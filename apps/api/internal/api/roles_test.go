@@ -741,6 +741,26 @@ func TestRouteSyncStatusScopedToVisibleAccounts(t *testing.T) {
 	if seen["garmin:stranger"] {
 		t.Error("buddy can see stranger's account — a crew they do not share")
 	}
+
+	// An admin sees every route (visibleRoutes' own, separate bypass —
+	// untouched here), but that is authority to manage a route, not a
+	// general directory of who links which head unit. Sync status must
+	// resolve the same way it does for any other viewer with no crew
+	// relationship to either side: neither account visible.
+	adminResp := h.as("boss", "domestique-admins", http.MethodGet, "/api/routes", "")
+	var adminList struct {
+		Routes []routeDTO `json:"routes"`
+	}
+	if err := json.NewDecoder(adminResp.Body).Decode(&adminList); err != nil {
+		t.Fatal(err)
+	}
+	if len(adminList.Routes) != 1 {
+		t.Fatalf("admin routes = %+v, want the one shared route (visibleRoutes still bypasses)", adminList.Routes)
+	}
+	seen = accountIDs(adminList.Routes[0])
+	if seen["wahoo:buddy"] || seen["garmin:stranger"] || seen["garmin:wilant"] {
+		t.Errorf("admin sees %v — an admin with no crew relationship to this route should see no accounts in its sync state, only that the route itself exists", seen)
+	}
 }
 
 // Ownership comes from the session, never the form — otherwise a rider could

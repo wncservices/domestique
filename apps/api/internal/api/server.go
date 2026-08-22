@@ -1095,13 +1095,19 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	identity := auth.FromContext(r.Context())
 	routes = visibleRoutes(routes, identity, crews)
-	// A route targeting more than one crew resolves TargetsFor against
-	// every one of them, not just whichever crew made it visible to this
-	// caller — without this, a route's own sync status would still list
-	// account ids belonging to a *different* crew's members, the same
-	// exposure visibleAccounts already closed for /api/accounts and
-	// /api/plan, just reachable through a route's SyncState instead.
-	linked = visibleAccounts(identity, linked, crews)
+	// listableAccounts, not visibleAccounts: this is a read-only display —
+	// which of a route's crew's devices actually has it — not authority to
+	// push or delete on anyone's behalf, so it takes visibleAccounts'
+	// narrower sibling, the one that never bypasses to every account in
+	// the deployment for PermEditAny. An admin already sees every route
+	// (visibleRoutes' own bypass, above); that should not also mean
+	// seeing a route's sync status resolved against riders who share no
+	// crew with them at all. A route targeting more than one crew still
+	// resolves TargetsFor against every one of them, not just whichever
+	// crew made it visible to this caller — without that part, a route's
+	// own sync status would list account ids belonging to a *different*
+	// crew's members, the same exposure this closes for non-admins too.
+	linked = listableAccounts(identity, linked, crews)
 
 	writeJSON(w, http.StatusOK, libraryResponse{
 		Routes:   s.toRouteDTOs(r.Context(), routes, linked, crews),
@@ -2089,12 +2095,14 @@ func visibleAccounts(identity auth.Identity, linked []model.Account, crews crew.
 	return listableAccounts(identity, linked, crews)
 }
 
-// listableAccounts is visibleAccounts' narrower sibling, for handleAccounts
-// alone: own account, or a crew fellow's — never everything, not even for
-// an admin. Seeing who links which head unit is a different question from
-// having authority to push or delete on their behalf (visibleAccounts,
-// above); an admin already has that authority everywhere it actually
-// matters without needing a general directory of every rider's devices.
+// listableAccounts is visibleAccounts' narrower sibling, for anywhere the
+// question is "who can I see," not "who may I act on" — handleAccounts,
+// and handleRoutes' own sync status display: own account, or a crew
+// fellow's — never everything, not even for an admin. Seeing who links
+// which head unit is a different question from having authority to push
+// or delete on their behalf (visibleAccounts, above); an admin already
+// has that authority everywhere it actually matters without needing a
+// general directory of every rider's devices.
 func listableAccounts(identity auth.Identity, linked []model.Account, crews crew.Snapshot) []model.Account {
 	out := make([]model.Account, 0, len(linked))
 	for _, a := range linked {
