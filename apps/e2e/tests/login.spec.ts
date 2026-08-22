@@ -19,15 +19,25 @@ const AUTH0_HOSTNAME = 'domestique.eu.auth0.com'
 //
 // Selectors target Auth0's documented New Universal Login field names
 // (input[name=username], input[name=password]) rather than visible label
-// text, which is copy that can change per Auth0 branding config. Not
-// verified against the live domestique.eu.auth0.com tenant from outside a
-// browser session — check these against the real login page on the first
-// real run and adjust if the tenant's actual DOM differs.
+// text, which is copy that can change per Auth0 branding config.
+//
+// Verified against the real tenant on the first real run: the identifier
+// screen renders a Google social-login button alongside the actual submit
+// button, and both are button[type="submit"] — a bare type selector
+// resolves to two elements there (strict-mode violation). The real submit
+// button is the one Auth0 marks as the primary action
+// (name="action" value="default" data-action-button-primary="true"); the
+// Google button carries data-provider="google" instead and has no
+// name="action" — scoping on name="action" rather than the primary/
+// secondary data attributes to stay consistent with this file's own
+// field-name-not-styling-attribute convention above.
+const CONTINUE_BUTTON = 'button[type="submit"][name="action"]'
+
 async function submitCredentials(page: Page, email: string, password: string) {
   await page.goto('/sso/login')
 
   await page.locator('input[name="username"]').fill(email)
-  await page.locator('button[type="submit"]').click()
+  await page.locator(CONTINUE_BUTTON).click()
 
   // Identifier-first is Auth0's default: the password field lives on a
   // second screen that only renders after the above submit. If this
@@ -36,7 +46,7 @@ async function submitCredentials(page: Page, email: string, password: string) {
   const passwordField = page.locator('input[name="password"]')
   await passwordField.waitFor({ state: 'visible' })
   await passwordField.fill(password)
-  await page.locator('button[type="submit"]').click()
+  await page.locator(CONTINUE_BUTTON).click()
 }
 
 async function signIn(page: Page, email: string, password: string) {
