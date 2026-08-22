@@ -3,6 +3,7 @@ import { computed, h, onMounted, ref, resolveComponent } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import { usePagedList } from '@/composables/usePagedList'
 import type { KomootConnection, KomootTour } from '@/api/types'
 
 const props = defineProps<{ state: 'unconfigured' | 'ready' }>()
@@ -46,6 +47,10 @@ const importable = computed(() => tours.value.filter((t) => !t.imported))
 const showImported = ref(false)
 const visibleTours = computed(() => (showImported.value ? tours.value : importable.value))
 const importedCount = computed(() => tours.value.length - importable.value.length)
+const { page: toursPage, paged: pagedTours, pageSize: toursPageSize } = usePagedList(
+  visibleTours,
+  10,
+)
 const canImport = computed(() => selected.value.length > 0 && !importing.value)
 const allSelected = computed(
   () => importable.value.length > 0 && selected.value.length === importable.value.length,
@@ -257,10 +262,17 @@ onMounted(async () => {
 
     <UTable
       v-if="ready && (visibleTours.length || loading)"
-      :data="visibleTours"
+      :data="pagedTours"
       :columns="columns"
       :loading="loading"
       :ui="{ td: 'text-sm' }"
+    />
+    <UPagination
+      v-if="visibleTours.length > toursPageSize"
+      v-model:page="toursPage"
+      :total="visibleTours.length"
+      :items-per-page="toursPageSize"
+      class="mt-4 justify-center"
     />
     <UEmpty
       v-else-if="ready && tours.length"

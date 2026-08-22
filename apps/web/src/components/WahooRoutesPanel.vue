@@ -3,6 +3,7 @@ import { computed, h, onMounted, ref, resolveComponent } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import { usePagedList } from '@/composables/usePagedList'
 import type { WahooConnection, WahooRoute } from '@/api/types'
 
 const emit = defineEmits<{ imported: [] }>()
@@ -27,6 +28,10 @@ const importable = computed(() => routes.value.filter((r) => !r.imported))
 const showImported = ref(false)
 const visibleRoutes = computed(() => (showImported.value ? routes.value : importable.value))
 const importedCount = computed(() => routes.value.length - importable.value.length)
+const { page: routesPage, paged: pagedRoutes, pageSize: routesPageSize } = usePagedList(
+  visibleRoutes,
+  10,
+)
 const canImport = computed(() => selected.value.length > 0 && !importing.value)
 const allSelected = computed(
   () => importable.value.length > 0 && selected.value.length === importable.value.length,
@@ -237,10 +242,17 @@ onMounted(async () => {
 
     <UTable
       v-if="connection.connected && (visibleRoutes.length || loading)"
-      :data="visibleRoutes"
+      :data="pagedRoutes"
       :columns="columns"
       :loading="loading"
       :ui="{ td: 'text-sm' }"
+    />
+    <UPagination
+      v-if="visibleRoutes.length > routesPageSize"
+      v-model:page="routesPage"
+      :total="visibleRoutes.length"
+      :items-per-page="routesPageSize"
+      class="mt-4 justify-center"
     />
     <UEmpty
       v-else-if="connection.connected && routes.length"

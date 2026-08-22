@@ -3,6 +3,7 @@ import { computed, h, onMounted, ref, resolveComponent } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import { usePagedList } from '@/composables/usePagedList'
 import type { GarminConnection, GarminCourse } from '@/api/types'
 
 const emit = defineEmits<{ imported: [] }>()
@@ -27,6 +28,10 @@ const importable = computed(() => courses.value.filter((c) => !c.imported))
 const showImported = ref(false)
 const visibleCourses = computed(() => (showImported.value ? courses.value : importable.value))
 const importedCount = computed(() => courses.value.length - importable.value.length)
+const { page: coursesPage, paged: pagedCourses, pageSize: coursesPageSize } = usePagedList(
+  visibleCourses,
+  10,
+)
 const canImport = computed(() => selected.value.length > 0 && !importing.value)
 const allSelected = computed(
   () => importable.value.length > 0 && selected.value.length === importable.value.length,
@@ -237,10 +242,17 @@ onMounted(async () => {
 
     <UTable
       v-if="connection.connected && (visibleCourses.length || loading)"
-      :data="visibleCourses"
+      :data="pagedCourses"
       :columns="columns"
       :loading="loading"
       :ui="{ td: 'text-sm' }"
+    />
+    <UPagination
+      v-if="visibleCourses.length > coursesPageSize"
+      v-model:page="coursesPage"
+      :total="visibleCourses.length"
+      :items-per-page="coursesPageSize"
+      class="mt-4 justify-center"
     />
     <UEmpty
       v-else-if="connection.connected && courses.length"
