@@ -35,6 +35,18 @@ function formatBytes(n?: number): string {
 }
 
 async function trigger() {
+  // Checked before Number(): a blank or whitespace-only field coerces to
+  // 0 (Number('') === 0, not NaN), which silently turned "I forgot to
+  // fill this in" into a real, validation-passing-looking (0,0,0,0) bbox
+  // and a confusing "west must be less than east" error instead of a
+  // straightforward "fill in every field" one.
+  const fields = { West: west.value, South: south.value, East: east.value, North: north.value, 'Max zoom': maxZoom.value }
+  const blank = Object.entries(fields).filter(([, v]) => v.trim() === '')
+  if (blank.length) {
+    error.value = `${blank.map(([name]) => name).join(', ')} ${blank.length > 1 ? 'are' : 'is'} required.`
+    return
+  }
+
   const w = Number(west.value)
   const s = Number(south.value)
   const e = Number(east.value)
