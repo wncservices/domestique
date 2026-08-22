@@ -366,6 +366,9 @@ export interface BasemapUpdate {
 
   hasRun: boolean
   status?: 'pending' | 'running' | 'succeeded' | 'failed'
+  /** The download's own percentage, parsed server-side from the extract
+   *  step's log — absent while nothing parseable has been printed yet. */
+  progress?: number
   west?: number
   south?: number
   east?: number

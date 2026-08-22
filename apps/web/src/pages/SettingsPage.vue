@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type {
@@ -243,6 +243,22 @@ async function loadBasemap() {
   }
 }
 
+// Self-rescheduling rather than setInterval: each tick decides for itself
+// whether there is anything left to poll for, so this naturally stops the
+// moment a run finishes instead of ticking forever in the background.
+let basemapPollTimer: ReturnType<typeof setTimeout> | undefined
+
+async function pollBasemapWhileRunning() {
+  await loadBasemap()
+  if (basemap.value?.status === 'pending' || basemap.value?.status === 'running') {
+    basemapPollTimer = setTimeout(pollBasemapWhileRunning, 4000)
+  }
+}
+
+onUnmounted(() => {
+  if (basemapPollTimer) clearTimeout(basemapPollTimer)
+})
+
 async function loadAutoSync() {
   if (!canManageSettings.value) return
   try {
@@ -325,7 +341,7 @@ onMounted(async () => {
     loadWahoo(),
     loadMfa(),
     loadAutoSync(),
-    loadBasemap(),
+    pollBasemapWhileRunning(),
   ])
 })
 </script>
@@ -563,7 +579,7 @@ onMounted(async () => {
         </p>
       </template>
 
-      <BasemapSetup :basemap="basemap" @changed="loadBasemap" />
+      <BasemapSetup :basemap="basemap" @changed="pollBasemapWhileRunning" />
     </UCard>
 
     <!-- Deployment plumbing, and only an admin gets it: the API omits

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -281,6 +282,58 @@ func (c *Client) Outcome(ctx context.Context, jobName string) (JobOutcome, error
 	default:
 		return JobOutcome{Done: false}, nil
 	}
+}
+
+// progressPattern matches go-pmtiles' own progress line, e.g.:
+//
+//	fetching chunks  62% |████████████        | (5.4/8.7 GB, 24 MB/s) [3m22s:1m7s]
+//
+// It is a single, continuously-overwritten line (carriage returns, not
+// newlines, between updates — confirmed against the real binary), so
+// finding every match in a raw log dump and taking the last one is what
+// gets the most recent update, not a line-based parse.
+var progressPattern = regexp.MustCompile(`fetching chunks\s+(\d{1,3})%`)
+
+// Progress reports how far along the download half of a running Job is, as
+// a percentage — best-effort, like Outcome's own log reads: nil, false
+// while nothing parseable has been printed yet (the Job just started,
+// still resolving which tiles to fetch) rather than an error, since a
+// status endpoint should stay usable even when this can't be determined.
+func (c *Client) Progress(ctx context.Context, jobName string) (percent int, ok bool) {
+	pods, err := c.clientset.CoreV1().Pods(c.cfg.TilesNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "job-name=" + jobName,
+	})
+	if err != nil || len(pods.Items) == 0 {
+		return 0, false
+	}
+	req := c.clientset.CoreV1().Pods(c.cfg.TilesNamespace).GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{
+		Container: "extract",
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return 0, false
+	}
+	defer func() { _ = stream.Close() }()
+	// 512KB is generous headroom: the crew's own first real extract (a
+	// ~6-minute, 8.7GB Western Europe download) produced well under 100KB
+	// of progress-line updates in total.
+	data, _ := io.ReadAll(io.LimitReader(stream, 512<<10))
+	return parseProgress(data)
+}
+
+// parseProgress finds the last progressPattern match in a raw log dump and
+// returns it as a percentage — split out from Progress so this parsing
+// logic is testable without a Kubernetes client.
+func parseProgress(data []byte) (percent int, ok bool) {
+	matches := progressPattern.FindAllSubmatch(data, -1)
+	if len(matches) == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(string(matches[len(matches)-1][1]))
+	if err != nil || n < 0 || n > 100 {
+		return 0, false
+	}
+	return n, true
 }
 
 // copyContainerLog reads the copy container's own log for whichever pod the
