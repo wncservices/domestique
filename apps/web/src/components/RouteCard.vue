@@ -252,12 +252,27 @@ async function remove() {
 
     <div class="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
       <SyncBadge v-if="route.syncState.length" :statuses="route.syncState" :accounts="accounts" />
+      <!-- syncState only ever shows the viewer's own devices now, so an
+           empty list has two genuinely different meanings: the route truly
+           reaches nobody, or it reaches real crew members' devices, just
+           not this viewer's own. route.targets (the crew names it was
+           shared to, not the resolved reach) is what tells the two apart —
+           claiming "hasn't been shared to a crew" when it plainly has
+           would be flatly wrong. -->
       <UTooltip
-        v-if="!route.syncState.length"
+        v-if="!route.syncState.length && !route.targets.length"
         text="This route doesn't reach any device right now — it hasn't been shared to a crew, or the crew it's shared to has no members with a linked account yet."
       >
         <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
           no targets
+        </UBadge>
+      </UTooltip>
+      <UTooltip
+        v-if="!route.syncState.length && route.targets.length"
+        text="Shared to a crew, but not reaching any device of your own — other members' devices may still get it."
+      >
+        <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
+          not on your devices
         </UBadge>
       </UTooltip>
 
