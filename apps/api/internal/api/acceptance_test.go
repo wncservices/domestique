@@ -535,14 +535,12 @@ func TestRoutesEndpointReportsStatsAndTargets(t *testing.T) {
 	if len(route.Targets) != 1 || route.Targets[0] != "crew:shared" {
 		t.Errorf("targets = %v, want [crew:shared]", route.Targets)
 	}
-	if len(route.SyncState) != 2 {
-		t.Fatalf("syncState = %v, want one per resolved account", route.SyncState)
-	}
-	for _, status := range route.SyncState {
-		if status.Status != "pending" {
-			t.Errorf("%s: status = %q, want pending on a fresh state",
-				status.AccountID, status.Status)
-		}
+	// SyncState shows only the caller's own accounts (see
+	// TestRouteSyncStatusShowsOnlyYourOwnAccounts for the dedicated
+	// coverage of that rule) — "local" links none of its own here, even
+	// though crew:shared reaches "one" and "two"'s.
+	if len(route.SyncState) != 0 {
+		t.Errorf("syncState = %v, want none — local owns no linked account", route.SyncState)
 	}
 }
 

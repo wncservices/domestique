@@ -656,13 +656,14 @@ func TestPlanAndPushScopedToVisibleAccounts(t *testing.T) {
 	}
 }
 
-// A route targeting two crews resolves TargetsFor against both of them, not
-// just whichever one made it visible to a given caller — a subtler version
-// of the same exposure #140/#142 already closed, reachable through a
-// route's own SyncState instead of the accounts or plan endpoints
-// themselves. A rider in only one of the two crews must not learn the
-// account id (provider + rider name) of a member who is only in the other.
-func TestRouteSyncStatusScopedToVisibleAccounts(t *testing.T) {
+// A route's SyncState answers "what would happen on my own devices," not
+// "who else has this" — every viewer, including the route's own owner and
+// an admin, sees only their own account(s) there, never a crew fellow's.
+// TargetsFor (used by handlePlan/handlePush to decide where a push
+// actually goes) still resolves a shared route against every crew member's
+// account, unfiltered — only this read-only display is narrowed to one
+// person's own devices.
+func TestRouteSyncStatusShowsOnlyYourOwnAccounts(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	// seedRoleAccounts already links garmin:wilant.
 
@@ -713,14 +714,19 @@ func TestRouteSyncStatusScopedToVisibleAccounts(t *testing.T) {
 	if err := json.NewDecoder(uploadResp.Body).Decode(&uploaded); err != nil {
 		t.Fatal(err)
 	}
-	// wilant, the uploader, sees every target — both crews are theirs.
+	// wilant, the uploader and owner, still sees only their own account —
+	// owning a route shared to two crews is not the same question as
+	// "whose devices does this reach."
 	seen := accountIDs(uploaded)
-	if !seen["garmin:wilant"] || !seen["wahoo:buddy"] || !seen["garmin:stranger"] {
-		t.Errorf("owner's own upload response = %v, want all three accounts", seen)
+	if !seen["garmin:wilant"] {
+		t.Error("owner cannot see their own account in sync state")
+	}
+	if seen["wahoo:buddy"] || seen["garmin:stranger"] {
+		t.Errorf("owner's own upload response = %v, want only garmin:wilant", seen)
 	}
 
-	// buddy (crewA only) must see their own crew fellow's account, but not
-	// stranger's — a crewB member they share no crew with.
+	// buddy (crewA) sees only their own account — not the owner's, not
+	// stranger's (a crewB member they share no crew with either).
 	listResp := h.as("buddy", "cyclists", http.MethodGet, "/api/routes", "")
 	var list struct {
 		Routes []routeDTO `json:"routes"`
@@ -732,14 +738,30 @@ func TestRouteSyncStatusScopedToVisibleAccounts(t *testing.T) {
 		t.Fatalf("routes = %+v, want the one shared route", list.Routes)
 	}
 	seen = accountIDs(list.Routes[0])
-	if !seen["garmin:wilant"] {
-		t.Error("buddy cannot see the owner's own account in sync state")
-	}
 	if !seen["wahoo:buddy"] {
 		t.Error("buddy cannot see their own account in sync state")
 	}
-	if seen["garmin:stranger"] {
-		t.Error("buddy can see stranger's account — a crew they do not share")
+	if seen["garmin:wilant"] || seen["garmin:stranger"] {
+		t.Errorf("buddy sees %v, want only wahoo:buddy", seen)
+	}
+
+	// An admin sees every route (visibleRoutes' own, separate bypass —
+	// untouched here), but that is authority to manage a route, not a
+	// stake in whose devices it reaches. boss has no linked account of
+	// their own, so they see none here either.
+	adminResp := h.as("boss", "domestique-admins", http.MethodGet, "/api/routes", "")
+	var adminList struct {
+		Routes []routeDTO `json:"routes"`
+	}
+	if err := json.NewDecoder(adminResp.Body).Decode(&adminList); err != nil {
+		t.Fatal(err)
+	}
+	if len(adminList.Routes) != 1 {
+		t.Fatalf("admin routes = %+v, want the one shared route (visibleRoutes still bypasses)", adminList.Routes)
+	}
+	seen = accountIDs(adminList.Routes[0])
+	if seen["wahoo:buddy"] || seen["garmin:stranger"] || seen["garmin:wilant"] {
+		t.Errorf("admin sees %v — an admin with no linked account of their own should see no accounts in this route's sync state, only that the route itself exists", seen)
 	}
 }
 

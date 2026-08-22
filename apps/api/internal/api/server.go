@@ -1095,13 +1095,18 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	identity := auth.FromContext(r.Context())
 	routes = visibleRoutes(routes, identity, crews)
-	// A route targeting more than one crew resolves TargetsFor against
-	// every one of them, not just whichever crew made it visible to this
-	// caller — without this, a route's own sync status would still list
-	// account ids belonging to a *different* crew's members, the same
-	// exposure visibleAccounts already closed for /api/accounts and
-	// /api/plan, just reachable through a route's SyncState instead.
-	linked = visibleAccounts(identity, linked, crews)
+	// ownAccountsOnly, not listableAccounts or visibleAccounts: this is a
+	// read-only display of what would happen on *your own* devices, not a
+	// roster of a crew's or authority to push/delete on anyone's behalf.
+	// toRouteDTO passes this same slice straight into config.TargetsFor,
+	// which can only ever resolve a route's SyncState against the accounts
+	// it is given — narrowing the input here is what narrows the display,
+	// for every role including the route's own owner and an admin. Pushing
+	// (handlePush) and planning (handlePlan) call TargetsFor with the full
+	// crew-wide account list separately — a route shared to a crew still
+	// genuinely reaches every member's devices; only this viewer-facing
+	// display is scoped down to one person's own.
+	linked = ownAccountsOnly(identity, linked)
 
 	writeJSON(w, http.StatusOK, libraryResponse{
 		Routes:   s.toRouteDTOs(r.Context(), routes, linked, crews),
@@ -1525,10 +1530,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// See handleRoutes' identical comment: a route targeting more than one
-	// crew must not surface another crew's member accounts in its own
-	// SyncState just because the caller happens to be in one of them.
-	linked = visibleAccounts(auth.FromContext(r.Context()), linked, crews)
+	// See handleRoutes' identical comment: this response renders the same
+	// SyncState shape the library grid does, so it takes the same rule —
+	// only the uploader's own accounts, not a crew fellow's.
+	linked = ownAccountsOnly(auth.FromContext(r.Context()), linked)
 
 	s.logger().Info("route uploaded", "slug", route.Slug, "by", req.UploadedBy)
 	s.autoSyncIfEnabled(req.UploadedBy)
@@ -1649,10 +1654,10 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	// See handleRoutes' identical comment: a route targeting more than one
-	// crew must not surface another crew's member accounts in its own
-	// SyncState just because the caller happens to be in one of them.
-	linked = visibleAccounts(identity, linked, crews)
+	// See handleRoutes' identical comment: this response renders the same
+	// SyncState shape the library grid does, so it takes the same rule —
+	// only the caller's own accounts, not a crew fellow's.
+	linked = ownAccountsOnly(identity, linked)
 
 	s.autoSyncIfEnabled(identity.User)
 	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
@@ -2099,6 +2104,27 @@ func listableAccounts(identity auth.Identity, linked []model.Account, crews crew
 	out := make([]model.Account, 0, len(linked))
 	for _, a := range linked {
 		if config.AccountVisibleTo(a, identity.User, crews) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// ownAccountsOnly narrows linked to identity's own — not a crew fellow's,
+// not everything for an admin — everywhere a route's own SyncState is
+// rendered for a caller to look at: handleRoutes (the library grid),
+// handleUpload and handleUpdate (both render the same routeDTO shape right
+// back at whoever just wrote the route). A route's SyncState answers "what
+// would happen on my devices," not "who else in my crew has this" (that
+// question belongs to a crew membership view, not a route's own detail);
+// TargetsFor resolving against only this viewer's own accounts is what
+// makes the display show only their own devices, whoever they are.
+// handlePlan/handlePush stay on visibleAccounts — deciding what to push
+// and to whom is a different question, genuinely crew-wide by nature.
+func ownAccountsOnly(identity auth.Identity, linked []model.Account) []model.Account {
+	out := make([]model.Account, 0, len(linked))
+	for _, a := range linked {
+		if strings.EqualFold(a.Rider, identity.User) {
 			out = append(out, a)
 		}
 	}

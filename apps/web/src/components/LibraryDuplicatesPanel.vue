@@ -67,7 +67,14 @@ function toggle(slug: string, on: boolean) {
 const selectedCount = computed(() => toDelete.value.size)
 
 function pushSummary(route: Route): string {
-  if (!route.syncState.length) return 'never pushed'
+  if (!route.syncState.length) {
+    // syncState only ever shows the viewer's own devices — an empty list
+    // here does not mean the route was never pushed anywhere, only that it
+    // never reached one of *this viewer's* devices. Saying "never pushed"
+    // outright could read as "safe to delete" for a route that is
+    // genuinely live on a crew fellow's head unit.
+    return route.targets.length ? 'not on your devices' : 'never pushed'
+  }
   const synced = route.syncState.filter((s) => s.status === 'synced').length
   return synced ? `synced to ${synced} device${synced === 1 ? '' : 's'}` : 'pending push'
 }
