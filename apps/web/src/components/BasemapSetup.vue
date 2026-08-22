@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api, ApiError } from '@/api/client'
 import type { BasemapUpdate } from '@/api/types'
 
@@ -24,6 +24,49 @@ const east = ref('')
 const north = ref('')
 const maxZoom = ref('14')
 
+// Raw west/south/east/north in decimal degrees mean nothing to a human at
+// a glance — this picks a region by name and fills them in, rather than
+// asking anyone to know or look up coordinates. The fields stay visible
+// and editable above so what's actually being sent is never hidden, just
+// pre-filled — someone can pick "Benelux" and then nudge a boundary
+// without switching to some separate "advanced" mode to do it.
+const REGION_PRESETS = [
+  { label: 'Belgium', west: 2.3, south: 49.4, east: 6.5, north: 51.6 },
+  { label: 'Benelux', west: 2.3, south: 49.4, east: 7.3, north: 53.6 },
+  { label: 'Netherlands', west: 3.3, south: 50.7, east: 7.3, north: 53.6 },
+  { label: 'France', west: -5.2, south: 41.2, east: 9.7, north: 51.2 },
+  { label: 'Germany', west: 5.8, south: 47.2, east: 15.1, north: 55.1 },
+  { label: 'Western Europe', west: -5, south: 42, east: 15, north: 55 },
+] as const
+const CUSTOM_REGION = 'Custom'
+const regionOptions = [...REGION_PRESETS.map((r) => r.label), CUSTOM_REGION]
+const region = ref('')
+
+// True only while applyRegion itself is writing the fields, so the watch
+// below can tell "the preset changed these" from "someone typed in a
+// field" and only treat the latter as switching to Custom.
+let applyingRegion = false
+
+function applyRegion(label: string) {
+  const preset = REGION_PRESETS.find((r) => r.label === label)
+  if (!preset) return // Custom: leave whatever is already in the fields alone.
+  applyingRegion = true
+  west.value = String(preset.west)
+  south.value = String(preset.south)
+  east.value = String(preset.east)
+  north.value = String(preset.north)
+  applyingRegion = false
+}
+
+// A hand-edit after picking a preset means the dropdown is now describing
+// numbers that no longer match it — flip it to Custom rather than leave it
+// silently lying about what's actually about to be submitted.
+watch([west, south, east, north], () => {
+  if (!applyingRegion && region.value !== CUSTOM_REGION) {
+    region.value = CUSTOM_REGION
+  }
+})
+
 const running = computed(
   () => props.basemap.status === 'pending' || props.basemap.status === 'running',
 )
@@ -35,6 +78,18 @@ function formatBytes(n?: number): string {
 }
 
 async function trigger() {
+  // Checked before Number(): a blank or whitespace-only field coerces to
+  // 0 (Number('') === 0, not NaN), which silently turned "I forgot to
+  // fill this in" into a real, validation-passing-looking (0,0,0,0) bbox
+  // and a confusing "west must be less than east" error instead of a
+  // straightforward "fill in every field" one.
+  const fields = { West: west.value, South: south.value, East: east.value, North: north.value, 'Max zoom': maxZoom.value }
+  const blank = Object.entries(fields).filter(([, v]) => v.trim() === '')
+  if (blank.length) {
+    error.value = `${blank.map(([name]) => name).join(', ')} ${blank.length > 1 ? 'are' : 'is'} required.`
+    return
+  }
+
   const w = Number(west.value)
   const s = Number(south.value)
   const e = Number(east.value)
@@ -138,9 +193,20 @@ async function trigger() {
 
       <form v-if="open" class="mt-4 grid gap-3" @submit.prevent="trigger">
         <p class="text-xs text-dimmed">
-          West, south, east, north in decimal degrees — pick a region covering wherever this
-          crew's routes actually are. A route outside it still renders, just without basemap
-          tiles behind it.
+          Pick a region covering wherever this crew's routes actually are. A route outside it
+          still renders, just without basemap tiles behind it.
+        </p>
+        <UFormField label="Region">
+          <USelect
+            v-model="region"
+            :items="regionOptions"
+            class="w-full sm:w-64"
+            @update:model-value="applyRegion"
+          />
+        </UFormField>
+        <p class="text-xs text-dimmed">
+          West, south, east, north in decimal degrees, filled in by the region above — adjust
+          them by hand if it needs to be narrower or wider.
         </p>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <UFormField label="West">
