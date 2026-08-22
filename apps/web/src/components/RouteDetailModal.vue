@@ -169,9 +169,14 @@ const mapRoutes = computed(() =>
     </template>
     <template #footer>
       <div class="flex w-full justify-between gap-2">
+        <!-- external: see RouteCard.vue's identical button for why —
+             a same-origin path like /api/gpx/... otherwise reads as an
+             internal route to vue-router, which intercepts the click
+             before `download` ever gets a chance to fire. -->
         <UButton
           v-if="route"
           :href="gpxUrl"
+          external
           download
           icon="i-lucide-download"
           color="neutral"

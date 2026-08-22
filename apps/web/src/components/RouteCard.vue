@@ -304,8 +304,15 @@ async function remove() {
         </UButton>
       </UTooltip>
 
+      <!-- external: without it, UButton's Link treats a same-origin
+           path like /api/gpx/... as an internal route and hands the click
+           to vue-router (Nuxt UI's own isExternal check is hasProtocol,
+           which a bare path never satisfies) — vue-router then does a
+           client-side navigate instead of a real browser request, so
+           `download` below never gets a chance to fire at all. -->
       <UButton
         :href="gpxUrl"
+        external
         download
         icon="i-lucide-download"
         color="neutral"
