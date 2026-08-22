@@ -21,22 +21,27 @@ import (
 // bbox/maxzoom/buildDate. Mirrors domestique-chart's basemapUpdate values
 // block exactly; main.go builds this from the same config file.
 type JobConfig struct {
-	// TilesNamespace is where the Job runs and where the tiles pod lives.
+	// TilesNamespace is where the Job runs and where the tiles PVC lives.
 	TilesNamespace string
-	// TilesPodSelector finds the running tiles pod to copy into — a label
-	// selector string, e.g. "app.kubernetes.io/name=tiles".
-	TilesPodSelector string
-	// CopyServiceAccount is the second, narrowly-scoped identity
-	// (domestique-chart's own basemap-rbac.yaml) the copy container runs
-	// as — never this app's own, so pods/exec is never something the
-	// always-on app pod itself can do.
-	CopyServiceAccount    string
+	// TilesPVCName is the tiles Deployment's own basemap PVC — mounted
+	// directly by this Job instead of going through kubectl cp/exec into
+	// the running tiles pod. That used to be how the extracted file
+	// reached the tiles pod at all, but kubectl cp/exec streaming a
+	// multi-gigabyte file through the API server's exec subprotocol
+	// proved unreliable in practice (tar stream corruption — "invalid
+	// tar magic" — and, in earlier manual attempts at the same transfer,
+	// connection resets, both at arbitrary byte offsets). The PVC moved
+	// to nfs-client (ReadWriteMany) specifically so this Job and the
+	// tiles pod can mount the exact same volume at once — the transfer
+	// becomes a local `mv`, no different from the atomic rename this Job
+	// already did on the far side of the old kubectl cp, just without
+	// anything streaming through the API server in between.
+	TilesPVCName          string
 	ExtractImage          string // repository:tag
 	CopyImage             string // repository:tag
 	CPURequest            string
 	MemRequest            string
 	MemLimit              string
-	WorkVolumeSize        string
 	ActiveDeadlineSeconds int64
 }
 
@@ -63,9 +68,15 @@ func InCluster(cfg JobConfig) (*Client, error) {
 	return &Client{clientset: clientset, cfg: cfg}, nil
 }
 
-const workVolume = "work"
-const workMountPath = "/work"
-const outputPath = workMountPath + "/basemap.pmtiles"
+const basemapVolume = "basemap"
+const basemapMountPath = "/basemap"
+
+// stagingPath is where extract writes — never the live-serving filename,
+// so a mid-extract Job never leaves nginx serving a half-written file; the
+// copy container's mv onto finalPath (same filesystem, so an atomic
+// rename) is what actually publishes it.
+const stagingPath = basemapMountPath + "/basemap.pmtiles.new"
+const finalPath = basemapMountPath + "/basemap.pmtiles"
 
 // runAsNonRootUser is an arbitrary non-zero UID, not the images' own —
 // confirmed via `docker run --user 1000:1000` that both protomaps/go-pmtiles
@@ -108,8 +119,13 @@ func (c *Client) Trigger(ctx context.Context, bbox BBox, maxZoom int, buildDate 
 			TTLSecondsAfterFinished: ptr(int32(jobTTLSeconds)),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					RestartPolicy:      corev1.RestartPolicyNever,
-					ServiceAccountName: c.cfg.CopyServiceAccount,
+					RestartPolicy: corev1.RestartPolicyNever,
+					// Neither container calls the Kubernetes API anymore
+					// — extract and copy both just read/write the
+					// mounted PVC directly — so there is no
+					// ServiceAccount to name here at all, and nothing to
+					// mount a token for.
+					AutomountServiceAccountToken: &falseVal,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: &trueVal,
 						RunAsUser:    &uid,
@@ -130,7 +146,7 @@ func (c *Client) Trigger(ctx context.Context, bbox BBox, maxZoom int, buildDate 
 							Args: []string{
 								"extract",
 								"https://build.protomaps.com/" + buildDate + ".pmtiles",
-								outputPath,
+								stagingPath,
 								// %.6f, not %g: %g switches to exponential
 								// notation for values near zero (0.00001 ->
 								// "1e-05"), a valid bbox coordinate this
@@ -160,7 +176,7 @@ func (c *Client) Trigger(ctx context.Context, bbox BBox, maxZoom int, buildDate 
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
-								{Name: workVolume, MountPath: workMountPath},
+								{Name: basemapVolume, MountPath: basemapMountPath},
 							},
 						},
 					},
@@ -169,32 +185,24 @@ func (c *Client) Trigger(ctx context.Context, bbox BBox, maxZoom int, buildDate 
 							Name:    "copy",
 							Image:   c.cfg.CopyImage,
 							Command: []string{"sh", "-c"},
-							// Finds the live tiles pod by label, streams
-							// the file in under a .new name, then renames
-							// it in place inside that pod — mv on the same
-							// filesystem is atomic, so nginx never serves
-							// a half-copied file mid-transfer. kubectl
-							// picks up in-cluster auth automatically from
-							// this container's own mounted ServiceAccount
-							// token; no kubeconfig to wire up.
+							// mv on the same volume is an atomic rename —
+							// nginx (a separate pod mounting this same
+							// PVC) never sees a half-written file — the
+							// exact guarantee the old kubectl cp/exec
+							// version of this had too, just without a
+							// multi-gigabyte transfer riding through the
+							// API server's exec subprotocol to get there.
 							Args: []string{
 								`set -eu
-pod=$(kubectl get pod -n "$TILES_NAMESPACE" -l "$TILES_POD_SELECTOR" -o jsonpath='{.items[0].metadata.name}')
-if [ -z "$pod" ]; then
-  echo "no tiles pod found matching $TILES_POD_SELECTOR in $TILES_NAMESPACE" >&2
-  exit 1
-fi
-kubectl cp "$WORK_FILE" "$TILES_NAMESPACE/$pod:/usr/share/nginx/html/tiles/basemap.pmtiles.new"
-kubectl exec -n "$TILES_NAMESPACE" "$pod" -- mv /usr/share/nginx/html/tiles/basemap.pmtiles.new /usr/share/nginx/html/tiles/basemap.pmtiles
-size=$(wc -c < "$WORK_FILE" | tr -d ' ')
-echo "placed basemap on pod $pod"
+mv "$STAGING_FILE" "$FINAL_FILE"
+size=$(wc -c < "$FINAL_FILE" | tr -d ' ')
+echo "placed basemap"
 echo "SIZE_BYTES=$size"
 `,
 							},
 							Env: []corev1.EnvVar{
-								{Name: "TILES_NAMESPACE", Value: c.cfg.TilesNamespace},
-								{Name: "TILES_POD_SELECTOR", Value: c.cfg.TilesPodSelector},
-								{Name: "WORK_FILE", Value: outputPath},
+								{Name: "STAGING_FILE", Value: stagingPath},
+								{Name: "FINAL_FILE", Value: finalPath},
 							},
 							SecurityContext: &corev1.SecurityContext{
 								AllowPrivilegeEscalation: &falseVal,
@@ -213,17 +221,29 @@ echo "SIZE_BYTES=$size"
 								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
-								{Name: workVolume, MountPath: workMountPath, ReadOnly: true},
+								// Not read-only, unlike the old version of
+								// this mount: this container is the one
+								// that now actually writes the final file
+								// (the mv above), where before it only
+								// ever read from an emptyDir to stream
+								// elsewhere via kubectl cp.
+								{Name: basemapVolume, MountPath: basemapMountPath},
 								{Name: "tmp", MountPath: "/tmp"},
 							},
 						},
 					},
 					Volumes: []corev1.Volume{
 						{
-							Name: workVolume,
+							// The tiles Deployment's own PVC, mounted
+							// directly — nfs-client (ReadWriteMany)
+							// specifically so this Job and the tiles pod
+							// can both hold it at once. See TilesPVCName's
+							// own doc comment for why this replaced an
+							// emptyDir + kubectl cp/exec.
+							Name: basemapVolume,
 							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{
-									SizeLimit: ptrQuantity(resource.MustParse(c.cfg.WorkVolumeSize)),
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: c.cfg.TilesPVCName,
 								},
 							},
 						},
@@ -389,5 +409,3 @@ func lastNonEmptyLine(log string) string {
 }
 
 func ptr[T any](v T) *T { return &v }
-
-func ptrQuantity(q resource.Quantity) *resource.Quantity { return &q }

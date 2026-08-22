@@ -752,14 +752,12 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	if cfg.Basemap.TilesNamespace != "" {
 		jobs, err := basemap.InCluster(basemap.JobConfig{
 			TilesNamespace:        cfg.Basemap.TilesNamespace,
-			TilesPodSelector:      cfg.Basemap.TilesPodSelector,
-			CopyServiceAccount:    cfg.Basemap.CopyServiceAccount,
+			TilesPVCName:          cfg.Basemap.TilesPVCName,
 			ExtractImage:          cfg.Basemap.ExtractImage,
 			CopyImage:             cfg.Basemap.CopyImage,
 			CPURequest:            cfg.Basemap.CPURequest,
 			MemRequest:            cfg.Basemap.MemRequest,
 			MemLimit:              cfg.Basemap.MemLimit,
-			WorkVolumeSize:        cfg.Basemap.WorkVolumeSize,
 			ActiveDeadlineSeconds: cfg.Basemap.ActiveDeadlineSeconds,
 		})
 		if err != nil {
