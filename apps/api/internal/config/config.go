@@ -62,15 +62,22 @@ type BasemapConfig struct {
 	// TilesNamespace being empty means this feature is unavailable — a
 	// deployment either has the tiles component and its RBAC (see above)
 	// or it does not; there is no separate on/off switch to forget to set.
-	TilesNamespace        string `yaml:"tiles_namespace,omitempty"`
-	TilesPodSelector      string `yaml:"tiles_pod_selector,omitempty"`
-	CopyServiceAccount    string `yaml:"copy_service_account,omitempty"`
+	TilesNamespace string `yaml:"tiles_namespace,omitempty"`
+	// TilesPVCName is the tiles Deployment's own basemap PVC (nfs-client,
+	// ReadWriteMany) — the update Job mounts it directly rather than
+	// streaming the extracted file through kubectl cp/exec into the
+	// running tiles pod, which proved unreliable for a file this size
+	// (see basemap.JobConfig's own doc comment). No default, like
+	// CopyServiceAccount used to be: it names a real object
+	// domestique-chart's tiles component creates, and guessing a name
+	// that might not match would fail silently at Job-run time instead
+	// of loudly at config load.
+	TilesPVCName          string `yaml:"tiles_pvc_name,omitempty"`
 	ExtractImage          string `yaml:"extract_image,omitempty"`
 	CopyImage             string `yaml:"copy_image,omitempty"`
 	CPURequest            string `yaml:"cpu_request,omitempty"`
 	MemRequest            string `yaml:"mem_request,omitempty"`
 	MemLimit              string `yaml:"mem_limit,omitempty"`
-	WorkVolumeSize        string `yaml:"work_volume_size,omitempty"`
 	ActiveDeadlineSeconds int64  `yaml:"active_deadline_seconds,omitempty"`
 }
 
@@ -150,21 +157,22 @@ func (c *Config) applyDefaults() {
 	// and defaulting these too would quietly turn that into "available with
 	// guesses," which is not a state Validate below should let through.
 	if c.Basemap.TilesNamespace != "" {
-		if c.Basemap.TilesPodSelector == "" {
-			c.Basemap.TilesPodSelector = "app.kubernetes.io/name=tiles"
-		}
-		// No default for CopyServiceAccount, unlike everything else here:
-		// it names an identity domestique-chart's basemap-rbac.yaml
-		// generates from the Helm release name (domestique.fullname), and
-		// guessing a name that might not match would fail silently at
-		// Job-run time (pod can't start, or every kubectl call inside it
-		// gets Forbidden) instead of loudly at config load. Validate below
+		// No default for TilesPVCName, unlike everything else here: it
+		// names a real PVC domestique-chart's tiles component creates,
+		// and guessing a name that might not match would fail silently
+		// at Job-run time (the pod can't even start — a PVC that doesn't
+		// exist) instead of loudly at config load. Validate below
 		// requires it explicitly instead.
 		if c.Basemap.ExtractImage == "" {
 			c.Basemap.ExtractImage = "protomaps/go-pmtiles:v1.31.2"
 		}
 		if c.Basemap.CopyImage == "" {
-			c.Basemap.CopyImage = "alpine/k8s:1.36.2"
+			// A plain alpine, not alpine/k8s: the copy container only
+			// ever runs `mv` and `wc` on the mounted PVC now — it has
+			// not called the Kubernetes API (and so has not needed
+			// kubectl) since basemap.JobConfig's own TilesPVCName
+			// replaced the kubectl cp/exec transfer.
+			c.Basemap.CopyImage = "alpine:3.22.2"
 		}
 		if c.Basemap.CPURequest == "" {
 			c.Basemap.CPURequest = "250m"
@@ -174,9 +182,6 @@ func (c *Config) applyDefaults() {
 		}
 		if c.Basemap.MemLimit == "" {
 			c.Basemap.MemLimit = "1Gi"
-		}
-		if c.Basemap.WorkVolumeSize == "" {
-			c.Basemap.WorkVolumeSize = "15Gi"
 		}
 		if c.Basemap.ActiveDeadlineSeconds == 0 {
 			c.Basemap.ActiveDeadlineSeconds = 1800
@@ -196,10 +201,10 @@ func (c *Config) Validate() error {
 		return err
 	}
 
-	if c.Basemap.TilesNamespace != "" && c.Basemap.CopyServiceAccount == "" {
-		return fmt.Errorf("basemap.tiles_namespace is set but basemap.copy_service_account is not — " +
-			"it must equal, exactly, whatever domestique-chart's basemap-rbac.yaml actually renders " +
-			"for {{ include \"domestique.fullname\" . }}-basemap-copy in this release")
+	if c.Basemap.TilesNamespace != "" && c.Basemap.TilesPVCName == "" {
+		return fmt.Errorf("basemap.tiles_namespace is set but basemap.tiles_pvc_name is not — " +
+			"it must equal, exactly, whatever domestique-chart's tiles component actually names " +
+			"its basemap PVC in this release")
 	}
 	return nil
 }
