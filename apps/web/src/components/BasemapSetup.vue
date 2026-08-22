@@ -157,8 +157,11 @@ async function trigger() {
             <p class="text-sm font-medium text-highlighted">Map basemap</p>
             <p class="text-sm text-muted">
               <template v-if="running">
-                Update in progress, requested by {{ props.basemap.requestedBy }} — this can take
-                several minutes.
+                Update in progress, requested by {{ props.basemap.requestedBy }}
+                <template v-if="props.basemap.progress != null">
+                  — {{ props.basemap.progress }}% downloaded.
+                </template>
+                <template v-else> — this can take several minutes.</template>
               </template>
               <template v-else-if="props.basemap.status === 'failed'">
                 Last attempt failed: {{ props.basemap.error }}
@@ -190,6 +193,12 @@ async function trigger() {
           {{ open ? 'Cancel' : 'Update' }}
         </UButton>
       </div>
+
+      <!-- indeterminate (no model-value) until the extract step has
+           printed its first parseable line, then tracks the real
+           percentage — SettingsPage's own poll loop is what keeps this
+           number moving while a download is running. -->
+      <UProgress v-if="running" :model-value="props.basemap.progress ?? null" class="mt-3" size="sm" />
 
       <form v-if="open" class="mt-4 grid gap-3" @submit.prevent="trigger">
         <p class="text-xs text-dimmed">

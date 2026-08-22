@@ -22,8 +22,13 @@ type basemapUpdateDTO struct {
 	CanManage   bool   `json:"canManage"`
 	Unavailable string `json:"unavailable,omitempty"`
 
-	HasRun      bool    `json:"hasRun"`
-	Status      string  `json:"status,omitempty"`
+	HasRun bool   `json:"hasRun"`
+	Status string `json:"status,omitempty"`
+	// Progress is the download's own percentage, parsed from the extract
+	// container's log — nil while nothing parseable has been printed yet,
+	// never present once the update has finished (Status moves on to
+	// succeeded/failed instead).
+	Progress    *int    `json:"progress,omitempty"`
 	West        float64 `json:"west,omitempty"`
 	South       float64 `json:"south,omitempty"`
 	East        float64 `json:"east,omitempty"`
@@ -98,6 +103,11 @@ func (s *Server) basemapDTOFor(r *http.Request) basemapUpdateDTO {
 
 	dto.HasRun = true
 	dto.Status = string(rec.Status)
+	if rec.Status == basemapStatusPending || rec.Status == basemapStatusRunning {
+		if percent, ok := s.BasemapJobs.Progress(r.Context(), rec.JobName); ok {
+			dto.Progress = &percent
+		}
+	}
 	dto.West, dto.South, dto.East, dto.North = rec.BBox.West, rec.BBox.South, rec.BBox.East, rec.BBox.North
 	dto.MaxZoom = rec.MaxZoom
 	dto.BuildDate = rec.BuildDate
