@@ -34,6 +34,7 @@ import type {
   TrackResponse,
   UploadRequest,
 } from './types'
+import type { BasemapLayers } from '@/utils/staticBasemap'
 
 /**
  * A failed request, carrying what the API said rather than only how it read.
@@ -223,6 +224,14 @@ export const api = {
   routes: () => request<LibraryResponse>('/api/routes'),
   plan: () => request<PlanResponse>('/api/plan'),
   track: (slug: string) => request<TrackResponse>(`/api/tracks/${encodeSlug(slug)}`),
+  /** Precomputed, cached background wash for a route's card preview — see
+   *  utils/staticBasemap's own fetchBasemapLayers for the client-side
+   *  fallback this is meant to make unnecessary on a deployment that has
+   *  it. A 404 (no tiles component, or no basemap built yet) is a normal,
+   *  expected outcome here, not a bug — callers should catch it and fall
+   *  back rather than surface it as an error. */
+  trackPreview: (slug: string) =>
+    request<BasemapLayers>(`/api/track-preview/${encodeSlug(slug)}`),
   /** Omitting `items` (or passing all of them) pushes everything, same as
    *  before per-item selection existed. */
   push: (items?: { accountId: string; slug: string }[]) =>

@@ -256,6 +256,19 @@ FROM basemap_updates ORDER BY created_at DESC LIMIT 1`))
 	return scanRecord(row)
 }
 
+// LatestSucceeded returns the most recent update that actually replaced
+// the live archive — unlike Latest, a pending/running/failed row never
+// changed the file's bytes, so only this one identifies what is currently
+// being served. preview.go's cache is keyed against this ID specifically:
+// it must go stale exactly when the file an admin is looking at changes,
+// not whenever any update is merely attempted.
+func (s *Store) LatestSucceeded() (Record, error) {
+	row := s.db.QueryRow(s.dialect.Rebind(`
+SELECT id, west, south, east, north, max_zoom, build_date, status, error, job_name, size_bytes, requested_by, created_at, completed_at
+FROM basemap_updates WHERE status = ? ORDER BY created_at DESC LIMIT 1`), StatusSucceeded)
+	return scanRecord(row)
+}
+
 func scanRecord(row *sql.Row) (Record, error) {
 	var rec Record
 	var completedAt sql.NullString

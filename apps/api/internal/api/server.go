@@ -89,6 +89,15 @@ type Server struct {
 	Basemap     *basemap.Store
 	BasemapJobs *basemap.Client
 
+	// PreviewTiles fetches and decodes basemap layers for a route's card
+	// preview; PreviewCache stores the result per route, keyed against
+	// Basemap.LatestSucceeded so a rebuilt basemap invalidates every
+	// cached preview automatically. Both nil — same "quietly unavailable"
+	// shape as Basemap/BasemapJobs above — falls back to a bare 404, and
+	// the client falls back to decoding the tiles itself.
+	PreviewTiles *basemap.PreviewTiles
+	PreviewCache *basemap.PreviewCache
+
 	// KomootEnabled is what the operator asked for, which is not the same as
 	// what they got: the config can turn Komoot on while the credentials are
 	// missing, leaving Komoot nil. Keeping both apart lets the UI say "set
@@ -193,8 +202,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/push", s.handlePush)
 
 	// The wildcard has to be last in a Go mux pattern, hence /api/tracks/<slug>
-	// rather than /api/routes/<slug>/track.
+	// rather than /api/routes/<slug>/track. Same reasoning rules out a
+	// /api/tracks/<slug>/preview suffix below: a slug can itself contain
+	// "/", so {slug...} would swallow "/preview" as part of the slug for
+	// one route while another registers it as a literal suffix — a
+	// genuinely ambiguous, not just inelegant, combination. A separate
+	// path prefix has no such overlap.
 	mux.HandleFunc("GET /api/tracks/{slug...}", s.handleTrack)
+	mux.HandleFunc("GET /api/track-preview/{slug...}", s.handleTrackPreview)
 	mux.HandleFunc("GET /api/gpx/{slug...}", s.handleDownload)
 	mux.HandleFunc("GET /api/fit/{slug...}", s.handleDownloadFIT)
 
@@ -1136,6 +1151,97 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 		coords = append(coords, [2]float64{p.Lat, p.Lon})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords})
+}
+
+// handleTrackPreview returns the earth/landuse/water/roads background wash
+// for a route's card preview, precomputed and cached server-side (see
+// basemap.PreviewTiles/PreviewCache) instead of every client re-fetching
+// and decoding PMTiles vector tiles itself. Unavailable — same "quietly
+// missing" shape as the rest of this package's optional features — is a
+// plain 404 with no body worth parsing; the client's own fallback is to
+// fall back to decoding the tiles itself, exactly as it did before this
+// endpoint existed, so a 404 here is not a broken deployment.
+func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermReadRoutes) {
+		return
+	}
+
+	slug := cleanSlug(r.PathValue("slug"))
+	if !s.mayView(w, r, slug) {
+		return
+	}
+
+	if s.Basemap == nil || s.PreviewTiles == nil || s.PreviewCache == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	basemapRec, err := s.Basemap.LatestSucceeded()
+	if err != nil {
+		// basemap.ErrNoRecord (nobody has ever successfully built one) is
+		// the overwhelmingly likely case; any other error is logged, but
+		// either way there is nothing to compute a preview against.
+		if !errors.Is(err, basemap.ErrNoRecord) {
+			s.logger().Error("reading latest succeeded basemap failed", "err", err)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	if cached, found, err := s.PreviewCache.Get(slug, basemapRec.ID); err != nil {
+		s.logger().Error("reading track preview cache failed", "slug", slug, "err", err)
+	} else if found {
+		writeRawJSON(w, cached)
+		return
+	}
+
+	points, err := s.Source.Track(r.Context(), slug)
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+	coords := make([][2]float64, 0, len(points))
+	for _, p := range points {
+		coords = append(coords, [2]float64{p.Lat, p.Lon})
+	}
+
+	layers := basemap.PreviewLayers{}
+	if west, south, east, north, ok := basemap.RouteBBox(coords); ok {
+		layers, err = s.PreviewTiles.FetchLayers(r.Context(), west, south, east, north)
+		if err != nil {
+			s.logger().Error("fetching track preview layers failed", "slug", slug, "err", err)
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+	}
+
+	body, err := json.Marshal(layers)
+	if err != nil {
+		s.logger().Error("encoding track preview failed", "slug", slug, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not encode preview"})
+		return
+	}
+	if err := s.PreviewCache.Put(slug, basemapRec.ID, string(body)); err != nil {
+		// The response is still good; only the next request pays the
+		// recompute cost again.
+		s.logger().Error("caching track preview failed", "slug", slug, "err", err)
+	}
+
+	writeRawJSON(w, string(body))
+}
+
+// writeRawJSON writes an already-serialized JSON document verbatim — for
+// handleTrackPreview's two paths (a cache hit's stored string, and a fresh
+// json.Marshal result) where re-decoding just to hand it to writeJSON
+// would be pointless work.
+func writeRawJSON(w http.ResponseWriter, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	// nosniff stops a browser deciding otherwise, same reasoning as
+	// handleDownload/handleDownloadFIT below.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// #nosec G705 -- this app's own server-computed JSON (route geometry),
+	// never user-supplied HTML, served with a fixed non-HTML content type.
+	_, _ = w.Write([]byte(body))
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
