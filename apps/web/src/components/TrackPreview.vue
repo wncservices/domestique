@@ -75,7 +75,6 @@ const projection = computed(() => {
   if (points.value.length < 2) return null
 
   const lats = points.value.map((p) => p[0])
-  const lons = points.value.map((p) => p[1])
   const midLat = (Math.min(...lats) + Math.max(...lats)) / 2
   const lonScale = Math.cos((midLat * Math.PI) / 180)
 
@@ -100,11 +99,18 @@ const projection = computed(() => {
         y: HEIGHT - offsetY - (lat - minY) * scale,
       }
     },
+    // The lat/lon visible at the *card's own edges*, not just the route's
+    // own tight bounding box — a route whose aspect ratio doesn't match the
+    // 2:1 card gets letterboxed by the scale/offset above, and fetching only
+    // the route's own bbox left that letterboxed margin with no background
+    // at all. Inverting project() at the four corners (x=0/WIDTH, y=0/HEIGHT)
+    // gives the actual visible extent, so the wash fills the whole card
+    // regardless of the route's shape.
     bbox: {
-      west: Math.min(...lons),
-      east: Math.max(...lons),
-      south: Math.min(...lats),
-      north: Math.max(...lats),
+      west: (-offsetX / scale + minX) / lonScale,
+      east: ((WIDTH - offsetX) / scale + minX) / lonScale,
+      south: minY - offsetY / scale,
+      north: minY + (HEIGHT - offsetY) / scale,
     },
   }
 })
