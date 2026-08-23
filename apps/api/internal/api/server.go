@@ -1205,14 +1205,29 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 		coords = append(coords, [2]float64{p.Lat, p.Lon})
 	}
 
+	start := time.Now()
 	layers := basemap.PreviewLayers{}
-	if west, south, east, north, ok := basemap.RouteBBox(coords); ok {
+	west, south, east, north, ok := basemap.RouteBBox(coords)
+	if !ok {
+		// Fewer than 2 points — the same threshold TrackPreview.vue's own
+		// projection computed uses, below which there is no route shape
+		// to fit a background to at all. Worth a log line of its own:
+		// unlike every other empty-result path here, this one means the
+		// route itself is degenerate, not that the fetch failed or the
+		// basemap doesn't cover it.
+		s.logger().Warn("track preview: route has too few points to compute a bbox", "slug", slug, "points", len(coords))
+	} else {
 		layers, err = s.PreviewTiles.FetchLayers(r.Context(), west, south, east, north)
 		if err != nil {
 			s.logger().Error("fetching track preview layers failed", "slug", slug, "err", err)
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
+		s.logger().Info("computed track preview",
+			"slug", slug, "elapsed", time.Since(start),
+			"earth_rings", len(layers.Earth), "landuse_rings", len(layers.Landuse),
+			"water_rings", len(layers.Water), "water_lines", len(layers.WaterLines),
+			"roads", len(layers.Roads))
 	}
 
 	body, err := json.Marshal(layers)
