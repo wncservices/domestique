@@ -18,17 +18,35 @@ import { defineConfig, type Plugin } from 'vite'
 // worker (text/html, not a script). Only a production-build problem: the
 // dev server resolves that same relative URL against the real
 // node_modules path, which it already serves directly.
+//
+// maplibre-gl-shared.mjs has to come along too: maplibre-gl-worker.mjs
+// itself has a real, static `import ... from "./maplibre-gl-shared.mjs"`
+// at its top. The *main-thread* copy of that same import (inside
+// maplibre-gl.mjs) is fine — Vite bundles it normally, since that's an
+// ordinary static import in source Vite's own build actually processes.
+// But maplibre-gl-worker.mjs is a raw file we copy verbatim, never run
+// through Vite at all, so when the browser loads it as a module worker,
+// *the browser's own* ES module resolver goes looking for
+// ./maplibre-gl-shared.mjs relative to the worker's URL — which fails
+// exactly the same way the worker itself used to: no console error at
+// the top level (it fails inside the worker's own module graph), just a
+// map that silently never finishes initializing.
+const MAPLIBRE_WORKER_FILES = ['maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs']
+
 function copyMaplibreWorker(): Plugin {
   return {
     name: 'copy-maplibre-gl-worker',
     apply: 'build',
     closeBundle() {
-      // Resolved via the package's own exports map, not a relative
-      // node_modules path guess — this is a workspace, so the installed
-      // copy is hoisted to the repo root, not apps/web/node_modules.
-      const worker = fileURLToPath(import.meta.resolve('maplibre-gl/dist/maplibre-gl-worker.mjs'))
-      const dest = join(dirname(fileURLToPath(import.meta.url)), 'dist/assets/maplibre-gl-worker.mjs')
-      copyFileSync(worker, dest)
+      const outDir = join(dirname(fileURLToPath(import.meta.url)), 'dist/assets')
+      for (const file of MAPLIBRE_WORKER_FILES) {
+        // Resolved via the package's own exports map, not a relative
+        // node_modules path guess — this is a workspace, so the
+        // installed copy is hoisted to the repo root, not
+        // apps/web/node_modules.
+        const src = fileURLToPath(import.meta.resolve(`maplibre-gl/dist/${file}`))
+        copyFileSync(src, join(outDir, file))
+      }
     },
   }
 }
