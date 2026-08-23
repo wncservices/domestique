@@ -79,6 +79,16 @@ type BasemapConfig struct {
 	MemRequest            string `yaml:"mem_request,omitempty"`
 	MemLimit              string `yaml:"mem_limit,omitempty"`
 	ActiveDeadlineSeconds int64  `yaml:"active_deadline_seconds,omitempty"`
+	// TilesServiceURL is the in-cluster URL of the tiles component's own
+	// basemap.pmtiles (e.g. http://tiles.tiles.svc.cluster.local/tiles/basemap.pmtiles)
+	// — read to precompute and cache route-preview background geometry
+	// server-side (see preview.go) instead of every client fetching and
+	// decoding vector tiles itself. Independent of TilesNamespace above
+	// (that gates *triggering updates*; this gates *reading the result*)
+	// and, like TilesPVCName, deliberately has no default: it names a real
+	// Service domestique-chart's tiles component creates in a release this
+	// app has no reliable way to guess from here.
+	TilesServiceURL string `yaml:"tiles_service_url,omitempty"`
 }
 
 // Config is domestique.yaml.

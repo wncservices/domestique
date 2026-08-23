@@ -743,6 +743,22 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	}
 	srv.Basemap = basemapStore
 
+	// Route-preview background geometry, precomputed and cached server-side
+	// instead of every client decoding PMTiles vector tiles itself — see
+	// basemap/preview.go. Independent of the Job-triggering block below
+	// (that gates *creating* a basemap; this only *reads* whatever one
+	// already exists), and like it, opt-in: unset means srv.PreviewTiles
+	// stays nil and handleTrackPreview reports the feature unavailable,
+	// same "quietly missing" shape as everything else in this file.
+	if cfg.Basemap.TilesServiceURL != "" {
+		previewCache, err := basemap.UsePreviewCacheDB(src.Conn(), src.DSN())
+		if err != nil {
+			return err
+		}
+		srv.PreviewCache = previewCache
+		srv.PreviewTiles = basemap.NewPreviewTiles(cfg.Basemap.TilesServiceURL)
+	}
+
 	// The Job-triggering side is opt-in twice over: cfg.Basemap.TilesNamespace
 	// unset means this deployment never asked for it, and InCluster
 	// returning (nil, nil) means it asked but isn't actually running in a
