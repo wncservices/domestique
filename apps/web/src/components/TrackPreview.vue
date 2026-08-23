@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { api } from '@/api/client'
+import { fetchBasemapLayers, type BasemapLayers } from '@/utils/staticBasemap'
 
 const props = defineProps<{ slug: string }>()
 
@@ -8,6 +9,7 @@ const points = ref<[number, number][]>([])
 const failed = ref(false)
 const loading = ref(true)
 const visible = ref(false)
+const background = ref<BasemapLayers>({ earth: [], water: [] })
 
 const WIDTH = 320
 const HEIGHT = 160
@@ -65,13 +67,15 @@ watch(
  * route does not look stretched east-west — at Belgian latitudes a degree of
  * longitude is only ~63% of a degree of latitude.
  *
- * Drawn as inline SVG on purpose: no map library, and nothing calls out to a
- * tile server with somebody's home address in the request.
+ * Shared by the route line and the basemap wash below (via project()) so
+ * both ever use exactly one frame — computing this twice, even correctly,
+ * would risk the two drifting apart pixel-for-pixel.
  */
-const path = computed(() => {
-  if (points.value.length < 2) return ''
+const projection = computed(() => {
+  if (points.value.length < 2) return null
 
   const lats = points.value.map((p) => p[0])
+  const lons = points.value.map((p) => p[1])
   const midLat = (Math.min(...lats) + Math.max(...lats)) / 2
   const lonScale = Math.cos((midLat * Math.PI) / 180)
 
@@ -88,11 +92,29 @@ const path = computed(() => {
   const offsetX = (WIDTH - spanX * scale) / 2
   const offsetY = (HEIGHT - spanY * scale) / 2
 
+  return {
+    project(lat: number, lon: number) {
+      return {
+        x: offsetX + (lon * lonScale - minX) * scale,
+        // SVG y grows downward; latitude grows north, so flip it.
+        y: HEIGHT - offsetY - (lat - minY) * scale,
+      }
+    },
+    bbox: {
+      west: Math.min(...lons),
+      east: Math.max(...lons),
+      south: Math.min(...lats),
+      north: Math.max(...lats),
+    },
+  }
+})
+
+const path = computed(() => {
+  const proj = projection.value
+  if (!proj) return ''
   return points.value
     .map((point, index) => {
-      const x = offsetX + (point[1] * lonScale - minX) * scale
-      // SVG y grows downward; latitude grows north, so flip it.
-      const y = HEIGHT - offsetY - (point[0] - minY) * scale
+      const { x, y } = proj.project(point[0], point[1])
       return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
     })
     .join(' ')
@@ -101,6 +123,54 @@ const path = computed(() => {
 const start = computed(() => {
   const match = path.value.match(/^M([\d.]+) ([\d.]+)/)
   return match ? { x: Number(match[1]), y: Number(match[2]) } : null
+})
+
+/**
+ * A land/water wash behind the route line — vector tiles decoded directly
+ * (see utils/staticBasemap), not a live map: a card grid can hold dozens
+ * of these at once, and an interactive maplibre-gl instance per card would
+ * mean that many concurrent WebGL contexts, which browsers cap. Fetched
+ * once the route's own bbox is known, alongside (not blocking) the route
+ * line itself — a slow or failed basemap fetch still leaves the track
+ * visible, just without a background under it.
+ */
+watch(
+  projection,
+  async (proj) => {
+    if (!proj) {
+      background.value = { earth: [], water: [] }
+      return
+    }
+    try {
+      background.value = await fetchBasemapLayers(proj.bbox)
+    } catch {
+      background.value = { earth: [], water: [] }
+    }
+  },
+  { immediate: true },
+)
+
+function ringsToPath(rings: [number, number][][], proj: NonNullable<typeof projection.value>) {
+  return rings
+    .map(
+      (ring) =>
+        `${ring
+          .map(([lat, lon], i) => {
+            const { x, y } = proj.project(lat, lon)
+            return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+          })
+          .join(' ')} Z`,
+    )
+    .join(' ')
+}
+
+const earthPath = computed(() => {
+  const proj = projection.value
+  return proj ? ringsToPath(background.value.earth, proj) : ''
+})
+const waterPath = computed(() => {
+  const proj = projection.value
+  return proj ? ringsToPath(background.value.water, proj) : ''
 })
 </script>
 
@@ -118,6 +188,8 @@ const start = computed(() => {
       role="img"
       :aria-label="`Route shape for ${slug}`"
     >
+      <path v-if="earthPath" :d="earthPath" class="fill-muted" stroke="none" />
+      <path v-if="waterPath" :d="waterPath" class="fill-primary/10" stroke="none" />
       <path
         :d="path"
         class="track-line"
