@@ -1191,7 +1191,7 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 	if cached, found, err := s.PreviewCache.Get(slug, basemapRec.ID); err != nil {
 		s.logger().Error("reading track preview cache failed", "slug", slug, "err", err)
 	} else if found {
-		writeRawJSON(w, cached)
+		writeTrackPreviewJSON(w, cached)
 		return
 	}
 
@@ -1242,15 +1242,30 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 		s.logger().Error("caching track preview failed", "slug", slug, "err", err)
 	}
 
-	writeRawJSON(w, string(body))
+	writeTrackPreviewJSON(w, string(body))
 }
 
-// writeRawJSON writes an already-serialized JSON document verbatim — for
-// handleTrackPreview's two paths (a cache hit's stored string, and a fresh
-// json.Marshal result) where re-decoding just to hand it to writeJSON
-// would be pointless work.
-func writeRawJSON(w http.ResponseWriter, body string) {
+// writeTrackPreviewJSON writes an already-serialized track-preview JSON
+// document verbatim — for handleTrackPreview's two paths (a cache hit's
+// stored string, and a fresh json.Marshal result) where re-decoding just
+// to hand it to writeJSON would be pointless work.
+//
+// Cache-Control here is what makes a page *reload* fast, not just a first
+// visit: the server-side cache (basemap.PreviewCache) already makes a
+// cache-miss recompute rare, but without this header every reload still
+// paid a full network round trip per visible card to re-fetch content
+// that had not changed at all. private (not public — Cloudflare sits in
+// front of this app, and this response is gated by mayView, so a shared
+// cache must never serve one rider's answer to another) with a day-long
+// max-age: the only thing that can actually change this response is an
+// admin rebuilding the basemap (see PreviewCache's own doc comment on
+// what invalidates it), which is rare and manual — a browser showing a
+// slightly stale background wash for up to a day afterward is a cosmetic
+// gap, not a correctness one, and cheaper than adding conditional-GET
+// (ETag/If-None-Match) support for a staleness window this low-stakes.
+func writeTrackPreviewJSON(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	// nosniff stops a browser deciding otherwise, same reasoning as
 	// handleDownload/handleDownloadFIT below.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
