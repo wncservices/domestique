@@ -25,7 +25,21 @@ import (
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/mvt"
 	"github.com/paulmach/orb/maptile"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
+
+// tracer names its own span apart from otelhttp's auto-instrumented ones
+// (the inbound /api/track-preview request, and — now that pmtilesClient
+// wraps its Transport too — each outbound Range request) so a trace shows
+// where FetchLayers' own time actually goes: the zoom/tile-count it chose,
+// and how many features of each kind it came back with. Nothing else in
+// this codebase starts spans manually (everywhere else relies entirely on
+// otelhttp/otelsql auto-instrumentation) — this is the one place server-
+// side work happens between those boundaries that is worth seeing broken
+// out on its own.
+var tracer = otel.Tracer("github.com/wncservices/domestique/apps/api/internal/basemap")
 
 const (
 	previewWidth   = 320.0
@@ -237,6 +251,9 @@ const fetchLayersTimeout = 30 * time.Second
 // rather than failing the whole request — a route near the edge of
 // whatever an admin extracted still gets whatever land/water does exist.
 func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north float64) (PreviewLayers, error) {
+	ctx, span := tracer.Start(ctx, "basemap.FetchLayers")
+	defer span.End()
+
 	var out PreviewLayers
 
 	ctx, cancel := context.WithTimeout(ctx, fetchLayersTimeout)
@@ -244,10 +261,16 @@ func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north
 
 	header, err := p.client.getHeader(ctx)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return out, err
 	}
 
-	_, tiles := chooseZoomAndTiles(west, south, east, north)
+	zoom, tiles := chooseZoomAndTiles(west, south, east, north)
+	span.SetAttributes(
+		attribute.Int("basemap.zoom", int(zoom)),
+		attribute.Int("basemap.tile_count", len(tiles)),
+	)
 	for _, t := range tiles {
 		if ctx.Err() != nil {
 			break
@@ -297,5 +320,12 @@ func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north
 		}
 	}
 
+	span.SetAttributes(
+		attribute.Int("basemap.earth_rings", len(out.Earth)),
+		attribute.Int("basemap.landuse_rings", len(out.Landuse)),
+		attribute.Int("basemap.water_rings", len(out.Water)),
+		attribute.Int("basemap.water_lines", len(out.WaterLines)),
+		attribute.Int("basemap.roads", len(out.Roads)),
+	)
 	return out, nil
 }

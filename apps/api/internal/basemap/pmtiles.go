@@ -28,6 +28,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const pmtilesHeaderSize = 127
@@ -67,7 +69,20 @@ type pmtilesClient struct {
 const pmtilesRequestTimeout = 15 * time.Second
 
 func newPMTilesClient(url string) *pmtilesClient {
-	return &pmtilesClient{url: url, httpClient: &http.Client{Timeout: pmtilesRequestTimeout}}
+	return &pmtilesClient{
+		url: url,
+		httpClient: &http.Client{
+			Timeout: pmtilesRequestTimeout,
+			// Every other outbound client in this app wraps its Transport
+			// the same way (wahoo.go, komoot.go, garmin.go, auth0mgmt.go,
+			// oidcflow.go) so its calls show up as spans in Tempo — this
+			// one didn't, which made a slow or failing tiles Service
+			// request invisible in a trace: only the inbound
+			// /api/track-preview HTTP span existed, with no breakdown of
+			// where its time actually went.
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		},
+	}
 }
 
 // maxRangeFetchBytes bounds every single Range request this client makes —
