@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { api } from '@/api/client'
-import { fetchBasemapLayers, type BasemapLayers } from '@/utils/staticBasemap'
+import { fetchBasemapLayers, ROAD_WIDTH, type BasemapLayers } from '@/utils/staticBasemap'
 
 const props = defineProps<{ slug: string }>()
 
@@ -9,7 +9,7 @@ const points = ref<[number, number][]>([])
 const failed = ref(false)
 const loading = ref(true)
 const visible = ref(false)
-const background = ref<BasemapLayers>({ earth: [], water: [] })
+const background = ref<BasemapLayers>({ earth: [], landuse: [], water: [], waterLines: [], roads: [] })
 
 const WIDTH = 320
 const HEIGHT = 160
@@ -134,43 +134,64 @@ const start = computed(() => {
  * line itself — a slow or failed basemap fetch still leaves the track
  * visible, just without a background under it.
  */
+const EMPTY_BACKGROUND: BasemapLayers = { earth: [], landuse: [], water: [], waterLines: [], roads: [] }
+
 watch(
   projection,
   async (proj) => {
     if (!proj) {
-      background.value = { earth: [], water: [] }
+      background.value = EMPTY_BACKGROUND
       return
     }
     try {
       background.value = await fetchBasemapLayers(proj.bbox)
     } catch {
-      background.value = { earth: [], water: [] }
+      background.value = EMPTY_BACKGROUND
     }
   },
   { immediate: true },
 )
 
-function ringsToPath(rings: [number, number][][], proj: NonNullable<typeof projection.value>) {
-  return rings
-    .map(
-      (ring) =>
-        `${ring
-          .map(([lat, lon], i) => {
-            const { x, y } = proj.project(lat, lon)
-            return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
-          })
-          .join(' ')} Z`,
-    )
+function pointsToPath(points: [number, number][], proj: NonNullable<typeof projection.value>) {
+  return points
+    .map(([lat, lon], i) => {
+      const { x, y } = proj.project(lat, lon)
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
+    })
     .join(' ')
+}
+
+function ringsToPath(
+  rings: [number, number][][],
+  proj: NonNullable<typeof projection.value>,
+  closed: boolean,
+) {
+  return rings.map((ring) => pointsToPath(ring, proj) + (closed ? ' Z' : '')).join(' ')
 }
 
 const earthPath = computed(() => {
   const proj = projection.value
-  return proj ? ringsToPath(background.value.earth, proj) : ''
+  return proj ? ringsToPath(background.value.earth, proj, true) : ''
+})
+const landusePath = computed(() => {
+  const proj = projection.value
+  return proj ? ringsToPath(background.value.landuse, proj, true) : ''
 })
 const waterPath = computed(() => {
   const proj = projection.value
-  return proj ? ringsToPath(background.value.water, proj) : ''
+  return proj ? ringsToPath(background.value.water, proj, true) : ''
+})
+const waterLinesPath = computed(() => {
+  const proj = projection.value
+  return proj ? ringsToPath(background.value.waterLines, proj, false) : ''
+})
+const roadPaths = computed(() => {
+  const proj = projection.value
+  if (!proj) return []
+  return background.value.roads.map((road) => ({
+    d: pointsToPath(road.points, proj),
+    width: ROAD_WIDTH[road.kind],
+  }))
 })
 </script>
 
@@ -189,7 +210,24 @@ const waterPath = computed(() => {
       :aria-label="`Route shape for ${slug}`"
     >
       <path v-if="earthPath" :d="earthPath" class="fill-[var(--ui-text-muted)]" stroke="none" />
+      <path v-if="landusePath" :d="landusePath" class="fill-[#22c55e]/15" stroke="none" />
       <path v-if="waterPath" :d="waterPath" class="fill-primary/10" stroke="none" />
+      <path
+        v-if="waterLinesPath"
+        :d="waterLinesPath"
+        class="stroke-primary/40"
+        fill="none"
+        stroke-width="1"
+      />
+      <path
+        v-for="(road, index) in roadPaths"
+        :key="index"
+        :d="road.d"
+        class="stroke-[var(--ui-bg)]/70"
+        fill="none"
+        :stroke-width="road.width"
+        stroke-linecap="round"
+      />
       <path
         :d="path"
         class="track-line"
