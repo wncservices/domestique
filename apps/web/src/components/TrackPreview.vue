@@ -15,10 +15,20 @@ const WIDTH = 320
 const HEIGHT = 160
 const PADDING = 10
 
+// A resolver for "this load cycle's points are in" — loadBackground's own
+// fallback (below) needs a local projection, but the two fetches otherwise
+// have nothing to do with each other, so nothing else here should have to
+// wait on this.
+let pointsReady = Promise.resolve()
+
 async function load() {
   loading.value = true
   failed.value = false
   points.value = []
+  let resolvePointsReady = () => {}
+  pointsReady = new Promise<void>((resolve) => {
+    resolvePointsReady = resolve
+  })
   try {
     const track = await api.track(props.slug)
     points.value = track.points
@@ -26,6 +36,7 @@ async function load() {
     failed.value = true
   } finally {
     loading.value = false
+    resolvePointsReady()
   }
 }
 
@@ -44,6 +55,7 @@ onMounted(() => {
       visible.value = true
       observer?.disconnect()
       load()
+      loadBackground()
     },
     { rootMargin: '200px' },
   )
@@ -58,7 +70,9 @@ onBeforeUnmount(() => observer?.disconnect())
 watch(
   () => props.slug,
   () => {
-    if (visible.value) load()
+    if (!visible.value) return
+    load()
+    loadBackground()
   },
 )
 
@@ -146,33 +160,39 @@ const EMPTY_BACKGROUND: BasemapLayers = { earth: [], landuse: [], water: [], wat
  * The server precomputes and caches this same background per route (see
  * api.trackPreview) so a page load benefits from every earlier visitor's
  * work instead of every client re-fetching and decoding PMTiles vector
- * tiles from scratch. A 404 there is a normal, expected outcome — a
- * deployment with no tiles component, or one where nobody has built a
- * basemap yet — so it falls back to doing the decode locally rather than
- * leaving the card blank; only if *that* also fails does the card end up
- * with no background at all.
+ * tiles from scratch. Fired the moment the card becomes visible, in
+ * parallel with load() above rather than after it: the server recomputes
+ * this route's own bbox from its own copy of the points (see
+ * basemap.RouteBBox), so waiting on this card's own api.track() call
+ * first — which earlier code did, via a watch(projection, ...) — was a
+ * needless waterfall, doubling the round-trip latency of every card on
+ * the page for no reason tied to how the data actually depends on itself.
+ *
+ * A 404 from the server is a normal, expected outcome — a deployment with
+ * no tiles component, or one where nobody has built a basemap yet — so it
+ * falls back to decoding the tiles locally rather than leaving the card
+ * blank. That fallback is the one part that still genuinely needs this
+ * card's own points (to compute a bbox from), so it awaits pointsReady —
+ * by the time a network request has already failed once, load()'s own
+ * request has usually long since resolved.
  */
-watch(
-  projection,
-  async (proj) => {
-    if (!proj) {
-      background.value = EMPTY_BACKGROUND
-      return
-    }
-    try {
-      background.value = await api.trackPreview(props.slug)
-      return
-    } catch {
-      /* fall through to the client-side decode below */
-    }
-    try {
-      background.value = await fetchBasemapLayers(proj.bbox)
-    } catch {
-      background.value = EMPTY_BACKGROUND
-    }
-  },
-  { immediate: true },
-)
+async function loadBackground() {
+  background.value = EMPTY_BACKGROUND
+  try {
+    background.value = await api.trackPreview(props.slug)
+    return
+  } catch {
+    /* fall through to the client-side decode below */
+  }
+  await pointsReady
+  const proj = projection.value
+  if (!proj) return
+  try {
+    background.value = await fetchBasemapLayers(proj.bbox)
+  } catch {
+    background.value = EMPTY_BACKGROUND
+  }
+}
 
 function pointsToPath(points: [number, number][], proj: NonNullable<typeof projection.value>) {
   return points
