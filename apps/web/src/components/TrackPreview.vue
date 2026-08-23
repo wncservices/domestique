@@ -1,9 +1,37 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useColorMode } from '@/color-mode'
 import { api } from '@/api/client'
 import { fetchBasemapLayers, ROAD_WIDTH, type BasemapLayers } from '@/utils/staticBasemap'
 
 const props = defineProps<{ slug: string }>()
+
+// The same colors RouteMap.vue's real maplibre-gl style pulls from
+// protomaps-themes-base's namedTheme('light'|'dark') for its own
+// earth/park/water layers — this card's wash used its own approximations
+// before (a generic muted gray, a hardcoded #22c55e green, the app's own
+// teal at 10% opacity for water), which looked like a different, unrelated
+// illustration style rather than a small preview of the same map.
+// Hardcoded rather than importing protomaps-themes-base here too: that
+// package is otherwise only ever dynamically imported (RouteMap.vue, only
+// once a route's real map is actually opened), and importing it into this
+// component — used on every Library card — pulled the whole theming
+// library (POI colors, label colors, every layer style, ~30kB gzipped)
+// into the Library bundle just to read six hex strings out of it. Copied
+// directly from namedTheme('light').{earth,park_a,water} and
+// namedTheme('dark').{earth,park_a,water}; re-copy if that package's
+// palette ever changes. park_a is the theme's own general "green space"
+// tone — the real map draws many landuse subcategories with their own
+// shade, but this wash already collapses all of them into one bucket (see
+// staticBasemap.ts's own GREEN_LANDUSE_KINDS), so one representative color
+// is the right level of detail here too.
+const MAP_COLORS = {
+  light: { earth: '#e2dfda', landuse: '#cfddd5', water: '#80deea' },
+  dark: { earth: '#1f1f1f', landuse: '#1c2421', water: '#31353f' },
+}
+
+const { resolved } = useColorMode()
+const mapColors = computed(() => MAP_COLORS[resolved.value === 'dark' ? 'dark' : 'light'])
 
 const points = ref<[number, number][]>([])
 const failed = ref(false)
@@ -251,13 +279,13 @@ const roadPaths = computed(() => {
       role="img"
       :aria-label="`Route shape for ${slug}`"
     >
-      <path v-if="earthPath" :d="earthPath" class="fill-[var(--ui-text-muted)]" stroke="none" />
-      <path v-if="landusePath" :d="landusePath" class="fill-[#22c55e]/15" stroke="none" />
-      <path v-if="waterPath" :d="waterPath" class="fill-primary/10" stroke="none" />
+      <path v-if="earthPath" :d="earthPath" :fill="mapColors.earth" stroke="none" />
+      <path v-if="landusePath" :d="landusePath" :fill="mapColors.landuse" stroke="none" />
+      <path v-if="waterPath" :d="waterPath" :fill="mapColors.water" stroke="none" />
       <path
         v-if="waterLinesPath"
         :d="waterLinesPath"
-        class="stroke-primary/40"
+        :stroke="mapColors.water"
         fill="none"
         stroke-width="1"
       />
