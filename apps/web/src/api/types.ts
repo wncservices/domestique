@@ -103,6 +103,10 @@ export interface CrewMember {
    *  waiting on the owner) or 'invite' (the owner added them, waiting on
    *  them). Only present while status is 'pending'. */
   origin?: 'self' | 'invite'
+  /** Whether this member may schedule a crew ride (see Ride below), beyond
+   *  the owner/admin who always may. Owner/admin-granted, per member. Only
+   *  meaningful for an approved row. */
+  canSchedule?: boolean
 }
 
 /** A set of riders who trust each other with their routes — the only way a
@@ -132,12 +136,41 @@ export interface Crew {
    *  changes what *any* member's own uploads default to, not only the
    *  owner's. Only the owner or an admin may change it. */
   autoShare: boolean
+  /** Whether the caller may schedule a crew ride — `mine` (always), or an
+   *  approved member holding their own CrewMember.canSchedule grant.
+   *  Computed server-side since `members` (where that grant otherwise
+   *  lives) is only present when `mine`. */
+  canSchedule: boolean
+  /** Who is currently, approvedly, in the crew — just names. Present for
+   *  `mine` or any approved member; a non-member sees nothing here beyond
+   *  `memberCount`. */
+  roster?: string[]
   /** Pending and approved members together. Only present when `mine`. */
   members?: CrewMember[]
 }
 
 export interface CreateCrewRequest {
   name: string
+}
+
+/** A crew's plan to ride a specific route on a specific day — see
+ *  CrewsPage.vue's scheduling section. Device-calendar placement (putting
+ *  this on a rider's Garmin/Wahoo for that day) is not something either
+ *  provider integration supports yet; "sync now" pushes the route to
+ *  devices the same way any shared route does, just on demand rather than
+ *  waiting for the next automatic push. */
+export interface Ride {
+  id: string
+  crewId: string
+  slug: string
+  routeName: string
+  date: string // YYYY-MM-DD
+  createdBy: string
+}
+
+export interface ScheduleRideRequest {
+  slug: string
+  date: string
 }
 
 export interface KomootTour {

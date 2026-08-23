@@ -28,8 +28,10 @@ import type {
   Person,
   PlanResponse,
   PushResponse,
+  Ride,
   Route,
   RouteDuplicateGroup,
+  ScheduleRideRequest,
   Sport,
   TrackResponse,
   UploadRequest,
@@ -337,6 +339,30 @@ export const api = {
   removeCrewMember: (crewId: string, rider: string) =>
     request<{ status: string }>(
       `/api/crews/${encodeURIComponent(crewId)}/members/${encodeURIComponent(rider)}`,
+      { method: 'DELETE' },
+    ),
+  /** Grants or revokes one member's permission to schedule a crew ride.
+   *  Owner or admin only. */
+  setCanScheduleCrewMember: (crewId: string, rider: string, canSchedule: boolean) =>
+    request<Crew>(
+      `/api/crews/${encodeURIComponent(crewId)}/members/${encodeURIComponent(rider)}/schedule`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canSchedule }),
+      },
+    ),
+
+  crewRides: (crewId: string) => request<Ride[]>(`/api/crews/${encodeURIComponent(crewId)}/rides`),
+  scheduleRide: (crewId: string, req: ScheduleRideRequest) =>
+    request<Ride>(`/api/crews/${encodeURIComponent(crewId)}/rides`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  deleteRide: (crewId: string, rideId: string) =>
+    request<{ status: string }>(
+      `/api/crews/${encodeURIComponent(crewId)}/rides/${encodeURIComponent(rideId)}`,
       { method: 'DELETE' },
     ),
 

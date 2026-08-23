@@ -39,6 +39,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
@@ -680,12 +681,19 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Crew.
+	scheduleStore, err := schedule.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	srv := &api.Server{
 		Source:   src,
 		Config:   cfg,
 		Store:    store,
 		Accounts: accountStore,
 		Crew:     crewStore,
+		Schedule: scheduleStore,
 		Auth:     authenticator,
 		Log:      log,
 		// Pure in-memory, no external credential to be missing — wired

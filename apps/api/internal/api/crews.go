@@ -18,6 +18,10 @@ type crewMemberDTO struct {
 	// it, waiting on the rider) — since they need the owner's own roster
 	// view to show a different action for each. Meaningless once approved.
 	Origin string `json:"origin,omitempty"`
+	// CanSchedule is whether this member may schedule a crew ride, beyond
+	// the owner/admin who always may — see crew.Member.CanSchedule. Only
+	// meaningful for an approved row; omitted (false) for a pending one.
+	CanSchedule bool `json:"canSchedule,omitempty"`
 }
 
 type crewDTO struct {
@@ -50,8 +54,24 @@ type crewDTO struct {
 	// just the owner's, so any member deciding whether to trust this crew
 	// needs to see it. Only the owner or an admin may change it.
 	AutoShare bool `json:"autoShare"`
-	// Members is who is pending and who is approved, omitted unless Mine —
-	// nobody else has a reason to see who else asked to join.
+	// CanSchedule is whether this identity may schedule a crew ride for
+	// this crew — Mine (owner/admin, always), or an approved member whose
+	// own crewMemberDTO.CanSchedule is set. Computed here rather than left
+	// for the frontend to derive from Members: Members is only present when
+	// Mine, so a granted-but-not-owner member has no other way to learn
+	// their own standing from this response.
+	CanSchedule bool `json:"canSchedule"`
+	// Roster is who is currently, approvedly, in the crew — just names, no
+	// status/origin — visible to any approved member (or Mine), not only
+	// the owner: unlike a pending request, who is currently in the crew is
+	// not information the crew has a reason to keep from its own members.
+	// A non-member (MembershipStatus "none" or "pending") gets nothing
+	// here; MemberCount above is the only roster information they see.
+	Roster []string `json:"roster,omitempty"`
+	// Members is who is pending and who is approved, together with each
+	// row's own status/origin/canSchedule, omitted unless Mine — nobody
+	// else has a reason to see who else asked to join, or manage the
+	// per-member schedule grant.
 	Members []crewMemberDTO `json:"members,omitempty"`
 }
 
@@ -74,6 +94,20 @@ func (s *Server) crewDTOFor(identity auth.Identity, c crew.Crew, members []crew.
 			if m.Status == crew.StatusPending {
 				dto.MembershipOrigin = string(m.Origin)
 			}
+			if m.Status == crew.StatusApproved && m.CanSchedule {
+				dto.CanSchedule = true
+			}
+		}
+	}
+	if dto.Mine {
+		dto.CanSchedule = true
+	}
+	if dto.Mine || dto.MembershipStatus == string(crew.StatusApproved) {
+		dto.Roster = make([]string, 0, dto.MemberCount)
+		for _, m := range members {
+			if m.Status == crew.StatusApproved {
+				dto.Roster = append(dto.Roster, m.Rider)
+			}
 		}
 	}
 	if dto.Mine {
@@ -82,6 +116,9 @@ func (s *Server) crewDTOFor(identity auth.Identity, c crew.Crew, members []crew.
 			member := crewMemberDTO{Rider: m.Rider, Status: string(m.Status)}
 			if m.Status == crew.StatusPending {
 				member.Origin = string(m.Origin)
+			}
+			if m.Status == crew.StatusApproved {
+				member.CanSchedule = m.CanSchedule
 			}
 			dto.Members = append(dto.Members, member)
 		}
@@ -251,6 +288,53 @@ func (s *Server) handleSetCrewAutoShare(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.logger().Info("crew auto-share set", "crew", id, "autoShare", body.AutoShare, "by", identity.User)
+	writeJSON(w, http.StatusOK, s.crewDTOFor(identity, c, members))
+}
+
+// handleSetCanScheduleCrewMember grants or revokes one member's permission
+// to schedule a crew ride. Owner or admin only, the same rule as
+// auto-share — this changes what someone *other* than the caller may do,
+// not the caller's own membership.
+func (s *Server) handleSetCanScheduleCrewMember(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageCrews) {
+		return
+	}
+	if !s.crewAvailable(w) {
+		return
+	}
+
+	id, rider := r.PathValue("id"), r.PathValue("rider")
+	c, err := s.Crew.Get(r.Context(), id)
+	if err != nil {
+		s.failCrewLookup(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if !identity.CanEditRoute(c.Owner) {
+		s.forbidCrew(w, r)
+		return
+	}
+
+	var body struct {
+		CanSchedule bool `json:"canSchedule"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	if err := s.Crew.SetCanSchedule(r.Context(), id, rider, body.CanSchedule); err != nil {
+		s.failCrewLookup(w, err)
+		return
+	}
+
+	members, err := s.Crew.Members(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.logger().Info("crew schedule permission set", "crew", id, "rider", rider, "canSchedule", body.CanSchedule, "by", identity.User)
 	writeJSON(w, http.StatusOK, s.crewDTOFor(identity, c, members))
 }
 

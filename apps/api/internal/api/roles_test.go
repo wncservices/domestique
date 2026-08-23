@@ -24,6 +24,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
+	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
@@ -46,6 +47,9 @@ type authHarness struct {
 	// seedApprovedCrew, the reason this harness needs one at all now that
 	// route visibility depends on it (TestRouteVisibility).
 	crew *crew.Store
+	// schedule lets a test read a scheduled ride's raw state directly,
+	// same reason crew above does for membership.
+	schedule *schedule.Store
 }
 
 func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness {
@@ -78,6 +82,10 @@ func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness 
 	if err != nil {
 		t.Fatal(err)
 	}
+	scheduleStore, err := schedule.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
 	appSettings, err := settings.UseDB(db.Conn(), db.DSN(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +110,7 @@ func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness 
 		Komoot:   komootClient,
 		Links:    links,
 		Crew:     crewStore,
+		Schedule: scheduleStore,
 		Settings: appSettings,
 		// Resume ignores the userID/token it is handed and always returns
 		// the same fake — this harness only ever needed one Komoot client
@@ -120,7 +129,7 @@ func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness 
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &authHarness{t: t, client: server.Client(), base: server.URL, src: db, links: links, crew: crewStore}
+	return &authHarness{t: t, client: server.Client(), base: server.URL, src: db, links: links, crew: crewStore, schedule: scheduleStore}
 }
 
 // seedApprovedCrew creates a crew owned by owner and lands every member as
