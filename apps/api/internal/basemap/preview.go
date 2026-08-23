@@ -20,6 +20,7 @@ package basemap
 import (
 	"context"
 	"math"
+	"time"
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/encoding/mvt"
@@ -217,6 +218,18 @@ func NewPreviewTiles(url string) *PreviewTiles {
 	return &PreviewTiles{client: newPMTilesClient(url)}
 }
 
+// fetchLayersTimeout bounds the whole tile loop below, not just each
+// individual request (pmtilesRequestTimeout already does that) — tiles are
+// fetched sequentially, not concurrently, and previewMaxTiles's own
+// backstop only reduces zoom down to previewMinZoom, so an unusually large
+// bbox (a route with a data-entry error spanning a continent) can still
+// mean fetching well over previewMaxTiles tiles one at a time. Without an
+// overall deadline that would just mean a slow request rather than a
+// bounded one; with it, the loop below bails once time is up and returns
+// whatever it already has, the same "best-effort, partial is fine" spirit
+// as a single missing tile.
+const fetchLayersTimeout = 30 * time.Second
+
 // FetchLayers fetches whichever tiles cover the bbox at a zoom chosen to
 // fit it, decodes each one, and merges the four layers this preview cares
 // about. Best-effort throughout, matching staticBasemap.ts: a tile outside
@@ -226,6 +239,9 @@ func NewPreviewTiles(url string) *PreviewTiles {
 func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north float64) (PreviewLayers, error) {
 	var out PreviewLayers
 
+	ctx, cancel := context.WithTimeout(ctx, fetchLayersTimeout)
+	defer cancel()
+
 	header, err := p.client.getHeader(ctx)
 	if err != nil {
 		return out, err
@@ -233,6 +249,9 @@ func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north
 
 	_, tiles := chooseZoomAndTiles(west, south, east, north)
 	for _, t := range tiles {
+		if ctx.Err() != nil {
+			break
+		}
 		data, err := p.client.GetTile(ctx, header, uint32(t.Z), uint64(t.X), uint64(t.Y))
 		if err != nil || data == nil {
 			continue

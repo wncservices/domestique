@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const pmtilesHeaderSize = 127
@@ -56,11 +57,44 @@ type pmtilesClient struct {
 	httpClient *http.Client
 }
 
+// pmtilesRequestTimeout bounds every individual Range request. Without it
+// this client used http.DefaultClient, which has no timeout at all — a
+// hung tiles Service (a pod restart mid-request, a half-open connection
+// after a network hiccup) would block a getRange call, and so a
+// handleTrackPreview request, forever: cmd/domestique/main.go's own
+// http.Server only sets ReadHeaderTimeout, nothing bounds how long a
+// handler itself may run.
+const pmtilesRequestTimeout = 15 * time.Second
+
 func newPMTilesClient(url string) *pmtilesClient {
-	return &pmtilesClient{url: url, httpClient: http.DefaultClient}
+	return &pmtilesClient{url: url, httpClient: &http.Client{Timeout: pmtilesRequestTimeout}}
 }
 
+// maxRangeFetchBytes bounds every single Range request this client makes —
+// header, directory, and tile-data reads alike, since all three ultimately
+// come from length fields this reader trusts (the file's own header, and
+// entries decoded from directories that header points at). Real archives
+// never come close: this cluster's own basemap.pmtiles has a ~2MB leaf
+// directory section and individual vector tiles in the tens-to-hundreds
+// of KB. The bound exists for a corrupted or truncated archive (e.g. an
+// interrupted basemap update Job) misparsed into a length field that is
+// itself garbage — without it, a single bad length could try to fetch and
+// buffer an unbounded amount of data on every request against that route.
+const maxRangeFetchBytes = 64 << 20 // 64MiB
+
 func (c *pmtilesClient) getRange(ctx context.Context, offset, length uint64) ([]byte, error) {
+	// length 0 never legitimately occurs at any call site (a header read is
+	// always 127 bytes; a directory or tile-data entry's own length is
+	// never zero for a real archive) — reject it explicitly rather than
+	// letting the Range header's offset+length-1 arithmetic underflow.
+	if length == 0 {
+		return nil, fmt.Errorf("pmtiles: refusing to fetch a zero-length range at offset %d — "+
+			"this usually means the archive is corrupt or truncated", offset)
+	}
+	if length > maxRangeFetchBytes {
+		return nil, fmt.Errorf("pmtiles: refusing to fetch %d bytes (over the %d-byte sanity limit) — "+
+			"this usually means the archive is corrupt or truncated", length, uint64(maxRangeFetchBytes))
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("pmtiles: build request: %w", err)
@@ -127,9 +161,21 @@ func pmtilesDecompress(data []byte, method uint8) ([]byte, error) {
 			return nil, fmt.Errorf("pmtiles: gzip: %w", err)
 		}
 		defer func() { _ = r.Close() }()
-		out, err := io.ReadAll(r)
+		// A small compressed blob can inflate to something enormous — the
+		// input itself is already bounded by maxRangeFetchBytes, but that
+		// bounds the *compressed* size, not what gzip expands it to.
+		// LimitReader(..., n+1) is the standard idiom for detecting "the
+		// real data was truncated at exactly the limit" vs. "it actually
+		// ended there": reading maxDecompressedBytes+1 successfully means
+		// there was more data than the cap allows.
+		const maxDecompressedBytes = maxRangeFetchBytes
+		out, err := io.ReadAll(io.LimitReader(r, maxDecompressedBytes+1))
 		if err != nil {
 			return nil, fmt.Errorf("pmtiles: gzip read: %w", err)
+		}
+		if len(out) > maxDecompressedBytes {
+			return nil, fmt.Errorf("pmtiles: decompressed data exceeds the %d-byte sanity limit — "+
+				"this usually means the archive is corrupt", maxDecompressedBytes)
 		}
 		return out, nil
 	default:
@@ -157,6 +203,17 @@ func deserializePMTilesDirectory(data []byte) ([]pmtilesDirEntry, error) {
 	numEntries, err := readVarint()
 	if err != nil {
 		return nil, err
+	}
+	// A directory this size (at minimum 4 bytes/entry for the four varint
+	// arrays below) would already be many times larger than
+	// maxDecompressedBytes ever allows through — this is a second, cheap
+	// layer of the same "corrupt archive, not a legitimate one" defense,
+	// checked before the make() below rather than relying on that earlier
+	// bound alone.
+	const maxDirectoryEntries = maxRangeFetchBytes / 4
+	if numEntries > maxDirectoryEntries {
+		return nil, fmt.Errorf("pmtiles: directory claims %d entries (over the %d sanity limit) — "+
+			"this usually means the archive is corrupt", numEntries, uint64(maxDirectoryEntries))
 	}
 	entries := make([]pmtilesDirEntry, numEntries)
 
