@@ -114,10 +114,14 @@ func TestOwnerSchedulingAnUnsharedRouteSharesItToo(t *testing.T) {
 	}
 }
 
-// TestGrantedMemberSchedulingAnUnsharedRouteIsRejected proves CanSchedule is
-// not a route-edit permission: a member who may schedule rides for the crew
-// still cannot retarget somebody else's route themselves — the route must
-// already be shared before they can plan around it.
+// TestGrantedMemberSchedulingAnUnsharedRouteIsRejected proves two things at
+// once: CanSchedule is not a route-edit permission (a member who may
+// schedule rides for the crew still cannot retarget somebody else's route
+// themselves — it must already be shared before they can plan around it),
+// and that rejection must not leak the route's existence — a route the
+// caller cannot otherwise see (config.VisibleTo) has to come back 404, the
+// same as a genuinely nonexistent slug, not a 400 that would tell an
+// unrelated rider "that one exists, it's just not shared with you."
 func TestGrantedMemberSchedulingAnUnsharedRouteIsRejected(t *testing.T) {
 	h := newAuthHarness(t, nil)
 	crewID := h.seedApprovedCrew(t, "wilant", "friend")
@@ -130,8 +134,38 @@ func TestGrantedMemberSchedulingAnUnsharedRouteIsRejected(t *testing.T) {
 
 	resp := h.as("friend", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides",
 		`{"slug":"`+route.Slug+`","date":"2026-09-06"}`)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (route not shared with the crew yet)", resp.StatusCode)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 — friend cannot see this route, so it must look nonexistent", resp.StatusCode)
+	}
+}
+
+// TestSchedulingAnInvisibleRouteDoesNotLeakItsExistence is
+// TestGrantedMemberSchedulingAnUnsharedRouteIsRejected's own scenario
+// generalized: literally any rider may schedule for a crew they own (owning
+// any crew grants Mine, and Mine always grants CanSchedule — see
+// crewAuthorityFor), which without the visibility filter in
+// handleCreateRide would turn this endpoint into a way to probe whether an
+// arbitrary slug exists anywhere in the deployment, regardless of any
+// relationship to it. A route with no owner and no crew is invisible to
+// everyone but an admin (config.VisibleTo), so it stands in for "a route
+// this rider has absolutely nothing to do with."
+func TestSchedulingAnInvisibleRouteDoesNotLeakItsExistence(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	ownCrewID := h.seedApprovedCrew(t, "prober") // owner — always CanSchedule
+	invisible := h.seedRoute(t, "Somebody Else's Route", "wilant")
+
+	resp := h.as("prober", "cyclists", http.MethodPost, "/api/crews/"+ownCrewID+"/rides",
+		`{"slug":"`+invisible.Slug+`","date":"2026-09-06"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 — indistinguishable from a slug that doesn't exist at all", resp.StatusCode)
+	}
+
+	// A slug that truly doesn't exist must produce the exact same response.
+	respFake := h.as("prober", "cyclists", http.MethodPost, "/api/crews/"+ownCrewID+"/rides",
+		`{"slug":"no-such-route-at-all","date":"2026-09-06"}`)
+	if respFake.StatusCode != resp.StatusCode {
+		t.Fatalf("a real-but-invisible slug and a fake one must return the same status, got %d vs %d",
+			resp.StatusCode, respFake.StatusCode)
 	}
 }
 
@@ -334,5 +368,41 @@ func TestCrewDTOReportsCanSchedule(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("friend not found in the owner's own member list")
+	}
+}
+
+// TestDeletingACrewPurgesItsRides proves the fix for a real stale-data leak:
+// crew ids are deterministic slugs and freed for reuse the moment a crew is
+// deleted (crew.Store.uniqueID only checks currently-existing crews), so a
+// brand new, completely unrelated crew that happens to get the same name
+// would otherwise inherit the old crew's scheduled rides the instant
+// anyone lists them.
+func TestDeletingACrewPurgesItsRides(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	if resp := h.as("wilant", "cyclists", http.MethodDelete, "/api/crews/"+crewID, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete crew: status = %d", resp.StatusCode)
+	}
+
+	resp := h.as("stranger", "cyclists", http.MethodPost, "/api/crews", `{"name":"Crew"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("recreate: status = %d", resp.StatusCode)
+	}
+	var recreated struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&recreated); err != nil {
+		t.Fatal(err)
+	}
+	if recreated.ID != crewID {
+		t.Fatalf("recreated crew id = %q, want the reused %q — this test's whole premise depends on id reuse", recreated.ID, crewID)
+	}
+
+	rides := h.decodeRides(t, h.as("stranger", "cyclists", http.MethodGet, "/api/crews/"+recreated.ID+"/rides", ""))
+	if len(rides) != 0 {
+		t.Fatalf("a brand new crew that reused the old one's id should start with no rides, got %+v", rides)
 	}
 }

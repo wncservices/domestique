@@ -138,6 +138,13 @@ func rideDTOFor(ride schedule.Ride, routeNames map[string]string) rideDTO {
 // permission — so for them the route has to already be shared here; the
 // natural workflow is the route's owner shares it once (from the Library
 // page, as today), and any granted member can schedule it afterward.
+//
+// A route the caller cannot otherwise see (config.VisibleTo — see the
+// visibleRoutes filter below) is rejected the same way a genuinely
+// nonexistent slug is: 404, "no such route," never a 400 that would
+// distinguish "exists but not shared with you" from "doesn't exist."
+// Anything more specific would let a rider probe slugs outside their own
+// crews to learn whether they exist.
 func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageCrews) {
 		return
@@ -178,6 +185,20 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	// Filtered through the same visibility rule every other route-facing
+	// handler uses (visibleRoutes/config.VisibleTo — see handleRoutes,
+	// handleTrack's mayView) before ever searching by slug: without this, a
+	// rider who may schedule for *some* crew of their own — trivially any
+	// rider, since owning any crew grants it — could probe an arbitrary
+	// slug across the whole deployment and learn from the response whether
+	// it exists, is owned, or is shared, none of which they have any
+	// relationship to. Route existence must not leak beyond what the
+	// caller could already see.
+	routes = visibleRoutes(routes, identity, crews)
 	idx := -1
 	for i, route := range routes {
 		if route.Slug == body.Slug {
@@ -190,11 +211,6 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	route := routes[idx]
-
-	crews, ok := s.crewSnapshot(w, r)
-	if !ok {
-		return
-	}
 
 	// Resolves the same way TargetsFor does: naming the crew in Targets is
 	// not enough on its own if the route's owner has since left it (a

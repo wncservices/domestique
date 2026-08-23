@@ -124,10 +124,49 @@ func TestScheduleEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("DeleteForCrew removes only that crew's rides", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				gone, err := store.Create(ctx, "crew:sunday-club", "hill-loop", "2026-09-05", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				untouched, err := store.Create(ctx, "crew:other-crew", "flat-loop", "2026-09-05", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+
+				if err := store.DeleteForCrew(ctx, "crew:sunday-club"); err != nil {
+					t.Fatalf("DeleteForCrew: %v", err)
+				}
+				if _, err := store.Get(ctx, gone.ID); !errors.Is(err, ErrNotFound) {
+					t.Fatalf("get after DeleteForCrew: err = %v, want ErrNotFound", err)
+				}
+				if _, err := store.Get(ctx, untouched.ID); err != nil {
+					t.Fatalf("a different crew's ride should be untouched: %v", err)
+				}
+			})
+
+			t.Run("DeleteForCrew on a crew with no rides is not an error", func(t *testing.T) {
+				store := open(t)
+				if err := store.DeleteForCrew(t.Context(), "crew:nothing-scheduled"); err != nil {
+					t.Fatalf("DeleteForCrew: %v", err)
+				}
+			})
+
 			t.Run("rejects a malformed date", func(t *testing.T) {
 				store := open(t)
-				if _, err := store.Create(t.Context(), "crew:sunday-club", "hill-loop", "not-a-date", "wilant"); err == nil {
-					t.Fatal("expected an error for a malformed date")
+				for _, bad := range []string{
+					"not-a-date",
+					"2026/09/05", // wrong separators
+					"20260905",   // wrong shape entirely
+					"2026-13-05", // no month 13
+					"2026-02-30", // February has no 30th
+				} {
+					if _, err := store.Create(t.Context(), "crew:sunday-club", "hill-loop", bad, "wilant"); err == nil {
+						t.Errorf("%q: expected an error, got none", bad)
+					}
 				}
 			})
 

@@ -235,6 +235,18 @@ func (s *Server) handleDeleteCrew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort, not part of the response either way: the crew is already
+	// gone by this point, which is what the caller asked for. Left
+	// uncleaned, though, a since-reused crew id (see
+	// schedule.Store.DeleteForCrew's own doc comment) would resurrect this
+	// crew's old rides for whichever unrelated crew claims the same id
+	// next — worth logging on failure, not worth failing this request over.
+	if s.Schedule != nil {
+		if err := s.Schedule.DeleteForCrew(r.Context(), id); err != nil {
+			s.logger().Error("could not clean up rides for a deleted crew", "crew", id, "error", err)
+		}
+	}
+
 	s.logger().Info("crew deleted", "id", id, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

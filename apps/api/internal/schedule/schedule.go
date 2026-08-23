@@ -34,31 +34,23 @@ import (
 // ErrNotFound is returned for a ride id nothing matches.
 var ErrNotFound = errors.New("no such scheduled ride")
 
-// dateOnly matches YYYY-MM-DD — the only shape a ride's date may take. A
-// ride names a day, not a moment: nothing about scheduling a ride, sharing
-// it with the crew, or syncing it to a device needs a time-of-day, and
-// accepting one would just be a value nothing ever reads.
-var dateOnly = func() func(string) bool {
-	const digits = "0123456789"
-	return func(s string) bool {
-		if len(s) != len("YYYY-MM-DD") {
-			return false
-		}
-		for i, c := range s {
-			switch i {
-			case 4, 7:
-				if c != '-' {
-					return false
-				}
-			default:
-				if !strings.ContainsRune(digits, c) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-}()
+// dateLayout is the only shape a ride's date may take, and the only thing
+// this package ever formats or parses one as. A ride names a day, not a
+// moment: nothing about scheduling a ride, sharing it with the crew, or
+// syncing it to a device needs a time-of-day, and accepting one would just
+// be a value nothing ever reads.
+const dateLayout = "2006-01-02"
+
+// dateOnly reports whether s is a real calendar date in dateLayout — not
+// just shaped like one. time.Parse with this exact layout already rejects
+// "2026-13-40" (no such month) the same way it rejects "2026/09/05" (wrong
+// separators) or "20260905" (wrong length); Go's reference-layout parsing
+// validates both the shape and the value in one pass, so there is no
+// separate range check to get wrong.
+func dateOnly(s string) bool {
+	_, err := time.Parse(dateLayout, s)
+	return err == nil
+}
 
 // Ride is one crew's plan to ride a specific route on a specific day.
 type Ride struct {
@@ -204,4 +196,18 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DeleteForCrew removes every ride a crew has scheduled — called when the
+// crew itself is deleted. Crew ids are reused: crew.Store.uniqueID only
+// checks against currently-existing crews, so a deleted "Sunday Club" frees
+// "crew:sunday-club" for a brand new, unrelated crew of the same name to
+// claim. Without this, that new crew would inherit the old one's scheduled
+// rides the moment anyone lists them — a stale-data leak across what the
+// app treats as two different crews that only happen to share a
+// since-reused id. Zero rides to delete is the ordinary case (most crews
+// never schedule one), not an error.
+func (s *Store) DeleteForCrew(ctx context.Context, crewID string) error {
+	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_rides WHERE crew_id = ?`), crewID)
+	return err
 }
