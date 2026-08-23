@@ -1,12 +1,42 @@
+import { copyFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import ui from '@nuxt/ui/vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+
+// maplibre-gl loads its own worker at runtime via
+// new URL('./maplibre-gl-worker.mjs', import.meta.url) — resolved against
+// wherever its *own* chunk actually ends up being served from, not
+// something Vite's asset pipeline ever sees (that URL construction lives
+// inside maplibre-gl's own pre-built dist output, not source Vite parses
+// for asset references). Vite hashes the chunk maplibre-gl ends up in but
+// never copies the separate maplibre-gl-worker.mjs file sitting next to it
+// in node_modules, so the browser requests a file the build never
+// produced — a 404 that this app's own catch-all SPA routing turns into a
+// 302 to the landing host, which the browser then refuses to run as a
+// worker (text/html, not a script). Only a production-build problem: the
+// dev server resolves that same relative URL against the real
+// node_modules path, which it already serves directly.
+function copyMaplibreWorker(): Plugin {
+  return {
+    name: 'copy-maplibre-gl-worker',
+    apply: 'build',
+    closeBundle() {
+      // Resolved via the package's own exports map, not a relative
+      // node_modules path guess — this is a workspace, so the installed
+      // copy is hoisted to the repo root, not apps/web/node_modules.
+      const worker = fileURLToPath(import.meta.resolve('maplibre-gl/dist/maplibre-gl-worker.mjs'))
+      const dest = join(dirname(fileURLToPath(import.meta.url)), 'dist/assets/maplibre-gl-worker.mjs')
+      copyFileSync(worker, dest)
+    },
+  }
+}
 
 // The API listens on :8080 (`domestique serve`); in dev we proxy to it so the
 // frontend runs from Vite with hot reload against the real backend.
 export default defineConfig({
-  plugins: [vue(), ui()],
+  plugins: [vue(), ui(), copyMaplibreWorker()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
