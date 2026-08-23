@@ -188,7 +188,7 @@ const waterPath = computed(() => {
       role="img"
       :aria-label="`Route shape for ${slug}`"
     >
-      <path v-if="earthPath" :d="earthPath" class="fill-muted" stroke="none" />
+      <path v-if="earthPath" :d="earthPath" class="fill-[var(--ui-text-muted)]" stroke="none" />
       <path v-if="waterPath" :d="waterPath" class="fill-primary/10" stroke="none" />
       <path
         :d="path"
