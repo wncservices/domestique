@@ -274,6 +274,51 @@ func TestDeleteRide(t *testing.T) {
 			t.Fatalf("status = %d, want 200", resp.StatusCode)
 		}
 	})
+
+	t.Run("a creator who has since left the crew can no longer delete it", func(t *testing.T) {
+		ride := h.mustScheduleRide(t, "friend", crewID, route.Slug, "2026-09-05")
+		if resp := h.as("friend", "cyclists", http.MethodDelete,
+			"/api/crews/"+crewID+"/members/friend", ""); resp.StatusCode != http.StatusOK {
+			t.Fatalf("leave crew: status = %d", resp.StatusCode)
+		}
+
+		resp := h.as("friend", "cyclists", http.MethodDelete,
+			"/api/crews/"+crewID+"/rides/"+ride.ID, "")
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403 — friend is no longer a member", resp.StatusCode)
+		}
+
+		// The crew owner can still clean it up.
+		if resp := h.as("wilant", "cyclists", http.MethodDelete,
+			"/api/crews/"+crewID+"/rides/"+ride.ID, ""); resp.StatusCode != http.StatusOK {
+			t.Fatalf("owner cleanup: status = %d, want 200", resp.StatusCode)
+		}
+	})
+}
+
+// TestRideSurvivesItsRouteBeingDeleted proves a ride whose route has since
+// been deleted still lists cleanly — routeName falls back to the slug
+// instead of coming back empty — and can still be removed like any other
+// ride.
+func TestRideSurvivesItsRouteBeingDeleted(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	ride := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	if resp := h.as("wilant", "cyclists", http.MethodDelete, "/api/routes/"+route.Slug, ""); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete route: status = %d", resp.StatusCode)
+	}
+
+	rides := h.decodeRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/crews/"+crewID+"/rides", ""))
+	if len(rides) != 1 || rides[0].RouteName != route.Slug {
+		t.Fatalf("rides = %+v, want one ride whose routeName fell back to %q", rides, route.Slug)
+	}
+
+	if resp := h.as("wilant", "cyclists", http.MethodDelete,
+		"/api/crews/"+crewID+"/rides/"+ride.ID, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete ride: status = %d", resp.StatusCode)
+	}
 }
 
 // TestCrewDTOReportsRosterToApprovedMembersOnly proves who-is-in-the-crew is

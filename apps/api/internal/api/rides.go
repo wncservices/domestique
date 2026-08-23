@@ -120,9 +120,20 @@ func (s *Server) handleListRides(w http.ResponseWriter, r *http.Request) {
 }
 
 func rideDTOFor(ride schedule.Ride, routeNames map[string]string) rideDTO {
+	// A route deleted after being scheduled leaves routeNames with nothing
+	// for this slug — falls back to the slug itself rather than shipping an
+	// empty routeName the frontend would have to notice and paper over on
+	// its own. The ride row itself is still a real, deletable thing even
+	// once its route is gone (see handleDeleteRide's own doc comment: a
+	// ride never reaches back to touch the route or its targets, so
+	// nothing here needs the route to still exist).
+	name := routeNames[ride.Slug]
+	if name == "" {
+		name = ride.Slug
+	}
 	return rideDTO{
 		ID: ride.ID, CrewID: ride.CrewID, Slug: ride.Slug,
-		RouteName: routeNames[ride.Slug], Date: ride.Date, CreatedBy: ride.CreatedBy,
+		RouteName: name, Date: ride.Date, CreatedBy: ride.CreatedBy,
 	}
 }
 
@@ -259,8 +270,13 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteRide removes a scheduled ride — its creator, the crew's
-// owner, or an admin. Removing a ride never touches the route or the
-// crew's own targets; see schedule.Store.Delete's doc comment.
+// owner, or an admin. "Its creator" means *currently*: someone who has
+// since been removed from the crew keeps no lingering right to touch it —
+// authority is re-derived from the crew's live membership on every call
+// (crewAuthorityFor), the same as every other crew endpoint, rather than
+// trusting the identity on the ride row alone. Removing a ride never
+// touches the route or the crew's own targets; see schedule.Store.Delete's
+// doc comment.
 func (s *Server) handleDeleteRide(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageCrews) {
 		return
@@ -284,9 +300,15 @@ func (s *Server) handleDeleteRide(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such scheduled ride"})
 		return
 	}
+	members, err := s.Crew.Members(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 
 	identity := auth.FromContext(r.Context())
-	if !identity.CanEditRoute(c.Owner) && !strings.EqualFold(ride.CreatedBy, identity.User) {
+	authority := crewAuthorityFor(identity, c, members)
+	if !authority.mine && (!authority.approved || !strings.EqualFold(ride.CreatedBy, identity.User)) {
 		s.forbidCrew(w, r)
 		return
 	}
