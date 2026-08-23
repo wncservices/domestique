@@ -8,6 +8,13 @@ import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import RouteMap from '@/components/RouteMap.vue'
 import type { Sport } from '@/api/types'
 
+// Named explicitly for App.vue's <KeepAlive include="LibraryPage">, rather
+// than relying on build-tool filename inference: the whole point of that
+// KeepAlive is to stop every card's preview (route line + background wash)
+// from being rebuilt on every visit, and a silent inference miss would
+// bring that regression back with no error to point at.
+defineOptions({ name: 'LibraryPage' })
+
 const {
   accounts,
   routes,
