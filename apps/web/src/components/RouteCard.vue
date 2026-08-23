@@ -191,12 +191,22 @@ async function remove() {
          more than the accessibility gap it closes justifies. -->
     <TrackPreview :slug="route.slug" />
 
+    <!-- Every text block below is clamped to a fixed number of lines *and*
+         given that many lines' worth of height (h-[Nlh], not just
+         line-clamp alone — line-clamp only caps overflow, it doesn't pad
+         shorter text back up), so distance/ascent and the tags below
+         always start at the same y no matter how long the name, slug, or
+         description happen to be — a one-line name no longer sits closer
+         to the stats than a three-line one. The description paragraph is
+         no longer conditionally rendered for the same reason: a route
+         with no description needs to reserve the same space as one that
+         has a short one, not collapse it away. -->
     <div>
-      <h3 class="font-medium text-highlighted">{{ route.name }}</h3>
-      <p class="font-mono text-xs text-muted">{{ route.slug }}</p>
+      <h3 class="line-clamp-2 h-[2lh] font-medium text-highlighted">{{ route.name }}</h3>
+      <p class="truncate font-mono text-xs text-muted">{{ route.slug }}</p>
     </div>
 
-    <p v-if="route.description" class="text-sm text-toned">{{ route.description }}</p>
+    <p class="line-clamp-2 h-[2lh] text-sm text-toned">{{ route.description }}</p>
 
     <dl class="flex gap-5">
       <div>
