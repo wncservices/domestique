@@ -468,7 +468,7 @@ func runValidate(src *source.DB, linked []model.Account, crews crew.Snapshot) er
 	for _, r := range routes {
 		fmt.Fprintf(w, "%s\t%s\t%.1f km\t%.0f m\t%d\t%v\n",
 			r.Slug, r.Name, r.Stats.DistanceM/1000, r.Stats.AscentM,
-			r.Stats.PointCount, config.TargetsFor(r, linked, crews))
+			r.Stats.PointCount, config.PushTargetsFor(r, linked))
 		for _, unknown := range config.UnknownTargets(r, crews) {
 			problems = append(problems, fmt.Sprintf("%s: unknown target %q", r.Slug, unknown))
 		}
@@ -485,7 +485,11 @@ func runPlan(src *source.DB, linked []model.Account, store state.Store, crews cr
 		return err
 	}
 
-	plan, err := sync.BuildPlan(context.Background(), routes, linked, store, crews)
+	// crewSharing: false, the same as every other general-purpose caller —
+	// see sync.BuildPlan's own doc comment. The CLI has no equivalent of
+	// the crew ride scheduler's own deliberate "sync now" action, so it
+	// never has a reason to pass true.
+	plan, err := sync.BuildPlan(context.Background(), routes, linked, store, crews, false)
 	if err != nil {
 		return err
 	}
@@ -500,7 +504,8 @@ func runPush(src *source.DB, linked []model.Account, store state.Store, crews cr
 		return err
 	}
 
-	plan, err := sync.BuildPlan(context.Background(), routes, linked, store, crews)
+	// crewSharing: false — see runPlan's identical comment just above.
+	plan, err := sync.BuildPlan(context.Background(), routes, linked, store, crews, false)
 	if err != nil {
 		return err
 	}

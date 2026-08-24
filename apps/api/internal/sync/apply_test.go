@@ -52,10 +52,18 @@ func forAccount(t *testing.T, store state.Store, accountID string) map[string]st
 	return entries
 }
 
-// mustPlan is the same idea for BuildPlan.
+// mustPlan is the same idea for BuildPlan. crewSharing is always true here —
+// sync_test.go's own fixtures are all a route shared to a crew, specifically
+// so BuildPlan's diff engine (create/update/delete detection, exercised by
+// every test in that file) gets run across more than one account without
+// each test inventing its own multi-owner fixture. That crew-aware
+// resolution is exactly what backs the crew ride scheduler's own "sync now"
+// action now — see BuildPlan's own doc comment for the other, narrower mode
+// every general-purpose push uses instead, covered separately by
+// TestBuildPlanGeneralPushNeverReachesACrewFellow.
 func mustPlan(t *testing.T, routes []model.Route, linked []model.Account, store state.Store, crews crew.Snapshot) model.Plan {
 	t.Helper()
-	plan, err := BuildPlan(t.Context(), routes, linked, store, crews)
+	plan, err := BuildPlan(t.Context(), routes, linked, store, crews, true)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}

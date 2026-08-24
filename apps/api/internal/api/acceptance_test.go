@@ -84,6 +84,16 @@ func (f *fakeTarget) Delete(context.Context, string) error {
 }
 
 // seedAccounts links two head units the way riders would through the UI.
+// seedAccounts links two accounts for "local" itself — every request in
+// this harness resolves to that identity (mode: none's LocalIdentity), and
+// since general-purpose push now never reaches past a route's own owner
+// (config.PushTargetsFor — see the security fix this comment is part of),
+// the push/plan mechanics tests in this file need an owner who actually
+// has somewhere of their own to push to. "one" and "two" stay linked too:
+// they still stand in for a crew fellow wherever a test's own point is
+// crew *membership* or *sharing* — target validation, UnknownTargets, and
+// the crew ride scheduler's own "sync now" action, none of which this
+// change touches.
 func seedAccounts(t *testing.T, db *source.DB) *accounts.Store {
 	t.Helper()
 
@@ -95,6 +105,8 @@ func seedAccounts(t *testing.T, db *source.DB) *accounts.Store {
 		provider model.Provider
 		rider    string
 	}{
+		{model.ProviderGarmin, "local"},
+		{model.ProviderWahoo, "local"},
 		{model.ProviderGarmin, "one"},
 		{model.ProviderWahoo, "two"},
 	} {
@@ -264,16 +276,21 @@ func syncHarness(t *testing.T) (*harness, routeDTO) {
 	return h, h.uploadExample("Kemmelberg Loop")
 }
 
-// uploadExample shares the route to crew:shared — one, two — so a route
-// with no targets of its own reaches every linked account, the closest
-// equivalent to the old nil-target default now that nil means "the
-// owner's own accounts only" (see config.TargetsFor). Every request in
-// this harness resolves to rider "local", which owns no linked account of
-// its own — without an explicit crew, an uploaded route would reach
-// nobody.
+// uploadExample uploads with no explicit target choice at all — every
+// request in this harness resolves to rider "local", who owns two linked
+// accounts of their own (see seedAccounts), so the plain owner-only
+// default (config.PushTargetsFor — no Targets means "the owner's own
+// accounts, nothing more") already reaches two accounts on its own,
+// which is what the push/plan mechanics tests in this file actually need:
+// something to diff a create/update/delete against. It deliberately does
+// not lean on crew:shared the way it once did — reaching a route's *own*
+// owner is the one thing every push path still does the same way,
+// general-purpose or not, so it is what these tests should exercise;
+// reaching a crew fellow is now the crew ride scheduler's own doing (see
+// rides_test.go's TestSyncRide and friends), not a plain upload's.
 func (h *harness) uploadExample(name string) routeDTO {
 	h.t.Helper()
-	resp := h.upload(map[string]string{"name": name, "targets": "crew:shared"}, exampleGPX(h.t), "route.gpx")
+	resp := h.upload(map[string]string{"name": name}, exampleGPX(h.t), "route.gpx")
 	h.expectStatus(resp, http.StatusCreated)
 	var route routeDTO
 	h.decode(resp, &route)
@@ -397,8 +414,8 @@ func TestAccountsEndpoint(t *testing.T) {
 	}
 	h.decode(resp, &accounts)
 
-	if len(accounts) != 2 {
-		t.Fatalf("got %d accounts, want the two that were linked", len(accounts))
+	if len(accounts) != 4 {
+		t.Fatalf("got %d accounts, want the four that seedAccounts links", len(accounts))
 	}
 	// The UI shows "adapter not wired up" from this, so it has to say what is
 	// true of each provider — both push for real now.
@@ -530,17 +547,17 @@ func TestRoutesEndpointReportsStatsAndTargets(t *testing.T) {
 	if route.AscentM == 0 || route.PointCount == 0 || route.ContentHash == "" {
 		t.Errorf("derived fields missing: %+v", route)
 	}
-	// Targets holds the crew named at write time (see uploadExample), not
-	// the accounts it resolves to — that resolved reach is SyncState.
-	if len(route.Targets) != 1 || route.Targets[0] != "crew:shared" {
-		t.Errorf("targets = %v, want [crew:shared]", route.Targets)
+	// Targets is empty — uploadExample makes no explicit sharing choice —
+	// not the accounts it resolves to; that resolved reach is SyncState.
+	if len(route.Targets) != 0 {
+		t.Errorf("targets = %v, want none", route.Targets)
 	}
 	// SyncState shows only the caller's own accounts (see
 	// TestRouteSyncStatusShowsOnlyYourOwnAccounts for the dedicated
-	// coverage of that rule) — "local" links none of its own here, even
-	// though crew:shared reaches "one" and "two"'s.
-	if len(route.SyncState) != 0 {
-		t.Errorf("syncState = %v, want none — local owns no linked account", route.SyncState)
+	// coverage of that rule) — "local" links two of its own (seedAccounts),
+	// which is exactly what an owner-only default reaches.
+	if len(route.SyncState) != 2 {
+		t.Errorf("syncState = %v, want local's own two accounts", route.SyncState)
 	}
 }
 
@@ -707,7 +724,7 @@ func TestPatchAutoSyncsWhenEnabled(t *testing.T) {
 func TestAutoSyncSkipsAnAccountWithAutoPushOff(t *testing.T) {
 	h := newHarness(t)
 
-	resp := h.do(http.MethodPut, "/api/accounts/wahoo:two/auto-push",
+	resp := h.do(http.MethodPut, "/api/accounts/wahoo:local/auto-push",
 		strings.NewReader(`{"enabled":false}`), "application/json")
 	h.expectStatus(resp, http.StatusOK)
 	var account struct {
@@ -724,8 +741,8 @@ func TestAutoSyncSkipsAnAccountWithAutoPushOff(t *testing.T) {
 
 	h.uploadExample("Only one account auto-pushes")
 
-	// garmin:one still auto-pushes, so the plan settles at one in sync and
-	// one still pending — never both, and never zero, within the same
+	// garmin:local still auto-pushes, so the plan settles at one in sync
+	// and one still pending — never both, and never zero, within the same
 	// window waitForInSync already uses.
 	deadline := time.Now().Add(2 * time.Second)
 	var plan planDTO
@@ -737,13 +754,13 @@ func TestAutoSyncSkipsAnAccountWithAutoPushOff(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if plan.InSync != 1 || len(plan.Items) != 1 {
-		t.Fatalf("plan = %+v, want garmin:one synced and wahoo:two still pending", plan)
+		t.Fatalf("plan = %+v, want garmin:local synced and wahoo:local still pending", plan)
 	}
-	if plan.Items[0].AccountID != "wahoo:two" {
-		t.Errorf("the pending item is %+v, want wahoo:two", plan.Items[0])
+	if plan.Items[0].AccountID != "wahoo:local" {
+		t.Errorf("the pending item is %+v, want wahoo:local", plan.Items[0])
 	}
 
-	// A manual push still reaches wahoo:two — the preference only governs
+	// A manual push still reaches wahoo:local — the preference only governs
 	// the unattended path, never a push the rider triggered themselves.
 	resp = h.do(http.MethodPost, "/api/push", nil, "")
 	h.expectStatus(resp, http.StatusOK)
@@ -808,7 +825,7 @@ func TestPlanThenPushThenPlanIsEmpty(t *testing.T) {
 func TestPushCanBeLimitedToASelection(t *testing.T) {
 	h, route := syncHarness(t)
 
-	body := fmt.Sprintf(`{"items":[{"accountId":"garmin:one","slug":%q}]}`, route.Slug)
+	body := fmt.Sprintf(`{"items":[{"accountId":"garmin:local","slug":%q}]}`, route.Slug)
 	resp := h.do(http.MethodPost, "/api/push", strings.NewReader(body), "application/json")
 	h.expectStatus(resp, http.StatusOK)
 
@@ -825,7 +842,7 @@ func TestPushCanBeLimitedToASelection(t *testing.T) {
 	h.decode(h.get("/api/routes"), &library)
 	for _, status := range library.Routes[0].SyncState {
 		want := "pending"
-		if status.AccountID == "garmin:one" {
+		if status.AccountID == "garmin:local" {
 			want = "synced"
 		}
 		if status.Status != want {
@@ -862,7 +879,7 @@ func TestPushWithEmptySelectionPushesEverything(t *testing.T) {
 // One provider failing must not stop the other rider's routes going out.
 func TestPushReportsPerAccountFailures(t *testing.T) {
 	h, _ := syncHarness(t)
-	h.pushed.failOn = "wahoo:two"
+	h.pushed.failOn = "wahoo:local"
 
 	resp := h.do(http.MethodPost, "/api/push", nil, "")
 	h.expectStatus(resp, http.StatusOK)
@@ -876,7 +893,7 @@ func TestPushReportsPerAccountFailures(t *testing.T) {
 	if len(push.Failures) != 1 {
 		t.Fatalf("failures = %v, want exactly one", push.Failures)
 	}
-	if !strings.Contains(push.Failures[0], "wahoo:two") {
+	if !strings.Contains(push.Failures[0], "wahoo:local") {
 		t.Errorf("failure does not name the account: %q", push.Failures[0])
 	}
 
@@ -885,7 +902,7 @@ func TestPushReportsPerAccountFailures(t *testing.T) {
 	h.decode(h.get("/api/routes"), &library)
 	for _, status := range library.Routes[0].SyncState {
 		want := "synced"
-		if status.AccountID == "wahoo:two" {
+		if status.AccountID == "wahoo:local" {
 			want = "pending"
 		}
 		if status.Status != want {
@@ -946,7 +963,13 @@ func TestUploadLifecycle(t *testing.T) {
 		t.Errorf("origin = %q, want database", created.Origin)
 	}
 
-	// It shows up in the library, and only plans for the account it named.
+	// It shows up in the library, and general-purpose push (GET /api/plan
+	// here, the same as a click on "Push to devices") only ever plans for
+	// the uploader's own accounts — crew:soloone's own approved member
+	// ("one") never appears, even though the route explicitly names that
+	// crew. Reaching a crew fellow through a route's Targets is the crew
+	// ride scheduler's own "sync now" action now, not a plain upload's or
+	// a plain push's — see rides_test.go's own coverage of that.
 	var library libraryDTO
 	h.decode(h.get("/api/routes"), &library)
 	if len(library.Routes) != 1 {
@@ -955,11 +978,13 @@ func TestUploadLifecycle(t *testing.T) {
 
 	var plan planDTO
 	h.decode(h.get("/api/plan"), &plan)
-	if len(plan.Items) != 1 {
-		t.Fatalf("plan = %+v, want a single create", plan.Items)
+	if len(plan.Items) != 2 {
+		t.Fatalf("plan = %+v, want a create per the owner's own two accounts", plan.Items)
 	}
-	if plan.Items[0].AccountID != "garmin:one" {
-		t.Errorf("planned for %s; per-route targets were ignored", plan.Items[0].AccountID)
+	for _, item := range plan.Items {
+		if item.AccountID != "garmin:local" && item.AccountID != "wahoo:local" {
+			t.Errorf("planned for %s — crew:soloone's own member must never appear here", item.AccountID)
+		}
 	}
 }
 
@@ -1145,6 +1170,11 @@ func TestPatchDisablingRouteQueuesDeletes(t *testing.T) {
 	}
 }
 
+// Retargeting to a different crew changes who may schedule this route into
+// a crew ride, and who sees it in their own library — it does not change
+// who general-purpose push reaches, which stays the owner's own accounts
+// regardless of which crew (or none) is named. See TestUploadLifecycle's
+// identical point on the create path.
 func TestPatchRetargetsRoute(t *testing.T) {
 	h := newHarness(t)
 	route := h.uploadExample("Shared")
@@ -1156,8 +1186,8 @@ func TestPatchRetargetsRoute(t *testing.T) {
 	var plan planDTO
 	h.decode(h.get("/api/plan"), &plan)
 	for _, item := range plan.Items {
-		if item.AccountID != "wahoo:two" {
-			t.Errorf("still planning for %s after retargeting", item.AccountID)
+		if item.AccountID != "garmin:local" && item.AccountID != "wahoo:local" {
+			t.Errorf("planning for %s after retargeting — crew:solotwo's own member must never appear", item.AccountID)
 		}
 	}
 }

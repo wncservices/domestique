@@ -162,3 +162,27 @@ func TestBuildPlanHonoursCrewMembership(t *testing.T) {
 		}
 	}
 }
+
+// A general-purpose push (crewSharing: false — see BuildPlan's own doc
+// comment) must never reach a crew fellow's account, even for a route
+// explicitly shared to a crew both riders currently, approvedly, belong
+// to. This is the actual security boundary the crewSharing parameter
+// exists to draw: only the crew ride scheduler's own deliberate "sync
+// now" action (BuildPlan called with crewSharing: true, exercised by
+// every other test in this file via mustPlan) may cross from one rider's
+// own accounts into another's.
+func TestBuildPlanGeneralPushNeverReachesACrewFellow(t *testing.T) {
+	routes, linked, store := testRoutes(t), testAccounts(), newStore(t)
+
+	plan, err := BuildPlan(t.Context(), routes, linked, store, testCrews(), false)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+
+	for _, item := range plan.Changes() {
+		if item.AccountID != "garmin:one" {
+			t.Errorf("general push planned %s for %s, want only the route's own owner (garmin:one)",
+				item.Slug, item.AccountID)
+		}
+	}
+}

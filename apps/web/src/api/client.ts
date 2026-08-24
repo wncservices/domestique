@@ -365,6 +365,17 @@ export const api = {
       `/api/crews/${encodeURIComponent(crewId)}/rides/${encodeURIComponent(rideId)}`,
       { method: 'DELETE' },
     ),
+  /** Pushes one scheduled ride's route to every one of the crew's own
+   *  currently-approved members' devices — the one deliberate exception to
+   *  every other push path only ever reaching the pushing rider's own
+   *  accounts (see the API's own config.PushTargetsFor doc comment). Not
+   *  api.push: that endpoint is general-purpose push now, and can no
+   *  longer reach anyone but the caller themselves. */
+  syncRide: (crewId: string, rideId: string) =>
+    request<PushResponse>(
+      `/api/crews/${encodeURIComponent(crewId)}/rides/${encodeURIComponent(rideId)}/sync`,
+      { method: 'POST' },
+    ),
 
   people: () => request<Person[]>('/api/people'),
   invitePerson: (req: InvitePersonRequest) =>

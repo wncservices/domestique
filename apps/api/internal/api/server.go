@@ -273,6 +273,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/crews/{id}/rides", s.handleListRides)
 	mux.HandleFunc("POST /api/crews/{id}/rides", s.handleCreateRide)
 	mux.HandleFunc("DELETE /api/crews/{id}/rides/{rideId}", s.handleDeleteRide)
+	mux.HandleFunc("POST /api/crews/{id}/rides/{rideId}/sync", s.handleSyncRide)
 
 	// Not under /api: these are browser navigations (redirects, a form post
 	// from the SPA), not JSON calls, so they sit outside the /api/ 404
@@ -1397,7 +1398,12 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 	routes = visibleRoutes(routes, identity, crews)
 	linked = visibleAccounts(identity, linked, crews)
 
-	plan, err := syncer.BuildPlan(r.Context(), routes, linked, s.Store, crews)
+	// crewSharing: false — this is what GET /api/plan promises the Library
+	// page's own "Push to devices" button can actually deliver, and the
+	// button pushes through crewSharing: false too (see runPush). Showing
+	// a crew fellow's account here that a click on that button could never
+	// actually reach would be its own kind of lie.
+	plan, err := syncer.BuildPlan(r.Context(), routes, linked, s.Store, crews, false)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -1462,9 +1468,6 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 // selected alone was not enough of a guard: nothing stopped that map from
 // naming another rider's account id, plan or no plan naming it back.
 func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, autoPushOnly bool, caller *auth.Identity) (pushResponse, error) {
-	s.pushMu.Lock()
-	defer s.pushMu.Unlock()
-
 	routes, _, err := s.Source.List(ctx)
 	if err != nil {
 		return pushResponse{}, err
@@ -1488,6 +1491,29 @@ func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, a
 		linked = autoPushAccounts(linked)
 	}
 
+	// crewSharing: false — every caller of runPush is general-purpose (a
+	// rider's own "Push to devices" click, or the unattended auto-sync/
+	// auto-import path). See BuildPlan's own doc comment for the narrower,
+	// crew-fellow-reaching mode reserved for the crew ride scheduler's own
+	// explicit "sync now" action (applyPush is what that calls instead).
+	return s.applyPush(ctx, routes, linked, crews, false, selected)
+}
+
+// applyPush is the shared tail every push actually goes through — runPush
+// above (a rider's own click, or the unattended auto-sync/auto-import
+// path) and handleSyncRide (the crew ride scheduler's own "sync now") — so
+// there is exactly one place that builds a plan, narrows it to what was
+// selected, applies it, and reports what happened, rather than two copies
+// quietly drifting apart. crewSharing is passed straight through to
+// BuildPlan; see that function's own doc comment for what it actually
+// controls and why it exists as a parameter at all. routes/linked are
+// already whatever scope the caller decided on — a full library/account
+// list for runPush, a single route and one crew's own accounts for
+// handleSyncRide — this function does not narrow either any further.
+func (s *Server) applyPush(ctx context.Context, routes []model.Route, linked []model.Account, crews crew.Snapshot, crewSharing bool, selected map[model.PlanKey]bool) (pushResponse, error) {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+
 	build := s.TargetFactory
 	if build == nil {
 		build = s.targetFactory().Build
@@ -1502,7 +1528,7 @@ func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, a
 		byAccount[account.ID] = target
 	}
 
-	plan, err := syncer.BuildPlan(ctx, routes, linked, s.Store, crews)
+	plan, err := syncer.BuildPlan(ctx, routes, linked, s.Store, crews, crewSharing)
 	if err != nil {
 		return pushResponse{}, err
 	}
