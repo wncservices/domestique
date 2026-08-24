@@ -977,13 +977,17 @@ async function saveShare() {
                 <UFormField label="Date" class="flex-1">
                   <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
                 </UFormField>
-                <UFormField label="Time (optional)" class="flex-1">
+                <!-- No flex-1/w-full here: a time never needs more than
+                     "09:00" plus its own native spinner, so giving it an
+                     equal share of the row next to the much longer date
+                     display just stretched it into empty padding. -->
+                <UFormField label="Time (optional)">
                   <UInput
                     v-model="scheduleTime"
                     type="time"
                     step="900"
                     size="sm"
-                    class="w-full"
+                    class="w-28"
                   />
                 </UFormField>
                 <UButton
