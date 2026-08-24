@@ -31,6 +31,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
+	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
@@ -410,7 +411,19 @@ func openSource(cfg *config.Config) (*source.DB, error) {
 	if cfg.Source.DSN == "" {
 		return nil, errors.New("no database configured: set --db, source.dsn, or DOMESTIQUE_SOURCE_DSN")
 	}
-	return source.OpenDB(cfg.Source.DSN)
+	src, err := source.OpenDB(cfg.Source.DSN)
+	if err != nil {
+		return nil, err
+	}
+	// Wired here rather than only in runServe: this is the one place every
+	// command that can create or update a route (serve's own upload/edit
+	// endpoints, but also the CLI's own import) shares, so elevation
+	// backfilling applies the same way regardless of which one a route
+	// actually came through.
+	if cfg.Elevation.Enabled {
+		src.SetElevationClient(elevation.New(cfg.Elevation.URL))
+	}
+	return src, nil
 }
 
 // openAccounts reads the linked head units.

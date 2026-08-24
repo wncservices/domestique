@@ -124,4 +124,25 @@ komoot:
 # session at link time, so there is no second place where somebody's name and
 # devices are written down, and no way for the two to disagree.
 #
-# A route with no `targets` of its own goes to every linked head unit.
+# A route with no `targets` of its own reaches only its own owner's own head
+# units. Naming a crew in `targets` shares it with that crew — reachable in
+# the app, and pushable to it by a crew ride's own explicit "sync now" — but
+# general-purpose push (this button, auto-sync, the CLI) never reaches past
+# the route's own owner, no matter what it names in `targets`.
+
+# Backfill elevation for a route that has none of its own worth trusting —
+# never queried at all, or (the case this exists for) every point stamped
+# with the same 0.00000 placeholder by a route-planning site that never
+# touched real terrain data.
+#
+# Off by default: this is the one thing in this file that sends a route's
+# own coordinates to a service outside the deployment on its own initiative,
+# not because a rider asked to connect an account. A regular running route
+# can reveal where someone lives — turning this on is a decision to make on
+# purpose.
+elevation:
+  enabled: false
+  # Defaults to the public Open-Elevation instance (api.open-elevation.com) —
+  # free, no API key, open source. Point this at a self-hosted instance
+  # instead if you would rather not depend on the public one.
+  # url: https://api.open-elevation.com/api/v1/lookup

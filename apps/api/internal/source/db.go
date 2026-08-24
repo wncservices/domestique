@@ -18,6 +18,7 @@ import (
 	_ "modernc.org/sqlite"             // SQLite, pure Go: no cgo, so the image stays small
 
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
+	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 )
@@ -56,6 +57,20 @@ type DB struct {
 	db      *sql.DB
 	dsn     string
 	dialect dbx.Dialect
+	// elevation backfills a route's elevation at create/update time when it
+	// has none of its own worth trusting (gpx.NeedsElevation) — nil unless
+	// SetElevationClient is called, which main.go only does when an
+	// operator opts into config.ElevationConfig.Enabled. A directory-backed
+	// source never gets one: it has no Create/Update to backfill during.
+	elevation *elevation.Client
+}
+
+// SetElevationClient wires up elevation backfilling for every future
+// Create/Update — a setter rather than a constructor parameter, since it is
+// optional and OpenDB's signature is already relied on with a fixed shape
+// throughout this codebase and its tests.
+func (d *DB) SetElevationClient(c *elevation.Client) {
+	d.elevation = c
 }
 
 // OpenDB opens (and migrates) a route database.
@@ -240,7 +255,7 @@ func (d *DB) GPX(ctx context.Context, slug string) ([]byte, error) {
 }
 
 func (d *DB) Create(ctx context.Context, req CreateRequest) (model.Route, error) {
-	points, stats, err := analyse(req.GPX)
+	points, stats, err := d.analyse(ctx, req.GPX)
 	if err != nil {
 		return model.Route{}, err
 	}
@@ -319,7 +334,7 @@ func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.
 	}
 
 	if req.GPX != nil {
-		points, stats, err := analyse(req.GPX)
+		points, stats, err := d.analyse(ctx, req.GPX)
 		if err != nil {
 			return model.Route{}, err
 		}
@@ -438,7 +453,7 @@ func (d *DB) uniqueSlug(ctx context.Context, base string) (string, error) {
 	return "", fmt.Errorf("could not find a free slug for %q", base)
 }
 
-func analyse(raw []byte) ([]gpx.Point, model.RouteStats, error) {
+func (d *DB) analyse(ctx context.Context, raw []byte) ([]gpx.Point, model.RouteStats, error) {
 	if len(raw) == 0 {
 		return nil, model.RouteStats{}, errors.New("empty GPX upload")
 	}
@@ -450,7 +465,89 @@ func analyse(raw []byte) ([]gpx.Point, model.RouteStats, error) {
 	if err != nil {
 		return nil, model.RouteStats{}, err
 	}
+	if gpx.NeedsElevation(points) {
+		d.backfillElevation(ctx, points)
+	}
 	return points, gpx.ComputeStats(points), nil
+}
+
+// maxElevationLookups caps how many of a route's points ever get a real
+// terrain lookup — a recorded track can hold thousands, and an elevation
+// profile does not need one sample per GPS fix to sum a climb correctly.
+// Sampled evenly across the route; see backfillElevation for why every
+// point NOT selected has its own elevation explicitly cleared rather than
+// left however gpx.ParsePoints found it.
+const maxElevationLookups = 300
+
+// backfillElevation looks up real terrain for an evenly-sampled subset of
+// points and applies it to points in place.
+//
+// Downsampled rather than looking up every point, both for speed (an
+// upload is a synchronous HTTP request; thousands of points would mean
+// dozens of round trips to a third party before it could ever return) and
+// because gpx.ComputeStats does not need one sample per GPS fix to sum a
+// climb correctly. Every point *not* selected has HasEle explicitly
+// cleared — even though gpx.NeedsElevation already established every
+// point in this particular call either had none or the same 0.00000
+// placeholder, leaving that placeholder in place on the unsampled points
+// would have gpx.ComputeStats read the gap between a real, looked-up
+// sample and its untouched 0-elevation neighbour as a climb or a drop
+// that was never really there.
+//
+// Best-effort: any failure (the service unreachable, slow, a bad
+// response) is swallowed and points is left exactly as gpx.ParsePoints
+// produced it. This must never turn a third party being briefly down
+// into a failed upload — the caller already treats "no usable elevation"
+// as a legitimate, expected outcome (it is what routing here at all
+// means), so there is nothing worse about leaving it that way than there
+// was before this feature existed.
+//
+// backfillTimeout bounds the whole attempt, not just elevation.Client's
+// own per-request timeout — up to three sequential batched requests
+// (maxElevationLookups points at 100 per request) could otherwise each
+// take the client's own full 20s before failing, adding up to a full
+// minute to a single, synchronous upload if the configured service is
+// merely slow rather than cleanly down. This must finish well inside
+// that, or fail, so a degraded elevation service degrades this feature
+// quickly instead of making every upload feel hung.
+// A var, not a const: elevation_backfill_test.go shrinks it to keep its own
+// timeout test fast rather than actually waiting 15 real seconds.
+var backfillTimeout = 15 * time.Second
+
+func (d *DB) backfillElevation(ctx context.Context, points []gpx.Point) {
+	if d.elevation == nil || len(points) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, backfillTimeout)
+	defer cancel()
+
+	step := 1
+	if len(points) > maxElevationLookups {
+		step = (len(points) + maxElevationLookups - 1) / maxElevationLookups
+	}
+
+	indices := make([]int, 0, maxElevationLookups+1)
+	lookup := make([]elevation.Point, 0, maxElevationLookups+1)
+	for i := 0; i < len(points); i += step {
+		indices = append(indices, i)
+		lookup = append(lookup, elevation.Point{Lat: points[i].Lat, Lon: points[i].Lon})
+	}
+
+	elevations, err := d.elevation.Lookup(ctx, lookup)
+	if err != nil {
+		return
+	}
+
+	sampled := make(map[int]bool, len(indices))
+	for j, i := range indices {
+		points[i].Ele, points[i].HasEle = elevations[j], true
+		sampled[i] = true
+	}
+	for i := range points {
+		if !sampled[i] {
+			points[i].HasEle = false
+		}
+	}
 }
 
 // Titleize turns a filename stem into a display name:

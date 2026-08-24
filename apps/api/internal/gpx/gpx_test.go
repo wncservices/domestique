@@ -120,6 +120,72 @@ func TestComputeStatsIgnoresElevationNoise(t *testing.T) {
 	}
 }
 
+func TestNeedsElevation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		points []Point
+		want   bool
+	}{
+		{
+			name:   "no point has any elevation at all",
+			points: []Point{{Lat: 50, Lon: 3}, {Lat: 50.001, Lon: 3}},
+			want:   true,
+		},
+		{
+			// The real-world shape this function exists for: a route
+			// planner (afstandmeten.nl, found live) stamps every point
+			// with a literal 0.00000 rather than omitting <ele> or
+			// querying real terrain.
+			name: "every point reports exactly zero",
+			points: []Point{
+				{Lat: 50, Lon: 3, Ele: 0, HasEle: true},
+				{Lat: 50.001, Lon: 3, Ele: 0, HasEle: true},
+				{Lat: 50.002, Lon: 3, Ele: 0, HasEle: true},
+			},
+			want: true,
+		},
+		{
+			name: "real, nonzero elevation throughout",
+			points: []Point{
+				{Lat: 50, Lon: 3, Ele: 12.4, HasEle: true},
+				{Lat: 50.001, Lon: 3, Ele: 15.8, HasEle: true},
+			},
+			want: false,
+		},
+		{
+			name: "sparse but genuine elevation is left alone",
+			points: []Point{
+				{Lat: 50, Lon: 3},
+				{Lat: 50.001, Lon: 3, Ele: 42, HasEle: true},
+				{Lat: 50.002, Lon: 3},
+			},
+			want: false,
+		},
+		{
+			// A single point genuinely at sea level does not, on its
+			// own, prove the whole file is a placeholder — only every
+			// point being exactly zero does.
+			name: "one real point happens to be exactly zero, others are not",
+			points: []Point{
+				{Lat: 50, Lon: 3, Ele: 0, HasEle: true},
+				{Lat: 50.001, Lon: 3, Ele: 8.2, HasEle: true},
+			},
+			want: false,
+		},
+		{
+			name:   "no points at all",
+			points: nil,
+			want:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NeedsElevation(tc.points); got != tc.want {
+				t.Errorf("NeedsElevation() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestContentHashIgnoresPrecisionBelowOneMetre(t *testing.T) {
 	base := []Point{{Lat: 50.123456789, Lon: 3.1234567}, {Lat: 50.2, Lon: 3.2}}
 	jittered := []Point{{Lat: 50.1234561, Lon: 3.1234569}, {Lat: 50.2, Lon: 3.2}}
