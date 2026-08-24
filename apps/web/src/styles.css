@@ -128,22 +128,22 @@
 
   /* Light mode is a tinted page with white cards, rather than white on white.
    * The old flat-white version gave a card no edge of its own, so a dozen
-   * routes read as one undifferentiated sheet — and neutral-50 alone still
-   * wasn't enough separation from a plain white card once real content was
-   * on screen (a page mostly covered by a stat row + a route grid leaves
-   * almost none of the tinted ground visible to contrast against). Bumped a
-   * full step: page ground is neutral-100, and the muted/border steps below
-   * it move with it so the whole ramp keeps its relative spacing. */
-  --ui-bg: var(--color-neutral-100);
-  --ui-bg-muted: var(--color-neutral-200);
+   * routes read as one undifferentiated sheet. Went a full step further
+   * than the first attempt at this (neutral-50, then neutral-100) once both
+   * still read as barely-there against a screenshot full of real content —
+   * neutral-200 is the step that's unmistakably a different colour from a
+   * white card next to it, not just technically different. The muted/border
+   * steps move with it so the ramp keeps its relative spacing. */
+  --ui-bg: var(--color-neutral-200);
+  --ui-bg-muted: var(--color-neutral-300);
   --ui-bg-elevated: #ffffff;
-  --ui-border: var(--color-neutral-300);
-  --ui-border-accented: var(--color-neutral-400);
+  --ui-border: var(--color-neutral-400);
+  --ui-border-accented: var(--color-neutral-500);
 
   --app-card-bg: #ffffff;
-  --app-card-shadow: 0 1px 2px rgb(16 25 23 / 0.06), 0 1px 3px rgb(16 25 23 / 0.09);
-  --app-card-shadow-hover: 0 4px 12px rgb(16 25 23 / 0.10), 0 2px 4px rgb(16 25 23 / 0.06);
-  --app-header-bg: rgb(223 235 228 / 0.8);
+  --app-card-shadow: 0 1px 3px rgb(16 25 23 / 0.10), 0 2px 5px rgb(16 25 23 / 0.12);
+  --app-card-shadow-hover: 0 6px 16px rgb(16 25 23 / 0.14), 0 3px 6px rgb(16 25 23 / 0.08);
+  --app-header-bg: rgb(207 223 215 / 0.85);
   /* Two lobes rather than one: teal plus a touch of ember reads as morning
    * light, not a single-hue wash. Consumed globally via body, so both the
    * landing bundle and the app shell pick it up from this one place. */
