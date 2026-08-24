@@ -61,15 +61,29 @@ const myAccountCount = computed(() => {
   return accounts.value.filter((a) => a.rider.toLowerCase() === user).length
 })
 
+// One categorical accent per tile (docs/design-system.md) so the four
+// separate at a glance instead of repeating the same primary tint four
+// times — purely decorative, carries no status meaning.
 const stats = computed(() => [
-  { label: 'Routes', value: String(routes.value.length), icon: 'i-lucide-route' },
-  { label: 'Distance', value: `${totalDistance.value.toFixed(0)} km`, icon: 'i-lucide-ruler' },
+  { label: 'Routes', value: String(routes.value.length), icon: 'i-lucide-route', color: 'primary' },
+  {
+    label: 'Distance',
+    value: `${totalDistance.value.toFixed(0)} km`,
+    icon: 'i-lucide-ruler',
+    color: 'ember',
+  },
   {
     label: 'Ascent',
     value: `${Math.round(totalAscent.value).toLocaleString()} m`,
     icon: 'i-lucide-mountain',
+    color: 'sky',
   },
-  { label: 'Head units', value: String(myAccountCount.value), icon: 'i-lucide-watch' },
+  {
+    label: 'Head units',
+    value: String(myAccountCount.value),
+    icon: 'i-lucide-watch',
+    color: 'violet',
+  },
 ])
 
 // Add is hidden rather than disabled for a viewer: the page would be an empty
@@ -124,7 +138,7 @@ onMounted(refresh)
               <UIcon name="i-lucide-bike" class="size-5" />
             </span>
             <div class="min-w-0">
-              <h1 class="truncate text-base font-semibold tracking-tight text-highlighted">
+              <h1 class="font-display truncate text-base font-semibold tracking-tight text-highlighted">
                 Domestique
               </h1>
               <p class="truncate text-xs text-muted">
@@ -227,10 +241,15 @@ onMounted(refresh)
       <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div v-for="stat in stats" :key="stat.label" class="app-card px-4 py-3">
           <div class="flex items-center gap-1.5 text-[0.7rem] uppercase tracking-wide text-dimmed">
-            <UIcon :name="stat.icon" class="size-3.5" />
+            <span
+              class="flex size-4 items-center justify-center rounded"
+              :style="{ color: `var(--app-accent-${stat.color})` }"
+            >
+              <UIcon :name="stat.icon" class="size-3.5" />
+            </span>
             {{ stat.label }}
           </div>
-          <div class="mt-1 truncate text-2xl tabular-nums text-highlighted">
+          <div class="font-mono mt-1 truncate text-2xl tabular-nums text-highlighted">
             {{ stat.value }}
           </div>
         </div>

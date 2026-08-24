@@ -6,33 +6,93 @@
  * Teal rather than the orange this started with: orange sits next to the
  * warning colour, so an accent and an alarm looked alike at a glance. Teal
  * reads outdoors without competing with the amber and red the UI reserves for
- * things going wrong. */
+ * things going wrong. This is the brighter/v2 tuning of that same teal —
+ * lighter ground, more saturated accent — not a hue change. See
+ * docs/design-system.md for the token reference and the rules for adding to
+ * this file. */
 @theme static {
-  --color-primary-50: #eefdfa;
-  --color-primary-100: #d3f9f2;
-  --color-primary-200: #abf2e7;
-  --color-primary-300: #71e7d9;
-  --color-primary-400: #35d2c3;
-  --color-primary-500: #16b8ab;
-  --color-primary-600: #0d938c;
-  --color-primary-700: #107570;
-  --color-primary-800: #125d5b;
-  --color-primary-900: #144d4b;
-  --color-primary-950: #042f2e;
+  --color-primary-50: #eafdf9;
+  --color-primary-100: #c8f7ec;
+  --color-primary-200: #8ff0da;
+  --color-primary-300: #4de3c2;
+  --color-primary-400: #14cfab;
+  --color-primary-500: #04b99e;
+  --color-primary-600: #049483;
+  --color-primary-700: #0a7669;
+  --color-primary-800: #105f56;
+  --color-primary-900: #134e47;
+  --color-primary-950: #04302c;
 
-  /* Surfaces are cool-neutral slate, which keeps the teal looking deliberate
-   * rather than tinting the whole page. */
-  --color-neutral-50: #f8fafc;
-  --color-neutral-100: #f1f5f9;
-  --color-neutral-200: #e2e8f0;
-  --color-neutral-300: #cbd5e1;
-  --color-neutral-400: #94a3b8;
-  --color-neutral-500: #64748b;
-  --color-neutral-600: #475569;
-  --color-neutral-700: #334155;
-  --color-neutral-800: #1e293b;
-  --color-neutral-900: #0f172a;
-  --color-neutral-950: #020617;
+  /* Surfaces are a teal-tinted near-white, not cool slate — the old blue-grey
+   * ramp made the whole app read colder than the brand accent sitting on it.
+   * Still neutral enough that the teal (and the three accents below) look
+   * deliberate rather than the page itself being tinted. */
+  --color-neutral-50: #f6faf8;
+  --color-neutral-100: #eef4f1;
+  --color-neutral-200: #dde9e4;
+  --color-neutral-300: #c3d3cc;
+  --color-neutral-400: #8fa39b;
+  --color-neutral-500: #647a72;
+  --color-neutral-600: #495d56;
+  --color-neutral-700: #34443f;
+  --color-neutral-800: #1e2b27;
+  --color-neutral-900: #101917;
+  --color-neutral-950: #050a09;
+
+  /* Three categorical accents, purely decorative — see docs/design-system.md
+   * for the categorical-vs-semantic rule. Never used for status; that stays
+   * Nuxt UI's own success/warning/error/info. Each is hand-tuned to the same
+   * lightness/chroma curve as the teal above so the four read as one family.
+   *
+   * Ember is a coral, not an amber, for the same reason teal beat orange:
+   * amber sits on Nuxt UI's warning hue. */
+  --color-ember-50: #fff1ec;
+  --color-ember-100: #ffe0d2;
+  --color-ember-200: #ffc0a8;
+  --color-ember-300: #ff9d78;
+  --color-ember-400: #ff8058;
+  --color-ember-500: #ff6b45;
+  --color-ember-600: #e8502b;
+  --color-ember-700: #c03d1e;
+  --color-ember-800: #9c331c;
+  --color-ember-900: #7d2c1b;
+  --color-ember-950: #43140b;
+
+  --color-sky-50: #eef7ff;
+  --color-sky-100: #dcedff;
+  --color-sky-200: #b7dcff;
+  --color-sky-300: #85c4ff;
+  --color-sky-400: #4fa4ff;
+  --color-sky-500: #2f8fff;
+  --color-sky-600: #1a6fe0;
+  --color-sky-700: #1557b3;
+  --color-sky-800: #15468c;
+  --color-sky-900: #163c73;
+  --color-sky-950: #0d2244;
+
+  --color-violet-50: #f4f1fe;
+  --color-violet-100: #ece4fd;
+  --color-violet-200: #d9caf9;
+  --color-violet-300: #bda6f4;
+  --color-violet-400: #a281ee;
+  --color-violet-500: #8462f0;
+  --color-violet-600: #6c46e0;
+  --color-violet-700: #5934bd;
+  --color-violet-800: #492c98;
+  --color-violet-900: #3d267c;
+  --color-violet-950: #24144a;
+
+  /* Bricolage for the brand wordmark and page h1s only; Plus Jakarta Sans is
+   * the body default (set on body below, not per-element); Plex Mono is for
+   * anything tabular — distances, ascent, counts, ids. Declaring these here
+   * (Tailwind v4's `--font-*` namespace) is what makes `font-display` /
+   * `font-mono` work as utility classes; `--font-sans` also becomes the
+   * `font-sans` utility, but body already opts every element in by default.
+   * Loaded via Google Fonts <link> in index.html/landing.html — see
+   * docs/design-system.md for why that beat self-hosting here. */
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 }
 
 :root {
@@ -48,15 +108,34 @@
   --ui-border-accented: var(--color-neutral-300);
 
   --app-card-bg: #ffffff;
-  --app-card-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
-  --app-card-shadow-hover: 0 4px 12px rgb(15 23 42 / 0.08), 0 2px 4px rgb(15 23 42 / 0.04);
-  --app-header-bg: rgb(248 250 252 / 0.8);
-  --app-glow: radial-gradient(60rem 24rem at 50% -8rem, rgb(22 184 171 / 0.10), transparent 70%);
+  --app-card-shadow: 0 1px 2px rgb(16 25 23 / 0.05), 0 1px 3px rgb(16 25 23 / 0.07);
+  --app-card-shadow-hover: 0 4px 12px rgb(16 25 23 / 0.09), 0 2px 4px rgb(16 25 23 / 0.05);
+  --app-header-bg: rgb(246 250 248 / 0.8);
+  /* Two lobes rather than one: teal plus a touch of ember reads as morning
+   * light, not a single-hue wash. Consumed globally via body, so both the
+   * landing bundle and the app shell pick it up from this one place. */
+  --app-glow:
+    radial-gradient(46rem 22rem at 18% -10%, rgb(20 207 171 / 0.12), transparent 70%),
+    radial-gradient(38rem 20rem at 96% 8%, rgb(255 107 69 / 0.10), transparent 70%);
+
+  /* One pair per categorical accent — a solid step for icons/text, a soft
+   * step for the tinted chip behind it. This is the *only* place an accent's
+   * light/dark contrast is decided; components always reach for the var, not
+   * a literal shade class, so nothing needs a `dark:` variant of its own. */
+  --app-accent-primary: var(--ui-primary);
+  --app-accent-primary-soft: var(--color-primary-100);
+  --app-accent-ember: var(--color-ember-600);
+  --app-accent-ember-soft: var(--color-ember-100);
+  --app-accent-sky: var(--color-sky-600);
+  --app-accent-sky-soft: var(--color-sky-100);
+  --app-accent-violet: var(--color-violet-600);
+  --app-accent-violet-soft: var(--color-violet-100);
 }
 
 .dark {
   /* A lighter tint of the accent in dark mode: the 600 that reads well on
-   * white is close to invisible on a dark surface. */
+   * white is close to invisible on a dark surface. Same reasoning applies to
+   * every categorical accent below — each swaps to its own 400 step. */
   --ui-primary: var(--color-primary-400);
 
   --ui-bg: var(--color-neutral-950);
@@ -65,17 +144,29 @@
   --ui-border: var(--color-neutral-800);
   --ui-border-accented: var(--color-neutral-700);
 
-  --app-card-bg: rgb(30 41 59 / 0.5);
+  --app-card-bg: rgb(30 43 39 / 0.5);
   --app-card-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
   --app-card-shadow-hover: 0 6px 20px rgb(0 0 0 / 0.35);
-  --app-header-bg: rgb(2 6 23 / 0.8);
-  --app-glow: radial-gradient(60rem 24rem at 50% -8rem, rgb(22 184 171 / 0.14), transparent 70%);
+  --app-header-bg: rgb(5 10 9 / 0.8);
+  --app-glow:
+    radial-gradient(46rem 22rem at 18% -10%, rgb(20 207 171 / 0.16), transparent 70%),
+    radial-gradient(38rem 20rem at 96% 8%, rgb(255 107 69 / 0.12), transparent 70%);
+
+  --app-accent-primary: var(--ui-primary);
+  --app-accent-primary-soft: var(--color-primary-950);
+  --app-accent-ember: var(--color-ember-400);
+  --app-accent-ember-soft: var(--color-ember-950);
+  --app-accent-sky: var(--color-sky-400);
+  --app-accent-sky-soft: var(--color-sky-950);
+  --app-accent-violet: var(--color-violet-400);
+  --app-accent-violet-soft: var(--color-violet-950);
 }
 
 body {
   background-color: var(--ui-bg);
   background-image: var(--app-glow);
   background-repeat: no-repeat;
+  font-family: var(--font-sans);
 }
 
 /* Stat tiles are plain divs; the panels are UCards and already pick the
@@ -120,7 +211,12 @@ body {
   border-bottom: 1px solid var(--ui-border);
 }
 
-/* The route preview draws itself; give it the accent so it matches. */
+/* The route preview draws itself; give it the accent so it matches.
+ * --track-color is set per-card by TrackPreview.vue (see utils/routeColor.ts)
+ * so different routes get a different accent from the same four-colour set
+ * as the stat tiles — the fallback keeps every other consumer of this class
+ * (there are none today, but the class is the public contract) on the plain
+ * brand colour if the var is never set. */
 .track-line {
-  stroke: var(--ui-primary);
+  stroke: var(--track-color, var(--ui-primary));
 }
