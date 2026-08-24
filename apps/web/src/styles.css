@@ -41,10 +41,10 @@
    * ramp made the whole app read colder than the brand accent sitting on it.
    * Still neutral enough that the teal (and the three accents below) look
    * deliberate rather than the page itself being tinted. */
-  --color-neutral-50: #eef6f1;
-  --color-neutral-100: #dfebe4;
-  --color-neutral-200: #cfdfd7;
-  --color-neutral-300: #b7cec4;
+  --color-neutral-50: #f6faf8;
+  --color-neutral-100: #eef4f1;
+  --color-neutral-200: #dde9e4;
+  --color-neutral-300: #c3d3cc;
   --color-neutral-400: #8fa39b;
   --color-neutral-500: #647a72;
   --color-neutral-600: #495d56;
@@ -126,24 +126,26 @@
 
   --ui-primary: var(--color-primary-600);
 
-  /* Light mode is a tinted page with white cards, rather than white on white.
-   * The old flat-white version gave a card no edge of its own, so a dozen
-   * routes read as one undifferentiated sheet. Went a full step further
-   * than the first attempt at this (neutral-50, then neutral-100) once both
-   * still read as barely-there against a screenshot full of real content —
-   * neutral-200 is the step that's unmistakably a different colour from a
-   * white card next to it, not just technically different. The muted/border
-   * steps move with it so the ramp keeps its relative spacing. */
-  --ui-bg: var(--color-neutral-200);
-  --ui-bg-muted: var(--color-neutral-300);
+  /* Light mode is a tinted page with white cards, rather than white on white
+   * — the old flat-white version gave a card no edge of its own, so a dozen
+   * routes read as one undifferentiated sheet. This is the same pale tint
+   * the original mockup used (neutral-50, ~#f6faf8): earlier revisions
+   * pushed the page ground progressively darker (neutral-100, then
+   * neutral-200) chasing more contrast, but the actual missing contrast was
+   * `UCard variant="outline"` sharing the page's own background outright
+   * (see vite.config.ts's card theme override) — once that was fixed, the
+   * subtle original tint was already correct, and darkening the page
+   * further past it only fought the mockup's own light, airy read. */
+  --ui-bg: var(--color-neutral-50);
+  --ui-bg-muted: var(--color-neutral-100);
   --ui-bg-elevated: #ffffff;
-  --ui-border: var(--color-neutral-400);
-  --ui-border-accented: var(--color-neutral-500);
+  --ui-border: var(--color-neutral-200);
+  --ui-border-accented: var(--color-neutral-300);
 
   --app-card-bg: #ffffff;
-  --app-card-shadow: 0 1px 3px rgb(16 25 23 / 0.10), 0 2px 5px rgb(16 25 23 / 0.12);
-  --app-card-shadow-hover: 0 6px 16px rgb(16 25 23 / 0.14), 0 3px 6px rgb(16 25 23 / 0.08);
-  --app-header-bg: rgb(207 223 215 / 0.85);
+  --app-card-shadow: 0 1px 2px rgb(16 25 23 / 0.05), 0 1px 3px rgb(16 25 23 / 0.07);
+  --app-card-shadow-hover: 0 4px 12px rgb(16 25 23 / 0.09), 0 2px 4px rgb(16 25 23 / 0.05);
+  --app-header-bg: rgb(246 250 248 / 0.8);
   /* Two lobes rather than one: teal plus a touch of ember reads as morning
    * light, not a single-hue wash. Consumed globally via body, so both the
    * landing bundle and the app shell pick it up from this one place. */
