@@ -155,6 +155,44 @@ func TestScheduleEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("ClearCreatedBy blanks authorship without deleting the ride", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				authored, err := store.Create(ctx, "crew:sunday-club", "hill-loop", "2026-09-05", "", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				untouched, err := store.Create(ctx, "crew:sunday-club", "flat-loop", "2026-09-05", "", "tiebe")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+
+				n, err := store.ClearCreatedBy(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("ClearCreatedBy: %v", err)
+				}
+				if n != 1 {
+					t.Fatalf("cleared %d rides, want 1", n)
+				}
+
+				got, err := store.Get(ctx, authored.ID)
+				if err != nil {
+					t.Fatalf("get after ClearCreatedBy: %v", err)
+				}
+				if got.CreatedBy != "" {
+					t.Errorf("CreatedBy = %q, want blanked", got.CreatedBy)
+				}
+
+				other, err := store.Get(ctx, untouched.ID)
+				if err != nil {
+					t.Fatalf("get untouched ride: %v", err)
+				}
+				if other.CreatedBy != "tiebe" {
+					t.Errorf("a different rider's ride should be untouched, got CreatedBy = %q", other.CreatedBy)
+				}
+			})
+
 			t.Run("rejects a malformed date", func(t *testing.T) {
 				store := open(t)
 				for _, bad := range []string{

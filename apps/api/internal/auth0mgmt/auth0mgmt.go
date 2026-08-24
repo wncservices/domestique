@@ -70,8 +70,15 @@ type Person struct {
 	// People page can offer a best-effort guess at a not-yet-logged-in
 	// person's eventual rider identity — see internal/api/people.go's
 	// likelyRider.
-	Nickname  string
-	Roles     []string
+	Nickname string
+	Roles    []string
+	// Blocked mirrors Auth0's own blocked flag on this identity — set by
+	// SetBlocked, read back here so the People page can render a toggle
+	// instead of firing the action blind. Populated from the Users Search
+	// API the same way CreatedAt/LastLogin are (see lastSeen) since, like
+	// those two, the role-members endpoint ListPeople otherwise uses does
+	// not return it.
+	Blocked   bool
 	CreatedAt time.Time
 	LastLogin time.Time
 }
@@ -290,6 +297,7 @@ type roleUser struct {
 	Email     string `json:"email"`
 	Name      string `json:"name"`
 	Nickname  string `json:"nickname"`
+	Blocked   bool   `json:"blocked"`
 	CreatedAt string `json:"created_at"`
 	LastLogin string `json:"last_login"`
 }
@@ -319,7 +327,7 @@ func (c *Client) lastSeen(ctx context.Context, userIDs []string) (map[string]rol
 	q := url.Values{
 		"search_engine":  {"v3"},
 		"q":              {strings.Join(terms, " OR ")},
-		"fields":         {"user_id,created_at,last_login,nickname"},
+		"fields":         {"user_id,created_at,last_login,nickname,blocked"},
 		"include_fields": {"true"},
 	}
 
@@ -387,6 +395,7 @@ func (c *Client) ListPeople(ctx context.Context, gateRole string, permissionRole
 			Name:      m.Name,
 			Nickname:  s.Nickname,
 			Roles:     memberOf[m.UserID],
+			Blocked:   s.Blocked,
 			CreatedAt: parseTime(s.CreatedAt),
 			LastLogin: parseTime(s.LastLogin),
 		})
@@ -416,6 +425,7 @@ func (c *Client) FindByEmail(ctx context.Context, email string) ([]Person, error
 			Email:     u.Email,
 			Name:      u.Name,
 			Nickname:  u.Nickname,
+			Blocked:   u.Blocked,
 			CreatedAt: parseTime(u.CreatedAt),
 			LastLogin: parseTime(u.LastLogin),
 		})
@@ -484,6 +494,33 @@ func (c *Client) UpdateName(ctx context.Context, userID, name string) (Person, e
 		return Person{}, fmt.Errorf("updating name: %w", err)
 	}
 	return Person{UserID: updated.UserID, Email: updated.Email, Name: updated.Name}, nil
+}
+
+// SetBlocked flips Auth0's own blocked flag on an existing identity. This
+// only refuses sign-in for *this* identity — it does not stop a fresh
+// signup with the same email from getting in, which is why the API package
+// pairs every call to this with a write to its own local blocklist (see
+// internal/blocklist) checked at the OIDC callback, not with this alone.
+func (c *Client) SetBlocked(ctx context.Context, userID string, blocked bool) error {
+	if err := c.do(ctx, http.MethodPatch, "/api/v2/users/"+url.PathEscape(userID),
+		map[string]any{"blocked": blocked}, nil); err != nil {
+		return fmt.Errorf("changing blocked status: %w", err)
+	}
+	return nil
+}
+
+// DeleteUser permanently removes an Auth0 identity — the admin People
+// page's "delete this rider" and the self-service Settings page's "delete
+// my account." Irreversible, and Auth0 keeps no local record afterward to
+// retry against, which is why callers purge this app's own data for the
+// rider *first* (see the API package's purgeRiderData): a failure here
+// after that purge already succeeded leaves nothing stranded, whereas the
+// reverse order would leave local data with no identity left to explain it.
+func (c *Client) DeleteUser(ctx context.Context, userID string) error {
+	if err := c.do(ctx, http.MethodDelete, "/api/v2/users/"+url.PathEscape(userID), nil, nil); err != nil {
+		return fmt.Errorf("deleting the account: %w", err)
+	}
+	return nil
 }
 
 // SetRoles makes userID's role membership exactly want — granting whatever

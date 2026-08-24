@@ -27,6 +27,8 @@ type PeopleConnector interface {
 	ListEnrollments(ctx context.Context, userID string) ([]auth0mgmt.Enrollment, error)
 	CreateGuardianEnrollmentTicket(ctx context.Context, userID string) (string, error)
 	DeleteEnrollment(ctx context.Context, enrollmentID string) error
+	SetBlocked(ctx context.Context, userID string, blocked bool) error
+	DeleteUser(ctx context.Context, userID string) error
 }
 
 type personDTO struct {
@@ -40,6 +42,10 @@ type personDTO struct {
 	Role      string `json:"role"`
 	CreatedAt string `json:"createdAt,omitempty"`
 	LastLogin string `json:"lastLogin,omitempty"`
+	// Blocked mirrors Auth0's own blocked flag — see auth0mgmt.Person.Blocked.
+	// Lets the People page render a Block/Unblock toggle reflecting current
+	// state instead of firing the action blind.
+	Blocked bool `json:"blocked,omitempty"`
 	// LikelyRider is a best-effort guess at what identityFromToken will
 	// resolve this person's rider identity to once they actually sign in —
 	// see likelyRider's own doc comment. Empty when nothing legal could be
@@ -142,6 +148,7 @@ func (s *Server) personDTO(p auth0mgmt.Person) personDTO {
 	dto := personDTO{
 		ID: p.UserID, Email: p.Email, Name: p.Name, Role: roleLabel(role),
 		LikelyRider: likelyRider(p.Name, p.Nickname, p.UserID),
+		Blocked:     p.Blocked,
 	}
 	if !p.CreatedAt.IsZero() {
 		dto.CreatedAt = formatTime(p.CreatedAt)
@@ -322,4 +329,117 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("person role changed", "id", id, "role", body.Role, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleSetPersonBlocked blocks or unblocks a person — two writes against
+// two different things, on purpose: Auth0's own blocked flag
+// (SetBlocked) stops the specific identity an admin is looking at from
+// signing in, and this app's own blocklist (checked at the OIDC callback,
+// see internal/blocklist and sso.go) stops a fresh signup with the same
+// email from getting back in too. Unblocking undoes both. Does not touch
+// this rider's local data either way — blocking is reversible, unlike
+// handleDeletePerson.
+func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManagePeople) {
+		return
+	}
+	if !s.peopleAvailable(w) {
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no person id"})
+		return
+	}
+
+	var body struct {
+		Blocked bool   `json:"blocked"`
+		Email   string `json:"email"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.Email = strings.TrimSpace(strings.ToLower(body.Email))
+	if body.Email == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email is required"})
+		return
+	}
+
+	if err := s.People.SetBlocked(r.Context(), id, body.Blocked); err != nil {
+		s.logger().Warn("changing a person's blocked status failed", "id", id, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Blocklist is wired unconditionally in a real deployment (see
+	// server.go's own doc comment on the field) — nil here only in a test
+	// that has not wired one, not a "feature not configured" case, so this
+	// is a loud log rather than a 412 the way peopleAvailable degrades.
+	if s.Blocklist == nil {
+		s.logger().Error("blocklist unavailable — this should never happen outside tests")
+	} else {
+		var err error
+		if body.Blocked {
+			err = s.Blocklist.Block(r.Context(), body.Email, auth.FromContext(r.Context()).User, body.Reason)
+		} else {
+			err = s.Blocklist.Unblock(r.Context(), body.Email)
+		}
+		if err != nil {
+			s.logger().Warn("updating the local blocklist failed", "email", body.Email, "err", err)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "updated",
+				"error":  "Auth0 was updated, but the local blocklist could not be: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	s.logger().Info("person blocked status changed", "id", id, "email", body.Email, "blocked", body.Blocked, "by", auth.FromContext(r.Context()).User)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// handleDeletePerson removes a person entirely: this app's own local data
+// for their rider identity first (best-effort guess at which one — see
+// personDTO.LikelyRider, which the admin confirms or edits client-side
+// before this request is even made), then their Auth0 identity itself.
+// Purge-before-identity on purpose, the same ordering handleDeleteMe uses:
+// a failure here never leaves an Auth0 identity gone with local data still
+// attached to it. Unlike blocking, this does not touch the local blocklist
+// — a deleted rider is explicitly allowed to sign up fresh.
+func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManagePeople) {
+		return
+	}
+	if !s.peopleAvailable(w) {
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no person id"})
+		return
+	}
+	rider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("rider")))
+
+	if rider != "" {
+		if _, err := s.purgeRiderData(r.Context(), rider); err != nil {
+			s.logger().Warn("purging local data before deleting a person failed", "id", id, "rider", rider, "err", err)
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error": "could not remove this rider's local data — nothing was deleted: " + err.Error(),
+			})
+			return
+		}
+	}
+
+	if err := s.People.DeleteUser(r.Context(), id); err != nil {
+		s.logger().Warn("deleting a person failed", "id", id, "rider", rider, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	s.logger().Info("person deleted", "id", id, "rider", rider, "by", auth.FromContext(r.Context()).User)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

@@ -107,6 +107,10 @@ export interface CrewMember {
    *  the owner/admin who always may. Owner/admin-granted, per member. Only
    *  meaningful for an approved row. */
   canSchedule?: boolean
+  /** Whether this member holds an owner grant — may delete the crew, change
+   *  auto-share, add/remove members, and promote/demote other owners. Only
+   *  meaningful for an approved row. */
+  owner?: boolean
 }
 
 /** A set of riders who trust each other with their routes — the only way a
@@ -115,8 +119,14 @@ export interface CrewMember {
 export interface Crew {
   id: string
   name: string
-  owner: string
-  /** Whether the caller may manage this crew — its owner, or an admin.
+  /** Who currently holds an owner grant — may delete the crew, change
+   *  auto-share, add/remove members, and promote/demote other owners.
+   *  Replaces a former single `owner` string: a crew now survives one
+   *  owner's departure as long as another owner grant remains. Always at
+   *  least one rider, except a crew whose sole owner was deleted, which an
+   *  admin may still manage regardless. */
+  owners: string[]
+  /** Whether the caller may manage this crew — one of `owners`, or an admin.
    *  Members is only ever present when this is true. */
   mine: boolean
   /** The caller's own standing with this crew — always present, even for a
@@ -260,6 +270,9 @@ export interface Person {
    *  add-member picker (CrewsPage.vue's knownRiders), not a source of
    *  truth. Absent when nothing legal could be derived. */
   likelyRider?: string
+  /** Whether an admin has blocked this person — mirrors Auth0's own blocked
+   *  flag. Absent (false) for everyone else. */
+  blocked?: boolean
 }
 
 export interface InvitePersonRequest {

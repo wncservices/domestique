@@ -533,6 +533,150 @@ func TestCrewEachEngine(t *testing.T) {
 					t.Error(`Has(id, "stranger") = true, want false`)
 				}
 			})
+
+			t.Run("create enrolls the owner with an owner grant", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				c, err := store.Create(ctx, "Sunday Club", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				isOwner, err := store.IsOwner(ctx, c.ID, "wilant")
+				if err != nil {
+					t.Fatalf("is owner: %v", err)
+				}
+				if !isOwner {
+					t.Error("creator is not reported as an owner")
+				}
+			})
+
+			t.Run("set owner promotes and demotes a member", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				c, err := store.Create(ctx, "Sunday Club", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				if _, err := store.AddMember(ctx, c.ID, "tiebe", "wilant"); err != nil {
+					t.Fatalf("add member: %v", err)
+				}
+				if err := store.Confirm(ctx, c.ID, "tiebe"); err != nil {
+					t.Fatalf("confirm: %v", err)
+				}
+
+				if err := store.SetOwner(ctx, c.ID, "tiebe", true); err != nil {
+					t.Fatalf("promote: %v", err)
+				}
+				isOwner, err := store.IsOwner(ctx, c.ID, "tiebe")
+				if err != nil {
+					t.Fatalf("is owner: %v", err)
+				}
+				if !isOwner {
+					t.Error("promoted member is not reported as an owner")
+				}
+
+				// Now that there are two owners, demoting one is fine.
+				if err := store.SetOwner(ctx, c.ID, "wilant", false); err != nil {
+					t.Fatalf("demote: %v", err)
+				}
+				isOwner, err = store.IsOwner(ctx, c.ID, "wilant")
+				if err != nil {
+					t.Fatalf("is owner: %v", err)
+				}
+				if isOwner {
+					t.Error("demoted owner is still reported as an owner")
+				}
+			})
+
+			t.Run("set owner rejects removing the last owner", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				c, err := store.Create(ctx, "Sunday Club", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				if _, err := store.AddMember(ctx, c.ID, "tiebe", "wilant"); err != nil {
+					t.Fatalf("add member: %v", err)
+				}
+				if err := store.Confirm(ctx, c.ID, "tiebe"); err != nil {
+					t.Fatalf("confirm: %v", err)
+				}
+
+				// tiebe is a plain member, not an owner — demoting wilant now
+				// would leave the crew with none.
+				if err := store.SetOwner(ctx, c.ID, "wilant", false); !errors.Is(err, ErrLastOwner) {
+					t.Fatalf("err = %v, want ErrLastOwner", err)
+				}
+			})
+
+			t.Run("backfill owner flag matches the existing owner column", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				c, err := store.Create(ctx, "Sunday Club", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				// Simulate a pre-migration row: strip the flag Create just
+				// set, the way a crew created before this column existed
+				// would read once the column itself is added with its
+				// DEFAULT FALSE.
+				if _, err := store.db.ExecContext(ctx, store.dialect.Rebind(
+					`UPDATE crew_members SET is_owner = ? WHERE crew_id = ? AND rider = ?`),
+					false, c.ID, "wilant"); err != nil {
+					t.Fatalf("reset flag: %v", err)
+				}
+
+				if err := store.backfillOwnerFlag(ctx); err != nil {
+					t.Fatalf("backfill: %v", err)
+				}
+				isOwner, err := store.IsOwner(ctx, c.ID, "wilant")
+				if err != nil {
+					t.Fatalf("is owner: %v", err)
+				}
+				if !isOwner {
+					t.Error("backfill did not restore the owner flag from crews.owner")
+				}
+			})
+
+			t.Run("remove rider everywhere clears every crew's membership", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				first, err := store.Create(ctx, "Sunday Club", "wilant")
+				if err != nil {
+					t.Fatalf("create first: %v", err)
+				}
+				second, err := store.Create(ctx, "Monday Club", "someone-else")
+				if err != nil {
+					t.Fatalf("create second: %v", err)
+				}
+				if _, err := store.AddMember(ctx, second.ID, "wilant", "someone-else"); err != nil {
+					t.Fatalf("add to second: %v", err)
+				}
+				if err := store.Confirm(ctx, second.ID, "wilant"); err != nil {
+					t.Fatalf("confirm: %v", err)
+				}
+
+				n, err := store.RemoveRiderEverywhere(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("remove everywhere: %v", err)
+				}
+				if n != 2 {
+					t.Fatalf("removed %d rows, want 2 (owner of first, member of second)", n)
+				}
+
+				snap, err := store.Snapshot(ctx)
+				if err != nil {
+					t.Fatalf("snapshot: %v", err)
+				}
+				if snap.ApprovedRiders.Has(first.ID, "wilant") || snap.ApprovedRiders.Has(second.ID, "wilant") {
+					t.Errorf("wilant still a member somewhere: %v", snap.ApprovedRiders)
+				}
+			})
 		})
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
+	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
@@ -153,6 +154,13 @@ type Server struct {
 	// unconditionally in runServe.
 	Schedule *schedule.Store
 
+	// Blocklist stops a blocked rider's email from creating a new local
+	// identity — see internal/blocklist. Auth0's own SetBlocked only refuses
+	// the identity an admin actually blocked, not a fresh signup with the
+	// same email; this is checked at the OIDC callback regardless of which
+	// identity the token names. Same no-nil-degradation story as Crew.
+	Blocklist *blocklist.Store
+
 	// ConnectLimiter throttles Garmin/Komoot connect by rider: both proxy a
 	// password straight to a third party, so without a limit this server is
 	// an unlimited, authenticated-only credential-stuffing proxy against
@@ -194,6 +202,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/metrics", metricsHandler())
 	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("PATCH /api/me", s.handleUpdateMe)
+	mux.HandleFunc("DELETE /api/me", s.handleDeleteMe)
 	mux.HandleFunc("POST /api/me/password-reset", s.handleSelfPasswordReset)
 	mux.HandleFunc("GET /api/me/mfa", s.handleListMFA)
 	mux.HandleFunc("POST /api/me/mfa/enroll", s.handleEnrollMFA)
@@ -265,6 +274,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/people", s.handlePeopleList)
 	mux.HandleFunc("POST /api/people", s.handlePeopleInvite)
 	mux.HandleFunc("PUT /api/people/{id}/role", s.handlePeopleSetRole)
+	mux.HandleFunc("PUT /api/people/{id}/blocked", s.handleSetPersonBlocked)
+	mux.HandleFunc("DELETE /api/people/{id}", s.handleDeletePerson)
 
 	mux.HandleFunc("POST /api/crews", s.handleCreateCrew)
 	mux.HandleFunc("GET /api/crews", s.handleListCrews)
@@ -275,6 +286,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/crews/{id}/members/{rider}", s.handleApproveCrewMember)
 	mux.HandleFunc("DELETE /api/crews/{id}/members/{rider}", s.handleRemoveCrewMember)
 	mux.HandleFunc("PATCH /api/crews/{id}/members/{rider}/schedule", s.handleSetCanScheduleCrewMember)
+	mux.HandleFunc("PATCH /api/crews/{id}/members/{rider}/owner", s.handleSetCrewMemberOwner)
 
 	mux.HandleFunc("GET /api/crews/{id}/rides", s.handleListRides)
 	mux.HandleFunc("POST /api/crews/{id}/rides", s.handleCreateRide)

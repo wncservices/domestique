@@ -29,6 +29,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
+	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
@@ -705,15 +706,23 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Crew — no external credential, only
+	// the database every deployment already has.
+	blocklistStore, err := blocklist.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	srv := &api.Server{
-		Source:   src,
-		Config:   cfg,
-		Store:    store,
-		Accounts: accountStore,
-		Crew:     crewStore,
-		Schedule: scheduleStore,
-		Auth:     authenticator,
-		Log:      log,
+		Source:    src,
+		Config:    cfg,
+		Store:     store,
+		Accounts:  accountStore,
+		Crew:      crewStore,
+		Schedule:  scheduleStore,
+		Blocklist: blocklistStore,
+		Auth:      authenticator,
+		Log:       log,
 		// Pure in-memory, no external credential to be missing — wired
 		// unconditionally, the same as Crew. 5 attempts per rider per 15
 		// minutes is enough for someone who mistypes a password twice; see
