@@ -111,6 +111,7 @@ func (s *Server) handleSetGarminConsumer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !s.Settings.CanStore() {
+		s.logger().Warn("garmin consumer set requested but this deployment has no encryption key configured")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment cannot store settings: " + secrets.ErrNoKey.Error(),
 		})

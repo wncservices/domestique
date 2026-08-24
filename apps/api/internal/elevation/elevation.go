@@ -22,6 +22,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // DefaultURL is the public Open-Elevation instance — free, no API key, no
@@ -57,7 +59,10 @@ func New(url string) *Client {
 	if url == "" {
 		url = DefaultURL
 	}
-	return &Client{url: url, httpClient: &http.Client{Timeout: requestTimeout}}
+	return &Client{url: url, httpClient: &http.Client{
+		Timeout:   requestTimeout,
+		Transport: otelhttp.NewTransport(http.DefaultTransport),
+	}}
 }
 
 // Lookup returns the elevation, in metres, for each point, in the same

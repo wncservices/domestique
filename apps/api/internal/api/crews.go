@@ -135,6 +135,11 @@ func (s *Server) crewAvailable(w http.ResponseWriter) bool {
 	if s.Crew != nil {
 		return true
 	}
+	// Error, not warn: this doc comment's own premise ("always true in
+	// practice") is false the moment this line runs in a real deployment —
+	// runServe wires Server.Crew unconditionally, so reaching here outside
+	// a test means that wiring broke, not that an admin left something off.
+	s.logger().Error("crew store unavailable — this should never happen outside tests")
 	writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 		"error": "this deployment has no crew store configured",
 	})

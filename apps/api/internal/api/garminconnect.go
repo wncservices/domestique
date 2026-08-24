@@ -101,6 +101,9 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Garmin == nil {
+		// Error, not warn: main.go wires srv.Garmin unconditionally, so nil
+		// here means that wiring broke, not that an admin left it off.
+		s.logger().Error("garmin connect requested but no Garmin client is wired — this should never happen outside tests")
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "this deployment has no Garmin sign-in configured",
 		})
@@ -109,6 +112,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 	consumer, _ := s.garminConsumer()
 	if !consumer.Configured() {
 		// Before the password is asked for, let alone sent.
+		s.logger().Warn("garmin connect requested but no OAuth1 consumer is configured")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": garmin.ErrNoConsumer.Error(),
 		})
@@ -117,6 +121,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 	if !s.Links.CanStore() {
 		// Refusing is the whole point: without a key the only way to honour
 		// this request would be to write the session somewhere readable.
+		s.logger().Warn("garmin connect requested but this deployment has no encryption key configured")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment cannot store a Garmin connection: " + secrets.ErrNoKey.Error(),
 		})

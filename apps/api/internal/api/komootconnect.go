@@ -85,6 +85,7 @@ func (s *Server) handleKomootConnect(w http.ResponseWriter, r *http.Request) {
 	if !s.Links.CanStore() {
 		// Refusing is the whole point: without a key the only way to honour
 		// this request would be to write the session somewhere readable.
+		s.logger().Warn("komoot connect requested but this deployment has no encryption key configured")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment cannot store a Komoot connection: " + secrets.ErrNoKey.Error(),
 		})

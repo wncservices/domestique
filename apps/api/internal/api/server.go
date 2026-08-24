@@ -1208,7 +1208,10 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cached, found, err := s.PreviewCache.Get(slug, basemapRec.ID); err != nil {
-		s.logger().Error("reading track preview cache failed", "slug", slug, "err", err)
+		// Warn, not error: nothing below returns early on this — the
+		// preview just gets recomputed from scratch, the same as a cache
+		// miss. The request still succeeds either way.
+		s.logger().Warn("reading track preview cache failed", "slug", slug, "err", err)
 	} else if found {
 		writeTrackPreviewJSON(w, cached)
 		return
@@ -1256,9 +1259,9 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.PreviewCache.Put(slug, basemapRec.ID, string(body)); err != nil {
-		// The response is still good; only the next request pays the
-		// recompute cost again.
-		s.logger().Error("caching track preview failed", "slug", slug, "err", err)
+		// Warn, not error: the response is still good; only the next
+		// request pays the recompute cost again.
+		s.logger().Warn("caching track preview failed", "slug", slug, "err", err)
 	}
 
 	writeTrackPreviewJSON(w, string(body))
@@ -1839,6 +1842,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// only the caller's own accounts, not a crew fellow's.
 	linked = ownAccountsOnly(identity, linked)
 
+	s.logger().Info("route updated", "slug", slug, "claimed", newOwner != nil, "by", identity.User)
 	s.autoSyncIfEnabled(identity.User)
 	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
 }
@@ -1861,6 +1865,8 @@ func (s *Server) handleRecalculateElevation(w http.ResponseWriter, r *http.Reque
 	}
 
 	if !s.Source.ElevationConfigured() {
+		s.logger().Warn("recalculate elevation requested but no elevation lookup is configured",
+			"slug", slug, "by", auth.FromContext(r.Context()).User)
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment has no elevation lookup configured",
 		})
@@ -1970,7 +1976,11 @@ func (s *Server) toRouteDTOs(ctx context.Context, routes []model.Route, linked [
 func (s *Server) stateFor(ctx context.Context, accountID string) map[string]state.Entry {
 	entries, err := s.Store.ForAccount(ctx, accountID)
 	if err != nil {
-		s.logger().Error("could not read sync state", "account", accountID, "err", err)
+		// Warn, not error: this doc comment's own premise is that stateFor
+		// is decorative only — the plan and the push read state through
+		// their own path and refuse to run if that fails, so this failure
+		// costs a UI badge, not a broken sync.
+		s.logger().Warn("could not read sync state", "account", accountID, "err", err)
 		return nil
 	}
 	return entries

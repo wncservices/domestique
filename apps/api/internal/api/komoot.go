@@ -415,18 +415,22 @@ func parseKomootTag(tag string) (string, bool) {
 func (s *Server) komootDisabled(w http.ResponseWriter) {
 	switch {
 	case !s.KomootEnabled:
+		s.logger().Warn("komoot requested but not enabled for this deployment")
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "Komoot import is not enabled for this deployment — set komoot.enabled",
 		})
 	case s.Links.CanStore():
 		// The rider can fix this themselves, so this is not a server-side
 		// gap: nothing is missing except a sign-in that has not happened yet.
+		// Not logged for the same reason: it is a routine per-rider state,
+		// not a deployment health signal.
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "Not signed in to Komoot — connect your account in Settings",
 		})
 	default:
 		// No encryption key, so the store refuses to hold a sign-in and the
 		// UI route is closed. The environment is genuinely the only way in.
+		s.logger().Warn("komoot requested but this deployment has no encryption key configured")
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "Komoot is enabled but this deployment cannot store sign-ins — set " +
 				secrets.EnvKey + ", or provide KOMOOT_EMAIL and KOMOOT_PASSWORD",
