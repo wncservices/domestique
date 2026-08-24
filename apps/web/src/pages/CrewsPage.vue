@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import type { Crew, Person, Ride, UpcomingRide } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
+import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
 import TrackPreview from '@/components/TrackPreview.vue'
 
 const { crews, accounts, routes, me, loading, error, refresh, can } = useLibrary()
@@ -85,7 +86,7 @@ function initials(rider: string): string {
 const upcomingRides = ref<UpcomingRide[]>([])
 async function loadUpcomingRides() {
   try {
-    upcomingRides.value = await api.upcomingRides()
+    upcomingRides.value = await api.upcomingRides(todayISO())
   } catch {
     // Best-effort — the main list still works fine with no "Next ride" line.
     upcomingRides.value = []
@@ -96,11 +97,6 @@ async function loadUpcomingRides() {
 // crew id is that crew's next ride.
 function nextRideFor(crewId: string): UpcomingRide | null {
   return upcomingRides.value.find((r) => r.crewId === crewId) ?? null
-}
-
-function formatRideWhen(ride: Ride): string {
-  const when = `${rideMonth(ride.date)} ${rideDay(ride.date)}`
-  return ride.time ? `${when}, ${ride.time}` : when
 }
 
 onMounted(refresh)
@@ -380,37 +376,16 @@ async function toggleCanSchedule(crew: Crew, rider: string, value: boolean) {
 
 // --- scheduled rides ---
 
-// Local, not UTC — Date#toISOString gives the UTC date, which drifts a day
-// off from "today" for part of the day at Belgian longitudes. A plain
-// native <input type="date"> already speaks and returns exactly this
-// YYYY-MM-DD form, so no date library is needed just to default it to
-// today — see the git history here for why that's deliberate: a
-// UCalendar/@internationalized/date picker was tried first and reverted
-// after it alone added ~31kB gzipped to this page's own bundle chunk.
-function todayISO(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+// todayISO/rideMonth/rideDay: see utils/rideDates.ts — shared with
+// LibraryPage.vue and with the "from" cutoff loadUpcomingRides sends above,
+// rather than three near-identical copies of the same date-only string
+// slicing drifting apart one at a time.
 const scheduleDate = ref(todayISO())
 // Empty by default — a ride names a day at minimum, same as before this
 // field existed; a native <input type="time"> already produces exactly the
 // HH:MM the API expects, so nothing here needs to format or parse it.
 const scheduleTime = ref('')
 
-// The little month/day date chip on each ride row — plain string slicing
-// on the already-known YYYY-MM-DD shape, not a date library: same reasoning
-// todayISO's own comment gives, and Intl.DateTimeFormat would need a real
-// Date first, which for a date-only string means either constructing one
-// at UTC midnight (correct value, wrong-looking if formatted with a local
-// timezone) or reintroducing exactly the parsing this file has already
-// deliberately avoided once.
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-function rideMonth(date: string): string {
-  return MONTH_ABBR[Number(date.slice(5, 7)) - 1] ?? ''
-}
-function rideDay(date: string): string {
-  return date.slice(8, 10)
-}
 const scheduleSlug = ref('')
 const scheduling = ref(false)
 

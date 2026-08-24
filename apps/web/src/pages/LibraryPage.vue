@@ -7,6 +7,7 @@ import RouteCard from '@/components/RouteCard.vue'
 import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import RouteMap from '@/components/RouteMap.vue'
 import type { Sport, UpcomingRide } from '@/api/types'
+import { formatRideWhen, todayISO } from '@/utils/rideDates'
 
 // Named explicitly for App.vue's <KeepAlive include="LibraryPage">, rather
 // than relying on build-tool filename inference: the whole point of that
@@ -147,22 +148,11 @@ const upcomingRides = ref<UpcomingRide[]>([])
 onMounted(async () => {
   try {
     const { api } = await import('@/api/client')
-    upcomingRides.value = await api.upcomingRides()
+    upcomingRides.value = await api.upcomingRides(todayISO())
   } catch {
     // Best-effort — the page works fine with no banner.
   }
 })
-
-// Plain string slicing on the already-known YYYY-MM-DD shape, not a date
-// library — same reasoning CrewsPage.vue's own todayISO/rideMonth comments
-// give: a real date-parsing library was tried once for this app's ride
-// scheduling and reverted after it alone added ~31kB gzipped to a page's
-// bundle chunk.
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-function formatRideWhen(ride: UpcomingRide): string {
-  const when = `${MONTH_ABBR[Number(ride.date.slice(5, 7)) - 1] ?? ''} ${ride.date.slice(8, 10)}`
-  return ride.time ? `${when}, ${ride.time}` : when
-}
 
 async function push(items: { accountId: string; slug: string }[]) {
   pushing.value = true

@@ -40,12 +40,12 @@ const targetNames = computed(() => {
 // (`mayEdit`), just checked here too so this popup doesn't offer an Edit
 // button that would come back 403.
 const canEdit = computed(() => {
-  if (!props.writable) return false
+  if (!props.writable || !props.route) return false
   const me = props.me
   if (!me) return false
   if (me.permissions.includes('routes:edit-any')) return true
   if (!me.permissions.includes('routes:edit-own')) return false
-  return !props.route?.owner || props.route.owner.toLowerCase() === (me.user ?? '').toLowerCase()
+  return !props.route.owner || props.route.owner.toLowerCase() === (me.user ?? '').toLowerCase()
 })
 
 const editingInfo = ref(false)

@@ -386,8 +386,12 @@ export const api = {
     ),
   /** Every upcoming ride across every crew the caller belongs to — the one
    *  fetch behind both the Library page's upcoming-ride banner and each
-   *  crew row's own "next ride" line. */
-  upcomingRides: () => request<UpcomingRide[]>('/api/rides/upcoming'),
+   *  crew row's own "next ride" line. `from` should be the caller's own
+   *  local today (see utils/rideDates.ts's todayISO) — the server has no
+   *  reliable notion of the rider's own timezone, so it falls back to its
+   *  own UTC today only when this is omitted. */
+  upcomingRides: (from?: string) =>
+    request<UpcomingRide[]>(`/api/rides/upcoming${from ? `?from=${encodeURIComponent(from)}` : ''}`),
 
   people: () => request<Person[]>('/api/people'),
   invitePerson: (req: InvitePersonRequest) =>

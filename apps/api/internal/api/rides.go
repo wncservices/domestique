@@ -290,6 +290,19 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 // filtering, the same division of labour crewAuthorityFor already draws
 // everywhere else in this file — the store answers what exists, the API
 // layer answers what this caller may see.
+//
+// from is an optional ?from=YYYY-MM-DD query param, the caller's own idea
+// of "today." The server does not default this to its own idea of today:
+// this deployment has riders in one timezone and no guarantee the server
+// process runs in it (nothing here sets TZ), so time.Now() server-side can
+// disagree with a rider's actual local day by up to a couple of hours
+// around midnight — the same class of bug CrewsPage.vue's todayISO()
+// already works around for the date picker. The browser always knows its
+// own local day; the server never reliably knows the rider's, so the
+// browser sends it. Omitting the param (any caller besides this app's own
+// frontend) falls back to the server's own UTC today, which is still a
+// reasonable default — just not one this handler should ever compute for a
+// request that already supplied a better answer.
 func (s *Server) handleUpcomingRides(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageCrews) {
 		return
@@ -298,12 +311,20 @@ func (s *Server) handleUpcomingRides(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	from := r.URL.Query().Get("from")
+	if from == "" {
+		from = time.Now().UTC().Format("2006-01-02")
+	} else if _, err := time.Parse("2006-01-02", from); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be a date in YYYY-MM-DD form"})
+		return
+	}
+
 	crews, ok := s.crewSnapshot(w, r)
 	if !ok {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	rides, err := s.Schedule.ListUpcoming(r.Context(), time.Now().UTC().Format("2006-01-02"))
+	rides, err := s.Schedule.ListUpcoming(r.Context(), from)
 	if err != nil {
 		s.fail(w, err)
 		return

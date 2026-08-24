@@ -688,3 +688,44 @@ func TestUpcomingRidesOmitsPastRides(t *testing.T) {
 		t.Fatalf("list = %+v, want no rides — the only one scheduled is long past", list)
 	}
 }
+
+// TestUpcomingRidesUsesTheCallersOwnFrom proves the caller's own ?from=
+// cutoff is actually honored, not just accepted — a rider's own idea of
+// "today" (their browser's local day) decides what counts as upcoming, not
+// the server's, since the server has no reliable notion of the rider's
+// timezone. Without this, a ride the caller considers already past could
+// still show as upcoming (or vice versa) purely because the server's clock
+// disagrees with the rider's own.
+func TestUpcomingRidesUsesTheCallersOwnFrom(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	// From a point after the ride: it must not show, even though the
+	// server's own unqualified default (real today, long before 2026-09-05)
+	// would otherwise include it.
+	after := h.decodeUpcomingRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=2026-09-06", ""))
+	if len(after) != 0 {
+		t.Fatalf("list = %+v, want no rides — from is after the only ride scheduled", after)
+	}
+
+	// From the ride's own date: inclusive, so it must show.
+	on := h.decodeUpcomingRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=2026-09-05", ""))
+	if len(on) != 1 {
+		t.Fatalf("list = %+v, want the one ride scheduled exactly on from", on)
+	}
+}
+
+// TestUpcomingRidesRejectsAMalformedFrom proves a caller-supplied ?from=
+// that isn't a real date 400s rather than silently falling back to
+// something else or reaching the database with it.
+func TestUpcomingRidesRejectsAMalformedFrom(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.seedApprovedCrew(t, "wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=not-a-date", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
