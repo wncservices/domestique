@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import type { Crew, Person, Ride } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
+import TrackPreview from '@/components/TrackPreview.vue'
 
 const { crews, accounts, routes, me, loading, error, refresh, can } = useLibrary()
 const toast = useToast()
@@ -405,6 +406,13 @@ const scheduleRouteOptions = computed(() => {
     ...own.map((r) => ({ label: `${r.name} (not shared here yet)`, value: r.slug })),
   ]
 })
+
+// The picked route's own record — same routes.value the options above were
+// built from, so this is a lookup, not a second fetch. Drives the preview
+// (TrackPreview, already used on the Library page) and the stats line
+// right under the picker, so scheduling a ride for the wrong route is
+// something a glance catches before Schedule is even clicked.
+const scheduleSelectedRoute = computed(() => routes.value.find((r) => r.slug === scheduleSlug.value) ?? null)
 
 async function scheduleRide() {
   const crew = detailCrew.value
@@ -1070,6 +1078,35 @@ async function saveShare() {
                   class="w-full"
                 />
               </UFormField>
+
+              <!-- What's actually about to be scheduled, before Schedule is
+                   clicked — the same TrackPreview the Library page's own
+                   cards use, so a route reads the same way everywhere in
+                   the app rather than this form inventing its own map. -->
+              <div v-if="scheduleSelectedRoute" class="flex gap-3 rounded-lg bg-elevated p-2">
+                <TrackPreview :slug="scheduleSelectedRoute.slug" class="w-28 shrink-0" />
+                <div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
+                  <p class="truncate text-sm font-medium text-highlighted">{{ scheduleSelectedRoute.name }}</p>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-dimmed">
+                    <span class="flex items-center gap-1">
+                      <UIcon name="i-lucide-ruler" class="size-3.5" />
+                      {{ (scheduleSelectedRoute.distanceM / 1000).toFixed(1) }} km
+                    </span>
+                    <span class="flex items-center gap-1">
+                      <UIcon name="i-lucide-mountain" class="size-3.5" />
+                      {{ Math.round(scheduleSelectedRoute.ascentM) }} m
+                    </span>
+                    <span class="flex items-center gap-1 capitalize">
+                      <UIcon
+                        :name="scheduleSelectedRoute.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
+                        class="size-3.5"
+                      />
+                      {{ scheduleSelectedRoute.sport }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div class="flex items-end gap-2">
                 <UFormField label="Date" class="flex-1">
                   <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
