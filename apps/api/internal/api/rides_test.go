@@ -12,7 +12,22 @@ type rideOut struct {
 	Slug      string `json:"slug"`
 	RouteName string `json:"routeName"`
 	Date      string `json:"date"`
+	Time      string `json:"time"`
 	CreatedBy string `json:"createdBy"`
+}
+
+type upcomingRideOut struct {
+	rideOut
+	CrewName string `json:"crewName"`
+}
+
+func (h *authHarness) decodeUpcomingRides(t *testing.T, resp *http.Response) []upcomingRideOut {
+	t.Helper()
+	var out []upcomingRideOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func (h *authHarness) decodeRides(t *testing.T, resp *http.Response) []rideOut {
@@ -39,6 +54,20 @@ func (h *authHarness) mustScheduleRide(t *testing.T, user, crewID, slug, date st
 	t.Helper()
 	resp := h.as(user, "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides",
 		`{"slug":"`+slug+`","date":"`+date+`"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("schedule ride: status = %d, want 201", resp.StatusCode)
+	}
+	return h.decodeRide(t, resp)
+}
+
+// mustScheduleRideAt is mustScheduleRide plus an explicit time of day, for
+// tests exercising the time field itself — kept separate so every existing
+// mustScheduleRide call site (which only ever cared about the date) didn't
+// need to grow an argument it has no use for.
+func (h *authHarness) mustScheduleRideAt(t *testing.T, user, crewID, slug, date, timeOfDay string) rideOut {
+	t.Helper()
+	resp := h.as(user, "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides",
+		`{"slug":"`+slug+`","date":"`+date+`","time":"`+timeOfDay+`"}`)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("schedule ride: status = %d, want 201", resp.StatusCode)
 	}
@@ -573,5 +602,130 @@ func TestSyncRideMissingRide(t *testing.T) {
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/nope/sync", "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestScheduleRideWithTimeRoundTrips proves the optional time-of-day field
+// survives create and list intact, and that leaving it out still works
+// exactly as before this field existed.
+func TestScheduleRideWithTimeRoundTrips(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+
+	timed := h.mustScheduleRideAt(t, "wilant", crewID, route.Slug, "2026-09-05", "09:30")
+	if timed.Time != "09:30" {
+		t.Fatalf("timed.Time = %q, want 09:30", timed.Time)
+	}
+
+	untimed := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-06")
+	if untimed.Time != "" {
+		t.Fatalf("untimed.Time = %q, want empty — no time was given", untimed.Time)
+	}
+
+	list := h.decodeRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/crews/"+crewID+"/rides", ""))
+	if len(list) != 2 {
+		t.Fatalf("len(list) = %d, want 2", len(list))
+	}
+	for _, ride := range list {
+		if ride.ID == timed.ID && ride.Time != "09:30" {
+			t.Errorf("listed timed ride.Time = %q, want 09:30", ride.Time)
+		}
+		if ride.ID == untimed.ID && ride.Time != "" {
+			t.Errorf("listed untimed ride.Time = %q, want empty", ride.Time)
+		}
+	}
+}
+
+// TestScheduleRideRejectsAMalformedTime proves the API layer surfaces
+// schedule.Store's own time validation as a 400, the same as it already
+// does for a malformed date.
+func TestScheduleRideRejectsAMalformedTime(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides",
+		`{"slug":"`+route.Slug+`","date":"2026-09-05","time":"25:99"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestUpcomingRidesSpansOwnCrewsOnly proves GET /api/rides/upcoming shows a
+// rider every upcoming ride across every crew they belong to, and nothing
+// from a crew they have no relationship to — the same audience rule
+// handleListRides already applies per-crew, just aggregated.
+func TestUpcomingRidesSpansOwnCrewsOnly(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewA := h.seedApprovedCrew(t, "wilant", "friend")
+	crewB := h.seedApprovedCrew(t, "stranger")
+	routeA := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewA})
+	routeB := h.seedRouteWithTargets(t, "Flat Loop", "stranger", []string{crewB})
+
+	h.mustScheduleRideAt(t, "wilant", crewA, routeA.Slug, "2026-09-05", "09:30")
+	h.mustScheduleRide(t, "stranger", crewB, routeB.Slug, "2026-09-06")
+
+	list := h.decodeUpcomingRides(t, h.as("friend", "cyclists", http.MethodGet, "/api/rides/upcoming", ""))
+	if len(list) != 1 {
+		t.Fatalf("len(list) = %d, want 1 — friend is only in crewA", len(list))
+	}
+	if list[0].Slug != routeA.Slug || list[0].Time != "09:30" || list[0].CrewName == "" {
+		t.Fatalf("list[0] = %+v, want crewA's timed ride with a crewName", list[0])
+	}
+}
+
+// TestUpcomingRidesOmitsPastRides proves the from-date filter actually
+// excludes what's already happened, not just what hasn't.
+func TestUpcomingRidesOmitsPastRides(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2020-01-01")
+
+	list := h.decodeUpcomingRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming", ""))
+	if len(list) != 0 {
+		t.Fatalf("list = %+v, want no rides — the only one scheduled is long past", list)
+	}
+}
+
+// TestUpcomingRidesUsesTheCallersOwnFrom proves the caller's own ?from=
+// cutoff is actually honored, not just accepted — a rider's own idea of
+// "today" (their browser's local day) decides what counts as upcoming, not
+// the server's, since the server has no reliable notion of the rider's
+// timezone. Without this, a ride the caller considers already past could
+// still show as upcoming (or vice versa) purely because the server's clock
+// disagrees with the rider's own.
+func TestUpcomingRidesUsesTheCallersOwnFrom(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	// From a point after the ride: it must not show, even though the
+	// server's own unqualified default (real today, long before 2026-09-05)
+	// would otherwise include it.
+	after := h.decodeUpcomingRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=2026-09-06", ""))
+	if len(after) != 0 {
+		t.Fatalf("list = %+v, want no rides — from is after the only ride scheduled", after)
+	}
+
+	// From the ride's own date: inclusive, so it must show.
+	on := h.decodeUpcomingRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=2026-09-05", ""))
+	if len(on) != 1 {
+		t.Fatalf("list = %+v, want the one ride scheduled exactly on from", on)
+	}
+}
+
+// TestUpcomingRidesRejectsAMalformedFrom proves a caller-supplied ?from=
+// that isn't a real date 400s rather than silently falling back to
+// something else or reaching the database with it.
+func TestUpcomingRidesRejectsAMalformedFrom(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	h.seedApprovedCrew(t, "wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=not-a-date", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
 }
