@@ -451,3 +451,127 @@ func TestDeletingACrewPurgesItsRides(t *testing.T) {
 		t.Fatalf("a brand new crew that reused the old one's id should start with no rides, got %+v", rides)
 	}
 }
+
+type syncOut struct {
+	Applied int `json:"applied"`
+	Items   []struct {
+		AccountID string `json:"accountId"`
+	} `json:"items"`
+}
+
+func (h *authHarness) decodeSync(t *testing.T, resp *http.Response) syncOut {
+	t.Helper()
+	var out syncOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func syncAccountIDs(out syncOut) map[string]bool {
+	got := make(map[string]bool, len(out.Items))
+	for _, item := range out.Items {
+		got[item.AccountID] = true
+	}
+	return got
+}
+
+// TestSyncRide proves the crew ride scheduler's own explicit "sync now"
+// action is the one deliberate exception to the rule general-purpose push
+// now follows everywhere else (config.PushTargetsFor — see that function's
+// own doc comment): it may still reach every one of a crew's own
+// currently-approved members' accounts, not just the clicking rider's own,
+// for the one route named on this one ride.
+func TestSyncRide(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant", "friend")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	if resp := h.as("friend", "cyclists", http.MethodPost, "/api/accounts",
+		`{"provider":"wahoo"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("friend linking wahoo: status = %d", resp.StatusCode)
+	}
+	ride := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/"+ride.ID+"/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := h.decodeSync(t, resp)
+	if out.Applied != 2 {
+		t.Fatalf("applied = %d, want 2 (wilant's own account and friend's)", out.Applied)
+	}
+	got := syncAccountIDs(out)
+	if !got["garmin:wilant"] || !got["wahoo:friend"] {
+		t.Fatalf("items = %+v, want garmin:wilant and wahoo:friend", out.Items)
+	}
+}
+
+// TestSyncRideNeverLeaksIntoAnotherCrew proves the second, defense-in-depth
+// scope handleSyncRide applies on top of crew-aware TargetsFor: a route
+// independently shared to two crews (a real possibility — Targets is just
+// a list) must only sync to the crew whose ride was actually clicked, not
+// spill into the other crew the same route's owner also happens to belong
+// to.
+func TestSyncRideNeverLeaksIntoAnotherCrew(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewA := h.seedApprovedCrew(t, "wilant", "friend")
+	crewB := h.seedApprovedCrew(t, "wilant", "stranger")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewA, crewB})
+	if resp := h.as("stranger", "cyclists", http.MethodPost, "/api/accounts",
+		`{"provider":"garmin"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("stranger linking garmin: status = %d", resp.StatusCode)
+	}
+	ride := h.mustScheduleRide(t, "wilant", crewA, route.Slug, "2026-09-05")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewA+"/rides/"+ride.ID+"/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	out := h.decodeSync(t, resp)
+	if got := syncAccountIDs(out); got["garmin:stranger"] {
+		t.Fatalf("items = %+v, syncing crewA's ride must never reach crewB's stranger", out.Items)
+	}
+}
+
+// TestSyncRideRequiresApprovedMembership proves a rider outside the crew
+// entirely cannot trigger a sync just by knowing a ride id.
+func TestSyncRideRequiresApprovedMembership(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	ride := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	resp := h.as("stranger", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/"+ride.ID+"/sync", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestSyncRideDoesNotRequireCanSchedule proves any approved member may
+// trigger a sync, not only whoever holds the CanSchedule grant — matching
+// the frontend, which shows "Sync now" to every crew member on a ride,
+// same as it shows the ride itself.
+func TestSyncRideDoesNotRequireCanSchedule(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant", "friend")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	ride := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+
+	resp := h.as("friend", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/"+ride.ID+"/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — an approved member with no CanSchedule grant may still sync", resp.StatusCode)
+	}
+}
+
+// TestSyncRideMissingRide proves a ride id that doesn't belong to this
+// crew — wrong crew, or doesn't exist at all — 404s rather than syncing
+// nothing silently.
+func TestSyncRideMissingRide(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/nope/sync", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}

@@ -219,7 +219,40 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// TargetsFor returns the accounts a route should be pushed to.
+// PushTargetsFor returns the accounts a route may be pushed to through a
+// general-purpose push: the CLI, the Library page's own "Push to devices"
+// button, and auto-sync — every caller that pushes on its own initiative
+// rather than as one rider's own deliberate, one-route action. Always and
+// only the route's own owner's own accounts, regardless of what crews it
+// names in Targets.
+//
+// This is deliberately narrower than TargetsFor below, which still expands
+// across a crew's approved membership — that is reserved for the crew ride
+// scheduler's own explicit "sync now" action (see api.handleSyncRide),
+// where a rider is knowingly, specifically asking for one named route to
+// reach their crew's devices right now. Found live: because PermEditAny
+// bypasses every *account-visibility* check in this codebase, an admin's
+// general push reached a route all the way into a crew fellow's own
+// device the instant that route was shared to any crew at all, with no
+// separate action, confirmation, or even awareness that push was about to
+// leave the pushing rider's own accounts — approving a crew invite is
+// consent to *see* a fellow member's shared routes (see VisibleTo below)
+// and to sync one to your own device yourself; it was never meant to be
+// consent for literally any other member's routine, unattended, or
+// admin-triggered push to silently write to your device on your behalf.
+func PushTargetsFor(r model.Route, linked []model.Account) []string {
+	if r.Targets != nil && len(*r.Targets) == 0 {
+		return nil // explicit: nowhere
+	}
+	return accountsForRider(r.Owner, linked)
+}
+
+// TargetsFor returns the accounts a route reaches once crew sharing is
+// taken into account — used only by the crew ride scheduler's own
+// deliberate "sync now" action (see PushTargetsFor's own doc comment for
+// why every general-purpose push uses that, narrower, function instead)
+// and by VisibleTo/AccountVisibleTo below, which answer a *visibility*
+// question, not a push-eligibility one.
 //
 // Targets holds crew ids, not raw account ids — see internal/crew's package
 // doc for why. A route with no targets reaches the owner's own accounts

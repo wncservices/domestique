@@ -8,6 +8,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
@@ -328,4 +329,100 @@ func (s *Server) failScheduleLookup(w http.ResponseWriter, err error) {
 		return
 	}
 	s.fail(w, err)
+}
+
+// handleSyncRide is the one deliberate exception to the rule the rest of
+// this app's push machinery now follows (see config.PushTargetsFor's own
+// doc comment): a rider looking at a specific scheduled ride, in a crew
+// they are themselves an approved member of, explicitly asking for that
+// one route to reach that one crew's devices right now. Any approved
+// member may trigger it — the same audience handleListRides already
+// shows the ride to — not just whoever holds CanSchedule, since sending
+// what is already shared and already visible to your own crew fellows'
+// devices is a different, lesser thing than deciding what gets shared or
+// scheduled in the first place.
+//
+// Scoped twice over, deliberately more than TargetsFor alone would give:
+// routes is just this one ride's route, and linked is narrowed to this
+// crew's own currently-approved members before BuildPlan ever runs — not
+// the full account list TargetsFor would otherwise be free to resolve
+// across, which would also reach any *other* crew this same route
+// happens to be independently shared to. A rider syncing a ride from one
+// crew's popup must never spill into a different crew the route's owner
+// also happens to belong to.
+func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageCrews) {
+		return
+	}
+	if !s.crewAvailable(w) || !s.scheduleAvailable(w) {
+		return
+	}
+
+	id, rideID := r.PathValue("id"), r.PathValue("rideId")
+	c, err := s.Crew.Get(r.Context(), id)
+	if err != nil {
+		s.failCrewLookup(w, err)
+		return
+	}
+	members, err := s.Crew.Members(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if authority := crewAuthorityFor(identity, c, members); !authority.approved {
+		s.forbidCrew(w, r)
+		return
+	}
+
+	ride, err := s.Schedule.Get(r.Context(), rideID)
+	if err != nil {
+		s.failScheduleLookup(w, err)
+		return
+	}
+	if ride.CrewID != id {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such scheduled ride"})
+		return
+	}
+
+	routes, _, err := s.Source.List(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	idx := -1
+	for i, route := range routes {
+		if route.Slug == ride.Slug {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "this ride's route no longer exists"})
+		return
+	}
+
+	linked, ok := s.linkedAccounts(w)
+	if !ok {
+		return
+	}
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	scoped := make([]model.Account, 0, len(linked))
+	for _, a := range linked {
+		if crews.ApprovedRiders.Has(id, a.Rider) {
+			scoped = append(scoped, a)
+		}
+	}
+
+	resp, err := s.applyPush(r.Context(), []model.Route{routes[idx]}, scoped, crews, true, nil)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.logger().Info("crew ride synced", "crew", id, "ride", rideID, "slug", ride.Slug, "by", identity.User)
+	writeJSON(w, http.StatusOK, resp)
 }

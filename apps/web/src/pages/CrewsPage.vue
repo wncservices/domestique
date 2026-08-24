@@ -458,31 +458,35 @@ async function deleteRide(ride: Ride) {
 
 // "Sync now": pushes a scheduled ride's route to every current approved
 // member's linked accounts right away, rather than waiting on the next
-// automatic push. Frontend-only — any crew fellow's accounts are already
-// visible to any other member server-side (config.AccountVisibleTo), the
-// same relationship that already lets a route reach them at all, so this
-// is just building the same {accountId, slug} selection PlanPanel's own
-// "push" already does and calling the existing endpoint.
+// automatic push. Its own dedicated endpoint, not api.push — general
+// push can no longer reach anyone but the caller's own accounts (a
+// deliberate security fix: crew membership is consent to see a fellow
+// member's shared routes and sync one to your own device yourself, not
+// consent for literally anyone else's push to silently write to your
+// device on your behalf). Sync now is the one place that still crosses
+// riders, and only because a rider is knowingly asking for exactly this
+// one ride, right now — see the API's own config.PushTargetsFor doc
+// comment for the fuller reasoning.
 const syncingRide = ref('')
 
 async function syncRide(ride: Ride) {
   const crew = detailCrew.value
   if (!crew) return
+  // Purely a friendlier message than "synced" for a crew that plainly has
+  // nowhere to sync to yet — the actual push (and its own, real
+  // authorization/membership check) happens server-side either way.
+  const roster = new Set((crew.roster ?? []).map((r) => r.toLowerCase()))
+  if (!accounts.value.some((a) => roster.has(a.rider.toLowerCase()))) {
+    toast.add({
+      title: 'Nobody in this crew has a linked device yet',
+      icon: 'i-lucide-info',
+      color: 'warning',
+    })
+    return
+  }
   syncingRide.value = ride.id
   try {
-    const roster = new Set((crew.roster ?? []).map((r) => r.toLowerCase()))
-    const items = accounts.value
-      .filter((a) => roster.has(a.rider.toLowerCase()))
-      .map((a) => ({ accountId: a.id, slug: ride.slug }))
-    if (!items.length) {
-      toast.add({
-        title: 'Nobody in this crew has a linked device yet',
-        icon: 'i-lucide-info',
-        color: 'warning',
-      })
-      return
-    }
-    const result = await api.push(items)
+    const result = await api.syncRide(crew.id, ride.id)
     if (result.failures.length) {
       toast.add({
         title: `Synced with ${result.failures.length} failure${result.failures.length === 1 ? '' : 's'}`,

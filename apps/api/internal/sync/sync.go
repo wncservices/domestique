@@ -21,10 +21,22 @@ import (
 // crews is likewise fetched fresh by the caller — a member removed since the
 // last plan must stop appearing on this one, not on the next process restart.
 //
+// crewSharing picks which of config's two target-resolution rules decides
+// who is pushed which route. false — every general-purpose caller (the
+// CLI, the Library page's own "Push to devices", auto-sync, and this
+// function's own read-only cousin behind GET /api/plan) — uses
+// config.PushTargetsFor, which never reaches past a route's own owner. true
+// is reserved for the crew ride scheduler's own explicit, one-route
+// "sync now" action (see api.handleSyncRide), the one deliberate case
+// where a rider is knowingly asking for a specific route to reach their
+// crew's devices right now; it uses the older, crew-aware
+// config.TargetsFor. See PushTargetsFor's own doc comment for why the
+// general-purpose path is restricted this way at all.
+//
 // It returns an error rather than treating unreadable state as empty: an empty
 // plan reads as "nothing to do", but empty *state* means "push everything
 // again", and the two must never be confused.
-func BuildPlan(ctx context.Context, routes []model.Route, linked []model.Account, store state.Store, crews crew.Snapshot) (model.Plan, error) {
+func BuildPlan(ctx context.Context, routes []model.Route, linked []model.Account, store state.Store, crews crew.Snapshot, crewSharing bool) (model.Plan, error) {
 	var plan model.Plan
 
 	for _, account := range linked {
@@ -35,7 +47,11 @@ func BuildPlan(ctx context.Context, routes []model.Route, linked []model.Account
 
 		desired := map[string]model.Route{}
 		for _, route := range routes {
-			for _, target := range config.TargetsFor(route, linked, crews) {
+			wantedBy := config.PushTargetsFor(route, linked)
+			if crewSharing {
+				wantedBy = config.TargetsFor(route, linked, crews)
+			}
+			for _, target := range wantedBy {
 				if target == account.ID {
 					desired[route.Slug] = route
 				}
