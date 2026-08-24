@@ -970,30 +970,53 @@ async function saveShare() {
                 </div>
               </div>
 
-              <div class="flex items-end gap-2">
-                <!-- No icon prop: a native date/time input already draws its
-                     own picker icon, so adding one of ours just doubled up
-                     and pushed the field wider than it needed to be. -->
-                <UFormField label="Date" class="flex-1">
-                  <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
-                </UFormField>
-                <!-- No flex-1/w-full here: a time never needs more than
-                     "09:00" plus its own native spinner, so giving it an
-                     equal share of the row next to the much longer date
-                     display just stretched it into empty padding. -->
-                <UFormField label="Time (optional)">
-                  <UInput
-                    v-model="scheduleTime"
-                    type="time"
-                    step="900"
-                    size="sm"
-                    class="w-28"
-                  />
-                </UFormField>
+              <!-- Stacked below sm: on a narrow phone, Date+Time+Schedule
+                   crammed into one row either overflowed or squeezed the
+                   inputs past usable width. Date and Time stay paired on
+                   their own row at every width (picking a day and a time
+                   together is one decision); Schedule drops to a full-width
+                   row of its own below that breakpoint instead of fighting
+                   the other two for space. -->
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div class="flex gap-2">
+                  <!-- No icon prop: a native date/time input already draws
+                       its own picker icon, so adding one of ours just
+                       doubled up and pushed the field wider than it needed
+                       to be. -->
+                  <UFormField label="Date" class="flex-1 sm:flex-initial">
+                    <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
+                  </UFormField>
+                  <!-- w-24, not flex-1/w-full: a time never needs more than
+                       "09:00" plus its own native spinner, so giving it an
+                       equal share of the row next to the much longer date
+                       display just stretched it into empty padding.
+                       `class` only reaches UInput's outer wrapper, not the
+                       `<input>` itself — the `ui.base` overrides below are
+                       needed to actually fix two Chrome quirks on the
+                       native control: type="time" renders a couple of px
+                       taller than type="date" at identical padding (h-7
+                       pins both to the same 28px), and reads with visibly
+                       less effective left inset than type="date" despite
+                       the same paddingLeft (ps-3 corrects for it). pe-1.5
+                       trims the default right padding, which otherwise
+                       left a gap before the picker icon once the box was
+                       narrowed to w-24. -->
+                  <UFormField label="Time (optional)">
+                    <UInput
+                      v-model="scheduleTime"
+                      type="time"
+                      step="900"
+                      size="sm"
+                      class="w-24"
+                      :ui="{ base: 'h-7 ps-3 pe-1.5' }"
+                    />
+                  </UFormField>
+                </div>
                 <UButton
                   type="submit"
                   size="sm"
                   icon="i-lucide-calendar-plus"
+                  class="w-full sm:w-auto"
                   :loading="scheduling"
                   :disabled="!scheduleSlug"
                 >
@@ -1005,7 +1028,10 @@ async function saveShare() {
                    dragging the native time spinner from 00:00 every time —
                    a second click on the already-picked preset clears it
                    back to "no specific time" instead of just re-setting the
-                   same value. -->
+                   same value. outline/neutral (unselected) matches the
+                   rest of this page's own secondary-button vocabulary
+                   (Search, Share your routes) rather than soft, which
+                   nothing else here uses for a toggle-like control. -->
               <div class="flex flex-wrap items-center gap-1.5">
                 <span class="text-xs text-dimmed">Quick pick:</span>
                 <UButton
@@ -1013,7 +1039,7 @@ async function saveShare() {
                   :key="preset.value"
                   size="xs"
                   :color="scheduleTime === preset.value ? 'primary' : 'neutral'"
-                  :variant="scheduleTime === preset.value ? 'solid' : 'soft'"
+                  :variant="scheduleTime === preset.value ? 'solid' : 'outline'"
                   @click="scheduleTime = scheduleTime === preset.value ? '' : preset.value"
                 >
                   {{ preset.label }}
