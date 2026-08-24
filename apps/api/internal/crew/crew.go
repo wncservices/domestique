@@ -106,6 +106,13 @@ type Member struct {
 	RequestedAt string
 	DecidedBy   string
 	DecidedAt   string
+	// CanSchedule is whether this rider may schedule a crew ride (see
+	// package schedule) beyond the owner/admin, who always may regardless
+	// of this flag. Owner-granted, per member, per crew — a rider trusted
+	// to plan rides in one crew is not automatically trusted in another.
+	// Meaningless for a pending row; only ever set by the owner/admin on an
+	// approved member.
+	CanSchedule bool
 }
 
 // MemberSet is which riders currently, approvedly, belong to which crews —
@@ -182,8 +189,9 @@ CREATE TABLE IF NOT EXISTS crew_members (
     requested_at TEXT NOT NULL,
     decided_by   TEXT NOT NULL DEFAULT '',
     decided_at   TEXT NOT NULL DEFAULT '',
+    can_schedule %s NOT NULL DEFAULT FALSE,
     PRIMARY KEY (crew_id, rider)
-);`, d.Boolean)
+);`, d.Boolean, d.Boolean)
 }
 
 // UseDB puts the crew tables in an already-open database — the same one
@@ -203,6 +211,9 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 		return nil, fmt.Errorf("migrate crew tables: %w", err)
 	}
 	if err := store.addOriginColumn(); err != nil {
+		return nil, fmt.Errorf("migrate crew tables: %w", err)
+	}
+	if err := store.addCanScheduleColumn(); err != nil {
 		return nil, fmt.Errorf("migrate crew tables: %w", err)
 	}
 	if err := store.normalizeExistingOwners(context.Background()); err != nil {
@@ -256,6 +267,21 @@ func (s *Store) addAutoShareColumn() error {
 // pending row already in the table can only have come from RequestJoin.
 func (s *Store) addOriginColumn() error {
 	_, err := s.db.Exec(`ALTER TABLE crew_members ADD COLUMN origin TEXT NOT NULL DEFAULT 'self'`)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
+}
+
+// addCanScheduleColumn adds can_schedule to a crew_members table that
+// predates the column, the same way addOriginColumn does for origin.
+func (s *Store) addCanScheduleColumn() error {
+	_, err := s.db.Exec(fmt.Sprintf(
+		`ALTER TABLE crew_members ADD COLUMN can_schedule %s NOT NULL DEFAULT FALSE`, s.dialect.Boolean))
 	if err == nil {
 		return nil
 	}
@@ -442,7 +468,7 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 // approved together, which is what the owner's own view needs.
 func (s *Store) Members(ctx context.Context, crewID string) ([]Member, error) {
 	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`
-        SELECT crew_id, rider, status, origin, requested_at, decided_by, decided_at
+        SELECT crew_id, rider, status, origin, requested_at, decided_by, decided_at, can_schedule
         FROM crew_members WHERE crew_id = ? ORDER BY requested_at`), crewID)
 	if err != nil {
 		return nil, fmt.Errorf("read crew members: %w", err)
@@ -453,7 +479,7 @@ func (s *Store) Members(ctx context.Context, crewID string) ([]Member, error) {
 	for rows.Next() {
 		var m Member
 		var status, origin string
-		if err := rows.Scan(&m.CrewID, &m.Rider, &status, &origin, &m.RequestedAt, &m.DecidedBy, &m.DecidedAt); err != nil {
+		if err := rows.Scan(&m.CrewID, &m.Rider, &status, &origin, &m.RequestedAt, &m.DecidedBy, &m.DecidedAt, &m.CanSchedule); err != nil {
 			return nil, fmt.Errorf("read crew members: %w", err)
 		}
 		m.Status = MemberStatus(status)
@@ -461,6 +487,28 @@ func (s *Store) Members(ctx context.Context, crewID string) ([]Member, error) {
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// SetCanSchedule grants or revokes an approved member's permission to
+// schedule a crew ride — the owner/admin may always schedule regardless of
+// this flag (see package schedule); this is only ever checked for someone
+// else. A no-op silently succeeds rather than erroring on a pending or
+// unknown row: the caller (crews.go) already resolved the crew and rider
+// from the roster it is currently showing, so a mismatch here would only
+// mean a race with something else editing the same row, not a caller
+// mistake worth surfacing differently from any other write.
+func (s *Store) SetCanSchedule(ctx context.Context, crewID, rider string, can bool) error {
+	rider = normalizeRider(rider)
+	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+        UPDATE crew_members SET can_schedule = ? WHERE crew_id = ? AND rider = ? AND status = ?`),
+		can, crewID, rider, string(StatusApproved))
+	if err != nil {
+		return fmt.Errorf("set crew member schedule permission: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // HasRider reports whether rider holds any row in crew_members, pending or

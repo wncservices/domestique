@@ -33,6 +33,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
@@ -146,6 +147,11 @@ type Server struct {
 	// external credential, only the database every deployment already has,
 	// so it is wired unconditionally in runServe.
 	Crew *crew.Store
+
+	// Schedule holds crew rides — see internal/schedule. Same
+	// no-nil-degradation story as Crew, for the same reason: wired
+	// unconditionally in runServe.
+	Schedule *schedule.Store
 
 	// ConnectLimiter throttles Garmin/Komoot connect by rider: both proxy a
 	// password straight to a third party, so without a limit this server is
@@ -262,6 +268,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/crews/{id}/members", s.handleAddCrewMember)
 	mux.HandleFunc("PUT /api/crews/{id}/members/{rider}", s.handleApproveCrewMember)
 	mux.HandleFunc("DELETE /api/crews/{id}/members/{rider}", s.handleRemoveCrewMember)
+	mux.HandleFunc("PATCH /api/crews/{id}/members/{rider}/schedule", s.handleSetCanScheduleCrewMember)
+
+	mux.HandleFunc("GET /api/crews/{id}/rides", s.handleListRides)
+	mux.HandleFunc("POST /api/crews/{id}/rides", s.handleCreateRide)
+	mux.HandleFunc("DELETE /api/crews/{id}/rides/{rideId}", s.handleDeleteRide)
 
 	// Not under /api: these are browser navigations (redirects, a form post
 	// from the SPA), not JSON calls, so they sit outside the /api/ 404
