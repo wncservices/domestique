@@ -117,12 +117,14 @@ func (s *Server) handleWahooConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Wahoo == nil {
+		s.logger().Warn("wahoo connect requested but not configured for this deployment")
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "this deployment has no Wahoo app credentials configured",
 		})
 		return
 	}
 	if !s.Links.CanStore() {
+		s.logger().Warn("wahoo connect requested but this deployment has no encryption key configured")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment cannot store a Wahoo connection: " + secrets.ErrNoKey.Error(),
 		})
@@ -165,6 +167,11 @@ func (s *Server) handleWahooConnect(w http.ResponseWriter, r *http.Request) {
 // stores the connection.
 func (s *Server) handleWahooCallback(w http.ResponseWriter, r *http.Request) {
 	if s.Wahoo == nil {
+		// handleWahooConnect above already refuses to start this flow when
+		// Wahoo isn't configured, so a callback landing here means either a
+		// config change mid-flow or a stale/forged callback URL — unusual,
+		// still not broken, still just a warning.
+		s.logger().Warn("wahoo callback received but not configured for this deployment")
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "this deployment has no Wahoo app credentials configured",
 		})

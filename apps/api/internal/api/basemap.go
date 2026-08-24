@@ -143,6 +143,8 @@ func (s *Server) handleBasemapUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Basemap == nil || s.BasemapJobs == nil {
+		s.logger().Warn("basemap update requested but no Job is configured",
+			"by", auth.FromContext(r.Context()).User)
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment has no basemap update Job configured",
 		})
@@ -214,7 +216,10 @@ func (s *Server) handleBasemapUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.Basemap.SetJobName(id, jobName); err != nil {
-		s.logger().Error("recording basemap job name failed", "err", err)
+		// Warn, not error: the job itself was already triggered
+		// successfully above — this only loses the name this record would
+		// otherwise use to correlate with the job's own status later.
+		s.logger().Warn("recording basemap job name failed", "err", err)
 	}
 
 	s.logger().Info("basemap update triggered", "by", admin, "job", jobName,

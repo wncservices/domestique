@@ -84,6 +84,7 @@ func (s *Server) peopleAvailable(w http.ResponseWriter) bool {
 	if s.People != nil {
 		return true
 	}
+	s.logger().Warn("people page requested but no Auth0 Management API access is configured")
 	writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 		"error": "this deployment has no Auth0 Management API access configured",
 	})

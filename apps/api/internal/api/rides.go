@@ -39,6 +39,10 @@ func (s *Server) scheduleAvailable(w http.ResponseWriter) bool {
 	if s.Schedule != nil {
 		return true
 	}
+	// Error, not warn — see crewAvailable's identical reasoning: this is a
+	// wiring defect if it ever fires outside a test, not a deployment
+	// choice.
+	s.logger().Error("schedule store unavailable — this should never happen outside tests")
 	writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 		"error": "this deployment has no schedule store configured",
 	})
