@@ -18,8 +18,8 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Status
 
 The library, diff engine, CLI, HTTP API and web UI work end to end, routes convert to FIT courses,
-and **both Garmin and Wahoo push are live** — a route added once pushes to every linked account,
-and courses already on Garmin can be listed, imported back, and de-duplicated from the UI.
+and **both Garmin and Wahoo push are live** — a route added once pushes to its owner's own linked
+accounts, and courses already on Garmin can be listed, imported back, and de-duplicated from the UI.
 `mode: oidc` (Auth0, including Google as
 a social sign-in) and an admin People page for inviting riders and managing access are live
 alongside the original `mode: proxy` — see [Logging in](#logging-in).
@@ -174,7 +174,10 @@ already sign in.
 
 Nothing about riders or devices is configured. Each rider links their own head
 unit from Settings, keyed to their Authelia username. A route with no targets
-of its own goes to every linked head unit.
+of its own goes to its owner's own linked head units only. Naming a crew in
+`targets` shares the route with that crew and lets the crew's own "Sync now"
+action push it to a fellow member's devices — see
+[Getting a route onto a device](#getting-a-route-onto-a-device) below.
 
 **Garmin is linked by signing in.** Enter your Garmin Connect email and
 password on the Settings page: the password is used for that one sign-in and
@@ -251,8 +254,12 @@ dependency. Already-imported tours are skipped, so running it twice is safe.
 ## Getting a route onto a device
 
 **Both providers push automatically** once a rider links their account (see
-[Linking a head unit](#linking-a-head-unit) above) — a route with no
-`targets` of its own goes out to every linked account on the next push.
+[Linking a head unit](#linking-a-head-unit) above) — every general-purpose push
+(the CLI, the Library page's "Push to devices" button, and auto-sync) reaches
+only the route's own owner's own linked accounts, regardless of what `targets`
+names. Naming a crew in `targets` shares the route with that crew and makes it
+eligible for that crew's own explicit "Sync now" action, on the crew's ride
+schedule — the one deliberate way a route reaches a crew fellow's device.
 For a device you would rather not link an account on at all, write a route
 out as a FIT course and copy it over USB instead:
 
@@ -327,8 +334,10 @@ is, and how to recognise a user. **No routes, no accounts, no riders, no credent
 and head units live in the database, and credentials come from the environment (in a cluster,
 Vault → ExternalSecret → `envFrom`).
 
-A route is pushed to the head units it names in `targets`, or to every linked one when it names
-none. Naming targets is what keeps one rider's private routes off the other's device.
+A general-purpose push (CLI, "Push to devices", auto-sync) always reaches only the route's own
+owner's own linked head units, whether or not `targets` names a crew. Naming a crew in `targets`
+shares the route with that crew and makes it visible there, and lets that crew's own "Sync now"
+action — and only that action — push it on to a fellow member's device.
 
 ## Layout
 

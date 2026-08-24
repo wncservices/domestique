@@ -41,9 +41,11 @@ source (db | fs) ──List──> []model.Route ─┐
 state ────────────Open───> state.Store ───┘
 ```
 
-A route is pushed to the accounts it names in `targets`, or to the library's
-`default_targets`. That is what keeps one rider's private routes off the
-other's head unit.
+A general-purpose push reaches only the route's own owner's own accounts,
+whether or not `targets` names a crew — that is what keeps one rider's
+private routes off another rider's head unit. Naming a crew in `targets`
+only shares the route with that crew and enables the crew's own explicit
+"Sync now" action to reach a fellow member's device.
 
 A content hash decides what changed. It ignores sub-metre coordinate jitter and
 timestamps — otherwise re-exporting the same route from a different planner
@@ -62,8 +64,10 @@ keyed to their Authelia username.
 Nothing about people or devices is configured. `domestique.yaml` holds where
 the database is and how to recognise a user, and that is all.
 
-A route with no targets goes to every linked head unit; naming targets is what
-keeps a private route off somebody else's device.
+A route with no targets goes to its owner's own linked head units only; naming
+a crew in targets shares the route with that crew and makes it eligible for
+that crew's own explicit "Sync now" action, but a general-purpose push (CLI,
+"Push to devices", auto-sync) always stays owner-only regardless of targets.
 
 ## Who can do what
 
@@ -126,7 +130,10 @@ stays quiet through a junction taken as a gentle curve. A planner that knows the
 road network does better, and its cues should win when a route comes from one.
 
 Garmin and Wahoo push are both wired and live — a route with no `targets` of
-its own goes out to every linked account automatically. `domestique fit
+its own goes out to its owner's own linked accounts automatically, and a
+general-purpose push never reaches past that regardless of `targets`; only a
+crew's own explicit "Sync now" action reaches a fellow member's device.
+`domestique fit
 <slug>` and `GET /api/fit/<slug>` still write a course out to copy onto a
 device over USB, for one nobody wants an account linked on at all. That
 manual path is also the only way to prove the conversion end to end: no

@@ -53,9 +53,13 @@ this together:
 - **One account per rider per provider**, which is what makes `provider:rider`
   a safe primary key. A duplicate would mean two rows claiming one device.
 
-A route with no `targets` of its own goes to **every linked account** — the
-useful default for a library two people share. Naming targets is what keeps a
-private route off the other rider's head unit.
+A route with no `targets` of its own goes to **its owner's own linked
+accounts only** — the safe default for a shared library. Naming a crew in
+`targets` shares the route with that crew (makes it visible there, per
+`config.VisibleTo`) and makes it eligible for that crew's own explicit
+"Sync now" action, but does not change what a general-purpose push (CLI,
+"Push to devices", auto-sync) reaches — that stays owner-only regardless of
+`targets`. See `config.PushTargetsFor` vs `config.TargetsFor`.
 
 ## Authentication and roles
 
