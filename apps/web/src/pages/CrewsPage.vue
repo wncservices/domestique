@@ -869,6 +869,158 @@ async function saveShare() {
     >
       <template #body>
         <div v-if="detailCrew" class="flex flex-col gap-4">
+          <!-- Scheduled rides -->
+          <section class="app-card flex flex-col gap-3 p-4">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+              <UIcon name="i-lucide-calendar-days" class="size-4 text-primary" />
+              Scheduled rides
+            </h3>
+
+            <USkeleton v-if="ridesLoading" class="h-16 w-full" />
+            <div v-else-if="rides.length" class="flex flex-col gap-2">
+              <div
+                v-for="ride in rides"
+                :key="ride.id"
+                class="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated/60"
+              >
+                <div class="flex w-11 shrink-0 flex-col items-center rounded-lg bg-elevated py-1 leading-none">
+                  <span class="text-[0.6rem] font-medium uppercase tracking-wide text-dimmed">
+                    {{ rideMonth(ride.date) }}
+                  </span>
+                  <span class="text-base font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-highlighted">{{ ride.routeName }}</p>
+                  <p class="truncate text-xs text-dimmed">
+                    <template v-if="ride.time">{{ ride.time }} · </template>Scheduled by {{ ride.createdBy }}
+                  </p>
+                </div>
+                <UTooltip text="Sync to the crew's devices now">
+                  <UButton
+                    size="sm"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-refresh-cw"
+                    :loading="syncingRide === ride.id"
+                    @click="syncRide(ride)"
+                  />
+                </UTooltip>
+                <UTooltip
+                  v-if="detailCrew.mine || ride.createdBy.toLowerCase() === (me?.user ?? '').toLowerCase()"
+                  text="Remove this ride"
+                >
+                  <UButton
+                    size="sm"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-trash-2"
+                    :loading="deletingRide === ride.id"
+                    @click="deleteRide(ride)"
+                  />
+                </UTooltip>
+              </div>
+            </div>
+            <div v-else class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-default py-6">
+              <UIcon name="i-lucide-calendar-x" class="size-5 text-dimmed" />
+              <p class="text-xs text-dimmed">No rides scheduled yet.</p>
+            </div>
+
+            <form
+              v-if="detailCrew.canSchedule"
+              class="flex flex-col gap-2 rounded-lg bg-elevated/60 p-3"
+              @submit.prevent="scheduleRide"
+            >
+              <p class="text-xs font-medium text-dimmed">Schedule a ride</p>
+              <UFormField label="Route">
+                <USelectMenu
+                  v-model="scheduleSlug"
+                  :items="scheduleRouteOptions"
+                  value-key="value"
+                  placeholder="Pick a route"
+                  size="sm"
+                  class="w-full"
+                />
+              </UFormField>
+
+              <!-- What's actually about to be scheduled, before Schedule is
+                   clicked — the same TrackPreview the Library page's own
+                   cards use, so a route reads the same way everywhere in
+                   the app rather than this form inventing its own map. -->
+              <div v-if="scheduleSelectedRoute" class="flex gap-3 rounded-lg bg-elevated p-2">
+                <TrackPreview :slug="scheduleSelectedRoute.slug" class="w-28 shrink-0" />
+                <div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
+                  <p class="truncate text-sm font-medium text-highlighted">{{ scheduleSelectedRoute.name }}</p>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-dimmed">
+                    <span class="flex items-center gap-1">
+                      <UIcon name="i-lucide-ruler" class="size-3.5" />
+                      {{ (scheduleSelectedRoute.distanceM / 1000).toFixed(1) }} km
+                    </span>
+                    <span class="flex items-center gap-1">
+                      <UIcon name="i-lucide-mountain" class="size-3.5" />
+                      {{ Math.round(scheduleSelectedRoute.ascentM) }} m
+                    </span>
+                    <span class="flex items-center gap-1 capitalize">
+                      <UIcon
+                        :name="scheduleSelectedRoute.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
+                        class="size-3.5"
+                      />
+                      {{ scheduleSelectedRoute.sport }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-end gap-2">
+                <!-- No icon prop: a native date/time input already draws its
+                     own picker icon, so adding one of ours just doubled up
+                     and pushed the field wider than it needed to be. -->
+                <UFormField label="Date" class="flex-1">
+                  <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
+                </UFormField>
+                <UFormField label="Time (optional)" class="flex-1">
+                  <UInput
+                    v-model="scheduleTime"
+                    type="time"
+                    step="900"
+                    size="sm"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UButton
+                  type="submit"
+                  size="sm"
+                  icon="i-lucide-calendar-plus"
+                  :loading="scheduling"
+                  :disabled="!scheduleSlug"
+                >
+                  Schedule
+                </UButton>
+              </div>
+
+              <!-- One click for the common cases, rather than everyone
+                   dragging the native time spinner from 00:00 every time —
+                   a second click on the already-picked preset clears it
+                   back to "no specific time" instead of just re-setting the
+                   same value. -->
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-xs text-dimmed">Quick pick:</span>
+                <UButton
+                  v-for="preset in timePresets"
+                  :key="preset.value"
+                  size="xs"
+                  :color="scheduleTime === preset.value ? 'primary' : 'neutral'"
+                  :variant="scheduleTime === preset.value ? 'solid' : 'soft'"
+                  @click="scheduleTime = scheduleTime === preset.value ? '' : preset.value"
+                >
+                  {{ preset.label }}
+                </UButton>
+              </div>
+            </form>
+            <p v-if="detailCrew.canSchedule && !scheduleRouteOptions.length" class="text-xs text-dimmed">
+              No routes to schedule yet — share one, or upload one of your own.
+            </p>
+          </section>
+
           <!-- Roster -->
           <section class="app-card flex flex-col gap-4 p-4">
             <div class="flex items-center justify-between gap-3">
@@ -876,7 +1028,7 @@ async function saveShare() {
                 <UIcon name="i-lucide-users" class="size-4 text-primary" />
                 Roster
               </h3>
-              <UButton size="xs" variant="soft" icon="i-lucide-route" @click="openShare(detailCrew)">
+              <UButton size="sm" variant="outline" icon="i-lucide-route" @click="openShare(detailCrew)">
                 Share your routes
               </UButton>
             </div>
@@ -1032,156 +1184,6 @@ async function saveShare() {
                 Leave crew
               </UButton>
             </template>
-          </section>
-
-          <!-- Scheduled rides -->
-          <section class="app-card flex flex-col gap-3 p-4">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
-              <UIcon name="i-lucide-calendar-days" class="size-4 text-primary" />
-              Scheduled rides
-            </h3>
-
-            <USkeleton v-if="ridesLoading" class="h-16 w-full" />
-            <div v-else-if="rides.length" class="flex flex-col gap-2">
-              <div
-                v-for="ride in rides"
-                :key="ride.id"
-                class="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated/60"
-              >
-                <div class="flex w-11 shrink-0 flex-col items-center rounded-lg bg-elevated py-1 leading-none">
-                  <span class="text-[0.6rem] font-medium uppercase tracking-wide text-dimmed">
-                    {{ rideMonth(ride.date) }}
-                  </span>
-                  <span class="text-base font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>
-                </div>
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-highlighted">{{ ride.routeName }}</p>
-                  <p class="truncate text-xs text-dimmed">
-                    <template v-if="ride.time">{{ ride.time }} · </template>Scheduled by {{ ride.createdBy }}
-                  </p>
-                </div>
-                <UTooltip text="Sync to the crew's devices now">
-                  <UButton
-                    size="sm"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-refresh-cw"
-                    :loading="syncingRide === ride.id"
-                    @click="syncRide(ride)"
-                  />
-                </UTooltip>
-                <UTooltip
-                  v-if="detailCrew.mine || ride.createdBy.toLowerCase() === (me?.user ?? '').toLowerCase()"
-                  text="Remove this ride"
-                >
-                  <UButton
-                    size="sm"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-trash-2"
-                    :loading="deletingRide === ride.id"
-                    @click="deleteRide(ride)"
-                  />
-                </UTooltip>
-              </div>
-            </div>
-            <div v-else class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-default py-6">
-              <UIcon name="i-lucide-calendar-x" class="size-5 text-dimmed" />
-              <p class="text-xs text-dimmed">No rides scheduled yet.</p>
-            </div>
-
-            <form
-              v-if="detailCrew.canSchedule"
-              class="flex flex-col gap-2 rounded-lg bg-elevated/60 p-3"
-              @submit.prevent="scheduleRide"
-            >
-              <p class="text-xs font-medium text-dimmed">Schedule a ride</p>
-              <UFormField label="Route">
-                <USelectMenu
-                  v-model="scheduleSlug"
-                  :items="scheduleRouteOptions"
-                  value-key="value"
-                  placeholder="Pick a route"
-                  size="sm"
-                  class="w-full"
-                />
-              </UFormField>
-
-              <!-- What's actually about to be scheduled, before Schedule is
-                   clicked — the same TrackPreview the Library page's own
-                   cards use, so a route reads the same way everywhere in
-                   the app rather than this form inventing its own map. -->
-              <div v-if="scheduleSelectedRoute" class="flex gap-3 rounded-lg bg-elevated p-2">
-                <TrackPreview :slug="scheduleSelectedRoute.slug" class="w-28 shrink-0" />
-                <div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
-                  <p class="truncate text-sm font-medium text-highlighted">{{ scheduleSelectedRoute.name }}</p>
-                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-dimmed">
-                    <span class="flex items-center gap-1">
-                      <UIcon name="i-lucide-ruler" class="size-3.5" />
-                      {{ (scheduleSelectedRoute.distanceM / 1000).toFixed(1) }} km
-                    </span>
-                    <span class="flex items-center gap-1">
-                      <UIcon name="i-lucide-mountain" class="size-3.5" />
-                      {{ Math.round(scheduleSelectedRoute.ascentM) }} m
-                    </span>
-                    <span class="flex items-center gap-1 capitalize">
-                      <UIcon
-                        :name="scheduleSelectedRoute.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
-                        class="size-3.5"
-                      />
-                      {{ scheduleSelectedRoute.sport }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex items-end gap-2">
-                <UFormField label="Date" class="flex-1">
-                  <UInput v-model="scheduleDate" type="date" icon="i-lucide-calendar" size="sm" class="w-full" />
-                </UFormField>
-                <UFormField label="Time (optional)" class="flex-1">
-                  <UInput
-                    v-model="scheduleTime"
-                    type="time"
-                    icon="i-lucide-clock"
-                    step="900"
-                    size="sm"
-                    class="w-full"
-                  />
-                </UFormField>
-                <UButton
-                  type="submit"
-                  size="sm"
-                  icon="i-lucide-calendar-plus"
-                  :loading="scheduling"
-                  :disabled="!scheduleSlug"
-                >
-                  Schedule
-                </UButton>
-              </div>
-
-              <!-- One click for the common cases, rather than everyone
-                   dragging the native time spinner from 00:00 every time —
-                   a second click on the already-picked preset clears it
-                   back to "no specific time" instead of just re-setting the
-                   same value. -->
-              <div class="flex flex-wrap items-center gap-1.5">
-                <span class="text-xs text-dimmed">Quick pick:</span>
-                <UButton
-                  v-for="preset in timePresets"
-                  :key="preset.value"
-                  size="xs"
-                  :color="scheduleTime === preset.value ? 'primary' : 'neutral'"
-                  :variant="scheduleTime === preset.value ? 'solid' : 'soft'"
-                  @click="scheduleTime = scheduleTime === preset.value ? '' : preset.value"
-                >
-                  {{ preset.label }}
-                </UButton>
-              </div>
-            </form>
-            <p v-if="detailCrew.canSchedule && !scheduleRouteOptions.length" class="text-xs text-dimmed">
-              No routes to schedule yet — share one, or upload one of your own.
-            </p>
           </section>
         </div>
       </template>
