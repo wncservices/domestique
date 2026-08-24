@@ -230,7 +230,7 @@ const mapRoutes = computed(() =>
         <dl class="flex flex-wrap gap-5">
           <div>
             <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Distance</dt>
-            <dd class="tabular-nums">{{ distance }}</dd>
+            <dd class="font-mono tabular-nums">{{ distance }}</dd>
           </div>
           <div>
             <dt class="flex items-center gap-1 text-[0.7rem] uppercase tracking-wide text-dimmed">
@@ -248,11 +248,11 @@ const mapRoutes = computed(() =>
                 />
               </UTooltip>
             </dt>
-            <dd class="tabular-nums">{{ ascent }}</dd>
+            <dd class="font-mono tabular-nums">{{ ascent }}</dd>
           </div>
           <div>
             <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Points</dt>
-            <dd class="tabular-nums">{{ route.pointCount }}</dd>
+            <dd class="font-mono tabular-nums">{{ route.pointCount }}</dd>
           </div>
           <div>
             <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Updated</dt>
@@ -262,7 +262,7 @@ const mapRoutes = computed(() =>
 
         <div class="flex flex-wrap gap-1.5">
           <UBadge
-            :color="route.sport === 'running' ? 'warning' : 'primary'"
+            :color="route.sport === 'running' ? 'neutral' : 'primary'"
             variant="subtle"
             size="sm"
             :icon="route.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"

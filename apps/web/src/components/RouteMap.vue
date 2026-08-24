@@ -123,7 +123,10 @@ function addRouteLayers() {
     source: SOURCE_ID,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      'line-color': '#16b8ab',
+      // Literal, not var(--ui-primary): MapLibre paint specs can't read CSS
+      // custom properties. Matches --color-primary-500 in styles.css — keep
+      // the two in sync by hand if that scale changes.
+      'line-color': '#04b99e',
       'line-width': ['case', ['==', ['get', 'slug'], props.selectedSlug ?? ''], 5, 3],
       'line-opacity': ['case', ['==', ['get', 'slug'], props.selectedSlug ?? ''], 1, 0.75],
     },
@@ -133,7 +136,7 @@ function addRouteLayers() {
     type: 'circle',
     source: SOURCE_ID,
     filter: ['==', ['geometry-type'], 'LineString'],
-    paint: { 'circle-radius': 4, 'circle-color': '#16b8ab' },
+    paint: { 'circle-radius': 4, 'circle-color': '#04b99e' },
   })
 
   map.on('click', LINE_LAYER_ID, (e) => {

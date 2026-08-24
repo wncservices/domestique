@@ -3,8 +3,15 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import { useColorMode } from '@/color-mode'
 import { api } from '@/api/client'
 import { fetchBasemapLayers, ROAD_WIDTH, type BasemapLayers } from '@/utils/staticBasemap'
+import { routeAccentKey } from '@/utils/routeColor'
 
 const props = defineProps<{ slug: string }>()
+
+// One of the four categorical accents (styles.css's --app-accent-*),
+// deterministic per slug — see routeColor.ts. Bound onto the root element as
+// --track-color so .track-line (styles.css) and the start dot below both
+// pick it up without threading it through every path individually.
+const accentVar = computed(() => `var(--app-accent-${routeAccentKey(props.slug)})`)
 
 // The same colors RouteMap.vue's real maplibre-gl style pulls from
 // protomaps-themes-base's namedTheme('light'|'dark') for its own
@@ -269,6 +276,7 @@ const roadPaths = computed(() => {
   <div
     ref="root"
     class="aspect-[2/1] grid place-items-center overflow-hidden rounded-lg bg-elevated/50"
+    :style="{ '--track-color': accentVar }"
   >
     <USkeleton v-if="loading" class="size-full" />
 
@@ -306,7 +314,7 @@ const roadPaths = computed(() => {
         stroke-linecap="round"
         stroke-linejoin="round"
       />
-      <circle v-if="start" :cx="start.x" :cy="start.y" r="4" class="fill-primary" />
+      <circle v-if="start" :cx="start.x" :cy="start.y" r="4" :fill="accentVar" />
     </svg>
 
     <p v-else class="text-sm text-muted">

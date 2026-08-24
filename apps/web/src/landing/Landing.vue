@@ -41,19 +41,31 @@ onMounted(async () => {
   }
 })
 
+// Four categorical accents (docs/design-system.md) — one per feature, purely
+// to help the eye separate four different ideas at a glance. Not semantic;
+// swapping the order just recolors which feature gets which accent.
 const features = [
   {
     icon: 'i-lucide-upload',
+    color: 'primary',
     title: 'Upload once',
     body: 'Drop in a GPX, or import what you have already planned in Komoot. Everything lives in one shared library.',
   },
   {
     icon: 'i-lucide-corner-up-right',
+    color: 'ember',
     title: 'Turn-by-turn, not breadcrumbs',
-    body: 'Routes become proper Garmin FIT courses, so a device can say something at a junction instead of drawing a line.',
+    body: 'Routes become real Garmin FIT courses and sync straight to a Wahoo ELEMNT — a device that can say something at a junction, not just draw a line.',
+  },
+  {
+    icon: 'i-lucide-users-round',
+    color: 'sky',
+    title: 'Ride with your crew',
+    body: 'Share a route with your crew and it shows up for everyone, with the next scheduled ride surfaced right in the library.',
   },
   {
     icon: 'i-lucide-server',
+    color: 'violet',
     title: 'Yours to run',
     body: 'Free software under the AGPL. Host it yourself, read every line, and keep your routes in your own database.',
   },
@@ -71,7 +83,7 @@ const features = [
           >
             <UIcon name="i-lucide-bike" class="size-5" />
           </span>
-          <strong class="text-base font-semibold tracking-tight text-highlighted">
+          <strong class="font-display text-base font-semibold tracking-tight text-highlighted">
             Domestique
           </strong>
         </div>
@@ -86,7 +98,7 @@ const features = [
     <UContainer class="max-w-5xl">
       <section class="py-16 sm:py-24">
         <h1
-          class="max-w-2xl text-4xl font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-6xl"
+          class="font-display max-w-2xl text-4xl font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-6xl"
         >
           One route library.<br />Every head unit.
         </h1>
@@ -117,9 +129,17 @@ const features = [
         </p>
       </section>
 
-      <section class="grid gap-4 pb-16 sm:grid-cols-3">
+      <section class="grid gap-4 pb-16 sm:grid-cols-2 lg:grid-cols-4">
         <div v-for="feature in features" :key="feature.title" class="app-card p-5">
-          <UIcon :name="feature.icon" class="size-5 text-primary" />
+          <span
+            class="flex size-9 items-center justify-center rounded-lg"
+            :style="{
+              backgroundColor: `var(--app-accent-${feature.color}-soft)`,
+              color: `var(--app-accent-${feature.color})`,
+            }"
+          >
+            <UIcon :name="feature.icon" class="size-5" />
+          </span>
           <h2 class="mt-3 font-medium text-highlighted">{{ feature.title }}</h2>
           <p class="mt-1 text-sm text-muted">{{ feature.body }}</p>
         </div>

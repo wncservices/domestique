@@ -211,11 +211,11 @@ async function remove() {
     <dl class="flex gap-5">
       <div>
         <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Distance</dt>
-        <dd class="tabular-nums">{{ distance }}</dd>
+        <dd class="font-mono tabular-nums">{{ distance }}</dd>
       </div>
       <div>
         <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Ascent</dt>
-        <dd class="tabular-nums">{{ ascent }}</dd>
+        <dd class="font-mono tabular-nums">{{ ascent }}</dd>
       </div>
     </dl>
 
@@ -224,7 +224,7 @@ async function remove() {
         <UBadge
           as="button"
           type="button"
-          :color="route.sport === 'running' ? 'warning' : 'primary'"
+          :color="route.sport === 'running' ? 'neutral' : 'primary'"
           variant="subtle"
           size="sm"
           :icon="route.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
@@ -238,7 +238,7 @@ async function remove() {
       </UTooltip>
       <UBadge
         v-else
-        :color="route.sport === 'running' ? 'warning' : 'primary'"
+        :color="route.sport === 'running' ? 'neutral' : 'primary'"
         variant="subtle"
         size="sm"
         :icon="route.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
