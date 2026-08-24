@@ -387,8 +387,8 @@ const scheduleDate = ref(todayISO())
 const scheduleTime = ref('')
 const timePresets = [
   { label: 'Morning · 09:00', value: '09:00' },
-  { label: 'Afternoon · 14:00', value: '14:00' },
-  { label: 'Evening · 18:00', value: '18:00' },
+  { label: 'Afternoon · 13:00', value: '13:00' },
+  { label: 'Evening · 17:00', value: '17:00' },
 ]
 
 const scheduleSlug = ref('')
@@ -997,10 +997,11 @@ async function saveShare() {
                        taller than type="date" at identical padding (h-7
                        pins both to the same 28px), and reads with visibly
                        less effective left inset than type="date" despite
-                       the same paddingLeft (ps-3 corrects for it). pe-1.5
-                       trims the default right padding, which otherwise
-                       left a gap before the picker icon once the box was
-                       narrowed to w-24. -->
+                       the same paddingLeft (ps-3 corrects for it). pe-0.5
+                       trims the default right padding down to just short of
+                       the picker icon itself, which otherwise left a
+                       visibly bigger gap before it than ps-3 leaves on the
+                       left. -->
                   <UFormField label="Time (optional)">
                     <UInput
                       v-model="scheduleTime"
@@ -1008,7 +1009,7 @@ async function saveShare() {
                       step="900"
                       size="sm"
                       class="w-24"
-                      :ui="{ base: 'h-7 ps-3 pe-1.5' }"
+                      :ui="{ base: 'h-7 ps-3 pe-0.5' }"
                     />
                   </UFormField>
                 </div>
@@ -1016,7 +1017,7 @@ async function saveShare() {
                   type="submit"
                   size="sm"
                   icon="i-lucide-calendar-plus"
-                  class="w-full sm:w-auto"
+                  class="w-full sm:ml-auto sm:w-auto"
                   :loading="scheduling"
                   :disabled="!scheduleSlug"
                 >
