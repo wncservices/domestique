@@ -143,10 +143,19 @@ const mapRoutes = computed(() =>
   <UModal
     :open="open"
     :title="route?.name"
-    :description="route?.slug"
     :ui="{ content: 'sm:max-w-2xl' }"
     @update:open="(v: boolean) => emit('update:open', v)"
   >
+    <template #description>
+      <!-- A permanent id, not a second copy of the name above — worth
+           saying explicitly: for a route whose name and slug started out
+           nearly identical, renaming the top line while this one
+           (deliberately) doesn't change reads as "nothing happened"
+           otherwise. -->
+      <UTooltip text="This route's permanent URL id — it doesn't change when you rename the route above.">
+        <span class="cursor-help">{{ route?.slug }}</span>
+      </UTooltip>
+    </template>
     <template #body>
       <div v-if="route" class="flex flex-col gap-4">
         <div class="h-64 overflow-hidden rounded-lg bg-elevated/50 sm:h-80">
