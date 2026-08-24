@@ -439,15 +439,80 @@ cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
   `accounts.Store` (a separate package) is **not** included — deliberately out of scope, so its
   queries still show up as disconnected root spans; a real gap, not an oversight, and a candidate
   for its own follow-up if it matters.
-- **Outbound HTTP calls carry spans too**, on the same principle: `oidcflow`, `komoot.Client`,
-  `garmin.Client` and `auth0mgmt.Client` each wrap their `http.Client`'s `Transport` in
-  `otelhttp.NewTransport`, and each needed the same context-threading treatment as the DB before
-  that Transport had a real parent to attach to — only `oidcflow` already threaded
-  `context.Context` anywhere; the other three took none. `garmin.Client`'s threading runs through
+- **Outbound HTTP calls carry spans too**, on the same principle: every one of this app's seven
+  outbound clients — `oidcflow`, `komoot.Client`, `garmin.Client`, `wahoo.Client`,
+  `auth0mgmt.Client`, `basemap`'s pmtiles client, and `elevation.Client` — wraps its `http.Client`'s
+  `Transport` in `otelhttp.NewTransport`, and (`oidcflow` aside, which already threaded
+  `context.Context` everywhere) each needed the same context-threading treatment as the DB before
+  that Transport had a real parent to attach to. `garmin.Client`'s threading runs through
   `internal/targets` (`Target`/`Courses` interfaces, the `Garmin`/`Wahoo` adapters) and
   `internal/sync` (`BuildPlan`, `Apply`), since the push path is the same call chain `state.Store`
   already required touching. `auth0mgmt.Client`'s threading runs through `api.PeopleConnector` and
-  every People-page handler.
+  every People-page handler. Two of these seven — the pmtiles client and `elevation.Client` —
+  shipped once *without* this wrapping and were fixed after the fact, each with a comment on the
+  fix explaining what a trace was missing until then; see the checklist below for what that means
+  for the next one.
+
+### Checklist: adding a feature that talks to something external, or fails in a new way
+
+Metrics and traces for the parts that already exist are automatic and need nothing from you —
+verified, not assumed, by walking every registration and call site as of this writing:
+
+- **Every inbound HTTP request**, including a brand new route: `Handler()` registers every
+  endpoint on one `mux`, and that whole `mux` gets wrapped exactly once, at the very end, in
+  `otelhttp.NewHandler(instrument(logRequests(...)))` — a new `mux.HandleFunc` line is
+  structurally incapable of skipping either the request/duration metrics or the span, there is no
+  second place to remember.
+- **Every DB query issued through a `*Context` method with a real `ctx`** (not
+  `context.Background()`) — `otelsql` wraps the `*sql.DB` itself in both `internal/source` and
+  `internal/state`, so a query is traced or not based on which method you call, not on any
+  separate step. A schema migration run once at `UseDB`/startup time (`addTimeColumn`,
+  `addSportColumn`, and their like) is the one deliberate exception: there is no request context
+  to thread at boot, and no request to correlate the span to anyway — using plain `.Exec` there is
+  correct, not a gap.
+- **Every push**, from whichever of the four places triggers one (manual `POST /api/push`,
+  auto-sync, auto-import, or a crew's own "sync now"): all four funnel through the single
+  `applyPush` → `sync.Apply(..., s.recordPushResult)` chokepoint, so
+  `domestique_push_errors_total`/`domestique_push_last_success_timestamp_seconds` cannot be
+  bypassed by a new push-triggering feature the way the outbound-client case below can be missed —
+  there is only one place that calls `sync.Apply` at all.
+
+What is **not** automatic, and has shipped missing before — twice, in `pmtiles.go` and then again
+in `elevation.Client`, per their own comments:
+
+1. **A new outbound HTTP client** (a new package like `elevation.Client`, or a new method added to
+   an existing one) needs its own `http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}`,
+   and every call it makes needs `http.NewRequestWithContext` with a `ctx` that actually descends
+   from the inbound request — not a freshly-built `context.Background()`, which produces a
+   disconnected root span nobody can trace back to the request that triggered it. Every one of
+   this app's seven outbound clients (`oidcflow`, `komoot.Client`, `garmin.Client`,
+   `auth0mgmt.Client`, `wahoo.Client`, `basemap`'s pmtiles client, `elevation.Client`) does this
+   today — a new eighth one is the thing to get right on the way in, not fix reactively once a
+   trace turns up a mysteriously untraced gap in the middle of it.
+2. **A new "this deployment doesn't have X configured" guard** (mirroring `crewAvailable`,
+   `peopleAvailable`, `ElevationConfigured`, `Links.CanStore()`, …) must log when it fires, not
+   just `writeJSON` the 412/501 and return. A silent one already shipped once — `recalculate
+   elevation`'s own 412 said nothing server-side until an operator asked why a UI error had no
+   matching log line. Pick the level deliberately, it is not always the same one:
+   - **Info** — the regular, successful case: a sync completed, a route was updated, elevation was
+     recalculated.
+   - **Warn** — the action did not happen, but nothing is broken: an optional feature or credential
+     an admin has not configured yet, a third-party call that failed while the response still
+     degrades gracefully (falls back, retries next time, or the request already succeeded before
+     the failure). Ask "does the code past this line still run, and does the request still
+     succeed?" — if yes, this is a Warn, not an Error, even if the word "failed" is in the message.
+   - **Error** — something that should be happening is not: a write that should have landed but
+     didn't and the request fails because of it, or a guard whose own doc comment says the nil case
+     "should never happen outside tests" actually firing in production. `push finished with
+     failures` is the canonical example here — it sat at Warn through several deploys where every
+     single push failed, which read as background noise instead of the incident it was; see that
+     log line's own comment.
+3. **A new metric** is worth adding only for something a dashboard or an alert would actually watch
+   — a per-request span already exists for free from step 1's `otelhttp` wrapping, so do not add a
+   histogram just to answer "did this call succeed," only for something aggregate across many
+   calls (`domestique_push_errors_total`'s own reasoning). Follow the existing `Int64Counter`/
+   `Float64Histogram`/`Float64Gauge` pattern in `internal/api/metrics.go`, not
+   `prometheus/client_golang` directly.
 
 ## Security guardrails
 
