@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+/* Self-hosted via @fontsource — not a Google Fonts <link>. That was the
+ * first cut, and it's exactly the failure mode self-hosting exists to avoid:
+ * a network-blocked or ad-blocked fonts.googleapis.com request silently
+ * falls back to the system font, which is invisible in review and only
+ * shows up as "the redesign doesn't look like the mockup" in the field.
+ * Variable-font packages for the two faces that have one (covers every
+ * weight used with a single file); IBM Plex Mono ships no variable build,
+ * so only the specific static weights actually used are pulled in. */
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
 /* Domestique's palette, layered over Nuxt UI's design tokens.
  *
  * Teal rather than the orange this started with: orange sits next to the
@@ -88,19 +102,40 @@
    * (Tailwind v4's `--font-*` namespace) is what makes `font-display` /
    * `font-mono` work as utility classes; `--font-sans` also becomes the
    * `font-sans` utility, but body already opts every element in by default.
-   * Loaded via Google Fonts <link> in index.html/landing.html — see
-   * docs/design-system.md for why that beat self-hosting here. */
-  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+   *
+   * The first name in each stack is " Variable" — @fontsource-variable's own
+   * registered family name, not the plain "Bricolage Grotesque"/"Plus
+   * Jakarta Sans" the package is named after. Drop the suffix and the browser
+   * silently falls through to the system font with no error anywhere —
+   * exactly the failure this file's self-hosting move was meant to rule out,
+   * just moved one step earlier. */
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 }
 
 :root {
+  /* Nuxt UI's own knob, not a Domestique one — every button/input/badge
+   * corner reads off this single var. Doubled from Nuxt UI's 0.25rem
+   * default: the tight, square-ish default corner is a big part of why the
+   * shipped app read flatter/less "designed" than the mockup, which used a
+   * consistently rounder hand — same lever the color tokens above already
+   * pull, just Nuxt UI's rather than this file's own. Colour-mode
+   * independent, so it lives once here rather than in both `:root`/`.dark`. */
+  --ui-radius: 0.5rem;
+
   --ui-primary: var(--color-primary-600);
 
-  /* Light mode is a tinted page with white cards, rather than white on white.
-   * The old flat-white version gave a card no edge of its own, so a dozen
-   * routes read as one undifferentiated sheet. */
+  /* Light mode is a tinted page with white cards, rather than white on white
+   * — the old flat-white version gave a card no edge of its own, so a dozen
+   * routes read as one undifferentiated sheet. This is the same pale tint
+   * the original mockup used (neutral-50, ~#f6faf8): earlier revisions
+   * pushed the page ground progressively darker (neutral-100, then
+   * neutral-200) chasing more contrast, but the actual missing contrast was
+   * `UCard variant="outline"` sharing the page's own background outright
+   * (see vite.config.ts's card theme override) — once that was fixed, the
+   * subtle original tint was already correct, and darkening the page
+   * further past it only fought the mockup's own light, airy read. */
   --ui-bg: var(--color-neutral-50);
   --ui-bg-muted: var(--color-neutral-100);
   --ui-bg-elevated: #ffffff;
@@ -211,12 +246,10 @@ body {
   border-bottom: 1px solid var(--ui-border);
 }
 
-/* The route preview draws itself; give it the accent so it matches.
- * --track-color is set per-card by TrackPreview.vue (see utils/routeColor.ts)
- * so different routes get a different accent from the same four-colour set
- * as the stat tiles — the fallback keeps every other consumer of this class
- * (there are none today, but the class is the public contract) on the plain
- * brand colour if the var is never set. */
+/* The route preview draws itself; give it the accent so it matches. Every
+ * route's line stays the one brand colour — deliberately, not per-route —
+ * so a card grid full of routes still reads as one library, the same
+ * reasoning RouteMap.vue's live map already applies to itself. */
 .track-line {
-  stroke: var(--track-color, var(--ui-primary));
+  stroke: var(--ui-primary);
 }

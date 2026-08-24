@@ -54,7 +54,33 @@ function copyMaplibreWorker(): Plugin {
 // The API listens on :8080 (`domestique serve`); in dev we proxy to it so the
 // frontend runs from Vite with hot reload against the real backend.
 export default defineConfig({
-  plugins: [vue(), ui(), copyMaplibreWorker()],
+  plugins: [
+    vue(),
+    ui({
+      // Nuxt UI's own "outline" card variant is `bg-default` — literally
+      // the page background, distinguished only by a ring. That's most of
+      // this app's panels (every UCard variant="outline": Settings, People,
+      // Crews, the plan/pending-changes panel, every provider-connect and
+      // duplicate-resolution panel) sitting at zero background contrast
+      // against the page, worse once styles.css's own page-ground token
+      // moved off near-white. `bg-elevated` — this app's white/near-black
+      // "actual card surface" token, the same one `.app-card` uses — is the
+      // one-line fix, and it has to happen here rather than per-component:
+      // there is no `app.config.ts` auto-load outside a full Nuxt app, so
+      // this plugin option is the only place a Nuxt UI component theme can
+      // be overridden in a standalone Vite setup like this one.
+      ui: {
+        card: {
+          variants: {
+            variant: {
+              outline: { root: 'bg-elevated ring ring-default divide-y divide-default' },
+            },
+          },
+        },
+      },
+    }),
+    copyMaplibreWorker(),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
