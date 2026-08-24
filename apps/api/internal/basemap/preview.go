@@ -224,12 +224,28 @@ func lineStrings(geom orb.Geometry) [][]LatLon {
 // PreviewTiles fetches the four preview layers from one PMTiles archive.
 type PreviewTiles struct {
 	client *pmtilesClient
+	sem    chan struct{}
 }
+
+// previewConcurrency bounds how many FetchLayers calls run at once. Each
+// one builds tens of thousands of ring/line points in memory (see
+// PreviewLayers) before it's cached — and this only ever runs on a
+// preview-cache miss, so it's cheap in steady state but bursts hard right
+// after a fresh pod boots or a basemap rebuild invalidates every cached
+// entry: a library page loading many route cards fires that many
+// concurrent misses at once. That burst OOMKilled a pod sized at 256Mi.
+// Queuing excess calls behind this trades a bit of latency for a bounded
+// worst-case heap, which is the right trade for a background wash nobody
+// is staring at while it loads.
+const previewConcurrency = 2
 
 // NewPreviewTiles points at the tiles component's basemap.pmtiles over
 // HTTP — see BasemapConfig.TilesServiceURL.
 func NewPreviewTiles(url string) *PreviewTiles {
-	return &PreviewTiles{client: newPMTilesClient(url)}
+	return &PreviewTiles{
+		client: newPMTilesClient(url),
+		sem:    make(chan struct{}, previewConcurrency),
+	}
 }
 
 // fetchLayersTimeout bounds the whole tile loop below, not just each
@@ -254,10 +270,20 @@ func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north
 	ctx, span := tracer.Start(ctx, "basemap.FetchLayers")
 	defer span.End()
 
-	var out PreviewLayers
-
 	ctx, cancel := context.WithTimeout(ctx, fetchLayersTimeout)
 	defer cancel()
+
+	select {
+	case p.sem <- struct{}{}:
+		defer func() { <-p.sem }()
+	case <-ctx.Done():
+		err := ctx.Err()
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return PreviewLayers{}, err
+	}
+
+	var out PreviewLayers
 
 	header, err := p.client.getHeader(ctx)
 	if err != nil {
