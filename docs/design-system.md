@@ -45,9 +45,11 @@ shade automatically.
 
 **Categorical vs semantic — the rule most likely to get broken.** Semantic
 colour (`success`/`warning`/`error`/`info`) means *status* and nothing else
-— never repurpose one for decoration. (`RouteCard.vue`'s sport badge
-currently borrows `warning` for "running," which predates this doc and is a
-known exception, not a pattern to copy.) `primary` means *the brand* — the
+— never repurpose one for decoration. (`RouteCard.vue`'s and
+`RouteDetailModal.vue`'s sport badges used to borrow `warning` for
+"running" this way — fixed to `neutral` once this doc made the rule
+explicit; the icon, not the colour, is what actually distinguishes cycling
+from running.) `primary` means *the brand* — the
 one interactive action or focal colour on a page; don't hand it out as "just
 another category" once there's more than one thing to colour. `ember` /
 `sky` / `violet` are *purely* categorical: they distinguish

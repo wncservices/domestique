@@ -224,7 +224,7 @@ async function remove() {
         <UBadge
           as="button"
           type="button"
-          :color="route.sport === 'running' ? 'warning' : 'primary'"
+          :color="route.sport === 'running' ? 'neutral' : 'primary'"
           variant="subtle"
           size="sm"
           :icon="route.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
@@ -238,7 +238,7 @@ async function remove() {
       </UTooltip>
       <UBadge
         v-else
-        :color="route.sport === 'running' ? 'warning' : 'primary'"
+        :color="route.sport === 'running' ? 'neutral' : 'primary'"
         variant="subtle"
         size="sm"
         :icon="route.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"

@@ -456,7 +456,7 @@ onMounted(async () => {
               rel="noopener noreferrer"
               size="sm"
               variant="outline"
-              color="info"
+              color="neutral"
               icon="i-lucide-external-link"
             >
               Continue in Auth0
