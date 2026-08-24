@@ -69,17 +69,20 @@ tiles. Reuse it rather than inventing a second way to show "this item has
 accent X"; see `Landing.vue`'s `features` array or `App.vue`'s `stats`
 computed for the concrete `{ ..., color: 'ember' }`-per-item shape.
 
-**Per-route colour** (`RouteCard.vue`'s track preview): `routeAccentKey()`
-in [`apps/web/src/utils/routeColor.ts`](../apps/web/src/utils/routeColor.ts)
-hashes a route's slug to one of the four accent keys, deterministically —
-same route, same colour, every reload. `TrackPreview.vue` is the only
-consumer today. `RouteMap.vue`'s live MapLibre view intentionally still uses
-one fixed colour for every route (a literal hex, since MapLibre paint specs
-can't read CSS custom properties) — a shared canvas with dozens of
-overlapping lines in four competing hues is a real legibility risk that a
-card grid doesn't have. If that ever changes, reuse `routeAccentKey()`
-rather than inventing a second colour-assignment scheme, so a route shows
-the same colour in the grid and on the map.
+**Route lines stay one colour, deliberately.** A per-route categorical
+accent (`TrackPreview.vue`'s card preview and `RouteMap.vue`'s live map both
+drawing from the four-accent set, one route → one accent) was tried and
+reverted — a library screen is mostly *many* of these on screen together,
+and four competing hues across a grid or an overlapping map view read as
+noise rather than "this one is not that one," the opposite of what a
+categorical accent is for (see the rule above: distinguishing *different
+kinds* of thing, not *many instances of the same kind*). Both consumers use
+`var(--ui-primary)` — `.track-line` in `styles.css` for the grid preview,
+the literal hex in `RouteMap.vue` for the live map (kept in sync by hand,
+per that file's own comment, since MapLibre paint specs can't read CSS
+custom properties). Don't reintroduce per-route colour without a real design
+review — it's cheap to build (a slug hash into the four accents) but was
+already tried once and didn't read well in practice.
 
 ### Type
 
@@ -94,13 +97,26 @@ Three font roles, each a `--font-*` token (which Tailwind v4 turns into a
   counts, ids. Pair with `tabular-nums` where digits line up in a column
   (stat tiles, route card distance/ascent).
 
-Both fonts are loaded via a Google Fonts `<link>` in `index.html` and
-`landing.html` (not self-hosted) — a deliberate call given this repo's usual
-self-hosting instinct for anything touching user data (see the map-tile
-architecture), but a font isn't route data, and self-hosting would mean
-managing `.woff2` files and a new dependency for a low-risk asset. Revisit
-only if the external request ever becomes a real problem for the landing
-bundle specifically.
+All three are self-hosted via `@fontsource-variable/bricolage-grotesque`,
+`@fontsource-variable/plus-jakarta-sans`, and `@fontsource/ibm-plex-mono`
+(pulled in from `styles.css` — see the `@import` lines at its top), not a
+Google Fonts `<link>`. That was the first cut, and it broke silently: a
+network-blocked or ad-blocked `fonts.googleapis.com` request just falls back
+to the system font, invisible in review, and only shows up as "this doesn't
+look like the redesign" once it's live. Self-hosting avoids the whole
+failure class. `@fontsource`'s variable-font packages cover every weight
+used in one file each; IBM Plex Mono ships no variable build upstream, so
+only the specific static weights (400/500/600) actually used are imported —
+don't add more without a reason.
+
+### Shape
+
+`--ui-radius` (`styles.css`, top of `:root`) is Nuxt UI's own corner-radius
+knob, not one this app invented — every button/input/badge corner reads off
+it. Set to `0.5rem`, double Nuxt UI's `0.25rem` default. One value, colour-
+mode independent, so don't add a per-component override; if something needs
+a genuinely different radius, that's `.app-card`'s own `1rem` (a deliberately
+larger, separate value for a full tile, not a Nuxt UI component).
 
 ### Spacing
 

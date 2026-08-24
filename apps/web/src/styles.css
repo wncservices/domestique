@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+/* Self-hosted via @fontsource — not a Google Fonts <link>. That was the
+ * first cut, and it's exactly the failure mode self-hosting exists to avoid:
+ * a network-blocked or ad-blocked fonts.googleapis.com request silently
+ * falls back to the system font, which is invisible in review and only
+ * shows up as "the redesign doesn't look like the mockup" in the field.
+ * Variable-font packages for the two faces that have one (covers every
+ * weight used with a single file); IBM Plex Mono ships no variable build,
+ * so only the specific static weights actually used are pulled in. */
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
 /* Domestique's palette, layered over Nuxt UI's design tokens.
  *
  * Teal rather than the orange this started with: orange sits next to the
@@ -27,10 +41,10 @@
    * ramp made the whole app read colder than the brand accent sitting on it.
    * Still neutral enough that the teal (and the three accents below) look
    * deliberate rather than the page itself being tinted. */
-  --color-neutral-50: #f6faf8;
-  --color-neutral-100: #eef4f1;
-  --color-neutral-200: #dde9e4;
-  --color-neutral-300: #c3d3cc;
+  --color-neutral-50: #eef6f1;
+  --color-neutral-100: #dfebe4;
+  --color-neutral-200: #cfdfd7;
+  --color-neutral-300: #b7cec4;
   --color-neutral-400: #8fa39b;
   --color-neutral-500: #647a72;
   --color-neutral-600: #495d56;
@@ -88,29 +102,48 @@
    * (Tailwind v4's `--font-*` namespace) is what makes `font-display` /
    * `font-mono` work as utility classes; `--font-sans` also becomes the
    * `font-sans` utility, but body already opts every element in by default.
-   * Loaded via Google Fonts <link> in index.html/landing.html — see
-   * docs/design-system.md for why that beat self-hosting here. */
-  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+   *
+   * The first name in each stack is " Variable" — @fontsource-variable's own
+   * registered family name, not the plain "Bricolage Grotesque"/"Plus
+   * Jakarta Sans" the package is named after. Drop the suffix and the browser
+   * silently falls through to the system font with no error anywhere —
+   * exactly the failure this file's self-hosting move was meant to rule out,
+   * just moved one step earlier. */
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 }
 
 :root {
+  /* Nuxt UI's own knob, not a Domestique one — every button/input/badge
+   * corner reads off this single var. Doubled from Nuxt UI's 0.25rem
+   * default: the tight, square-ish default corner is a big part of why the
+   * shipped app read flatter/less "designed" than the mockup, which used a
+   * consistently rounder hand — same lever the color tokens above already
+   * pull, just Nuxt UI's rather than this file's own. Colour-mode
+   * independent, so it lives once here rather than in both `:root`/`.dark`. */
+  --ui-radius: 0.5rem;
+
   --ui-primary: var(--color-primary-600);
 
   /* Light mode is a tinted page with white cards, rather than white on white.
    * The old flat-white version gave a card no edge of its own, so a dozen
-   * routes read as one undifferentiated sheet. */
-  --ui-bg: var(--color-neutral-50);
-  --ui-bg-muted: var(--color-neutral-100);
+   * routes read as one undifferentiated sheet — and neutral-50 alone still
+   * wasn't enough separation from a plain white card once real content was
+   * on screen (a page mostly covered by a stat row + a route grid leaves
+   * almost none of the tinted ground visible to contrast against). Bumped a
+   * full step: page ground is neutral-100, and the muted/border steps below
+   * it move with it so the whole ramp keeps its relative spacing. */
+  --ui-bg: var(--color-neutral-100);
+  --ui-bg-muted: var(--color-neutral-200);
   --ui-bg-elevated: #ffffff;
-  --ui-border: var(--color-neutral-200);
-  --ui-border-accented: var(--color-neutral-300);
+  --ui-border: var(--color-neutral-300);
+  --ui-border-accented: var(--color-neutral-400);
 
   --app-card-bg: #ffffff;
-  --app-card-shadow: 0 1px 2px rgb(16 25 23 / 0.05), 0 1px 3px rgb(16 25 23 / 0.07);
-  --app-card-shadow-hover: 0 4px 12px rgb(16 25 23 / 0.09), 0 2px 4px rgb(16 25 23 / 0.05);
-  --app-header-bg: rgb(246 250 248 / 0.8);
+  --app-card-shadow: 0 1px 2px rgb(16 25 23 / 0.06), 0 1px 3px rgb(16 25 23 / 0.09);
+  --app-card-shadow-hover: 0 4px 12px rgb(16 25 23 / 0.10), 0 2px 4px rgb(16 25 23 / 0.06);
+  --app-header-bg: rgb(223 235 228 / 0.8);
   /* Two lobes rather than one: teal plus a touch of ember reads as morning
    * light, not a single-hue wash. Consumed globally via body, so both the
    * landing bundle and the app shell pick it up from this one place. */
@@ -211,12 +244,10 @@ body {
   border-bottom: 1px solid var(--ui-border);
 }
 
-/* The route preview draws itself; give it the accent so it matches.
- * --track-color is set per-card by TrackPreview.vue (see utils/routeColor.ts)
- * so different routes get a different accent from the same four-colour set
- * as the stat tiles — the fallback keeps every other consumer of this class
- * (there are none today, but the class is the public contract) on the plain
- * brand colour if the var is never set. */
+/* The route preview draws itself; give it the accent so it matches. Every
+ * route's line stays the one brand colour — deliberately, not per-route —
+ * so a card grid full of routes still reads as one library, the same
+ * reasoning RouteMap.vue's live map already applies to itself. */
 .track-line {
-  stroke: var(--track-color, var(--ui-primary));
+  stroke: var(--ui-primary);
 }
