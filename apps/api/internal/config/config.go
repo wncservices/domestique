@@ -16,6 +16,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
+	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 )
 
@@ -48,6 +49,26 @@ type KomootConfig struct {
 // file meant to be readable, the same way auth.oidc.redirect_url does.
 type WahooConfig struct {
 	RedirectURL string `yaml:"redirect_url,omitempty"`
+}
+
+// ElevationConfig is how a route with no usable elevation of its own gets
+// one backfilled from a third-party terrain API — see internal/elevation
+// and gpx.NeedsElevation for what "no usable elevation" actually means
+// (never queried at all, or every point stamped with the same 0.00000
+// placeholder — found live, from a route drawn on a planning site rather
+// than recorded).
+//
+// Off by default, unlike everything else in this file: this is the one
+// feature here that sends a route's own coordinates to a service outside
+// the deployment on its own initiative, not because a rider asked to
+// connect an account. A rider's regular running route can reveal where
+// they live; enabling this is an operator's decision to make on purpose.
+type ElevationConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// URL defaults to elevation.DefaultURL (the public Open-Elevation
+	// instance) when Enabled is true and this is left empty — set it to
+	// point at a self-hosted instance instead.
+	URL string `yaml:"url,omitempty"`
 }
 
 // BasemapConfig is how an admin-triggered tiles-basemap update Job runs —
@@ -107,12 +128,13 @@ type WebConfig struct {
 }
 
 type Config struct {
-	Source  SourceConfig  `yaml:"source"`
-	Web     WebConfig     `yaml:"web"`
-	Auth    auth.Config   `yaml:"auth"`
-	Komoot  KomootConfig  `yaml:"komoot"`
-	Wahoo   WahooConfig   `yaml:"wahoo"`
-	Basemap BasemapConfig `yaml:"basemap"`
+	Source    SourceConfig    `yaml:"source"`
+	Web       WebConfig       `yaml:"web"`
+	Auth      auth.Config     `yaml:"auth"`
+	Komoot    KomootConfig    `yaml:"komoot"`
+	Wahoo     WahooConfig     `yaml:"wahoo"`
+	Basemap   BasemapConfig   `yaml:"basemap"`
+	Elevation ElevationConfig `yaml:"elevation"`
 }
 
 // DefaultDSN is where a database library lives unless configured otherwise.
@@ -160,6 +182,13 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Source.DSN == "" {
 		c.Source.DSN = DefaultDSN
+	}
+
+	// Same "only when opted in" rule as Basemap below — an operator who
+	// left elevation.enabled off gets no default url either, since one
+	// would be meaningless with nothing to use it.
+	if c.Elevation.Enabled && c.Elevation.URL == "" {
+		c.Elevation.URL = elevation.DefaultURL
 	}
 
 	// Only when the feature is actually opted into (a namespace is set) —

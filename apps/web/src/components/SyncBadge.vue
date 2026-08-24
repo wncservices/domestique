@@ -51,7 +51,7 @@ const appearance = computed(() => {
 const tooltip = computed(() =>
   props.statuses
     .map((status) => {
-      const when = status.updatedAt ? ` (last push ${status.updatedAt})` : ''
+      const when = status.updatedAt ? ` (last push ${new Date(status.updatedAt).toLocaleDateString()})` : ''
       const verb =
         status.status === 'synced' ? 'synced' : status.status === 'stale' ? 'changed' : 'not pushed yet'
       return `${labelFor(status)}: ${verb}${when}`

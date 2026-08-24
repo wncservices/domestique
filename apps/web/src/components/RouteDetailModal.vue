@@ -126,7 +126,7 @@ const mapRoutes = computed(() =>
           </div>
           <div>
             <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Updated</dt>
-            <dd>{{ route.updatedAt }}</dd>
+            <dd>{{ new Date(route.updatedAt).toLocaleDateString() }}</dd>
           </div>
         </dl>
 
@@ -161,7 +161,7 @@ const mapRoutes = computed(() =>
           <ul class="flex flex-col gap-1 text-sm text-toned">
             <li v-for="row in syncRows" :key="row.label">
               <span class="font-medium">{{ row.label }}</span>: {{ row.verb }}
-              <span v-if="row.updatedAt" class="text-dimmed">(last push {{ row.updatedAt }})</span>
+              <span v-if="row.updatedAt" class="text-dimmed">(last push {{ new Date(row.updatedAt).toLocaleDateString() }})</span>
             </li>
           </ul>
         </div>

@@ -109,6 +109,26 @@ func ParsePoints(raw []byte) ([]Point, error) {
 	return points, nil
 }
 
+// NeedsElevation reports whether points carries no usable elevation of its
+// own — either no point has any (HasEle false throughout, the ordinary
+// shape for a GPX that never had an <ele> tag at all), or, the shape that
+// actually prompted this function, every single point that does have one
+// reports exactly 0.0. Real GPS or barometric elevation is never that
+// uniform for more than a couple of points in a row — the only source
+// that produces it is a route-planning tool that never queried a real
+// terrain source and used 0 as a placeholder rather than omitting the
+// field. A route with even a little genuine, nonzero elevation data
+// (however sparse) is left alone; this only flags the case where there is
+// nothing worth trusting at all.
+func NeedsElevation(points []Point) bool {
+	for _, p := range points {
+		if p.HasEle && p.Ele != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // ComputeStats derives the metrics providers ask for at create time.
 func ComputeStats(points []Point) model.RouteStats {
 	var distance, ascent float64
