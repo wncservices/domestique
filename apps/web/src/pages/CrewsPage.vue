@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import type { Crew, Person, Ride } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
+import TrackPreview from '@/components/TrackPreview.vue'
 
 const { crews, accounts, routes, me, loading, error, refresh, can } = useLibrary()
 const toast = useToast()
@@ -64,6 +65,14 @@ function suggestedRiders(crew: Crew): string[] {
     (crew.members ?? []).filter((m) => m.status === 'approved').map((m) => m.rider),
   )
   return knownRiders.value.filter((rider) => !approved.has(rider))
+}
+
+// The one or two letters shown in a member's little avatar circle — a
+// rider is only ever a username here (see App.vue's own note on what
+// "rider" means), never a display name with a first/last split to draw on,
+// so the first couple of characters is the whole of what's available.
+function initials(rider: string): string {
+  return rider.slice(0, 2).toUpperCase()
 }
 
 onMounted(refresh)
@@ -353,6 +362,21 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 const scheduleDate = ref(todayISO())
+
+// The little month/day date chip on each ride row — plain string slicing
+// on the already-known YYYY-MM-DD shape, not a date library: same reasoning
+// todayISO's own comment gives, and Intl.DateTimeFormat would need a real
+// Date first, which for a date-only string means either constructing one
+// at UTC midnight (correct value, wrong-looking if formatted with a local
+// timezone) or reintroducing exactly the parsing this file has already
+// deliberately avoided once.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function rideMonth(date: string): string {
+  return MONTH_ABBR[Number(date.slice(5, 7)) - 1] ?? ''
+}
+function rideDay(date: string): string {
+  return date.slice(8, 10)
+}
 const scheduleSlug = ref('')
 const scheduling = ref(false)
 
@@ -382,6 +406,13 @@ const scheduleRouteOptions = computed(() => {
     ...own.map((r) => ({ label: `${r.name} (not shared here yet)`, value: r.slug })),
   ]
 })
+
+// The picked route's own record — same routes.value the options above were
+// built from, so this is a lookup, not a second fetch. Drives the preview
+// (TrackPreview, already used on the Library page) and the stats line
+// right under the picker, so scheduling a ride for the wrong route is
+// something a glance catches before Schedule is even clicked.
+const scheduleSelectedRoute = computed(() => routes.value.find((r) => r.slug === scheduleSlug.value) ?? null)
 
 async function scheduleRide() {
   const crew = detailCrew.value
@@ -798,18 +829,27 @@ async function saveShare() {
     </UModal>
 
     <!-- Crew detail popup: who's in it, and (owner/admin only) the roster
-         controls, plus scheduled rides for everyone approved. -->
+         controls, plus scheduled rides for everyone approved. Each section
+         is its own app-card (the same "elevated tile" language the stat
+         row at the top of the page and the route cards on the Library page
+         already use) rather than a flat list divided by a rule — a crew
+         with any real membership and rides otherwise reads as one long
+         wall of text with nothing to anchor the eye. -->
     <UModal
       :open="!!detailTarget"
       :title="detailCrew?.name ?? ''"
+      :ui="{ content: 'sm:max-w-xl' }"
       @update:open="(v: boolean) => { if (!v) detailTarget = null }"
     >
       <template #body>
-        <div v-if="detailCrew" class="flex flex-col gap-6">
+        <div v-if="detailCrew" class="flex flex-col gap-4">
           <!-- Roster -->
-          <section class="flex flex-col gap-3">
+          <section class="app-card flex flex-col gap-4 p-4">
             <div class="flex items-center justify-between gap-3">
-              <h3 class="text-sm font-medium text-highlighted">Roster</h3>
+              <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+                <UIcon name="i-lucide-users" class="size-4 text-primary" />
+                Roster
+              </h3>
               <UButton size="xs" variant="soft" icon="i-lucide-route" @click="openShare(detailCrew)">
                 Share your routes
               </UButton>
@@ -819,7 +859,9 @@ async function saveShare() {
               v-if="detailCrew.mine"
               text="When on, any new route a member uploads with no explicit sharing choice of their own is shared here automatically. Existing routes are never touched by this — turning it on doesn't reach back and share anything already uploaded."
             >
-              <label class="flex w-fit items-center gap-2 text-sm text-toned">
+              <label
+                class="flex w-fit items-center gap-2 rounded-lg bg-elevated/60 px-3 py-2 text-sm text-toned"
+              >
                 <USwitch
                   :model-value="detailCrew.autoShare"
                   :loading="togglingAutoShare === detailCrew.id"
@@ -840,12 +882,12 @@ async function saveShare() {
                   placeholder="Search or add a rider by username"
                   icon="i-lucide-search"
                   size="sm"
-                  class="max-w-xs"
+                  class="flex-1"
                   @create="(rider: string) => (addMemberInput[detailCrew!.id] = rider)"
                 />
                 <UButton
                   type="submit"
-                  size="xs"
+                  size="sm"
                   icon="i-lucide-user-plus"
                   :loading="addingMember === detailCrew.id"
                   :disabled="!addMemberInput[detailCrew.id]?.trim()"
@@ -854,15 +896,19 @@ async function saveShare() {
                 </UButton>
               </form>
 
-              <div class="flex flex-col gap-2">
+              <div class="flex flex-col gap-1">
                 <div
                   v-for="member in pendingFor(detailCrew)"
                   :key="`pending-${member.rider}`"
-                  class="flex items-center gap-2 text-sm"
+                  class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-elevated/60"
                 >
-                  <UIcon name="i-lucide-clock" class="size-4 text-dimmed" />
-                  <span class="flex-1 text-toned">
-                    {{ member.rider }}
+                  <div
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-warning/10 text-warning"
+                  >
+                    <UIcon name="i-lucide-clock" class="size-4" />
+                  </div>
+                  <span class="min-w-0 flex-1 truncate text-sm text-toned">
+                    <span class="font-medium text-highlighted">{{ member.rider }}</span>
                     {{ member.origin === 'invite' ? 'invited — awaiting their confirmation' : 'wants to join' }}
                   </span>
                   <UButton
@@ -889,11 +935,20 @@ async function saveShare() {
                 <div
                   v-for="member in approvedFor(detailCrew)"
                   :key="`approved-${member.rider}`"
-                  class="flex items-center gap-2 text-sm"
+                  class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-elevated/60"
                 >
-                  <UIcon name="i-lucide-user-check" class="size-4 text-dimmed" />
-                  <span class="flex-1 text-toned">{{ member.rider }}</span>
-                  <template v-if="member.rider.toLowerCase() !== detailCrew.owner.toLowerCase()">
+                  <div
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
+                  >
+                    {{ initials(member.rider) }}
+                  </div>
+                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">
+                    {{ member.rider }}
+                  </span>
+                  <UBadge v-if="member.rider.toLowerCase() === detailCrew.owner.toLowerCase()" color="primary" variant="subtle" size="sm">
+                    Owner
+                  </UBadge>
+                  <template v-else>
                     <UTooltip text="May schedule a crew ride, the same as the owner">
                       <label class="flex items-center gap-1.5 text-xs text-dimmed">
                         <USwitch
@@ -902,7 +957,7 @@ async function saveShare() {
                           :loading="togglingCanSchedule === `${detailCrew.id}:${member.rider}`"
                           @update:model-value="(v: boolean) => toggleCanSchedule(detailCrew!, member.rider, v)"
                         />
-                        Can schedule
+                        <span class="hidden sm:inline">Can schedule</span>
                       </label>
                     </UTooltip>
                     <UButton
@@ -912,28 +967,32 @@ async function saveShare() {
                       icon="i-lucide-x"
                       :loading="removing === `${detailCrew.id}:${member.rider}`"
                       @click="removeMember(detailCrew!, member.rider)"
-                    >
-                      Remove
-                    </UButton>
+                    />
                   </template>
                 </div>
 
-                <p v-if="!pendingFor(detailCrew).length && !approvedFor(detailCrew).length" class="text-xs text-dimmed">
+                <p v-if="!pendingFor(detailCrew).length && !approvedFor(detailCrew).length" class="px-2 text-xs text-dimmed">
                   Nobody else has joined yet.
                 </p>
               </div>
             </template>
             <template v-else>
-              <div class="flex flex-wrap gap-1.5">
-                <UBadge
+              <div class="flex flex-col gap-1">
+                <div
                   v-for="rider in detailCrew.roster ?? []"
                   :key="rider"
-                  color="neutral"
-                  variant="subtle"
-                  size="sm"
+                  class="flex items-center gap-3 rounded-lg px-2 py-1.5"
                 >
-                  {{ rider }}
-                </UBadge>
+                  <div
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
+                  >
+                    {{ initials(rider) }}
+                  </div>
+                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ rider }}</span>
+                  <UBadge v-if="rider.toLowerCase() === detailCrew.owner.toLowerCase()" color="primary" variant="subtle" size="sm">
+                    Owner
+                  </UBadge>
+                </div>
               </div>
               <UButton
                 size="sm"
@@ -947,63 +1006,69 @@ async function saveShare() {
                 Leave crew
               </UButton>
             </template>
-
-            <UButton
-              v-if="detailCrew.mine"
-              size="xs"
-              color="error"
-              variant="ghost"
-              icon="i-lucide-trash-2"
-              class="w-fit"
-              @click="openDelete(detailCrew)"
-            >
-              Delete crew
-            </UButton>
           </section>
 
           <!-- Scheduled rides -->
-          <section class="flex flex-col gap-3 border-t border-default pt-4">
-            <h3 class="text-sm font-medium text-highlighted">Scheduled rides</h3>
+          <section class="app-card flex flex-col gap-3 p-4">
+            <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+              <UIcon name="i-lucide-calendar-days" class="size-4 text-primary" />
+              Scheduled rides
+            </h3>
 
             <USkeleton v-if="ridesLoading" class="h-16 w-full" />
             <div v-else-if="rides.length" class="flex flex-col gap-2">
               <div
                 v-for="ride in rides"
                 :key="ride.id"
-                class="flex flex-wrap items-center gap-2 rounded-lg bg-elevated/50 px-3 py-2 text-sm"
+                class="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated/60"
               >
-                <UIcon name="i-lucide-calendar" class="size-4 shrink-0 text-dimmed" />
-                <span class="font-medium text-highlighted">{{ ride.date }}</span>
-                <span class="min-w-0 flex-1 truncate text-toned">{{ ride.routeName }}</span>
-                <span class="text-xs text-dimmed">by {{ ride.createdBy }}</span>
-                <UButton
-                  size="xs"
-                  variant="soft"
-                  icon="i-lucide-refresh-cw"
-                  :loading="syncingRide === ride.id"
-                  @click="syncRide(ride)"
-                >
-                  Sync now
-                </UButton>
-                <UButton
+                <div class="flex w-11 shrink-0 flex-col items-center rounded-lg bg-elevated py-1 leading-none">
+                  <span class="text-[0.6rem] font-medium uppercase tracking-wide text-dimmed">
+                    {{ rideMonth(ride.date) }}
+                  </span>
+                  <span class="text-base font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-highlighted">{{ ride.routeName }}</p>
+                  <p class="truncate text-xs text-dimmed">Scheduled by {{ ride.createdBy }}</p>
+                </div>
+                <UTooltip text="Sync to the crew's devices now">
+                  <UButton
+                    size="sm"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-refresh-cw"
+                    :loading="syncingRide === ride.id"
+                    @click="syncRide(ride)"
+                  />
+                </UTooltip>
+                <UTooltip
                   v-if="detailCrew.mine || ride.createdBy.toLowerCase() === (me?.user ?? '').toLowerCase()"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-x"
-                  :loading="deletingRide === ride.id"
-                  @click="deleteRide(ride)"
-                />
+                  text="Remove this ride"
+                >
+                  <UButton
+                    size="sm"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-trash-2"
+                    :loading="deletingRide === ride.id"
+                    @click="deleteRide(ride)"
+                  />
+                </UTooltip>
               </div>
             </div>
-            <p v-else class="text-xs text-dimmed">No rides scheduled yet.</p>
+            <div v-else class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-default py-6">
+              <UIcon name="i-lucide-calendar-x" class="size-5 text-dimmed" />
+              <p class="text-xs text-dimmed">No rides scheduled yet.</p>
+            </div>
 
             <form
               v-if="detailCrew.canSchedule"
-              class="flex flex-wrap items-end gap-2 border-t border-default pt-3"
+              class="flex flex-col gap-2 rounded-lg bg-elevated/60 p-3"
               @submit.prevent="scheduleRide"
             >
-              <UFormField label="Route" class="min-w-48 flex-1">
+              <p class="text-xs font-medium text-dimmed">Schedule a ride</p>
+              <UFormField label="Route">
                 <USelectMenu
                   v-model="scheduleSlug"
                   :items="scheduleRouteOptions"
@@ -1013,18 +1078,49 @@ async function saveShare() {
                   class="w-full"
                 />
               </UFormField>
-              <UFormField label="Date">
-                <UInput v-model="scheduleDate" type="date" size="sm" />
-              </UFormField>
-              <UButton
-                type="submit"
-                size="sm"
-                icon="i-lucide-calendar-plus"
-                :loading="scheduling"
-                :disabled="!scheduleSlug"
-              >
-                Schedule
-              </UButton>
+
+              <!-- What's actually about to be scheduled, before Schedule is
+                   clicked — the same TrackPreview the Library page's own
+                   cards use, so a route reads the same way everywhere in
+                   the app rather than this form inventing its own map. -->
+              <div v-if="scheduleSelectedRoute" class="flex gap-3 rounded-lg bg-elevated p-2">
+                <TrackPreview :slug="scheduleSelectedRoute.slug" class="w-28 shrink-0" />
+                <div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
+                  <p class="truncate text-sm font-medium text-highlighted">{{ scheduleSelectedRoute.name }}</p>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-dimmed">
+                    <span class="flex items-center gap-1">
+                      <UIcon name="i-lucide-ruler" class="size-3.5" />
+                      {{ (scheduleSelectedRoute.distanceM / 1000).toFixed(1) }} km
+                    </span>
+                    <span class="flex items-center gap-1">
+                      <UIcon name="i-lucide-mountain" class="size-3.5" />
+                      {{ Math.round(scheduleSelectedRoute.ascentM) }} m
+                    </span>
+                    <span class="flex items-center gap-1 capitalize">
+                      <UIcon
+                        :name="scheduleSelectedRoute.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
+                        class="size-3.5"
+                      />
+                      {{ scheduleSelectedRoute.sport }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-end gap-2">
+                <UFormField label="Date" class="flex-1">
+                  <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
+                </UFormField>
+                <UButton
+                  type="submit"
+                  size="sm"
+                  icon="i-lucide-calendar-plus"
+                  :loading="scheduling"
+                  :disabled="!scheduleSlug"
+                >
+                  Schedule
+                </UButton>
+              </div>
             </form>
             <p v-if="detailCrew.canSchedule && !scheduleRouteOptions.length" class="text-xs text-dimmed">
               No routes to schedule yet — share one, or upload one of your own.
@@ -1033,7 +1129,18 @@ async function saveShare() {
         </div>
       </template>
       <template #footer>
-        <div class="flex justify-end">
+        <div class="flex w-full items-center justify-between">
+          <UButton
+            v-if="detailCrew?.mine"
+            size="sm"
+            color="error"
+            variant="ghost"
+            icon="i-lucide-trash-2"
+            @click="openDelete(detailCrew)"
+          >
+            Delete crew
+          </UButton>
+          <span v-else />
           <UButton color="neutral" variant="ghost" @click="detailTarget = null">Close</UButton>
         </div>
       </template>
