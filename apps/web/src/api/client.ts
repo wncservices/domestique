@@ -292,6 +292,15 @@ export const api = {
       body: JSON.stringify({ name, description }),
     }),
 
+  /** Re-runs elevation backfill against the route's own already-stored GPX —
+   *  fixes a route uploaded before this deployment had elevation lookup
+   *  configured (or while the terrain service was briefly down), without
+   *  needing to re-upload the file. A no-op, not an error, on a route that
+   *  already has real elevation. 412s if this deployment has no elevation
+   *  lookup configured at all. */
+  recalculateElevation: (slug: string) =>
+    request<Route>(`/api/routes/${encodeSlug(slug)}/recalculate-elevation`, { method: 'POST' }),
+
   /** Claims an ownerless route (an import with no --owner, or an unclaimed
    *  Garmin sync-back) as the caller's own — the only way such a route ever
    *  becomes shareable, since crew-sharing validates against the owner's

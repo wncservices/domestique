@@ -15,6 +15,15 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:open': [boolean]; updated: [] }>()
 const toast = useToast()
 
+// What the modal's own #description slot shows, right under the title —
+// the route's description itself, not its slug: a rider has no use for the
+// permanent URL id up there, and a route with none yet still says so
+// rather than leaving the header blank.
+const headerDescription = computed(() => {
+  if (!props.route) return ''
+  return props.route.description || 'No description yet.'
+})
+
 const distance = computed(() => (props.route ? `${(props.route.distanceM / 1000).toFixed(1)} km` : ''))
 const ascent = computed(() => (props.route ? `${Math.round(props.route.ascentM)} m` : ''))
 const gpxUrl = computed(() => (props.route ? api.gpxUrl(props.route.slug) : ''))
@@ -76,6 +85,39 @@ async function saveInfo() {
     })
   } finally {
     savingInfo.value = false
+  }
+}
+
+// Re-runs elevation backfill against the route's own already-stored GPX —
+// see api.recalculateElevation's own doc comment. Client-side canEdit
+// gating is the same UX nicety it always is here (the server is the real
+// authority); whether this deployment has elevation lookup configured at
+// all is not something the client knows ahead of time, so a deployment
+// without it just sees the server's own 412 surfaced as a toast rather
+// than the button being hidden.
+const recalculating = ref(false)
+
+async function recalculateElevation() {
+  if (!props.route) return
+  const before = props.route.ascentM
+  recalculating.value = true
+  try {
+    const updated = await api.recalculateElevation(props.route.slug)
+    toast.add(
+      Math.round(updated.ascentM) === Math.round(before)
+        ? { title: 'Ascent unchanged', description: 'This route already had real elevation.', icon: 'i-lucide-mountain', color: 'neutral' }
+        : { title: 'Ascent recalculated', description: `${Math.round(before)} m → ${Math.round(updated.ascentM)} m`, icon: 'i-lucide-mountain', color: 'success' },
+    )
+    emit('updated')
+  } catch (err) {
+    toast.add({
+      title: 'Could not recalculate elevation',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    recalculating.value = false
   }
 }
 
@@ -143,19 +185,10 @@ const mapRoutes = computed(() =>
   <UModal
     :open="open"
     :title="route?.name"
+    :description="headerDescription"
     :ui="{ content: 'sm:max-w-2xl' }"
     @update:open="(v: boolean) => emit('update:open', v)"
   >
-    <template #description>
-      <!-- A permanent id, not a second copy of the name above — worth
-           saying explicitly: for a route whose name and slug started out
-           nearly identical, renaming the top line while this one
-           (deliberately) doesn't change reads as "nothing happened"
-           otherwise. -->
-      <UTooltip text="This route's permanent URL id — it doesn't change when you rename the route above.">
-        <span class="cursor-help">{{ route?.slug }}</span>
-      </UTooltip>
-    </template>
     <template #body>
       <div v-if="route" class="flex flex-col gap-4">
         <div class="h-64 overflow-hidden rounded-lg bg-elevated/50 sm:h-80">
@@ -166,18 +199,17 @@ const mapRoutes = computed(() =>
           <RouteMap v-else :routes="mapRoutes" />
         </div>
 
-        <div v-if="!editingInfo && (route.description || canEdit)" class="flex items-start justify-between gap-2">
-          <p v-if="route.description" class="flex-1 text-sm text-toned">{{ route.description }}</p>
-          <p v-else class="flex-1 text-sm italic text-dimmed">No description yet.</p>
+        <div v-if="!editingInfo && canEdit" class="flex justify-end">
           <UButton
-            v-if="canEdit"
             icon="i-lucide-pencil"
             color="neutral"
             variant="ghost"
             size="xs"
             aria-label="Edit name and description"
             @click="openEditInfo"
-          />
+          >
+            Edit
+          </UButton>
         </div>
 
         <form v-else-if="editingInfo" class="flex flex-col gap-3 rounded-lg bg-elevated/60 p-3" @submit.prevent="saveInfo">
@@ -201,7 +233,21 @@ const mapRoutes = computed(() =>
             <dd class="tabular-nums">{{ distance }}</dd>
           </div>
           <div>
-            <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Ascent</dt>
+            <dt class="flex items-center gap-1 text-[0.7rem] uppercase tracking-wide text-dimmed">
+              Ascent
+              <UTooltip v-if="canEdit" text="Recalculate from terrain data — fixes a route uploaded with no usable elevation of its own">
+                <UButton
+                  icon="i-lucide-refresh-cw"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  :ui="{ base: 'p-0.5' }"
+                  :loading="recalculating"
+                  aria-label="Recalculate elevation"
+                  @click="recalculateElevation"
+                />
+              </UTooltip>
+            </dt>
             <dd class="tabular-nums">{{ ascent }}</dd>
           </div>
           <div>

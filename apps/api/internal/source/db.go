@@ -254,6 +254,33 @@ func (d *DB) GPX(ctx context.Context, slug string) ([]byte, error) {
 	return raw, err
 }
 
+// ElevationConfigured reports whether SetElevationClient has ever been
+// called — see this type's own elevation field doc comment for why that is
+// optional.
+func (d *DB) ElevationConfigured() bool {
+	return d.elevation != nil
+}
+
+// RecalculateElevation re-runs elevation backfill against a route's own
+// currently stored GPX — the only way to fix a route uploaded before this
+// feature existed, or one uploaded while the configured terrain service
+// happened to be briefly down (backfillElevation swallows that failure by
+// design; see its own doc comment). It needs no elevation-specific logic
+// of its own: analyse (called from Update below, since GPX is non-nil)
+// already re-parses points and re-runs backfillElevation whenever
+// gpx.NeedsElevation says the file still has none of its own worth
+// trusting, so handing the route's own GPX back to Update is the entire
+// implementation. Safe to call on a route that already has real
+// elevation — NeedsElevation says no, backfillElevation is skipped, and
+// the route comes back with the exact same stats it had before.
+func (d *DB) RecalculateElevation(ctx context.Context, slug string) (model.Route, error) {
+	raw, err := d.GPX(ctx, slug)
+	if err != nil {
+		return model.Route{}, err
+	}
+	return d.Update(ctx, slug, UpdateRequest{GPX: raw})
+}
+
 func (d *DB) Create(ctx context.Context, req CreateRequest) (model.Route, error) {
 	points, stats, err := d.analyse(ctx, req.GPX)
 	if err != nil {
