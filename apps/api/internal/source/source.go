@@ -83,4 +83,14 @@ type Library interface {
 	Create(ctx context.Context, req CreateRequest) (model.Route, error)
 	Update(ctx context.Context, slug string, req UpdateRequest) (model.Route, error)
 	Delete(ctx context.Context, slug string) error
+	// ElevationConfigured reports whether backfilling has anything to call —
+	// see DB.elevation's own doc comment. The API layer uses this to tell
+	// "recalculate elevation" apart from every other write: unlike a rename
+	// or a target change, it has nothing to do if this is false, so it
+	// should say so rather than silently no-op.
+	ElevationConfigured() bool
+	// RecalculateElevation re-runs elevation backfill against a route's own
+	// currently stored GPX — see DB's own doc comment for why this needs no
+	// elevation-specific logic beyond handing that GPX back to Update.
+	RecalculateElevation(ctx context.Context, slug string) (model.Route, error)
 }

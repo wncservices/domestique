@@ -385,6 +385,11 @@ const scheduleDate = ref(todayISO())
 // field existed; a native <input type="time"> already produces exactly the
 // HH:MM the API expects, so nothing here needs to format or parse it.
 const scheduleTime = ref('')
+const timePresets = [
+  { label: 'Morning · 09:00', value: '09:00' },
+  { label: 'Afternoon · 14:00', value: '14:00' },
+  { label: 'Evening · 18:00', value: '18:00' },
+]
 
 const scheduleSlug = ref('')
 const scheduling = ref(false)
@@ -1132,10 +1137,17 @@ async function saveShare() {
 
               <div class="flex items-end gap-2">
                 <UFormField label="Date" class="flex-1">
-                  <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
+                  <UInput v-model="scheduleDate" type="date" icon="i-lucide-calendar" size="sm" class="w-full" />
                 </UFormField>
                 <UFormField label="Time (optional)" class="flex-1">
-                  <UInput v-model="scheduleTime" type="time" size="sm" class="w-full" />
+                  <UInput
+                    v-model="scheduleTime"
+                    type="time"
+                    icon="i-lucide-clock"
+                    step="900"
+                    size="sm"
+                    class="w-full"
+                  />
                 </UFormField>
                 <UButton
                   type="submit"
@@ -1145,6 +1157,25 @@ async function saveShare() {
                   :disabled="!scheduleSlug"
                 >
                   Schedule
+                </UButton>
+              </div>
+
+              <!-- One click for the common cases, rather than everyone
+                   dragging the native time spinner from 00:00 every time —
+                   a second click on the already-picked preset clears it
+                   back to "no specific time" instead of just re-setting the
+                   same value. -->
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-xs text-dimmed">Quick pick:</span>
+                <UButton
+                  v-for="preset in timePresets"
+                  :key="preset.value"
+                  size="xs"
+                  :color="scheduleTime === preset.value ? 'primary' : 'neutral'"
+                  :variant="scheduleTime === preset.value ? 'solid' : 'soft'"
+                  @click="scheduleTime = scheduleTime === preset.value ? '' : preset.value"
+                >
+                  {{ preset.label }}
                 </UButton>
               </div>
             </form>

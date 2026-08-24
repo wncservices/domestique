@@ -221,6 +221,12 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/routes", s.handleUpload)
 	mux.HandleFunc("PATCH /api/routes/{slug...}", s.handleUpdate)
+	// {slug}, not {slug...}: a "...to end of path" wildcard must be the
+	// pattern's final segment in Go's ServeMux, and this one isn't — a
+	// route slug never contains a "/" in practice anyway (see the slug
+	// generator in source/db.go), so the plain single-segment form loses
+	// nothing here.
+	mux.HandleFunc("POST /api/routes/{slug}/recalculate-elevation", s.handleRecalculateElevation)
 	mux.HandleFunc("DELETE /api/routes/{slug...}", s.handleDelete)
 
 	mux.HandleFunc("GET /api/komoot/connection", s.handleKomootConnection)
@@ -1834,6 +1840,51 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	linked = ownAccountsOnly(identity, linked)
 
 	s.autoSyncIfEnabled(identity.User)
+	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
+}
+
+// handleRecalculateElevation re-runs elevation backfill against a route's
+// own already-stored GPX — see source.DB.RecalculateElevation's own doc
+// comment for why re-submitting the same file is the entire implementation.
+// Its own action endpoint rather than another PATCH field: unlike
+// claimOwner (which does set a real field, Owner), this isn't a value the
+// caller is setting — it's closer in shape to handleSyncRide's "do a thing
+// now," just for one route instead of one crew.
+func (s *Server) handleRecalculateElevation(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermEditOwn) {
+		return
+	}
+
+	slug := cleanSlug(r.PathValue("slug"))
+	if !s.mayEdit(w, r, slug) {
+		return
+	}
+
+	if !s.Source.ElevationConfigured() {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no elevation lookup configured",
+		})
+		return
+	}
+
+	route, err := s.Source.RecalculateElevation(r.Context(), slug)
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	linked, ok := s.linkedAccounts(w)
+	if !ok {
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	linked = ownAccountsOnly(identity, linked)
+
+	s.logger().Info("route elevation recalculated", "slug", slug, "ascent", route.Stats.AscentM, "by", identity.User)
 	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
 }
 

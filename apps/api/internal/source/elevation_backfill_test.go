@@ -2,6 +2,7 @@ package source
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,44 @@ func TestDBCreateDoesNotBackfillWithoutAnElevationClient(t *testing.T) {
 	}
 	if route.Stats.AscentM != 0 {
 		t.Errorf("ascent = %.1f m, want 0 — elevation.Client is nil, backfill must not run", route.Stats.AscentM)
+	}
+}
+
+// TestDBRecalculateElevationFixesAPreexistingPlaceholderRoute proves the
+// point of RecalculateElevation: a route created before elevation lookup
+// was configured — the exact case TestDBCreateDoesNotBackfillWithoutAnElevationClient
+// above establishes — can still be fixed afterward, without re-uploading
+// its GPX, once the client is wired up.
+func TestDBRecalculateElevationFixesAPreexistingPlaceholderRoute(t *testing.T) {
+	db := openTestDB(t)
+
+	route, err := db.Create(t.Context(), CreateRequest{Name: "Night Run", GPX: []byte(allZeroElevationGPX)})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if route.Stats.AscentM != 0 {
+		t.Fatalf("ascent before = %.1f m, want 0 — this test's premise is that it starts unbackfilled", route.Stats.AscentM)
+	}
+
+	db.SetElevationClient(fakeElevationServer(t))
+	recalculated, err := db.RecalculateElevation(t.Context(), route.Slug)
+	if err != nil {
+		t.Fatalf("recalculate: %v", err)
+	}
+	if math.Abs(recalculated.Stats.AscentM-30) > 0.01 {
+		t.Errorf("ascent after = %.4f m, want 30 m from the backfilled elevation", recalculated.Stats.AscentM)
+	}
+}
+
+// TestDBRecalculateElevationOnAMissingRouteIsErrNotFound proves an unknown
+// slug reports the same sentinel every other lookup in this package uses,
+// rather than a bare SQL error or a zero-value route with no error at all.
+func TestDBRecalculateElevationOnAMissingRouteIsErrNotFound(t *testing.T) {
+	db := openTestDB(t)
+	db.SetElevationClient(fakeElevationServer(t))
+
+	if _, err := db.RecalculateElevation(t.Context(), "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
