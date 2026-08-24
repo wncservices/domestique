@@ -501,10 +501,25 @@ const maxElevationLookups = 300
 // as a legitimate, expected outcome (it is what routing here at all
 // means), so there is nothing worse about leaving it that way than there
 // was before this feature existed.
+//
+// backfillTimeout bounds the whole attempt, not just elevation.Client's
+// own per-request timeout — up to three sequential batched requests
+// (maxElevationLookups points at 100 per request) could otherwise each
+// take the client's own full 20s before failing, adding up to a full
+// minute to a single, synchronous upload if the configured service is
+// merely slow rather than cleanly down. This must finish well inside
+// that, or fail, so a degraded elevation service degrades this feature
+// quickly instead of making every upload feel hung.
+// A var, not a const: elevation_backfill_test.go shrinks it to keep its own
+// timeout test fast rather than actually waiting 15 real seconds.
+var backfillTimeout = 15 * time.Second
+
 func (d *DB) backfillElevation(ctx context.Context, points []gpx.Point) {
 	if d.elevation == nil || len(points) == 0 {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, backfillTimeout)
+	defer cancel()
 
 	step := 1
 	if len(points) > maxElevationLookups {

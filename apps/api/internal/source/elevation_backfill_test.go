@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
 )
@@ -129,5 +130,50 @@ func TestDBCreateDoesNotBackfillWithoutAnElevationClient(t *testing.T) {
 	}
 	if route.Stats.AscentM != 0 {
 		t.Errorf("ascent = %.1f m, want 0 — elevation.Client is nil, backfill must not run", route.Stats.AscentM)
+	}
+}
+
+// TestDBCreateBoundsElevationBackfillOverall proves backfillTimeout caps
+// the whole attempt, not just elevation.Client's own per-request timeout —
+// a service that merely responds slowly (not a hard connection failure)
+// must still make the upload return promptly rather than let up to three
+// sequential batched requests each run out their own much longer 20s
+// timeout in turn. Shrinks the package's own backfillTimeout var for the
+// duration of this test so it proves the cap without actually waiting out
+// the real 15s default.
+func TestDBCreateBoundsElevationBackfillOverall(t *testing.T) {
+	old := backfillTimeout
+	backfillTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { backfillTimeout = old })
+
+	// A plain defer, not t.Cleanup: t.Cleanup callbacks run in LIFO order,
+	// so registering this one after srv's below would make srv.Close (which
+	// waits for the still-blocked handler goroutine to return) run first —
+	// deadlocking teardown against itself. A defer runs before any
+	// t.Cleanup callback at all, so the handler is already unblocked by the
+	// time Close needs it to be.
+	unblock := make(chan struct{})
+	defer close(unblock)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-unblock // never responds within this test's own lifetime
+	}))
+	t.Cleanup(srv.Close)
+
+	db := openTestDB(t)
+	db.SetElevationClient(elevation.New(srv.URL))
+
+	start := time.Now()
+	route, err := db.Create(t.Context(), CreateRequest{Name: "Night Run", GPX: []byte(allZeroElevationGPX)})
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("create: %v, want the upload to succeed even though elevation lookup timed out", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("create took %s, want well under backfillTimeout's own much longer sibling (elevation.Client's 20s per-request timeout) to matter at all", elapsed)
+	}
+	if route.Stats.AscentM != 0 {
+		t.Errorf("ascent = %.1f m, want 0 — the lookup never returned, so nothing should have changed", route.Stats.AscentM)
 	}
 }

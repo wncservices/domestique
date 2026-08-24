@@ -102,3 +102,25 @@ func TestNewDefaultsAnEmptyURL(t *testing.T) {
 		t.Errorf("url = %q, want DefaultURL", c.url)
 	}
 }
+
+// A misbehaving or compromised elevation endpoint must not be able to hand
+// this an unbounded body to decode into memory — the url is operator
+// config, not attacker input, but a self-hosted instance an operator
+// points this at is still a third party from this process's own point of
+// view.
+func TestLookupCapsTheResponseBodySize(t *testing.T) {
+	c := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		// Miles past anything a real response (a handful of small
+		// numbers) could ever need — proves the cap actually engages
+		// rather than merely existing in a comment.
+		_, _ = w.Write([]byte(`{"results":[`))
+		for i := 0; i < 200_000; i++ {
+			_, _ = w.Write([]byte(`{"elevation":1.5},`))
+		}
+		_, _ = w.Write([]byte(`{"elevation":1.5}]}`))
+	})
+
+	if _, err := c.Lookup(t.Context(), []Point{{Lat: 1, Lon: 2}}); err == nil {
+		t.Fatal("expected an error decoding a response well past the size cap")
+	}
+}

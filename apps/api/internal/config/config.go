@@ -8,6 +8,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -244,6 +245,20 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("basemap.tiles_namespace is set but basemap.tiles_pvc_name is not — " +
 			"it must equal, exactly, whatever domestique-chart's tiles component actually names " +
 			"its basemap PVC in this release")
+	}
+
+	// Same reasoning as the auth check above — a malformed elevation.url
+	// would otherwise fail silently on every future upload instead: the
+	// backfill it drives is deliberately best-effort per call (see
+	// source.DB.backfillElevation's own doc comment for why a slow or
+	// unreachable service must never fail an upload), which means nothing
+	// downstream of a bad URL ever surfaces an error anywhere for an
+	// operator to notice.
+	if c.Elevation.Enabled {
+		u, err := url.Parse(c.Elevation.URL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("elevation.url %q is not a valid absolute URL", c.Elevation.URL)
+		}
 	}
 	return nil
 }

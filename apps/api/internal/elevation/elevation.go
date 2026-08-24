@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -123,8 +124,18 @@ func (c *Client) lookupBatch(ctx context.Context, points []Point) ([]float64, er
 		return nil, fmt.Errorf("elevation service returned %s", resp.Status)
 	}
 
+	// The url is operator config, not attacker input — but a self-hosted
+	// instance an operator points this at is still a third party from this
+	// process's own point of view, and a batch here is never more than
+	// batchSize results, each a couple of small numbers. Capped well past
+	// anything a real response could need, so a misbehaving or compromised
+	// endpoint can't hand this an unbounded body to decode into memory.
+	// io.LimitReader, not http.MaxBytesReader — that one is documented for
+	// an incoming *request* body on the server side (it signals back
+	// through an http.ResponseWriter on overflow); this is a client
+	// reading a response, where a plain byte cap is all that applies.
 	var out lookupResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decode elevation response: %w", err)
 	}
 	if len(out.Results) != len(points) {

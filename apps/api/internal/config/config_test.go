@@ -101,6 +101,44 @@ func TestValidateRejectsAnEmptyDSN(t *testing.T) {
 	}
 }
 
+// A malformed elevation.url would otherwise fail silently forever — the
+// backfill it drives is deliberately best-effort per call, so nothing
+// downstream of a bad URL ever surfaces an error anywhere. This has to be
+// caught at startup instead, the same as a bad auth config already is.
+func TestValidateRejectsAMalformedElevationURL(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Source:    SourceConfig{DSN: "data/domestique.db"},
+			Elevation: ElevationConfig{Enabled: true, URL: "https://example.com/lookup"},
+		}
+	}
+
+	if err := base().Validate(); err != nil {
+		t.Fatalf("a valid elevation.url was rejected: %v", err)
+	}
+
+	for _, bad := range []string{
+		"not a url at all",
+		"example.com/lookup", // no scheme
+		"https://",           // no host
+	} {
+		cfg := base()
+		cfg.Elevation.URL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%q: expected an error, got none", bad)
+		}
+	}
+
+	// Disabled: no validation at all, same as an empty URL never mattering
+	// while the feature is off.
+	cfg := base()
+	cfg.Elevation.Enabled = false
+	cfg.Elevation.URL = "not a url at all"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("a bad url while disabled should be ignored: %v", err)
+	}
+}
+
 // A route with no targets used to reach every linked account, system-wide,
 // with no consent from whoever owned the other accounts. That was the gap
 // crews exist to close: the default now is the owner's own accounts only.
