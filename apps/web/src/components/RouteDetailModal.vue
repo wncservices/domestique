@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { Account, Route } from '@/api/types'
+import type { Account, Me, Route } from '@/api/types'
 import RouteMap from './RouteMap.vue'
 
 const props = defineProps<{
   open: boolean
   route: Route | null
   accounts: Account[]
+  writable: boolean
+  me?: Me | null
 }>()
-const emit = defineEmits<{ 'update:open': [boolean] }>()
+const emit = defineEmits<{ 'update:open': [boolean]; updated: [] }>()
+const toast = useToast()
 
 const distance = computed(() => (props.route ? `${(props.route.distanceM / 1000).toFixed(1)} km` : ''))
 const ascent = computed(() => (props.route ? `${Math.round(props.route.ascentM)} m` : ''))
@@ -31,6 +35,49 @@ const targetNames = computed(() => {
   const byId = new Map(props.route.ownerCrews.map((c) => [c.id, c.name]))
   return props.route.targets.map((id) => byId.get(id) ?? id)
 })
+
+// Mirrors RouteCard.vue's own canEdit exactly — same server-side rule
+// (`mayEdit`), just checked here too so this popup doesn't offer an Edit
+// button that would come back 403.
+const canEdit = computed(() => {
+  if (!props.writable) return false
+  const me = props.me
+  if (!me) return false
+  if (me.permissions.includes('routes:edit-any')) return true
+  if (!me.permissions.includes('routes:edit-own')) return false
+  return !props.route?.owner || props.route.owner.toLowerCase() === (me.user ?? '').toLowerCase()
+})
+
+const editingInfo = ref(false)
+const draftName = ref('')
+const draftDescription = ref('')
+const savingInfo = ref(false)
+
+function openEditInfo() {
+  if (!props.route) return
+  draftName.value = props.route.name
+  draftDescription.value = props.route.description
+  editingInfo.value = true
+}
+
+async function saveInfo() {
+  if (!props.route || !draftName.value.trim()) return
+  savingInfo.value = true
+  try {
+    await api.updateInfo(props.route.slug, draftName.value.trim(), draftDescription.value)
+    editingInfo.value = false
+    emit('updated')
+  } catch (err) {
+    toast.add({
+      title: 'Could not update the route',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    savingInfo.value = false
+  }
+}
 
 function accountLabel(accountId: string): string {
   return props.accounts.find((a) => a.id === accountId)?.label || accountId
@@ -72,6 +119,7 @@ watch(
   async (slug) => {
     points.value = []
     trackFailed.value = false
+    editingInfo.value = false
     if (!slug) return
     loadingTrack.value = true
     try {
@@ -109,7 +157,34 @@ const mapRoutes = computed(() =>
           <RouteMap v-else :routes="mapRoutes" />
         </div>
 
-        <p v-if="route.description" class="text-sm text-toned">{{ route.description }}</p>
+        <div v-if="!editingInfo && (route.description || canEdit)" class="flex items-start justify-between gap-2">
+          <p v-if="route.description" class="flex-1 text-sm text-toned">{{ route.description }}</p>
+          <p v-else class="flex-1 text-sm italic text-dimmed">No description yet.</p>
+          <UButton
+            v-if="canEdit"
+            icon="i-lucide-pencil"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            aria-label="Edit name and description"
+            @click="openEditInfo"
+          />
+        </div>
+
+        <form v-else-if="editingInfo" class="flex flex-col gap-3 rounded-lg bg-elevated/60 p-3" @submit.prevent="saveInfo">
+          <UFormField label="Name">
+            <UInput v-model="draftName" class="w-full" />
+          </UFormField>
+          <UFormField label="Description">
+            <UTextarea v-model="draftDescription" class="w-full" :rows="3" />
+          </UFormField>
+          <div class="flex justify-end gap-2">
+            <UButton color="neutral" variant="ghost" :disabled="savingInfo" @click="editingInfo = false">
+              Cancel
+            </UButton>
+            <UButton type="submit" :loading="savingInfo" :disabled="!draftName.trim()">Save</UButton>
+          </div>
+        </form>
 
         <dl class="flex flex-wrap gap-5">
           <div>

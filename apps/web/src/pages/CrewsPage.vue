@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { Crew, Person, Ride } from '@/api/types'
+import type { Crew, Person, Ride, UpcomingRide } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
 import TrackPreview from '@/components/TrackPreview.vue'
@@ -75,7 +75,36 @@ function initials(rider: string): string {
   return rider.slice(0, 2).toUpperCase()
 }
 
+// Every upcoming ride across every crew this rider is in, soonest first per
+// crew (the API already sorts by date then time) — drives both the "Next
+// ride" line on each row of the main list below and, on the Library page,
+// the banner at the top of the page. Fetched here rather than folded into
+// useLibrary's own state: this is the only page that needs it today, and
+// adding it to every useLibrary consumer's own fetch would cost every other
+// page a request for data it never shows.
+const upcomingRides = ref<UpcomingRide[]>([])
+async function loadUpcomingRides() {
+  try {
+    upcomingRides.value = await api.upcomingRides()
+  } catch {
+    // Best-effort — the main list still works fine with no "Next ride" line.
+    upcomingRides.value = []
+  }
+}
+
+// upcomingRides is already sorted soonest-first, so the first match for a
+// crew id is that crew's next ride.
+function nextRideFor(crewId: string): UpcomingRide | null {
+  return upcomingRides.value.find((r) => r.crewId === crewId) ?? null
+}
+
+function formatRideWhen(ride: Ride): string {
+  const when = `${rideMonth(ride.date)} ${rideDay(ride.date)}`
+  return ride.time ? `${when}, ${ride.time}` : when
+}
+
 onMounted(refresh)
+onMounted(loadUpcomingRides)
 
 // Every call below fires after an edit made right here, on a page already
 // showing the crew list being refreshed — never on arriving at the page,
@@ -83,6 +112,7 @@ onMounted(refresh)
 // back to its loading skeleton on the way to showing the same thing
 // updated. See useLibrary.ts's own doc comment on refresh().
 function backgroundRefresh() {
+  loadUpcomingRides()
   return refresh({ background: true })
 }
 
@@ -362,6 +392,10 @@ function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 const scheduleDate = ref(todayISO())
+// Empty by default — a ride names a day at minimum, same as before this
+// field existed; a native <input type="time"> already produces exactly the
+// HH:MM the API expects, so nothing here needs to format or parse it.
+const scheduleTime = ref('')
 
 // The little month/day date chip on each ride row — plain string slicing
 // on the already-known YYYY-MM-DD shape, not a date library: same reasoning
@@ -419,9 +453,14 @@ async function scheduleRide() {
   if (!crew || !scheduleSlug.value) return
   scheduling.value = true
   try {
-    await api.scheduleRide(crew.id, { slug: scheduleSlug.value, date: scheduleDate.value })
+    await api.scheduleRide(crew.id, {
+      slug: scheduleSlug.value,
+      date: scheduleDate.value,
+      time: scheduleTime.value || undefined,
+    })
     toast.add({ title: 'Ride scheduled', icon: 'i-lucide-calendar-plus', color: 'success' })
     scheduleSlug.value = ''
+    scheduleTime.value = ''
     await Promise.all([loadRides(crew.id), backgroundRefresh()])
   } catch (err) {
     toast.add({
@@ -443,7 +482,7 @@ async function deleteRide(ride: Ride) {
   deletingRide.value = ride.id
   try {
     await api.deleteRide(crew.id, ride.id)
-    await loadRides(crew.id)
+    await Promise.all([loadRides(crew.id), loadUpcomingRides()])
   } catch (err) {
     toast.add({
       title: 'Could not remove that ride',
@@ -630,7 +669,10 @@ async function saveShare() {
           >
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm text-highlighted">{{ crew.name }}</p>
-              <p class="truncate font-mono text-xs text-dimmed">{{ crew.id }} · owner {{ crew.owner }}</p>
+              <p v-if="nextRideFor(crew.id)" class="truncate text-xs text-dimmed">
+                Next ride: {{ nextRideFor(crew.id)!.routeName }} · {{ formatRideWhen(nextRideFor(crew.id)!) }}
+              </p>
+              <p v-else class="truncate text-xs text-dimmed">No rides scheduled yet</p>
             </div>
 
             <UBadge color="neutral" variant="subtle" size="sm">
@@ -1034,7 +1076,9 @@ async function saveShare() {
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-medium text-highlighted">{{ ride.routeName }}</p>
-                  <p class="truncate text-xs text-dimmed">Scheduled by {{ ride.createdBy }}</p>
+                  <p class="truncate text-xs text-dimmed">
+                    <template v-if="ride.time">{{ ride.time }} · </template>Scheduled by {{ ride.createdBy }}
+                  </p>
                 </div>
                 <UTooltip text="Sync to the crew's devices now">
                   <UButton
@@ -1114,6 +1158,9 @@ async function saveShare() {
               <div class="flex items-end gap-2">
                 <UFormField label="Date" class="flex-1">
                   <UInput v-model="scheduleDate" type="date" size="sm" class="w-full" />
+                </UFormField>
+                <UFormField label="Time (optional)" class="flex-1">
+                  <UInput v-model="scheduleTime" type="time" size="sm" class="w-full" />
                 </UFormField>
                 <UButton
                   type="submit"

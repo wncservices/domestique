@@ -29,6 +29,7 @@ import type {
   PlanResponse,
   PushResponse,
   Ride,
+  UpcomingRide,
   Route,
   RouteDuplicateGroup,
   ScheduleRideRequest,
@@ -284,6 +285,13 @@ export const api = {
       body: JSON.stringify({ sport }),
     }),
 
+  updateInfo: (slug: string, name: string, description: string) =>
+    request<Route>(`/api/routes/${encodeSlug(slug)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description }),
+    }),
+
   /** Claims an ownerless route (an import with no --owner, or an unclaimed
    *  Garmin sync-back) as the caller's own — the only way such a route ever
    *  becomes shareable, since crew-sharing validates against the owner's
@@ -376,6 +384,10 @@ export const api = {
       `/api/crews/${encodeURIComponent(crewId)}/rides/${encodeURIComponent(rideId)}/sync`,
       { method: 'POST' },
     ),
+  /** Every upcoming ride across every crew the caller belongs to — the one
+   *  fetch behind both the Library page's upcoming-ride banner and each
+   *  crew row's own "next ride" line. */
+  upcomingRides: () => request<UpcomingRide[]>('/api/rides/upcoming'),
 
   people: () => request<Person[]>('/api/people'),
   invitePerson: (req: InvitePersonRequest) =>

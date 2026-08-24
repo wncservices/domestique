@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
@@ -19,7 +20,17 @@ type rideDTO struct {
 	Slug      string `json:"slug"`
 	RouteName string `json:"routeName"`
 	Date      string `json:"date"`
+	Time      string `json:"time,omitempty"`
 	CreatedBy string `json:"createdBy"`
+}
+
+// upcomingRideDTO is a rideDTO plus the crew it belongs to — the shape
+// GET /api/rides/upcoming needs and a plain rideDTO doesn't: that endpoint
+// spans every crew the caller is in, so each row has to say whose ride it
+// is, unlike /api/crews/{id}/rides where the crew is already the URL.
+type upcomingRideDTO struct {
+	rideDTO
+	CrewName string `json:"crewName"`
 }
 
 // scheduleAvailable mirrors crewAvailable — see its own doc comment for why
@@ -134,7 +145,7 @@ func rideDTOFor(ride schedule.Ride, routeNames map[string]string) rideDTO {
 	}
 	return rideDTO{
 		ID: ride.ID, CrewID: ride.CrewID, Slug: ride.Slug,
-		RouteName: name, Date: ride.Date, CreatedBy: ride.CreatedBy,
+		RouteName: name, Date: ride.Date, Time: ride.Time, CreatedBy: ride.CreatedBy,
 	}
 }
 
@@ -186,6 +197,7 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Slug string `json:"slug"`
 		Date string `json:"date"`
+		Time string `json:"time"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
@@ -260,7 +272,7 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ride, err := s.Schedule.Create(r.Context(), id, route.Slug, body.Date, identity.User)
+	ride, err := s.Schedule.Create(r.Context(), id, route.Slug, body.Date, body.Time, identity.User)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -268,6 +280,60 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("crew ride scheduled", "crew", id, "slug", route.Slug, "date", body.Date, "by", identity.User)
 	writeJSON(w, http.StatusCreated, rideDTOFor(ride, map[string]string{route.Slug: route.Name}))
+}
+
+// handleUpcomingRides answers "is anything scheduled?" across every crew
+// the caller belongs to — the one query behind both the Library page's
+// upcoming-ride banner and each crew row's own "next ride" line, so
+// neither surface needs its own fetch path. schedule.Store.ListUpcoming is
+// unfiltered by crew (see its own doc comment); this handler does the
+// filtering, the same division of labour crewAuthorityFor already draws
+// everywhere else in this file — the store answers what exists, the API
+// layer answers what this caller may see.
+func (s *Server) handleUpcomingRides(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageCrews) {
+		return
+	}
+	if !s.crewAvailable(w) || !s.scheduleAvailable(w) {
+		return
+	}
+
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	rides, err := s.Schedule.ListUpcoming(r.Context(), time.Now().UTC().Format("2006-01-02"))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	routes, _, err := s.Source.List(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	names := make(map[string]string, len(routes))
+	for _, route := range routes {
+		names[route.Slug] = route.Name
+	}
+	crewNames := make(map[string]string, len(crews.Crews))
+	for _, c := range crews.Crews {
+		crewNames[c.ID] = c.Name
+	}
+
+	out := make([]upcomingRideDTO, 0)
+	for _, ride := range rides {
+		if !crews.ApprovedRiders.Has(ride.CrewID, identity.User) {
+			continue
+		}
+		out = append(out, upcomingRideDTO{
+			rideDTO:  rideDTOFor(ride, names),
+			CrewName: crewNames[ride.CrewID],
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleDeleteRide removes a scheduled ride — its creator, the crew's

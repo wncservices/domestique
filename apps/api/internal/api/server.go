@@ -274,6 +274,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/crews/{id}/rides", s.handleCreateRide)
 	mux.HandleFunc("DELETE /api/crews/{id}/rides/{rideId}", s.handleDeleteRide)
 	mux.HandleFunc("POST /api/crews/{id}/rides/{rideId}/sync", s.handleSyncRide)
+	mux.HandleFunc("GET /api/rides/upcoming", s.handleUpcomingRides)
 
 	// Not under /api: these are browser navigations (redirects, a form post
 	// from the SPA), not JSON calls, so they sit outside the /api/ 404

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useLibrary } from '@/composables/useLibrary'
 import LibraryDuplicatesPanel from '@/components/LibraryDuplicatesPanel.vue'
 import PlanPanel from '@/components/PlanPanel.vue'
 import RouteCard from '@/components/RouteCard.vue'
 import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import RouteMap from '@/components/RouteMap.vue'
-import type { Sport } from '@/api/types'
+import type { Sport, UpcomingRide } from '@/api/types'
 
 // Named explicitly for App.vue's <KeepAlive include="LibraryPage">, rather
 // than relying on build-tool filename inference: the whole point of that
@@ -137,6 +137,33 @@ function backgroundRefresh() {
   return refresh({ background: true })
 }
 
+// Upcoming crew rides, for the banner at the top of the page — fetched here
+// rather than through useLibrary: this is the only page that shows it, and
+// folding it into that shared composable would cost every other page a
+// request for data it never displays. Lazy-imported the same way push()
+// below pulls in api/client, rather than a top-level import, to keep this
+// off the critical bundle for a page most visits never need it on.
+const upcomingRides = ref<UpcomingRide[]>([])
+onMounted(async () => {
+  try {
+    const { api } = await import('@/api/client')
+    upcomingRides.value = await api.upcomingRides()
+  } catch {
+    // Best-effort — the page works fine with no banner.
+  }
+})
+
+// Plain string slicing on the already-known YYYY-MM-DD shape, not a date
+// library — same reasoning CrewsPage.vue's own todayISO/rideMonth comments
+// give: a real date-parsing library was tried once for this app's ride
+// scheduling and reverted after it alone added ~31kB gzipped to a page's
+// bundle chunk.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+function formatRideWhen(ride: UpcomingRide): string {
+  const when = `${MONTH_ABBR[Number(ride.date.slice(5, 7)) - 1] ?? ''} ${ride.date.slice(8, 10)}`
+  return ride.time ? `${when}, ${ride.time}` : when
+}
+
 async function push(items: { accountId: string; slug: string }[]) {
   pushing.value = true
   failures.value = []
@@ -155,6 +182,22 @@ async function push(items: { accountId: string; slug: string }[]) {
 
 <template>
   <div class="flex flex-col gap-6">
+    <UAlert
+      v-if="upcomingRides.length"
+      color="primary"
+      variant="subtle"
+      icon="i-lucide-calendar-clock"
+      :title="upcomingRides.length === 1 ? 'A crew ride is scheduled' : `${upcomingRides.length} crew rides are scheduled`"
+    >
+      <template #description>
+        <ul class="flex flex-col gap-0.5">
+          <li v-for="ride in upcomingRides" :key="ride.id">
+            {{ ride.routeName }} with {{ ride.crewName }} — {{ formatRideWhen(ride) }}
+          </li>
+        </ul>
+      </template>
+    </UAlert>
+
     <UAlert
       v-for="problem in problems"
       :key="problem"
@@ -288,7 +331,10 @@ async function push(items: { accountId: string; slug: string }[]) {
       :open="selectedSlug !== null"
       :route="selectedRoute"
       :accounts="accounts"
+      :writable="canUpload"
+      :me="me"
       @update:open="(v: boolean) => { if (!v) selectedSlug = null }"
+      @updated="backgroundRefresh"
     />
   </div>
 </template>

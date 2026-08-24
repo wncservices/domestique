@@ -165,12 +165,23 @@ export interface Ride {
   slug: string
   routeName: string
   date: string // YYYY-MM-DD
+  time?: string // HH:MM, 24-hour — absent when no time of day was named
   createdBy: string
+}
+
+/** An upcoming ride plus the crew it belongs to — what GET /api/rides/upcoming
+ *  returns, spanning every crew the caller is in. A plain Ride doesn't say
+ *  whose crew it is; a per-crew fetch doesn't need to, since the crew is
+ *  already the URL, but this one aggregates across crews so each row has to
+ *  say so itself. */
+export interface UpcomingRide extends Ride {
+  crewName: string
 }
 
 export interface ScheduleRideRequest {
   slug: string
   date: string
+  time?: string
 }
 
 export interface KomootTour {
