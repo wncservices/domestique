@@ -87,6 +87,37 @@ function encodeSlug(slug: string): string {
   return slug.split('/').map(encodeURIComponent).join('/')
 }
 
+/**
+ * Memoizes a single-argument async function by that argument, for the
+ * page's lifetime — used below for track()/trackPreview(), where the
+ * result never changes for a given slug: a route's points never change
+ * after import (a re-import creates a new route, it doesn't edit one in
+ * place), and a preview's background wash only changes when an admin
+ * rebuilds the basemap, already reflected by the server's own
+ * PreviewCache invalidation. TrackPreview.vue's card fully unmounts and
+ * remounts on pagination (nothing keeps individual cards alive across a
+ * page change), so without this every revisit re-fetched *and*
+ * re-JSON-parsed *and* re-computed SVG paths from a payload that can run
+ * to tens of thousands of points for a dense town-centre route — an HTTP
+ * cache header alone only saves the network round trip, not that
+ * client-side work. Caches the in-flight promise, not just the resolved
+ * value, so concurrent callers for the same slug share one request rather
+ * than each firing their own; a failed fetch is evicted rather than
+ * cached, so a transient network error does not permanently poison a slug.
+ */
+function memoizeBySlug<T>(fn: (slug: string) => Promise<T>): (slug: string) => Promise<T> {
+  const cache = new Map<string, Promise<T>>()
+  return (slug: string) => {
+    let promise = cache.get(slug)
+    if (!promise) {
+      promise = fn(slug)
+      promise.catch(() => cache.delete(slug))
+      cache.set(slug, promise)
+    }
+    return promise
+  }
+}
+
 export const api = {
   config: () => request<AppConfig>('/api/config'),
   me: () => request<Me>('/api/me'),
@@ -232,15 +263,16 @@ export const api = {
     }),
   routes: () => request<LibraryResponse>('/api/routes'),
   plan: () => request<PlanResponse>('/api/plan'),
-  track: (slug: string) => request<TrackResponse>(`/api/tracks/${encodeSlug(slug)}`),
+  track: memoizeBySlug((slug: string) => request<TrackResponse>(`/api/tracks/${encodeSlug(slug)}`)),
   /** Precomputed, cached background wash for a route's card preview — see
    *  utils/staticBasemap's own fetchBasemapLayers for the client-side
    *  fallback this is meant to make unnecessary on a deployment that has
    *  it. A 404 (no tiles component, or no basemap built yet) is a normal,
    *  expected outcome here, not a bug — callers should catch it and fall
    *  back rather than surface it as an error. */
-  trackPreview: (slug: string) =>
+  trackPreview: memoizeBySlug((slug: string) =>
     request<BasemapLayers>(`/api/track-preview/${encodeSlug(slug)}`),
+  ),
   /** Omitting `items` (or passing all of them) pushes everything, same as
    *  before per-item selection existed. */
   push: (items?: { accountId: string; slug: string }[]) =>

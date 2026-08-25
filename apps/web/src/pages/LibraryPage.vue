@@ -79,6 +79,18 @@ const pagedRoutes = computed(() => {
   return visibleRoutes.value.slice(start, start + pageSize)
 })
 
+// Which slugs the current page shows — used to v-show cards rather than
+// v-for-slice them (see the template below) so a card that leaves the
+// page is hidden, not destroyed. RouteCard/TrackPreview's own fetch is
+// the expensive part to redo: a dense town-centre route's preview can run
+// to tens of thousands of points, and paginating away and back used to
+// tear the whole card down and rebuild it — re-fetching, re-parsing and
+// re-painting all of it — for data that cannot have changed underneath
+// it. api.track()/trackPreview() now memoize by slug too, but that alone
+// doesn't save the DOM/SVG paint cost of a full remount; v-show does,
+// since the component instance and its already-rendered DOM never go away.
+const pagedSlugs = computed(() => new Set(pagedRoutes.value.map((r) => r.slug)))
+
 // Map mode wants every filtered route plotted at once, not one page of 24 —
 // pagination doesn't apply to it.
 const viewMode = ref<'grid' | 'map'>('grid')
@@ -295,7 +307,8 @@ async function push(items: { accountId: string; slug: string }[]) {
       <template v-else>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <RouteCard
-            v-for="route in pagedRoutes"
+            v-for="route in visibleRoutes"
+            v-show="pagedSlugs.has(route.slug)"
             :key="route.slug"
             :route="route"
             :accounts="accounts"
