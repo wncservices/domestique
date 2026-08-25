@@ -240,20 +240,30 @@ onMounted(async () => {
       <USwitch v-model="showImported" :label="`Show ${importedCount} already imported`" />
     </div>
 
-    <UTable
-      v-if="connection.connected && (visibleCourses.length || loading)"
-      :data="pagedCourses"
-      :columns="columns"
-      :loading="loading"
-      :ui="{ td: 'text-sm' }"
-    />
-    <UPagination
-      v-if="visibleCourses.length > coursesPageSize"
-      v-model:page="coursesPage"
-      :total="visibleCourses.length"
-      :items-per-page="coursesPageSize"
-      class="mt-4 justify-center"
-    />
+    <!-- UTable and UPagination have to share one v-if/v-else-if branch, not
+         two adjacent ones of their own — UPagination's condition (whether
+         there are enough rows to paginate) is unrelated to whether the table
+         itself has anything to show, so giving it its own plain v-if used to
+         snap the chain in two: whenever there were new courses to import but
+         not enough to fill a page, the table rendered them correctly *and*
+         the "Everything is imported" empty state below rendered too, because
+         that v-else-if was actually attached to UPagination's (false)
+         condition rather than UTable's. -->
+    <template v-if="connection.connected && (visibleCourses.length || loading)">
+      <UTable
+        :data="pagedCourses"
+        :columns="columns"
+        :loading="loading"
+        :ui="{ td: 'text-sm' }"
+      />
+      <UPagination
+        v-if="visibleCourses.length > coursesPageSize"
+        v-model:page="coursesPage"
+        :total="visibleCourses.length"
+        :items-per-page="coursesPageSize"
+        class="mt-4 justify-center"
+      />
+    </template>
     <UEmpty
       v-else-if="connection.connected && courses.length"
       icon="i-lucide-check"
