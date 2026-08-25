@@ -205,6 +205,33 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A blocked rider is refused here, before a session is ever created —
+	// regardless of which Auth0 identity the token names. Auth0's own
+	// blocked flag (auth0mgmt.SetBlocked) only stops the specific identity
+	// an admin saw and blocked; this stops a fresh signup with the same
+	// email from getting back in too. Requires the token to carry an email
+	// claim (auth.oidc.scopes must include "email") — without one, a
+	// blocked rider signing in with a fresh identity simply is not caught,
+	// the same limitation handleSelfPasswordReset already documents for
+	// id.Email.
+	if s.Blocklist != nil && identity.Email != "" {
+		blocked, err := s.Blocklist.IsBlocked(r.Context(), identity.Email)
+		if err != nil {
+			s.logger().Warn("checking the blocklist failed", "err", err)
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "sign-in could not be completed"})
+			return
+		}
+		if blocked {
+			s.logger().Info("blocked email tried to sign in", "email", identity.Email, "user", identity.User)
+			returnTo := st.ReturnTo
+			if returnTo == "" {
+				returnTo = "/"
+			}
+			http.Redirect(w, r, withNotice(returnTo, "This account has been blocked."), http.StatusFound)
+			return
+		}
+	}
+
 	token, expiresAt, err := s.Sessions.Create(identity, sessionTTL)
 	if err != nil {
 		s.fail(w, err)

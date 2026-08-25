@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -22,15 +23,27 @@ type crewMemberDTO struct {
 	// the owner/admin who always may — see crew.Member.CanSchedule. Only
 	// meaningful for an approved row; omitted (false) for a pending one.
 	CanSchedule bool `json:"canSchedule,omitempty"`
+	// Owner is whether this member holds an owner grant — see
+	// crew.Member.IsOwner. Only meaningful for an approved row.
+	Owner bool `json:"owner,omitempty"`
 }
 
 type crewDTO struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Owner string `json:"owner"`
-	// Mine is whether this identity may manage the crew — its owner, or an
-	// admin — the same CanEditRoute idiom accountDTO.Mine already uses for
-	// a linked account. Members is revealed under the same condition.
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Owners is who currently holds an owner grant — may delete the crew,
+	// change auto-share, add/remove members, and promote/demote other
+	// owners. Replaces a former single Owner string: a crew now survives
+	// one owner's departure as long as another owner grant remains — see
+	// crew.Crew.Owner's own doc comment (the underlying column persists,
+	// informational only, as "who originally created this crew," but is
+	// no longer surfaced here since it no longer decides anything). Always
+	// at least one rider, except for a crew whose sole owner was deleted
+	// (see the API package's purgeRiderData), which an admin's own
+	// override in canManageCrew keeps manageable regardless.
+	Owners []string `json:"owners"`
+	// Mine is whether this identity may manage the crew — one of Owners, or
+	// an admin. Members is revealed under the same condition.
 	Mine bool `json:"mine"`
 	// MembershipStatus is this viewer's own standing: "none", "pending" or
 	// "approved". Always present, even for a crew that isn't theirs — a
@@ -80,15 +93,26 @@ type crewDTO struct {
 // together), so this never issues a query of its own.
 func (s *Server) crewDTOFor(identity auth.Identity, c crew.Crew, members []crew.Member) crewDTO {
 	dto := crewDTO{
-		ID: c.ID, Name: c.Name, Owner: c.Owner,
-		Mine:             identity.CanEditRoute(c.Owner),
+		ID: c.ID, Name: c.Name,
 		MembershipStatus: "none",
 		AutoShare:        c.AutoShare,
 	}
 	for _, m := range members {
-		if m.Status == crew.StatusApproved {
-			dto.MemberCount++
+		if m.Status != crew.StatusApproved {
+			continue
 		}
+		dto.MemberCount++
+		if m.IsOwner {
+			dto.Owners = append(dto.Owners, m.Rider)
+			if strings.EqualFold(m.Rider, identity.User) {
+				dto.Mine = true
+			}
+		}
+	}
+	if identity.Role.Can(auth.PermEditAny) {
+		dto.Mine = true
+	}
+	for _, m := range members {
 		if strings.EqualFold(m.Rider, identity.User) {
 			dto.MembershipStatus = string(m.Status)
 			if m.Status == crew.StatusPending {
@@ -119,6 +143,7 @@ func (s *Server) crewDTOFor(identity auth.Identity, c crew.Crew, members []crew.
 			}
 			if m.Status == crew.StatusApproved {
 				member.CanSchedule = m.CanSchedule
+				member.Owner = m.IsOwner
 			}
 			dto.Members = append(dto.Members, member)
 		}
@@ -144,6 +169,20 @@ func (s *Server) crewAvailable(w http.ResponseWriter) bool {
 		"error": "this deployment has no crew store configured",
 	})
 	return false
+}
+
+// canManageCrew reports whether identity may act as one of this crew's
+// owners would — a current owner grant on crewID, or an admin, the same
+// admin-always-may override CanEditRoute already gives every other owned
+// resource. Crew handlers use this instead of CanEditRoute(c.Owner):
+// CanEditRoute's single-owner-string signature cannot express "one of
+// several," and it stays that shape for its other two callers (routes,
+// linked accounts), which are not becoming multi-owner.
+func (s *Server) canManageCrew(ctx context.Context, identity auth.Identity, crewID string) (bool, error) {
+	if identity.Role.Can(auth.PermEditAny) {
+		return true, nil
+	}
+	return s.Crew.IsOwner(ctx, crewID, identity.User)
 }
 
 // handleCreateCrew makes a new crew. The caller becomes its owner and its
@@ -230,7 +269,10 @@ func (s *Server) handleDeleteCrew(w http.ResponseWriter, r *http.Request) {
 		s.failCrewLookup(w, err)
 		return
 	}
-	if !auth.FromContext(r.Context()).CanEditRoute(c.Owner) {
+	if may, err := s.canManageCrew(r.Context(), auth.FromContext(r.Context()), c.ID); err != nil {
+		s.fail(w, err)
+		return
+	} else if !may {
 		s.forbidCrew(w, r)
 		return
 	}
@@ -275,7 +317,10 @@ func (s *Server) handleSetCrewAutoShare(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	if !identity.CanEditRoute(c.Owner) {
+	if may, err := s.canManageCrew(r.Context(), identity, c.ID); err != nil {
+		s.fail(w, err)
+		return
+	} else if !may {
 		s.forbidCrew(w, r)
 		return
 	}
@@ -327,7 +372,10 @@ func (s *Server) handleSetCanScheduleCrewMember(w http.ResponseWriter, r *http.R
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	if !identity.CanEditRoute(c.Owner) {
+	if may, err := s.canManageCrew(r.Context(), identity, c.ID); err != nil {
+		s.fail(w, err)
+		return
+	} else if !may {
 		s.forbidCrew(w, r)
 		return
 	}
@@ -352,6 +400,64 @@ func (s *Server) handleSetCanScheduleCrewMember(w http.ResponseWriter, r *http.R
 	}
 
 	s.logger().Info("crew schedule permission set", "crew", id, "rider", rider, "canSchedule", body.CanSchedule, "by", identity.User)
+	writeJSON(w, http.StatusOK, s.crewDTOFor(identity, c, members))
+}
+
+// handleSetCrewMemberOwner grants or revokes a member's owner grant on the
+// crew — owner or admin only, the same rule as auto-share/schedule grants:
+// this changes what someone else may do, not the caller's own membership.
+// "Transfer ownership" is composed client-side from two calls to this same
+// endpoint (promote the new owner, then optionally demote self) rather than
+// a dedicated transfer endpoint. Rejects demoting the crew's last owner
+// (crew.ErrLastOwner) with 409, prompting the caller to promote someone
+// else first.
+func (s *Server) handleSetCrewMemberOwner(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageCrews) {
+		return
+	}
+	if !s.crewAvailable(w) {
+		return
+	}
+
+	id, rider := r.PathValue("id"), r.PathValue("rider")
+	c, err := s.Crew.Get(r.Context(), id)
+	if err != nil {
+		s.failCrewLookup(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if may, err := s.canManageCrew(r.Context(), identity, c.ID); err != nil {
+		s.fail(w, err)
+		return
+	} else if !may {
+		s.forbidCrew(w, r)
+		return
+	}
+
+	var body struct {
+		Owner bool `json:"owner"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	if err := s.Crew.SetOwner(r.Context(), id, rider, body.Owner); err != nil {
+		if errors.Is(err, crew.ErrLastOwner) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		s.failCrewLookup(w, err)
+		return
+	}
+
+	members, err := s.Crew.Members(r.Context(), id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.logger().Info("crew ownership set", "crew", id, "rider", rider, "owner", body.Owner, "by", identity.User)
 	writeJSON(w, http.StatusOK, s.crewDTOFor(identity, c, members))
 }
 
@@ -418,7 +524,10 @@ func (s *Server) handleAddCrewMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	if !identity.CanEditRoute(c.Owner) {
+	if may, err := s.canManageCrew(r.Context(), identity, c.ID); err != nil {
+		s.fail(w, err)
+		return
+	} else if !may {
 		s.forbidCrew(w, r)
 		return
 	}
@@ -482,7 +591,10 @@ func (s *Server) handleApproveCrewMember(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	} else {
-		if !identity.CanEditRoute(c.Owner) {
+		if may, err := s.canManageCrew(r.Context(), identity, c.ID); err != nil {
+			s.fail(w, err)
+			return
+		} else if !may {
 			s.forbidCrew(w, r)
 			return
 		}
@@ -537,7 +649,10 @@ func (s *Server) handleRemoveCrewMember(w http.ResponseWriter, r *http.Request) 
 			s.failCrewLookup(w, err)
 			return
 		}
-		if !identity.CanEditRoute(c.Owner) {
+		if may, err := s.canManageCrew(r.Context(), identity, c.ID); err != nil {
+			s.fail(w, err)
+			return
+		} else if !may {
 			s.forbidCrew(w, r)
 			return
 		}

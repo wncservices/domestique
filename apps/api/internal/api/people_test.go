@@ -12,6 +12,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
+	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/state"
 )
@@ -33,6 +34,9 @@ type fakePeople struct {
 	enrollments        map[string][]auth0mgmt.Enrollment // by user id
 	deletedEnrollments []string                          // DeleteEnrollment's own calls, in order
 
+	blockedUsers map[string]bool // by user id, last call wins
+	deletedUsers []string        // DeleteUser's own calls, in order
+
 	listErr       error
 	inviteErr     error
 	emailErr      error
@@ -42,6 +46,8 @@ type fakePeople struct {
 	enrollListErr error
 	ticketErr     error
 	deleteErr     error
+	setBlockedErr error
+	deleteUserErr error
 }
 
 func (f *fakePeople) ListPeople(context.Context, string, ...string) ([]auth0mgmt.Person, error) {
@@ -123,14 +129,38 @@ func (f *fakePeople) DeleteEnrollment(_ context.Context, enrollmentID string) er
 	return nil
 }
 
+func (f *fakePeople) SetBlocked(_ context.Context, userID string, blocked bool) error {
+	if f.setBlockedErr != nil {
+		return f.setBlockedErr
+	}
+	if f.blockedUsers == nil {
+		f.blockedUsers = map[string]bool{}
+	}
+	f.blockedUsers[userID] = blocked
+	return nil
+}
+
+func (f *fakePeople) DeleteUser(_ context.Context, userID string) error {
+	if f.deleteUserErr != nil {
+		return f.deleteUserErr
+	}
+	f.deletedUsers = append(f.deletedUsers, userID)
+	return nil
+}
+
 type peopleHarness struct {
 	t      *testing.T
 	client *http.Client
 	base   string
 	people *fakePeople
+	source *source.DB
 }
 
-func newPeopleHarness(t *testing.T, people *fakePeople) *peopleHarness {
+// newPeopleHarness builds a working People-page server. opts can wire
+// additional Server fields (Accounts, Links, Crew, Schedule, Blocklist) —
+// purgeRiderData nil-checks every one of them, so a test that only cares
+// about the Auth0 side of block/delete does not need to set any of these up.
+func newPeopleHarness(t *testing.T, people *fakePeople, opts ...func(*api.Server)) *peopleHarness {
 	t.Helper()
 
 	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
@@ -164,10 +194,13 @@ func newPeopleHarness(t *testing.T, people *fakePeople) *peopleHarness {
 	if people != nil {
 		srv.People = people
 	}
+	for _, opt := range opts {
+		opt(srv)
+	}
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &peopleHarness{t: t, client: server.Client(), base: server.URL, people: people}
+	return &peopleHarness{t: t, client: server.Client(), base: server.URL, people: people, source: db}
 }
 
 func (h *peopleHarness) as(user, groups, method, path, body string) *http.Response {
@@ -446,11 +479,180 @@ func TestPeopleEndpointsWithoutAConnectorAreUnavailable(t *testing.T) {
 		{http.MethodGet, "/api/people", ""},
 		{http.MethodPost, "/api/people", `{"email":"x@example.com","role":"rider"}`},
 		{http.MethodPut, "/api/people/u1/role", `{"role":"admin"}`},
+		{http.MethodPut, "/api/people/u1/blocked", `{"blocked":true,"email":"x@example.com"}`},
+		{http.MethodDelete, "/api/people/u1", ""},
 	} {
 		resp := h.as("wilant", "domestique-users,domestique-admins", tc.method, tc.path, tc.body)
 		if resp.StatusCode != http.StatusPreconditionFailed {
 			t.Errorf("%s %s status = %d, want 412", tc.method, tc.path, resp.StatusCode)
 		}
+	}
+}
+
+func newTestBlocklist(t *testing.T) *blocklist.Store {
+	t.Helper()
+	db, err := source.OpenDB(filepath.Join(t.TempDir(), "blocklist.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	bl, err := blocklist.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bl
+}
+
+func TestPeopleBlockRequiresAdmin(t *testing.T) {
+	h := newPeopleHarness(t, &fakePeople{})
+
+	resp := h.as("wilant", "domestique-users,cyclists", http.MethodPut, "/api/people/u1/blocked",
+		`{"blocked":true,"email":"rider@example.com"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// Blocking writes to both Auth0 (the identity an admin is actually looking
+// at) and the local blocklist (checked at every OIDC callback, regardless
+// of which identity signs in next) — see internal/blocklist's own package
+// doc for why neither alone is enough.
+func TestPeopleBlockSetsAuth0AndLocalBlocklist(t *testing.T) {
+	fake := &fakePeople{}
+	bl := newTestBlocklist(t)
+	h := newPeopleHarness(t, fake, func(s *api.Server) { s.Blocklist = bl })
+
+	resp := h.as("wilant", "domestique-users,domestique-admins", http.MethodPut, "/api/people/u1/blocked",
+		`{"blocked":true,"email":"Rider@Example.com","reason":"spamming crews"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !fake.blockedUsers["u1"] {
+		t.Error("Auth0 blocked flag was not set")
+	}
+	blocked, err := bl.IsBlocked(t.Context(), "rider@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blocked {
+		t.Error("local blocklist was not updated")
+	}
+}
+
+func TestPeopleUnblockClearsBothAuth0AndLocalBlocklist(t *testing.T) {
+	fake := &fakePeople{}
+	bl := newTestBlocklist(t)
+	if err := bl.Block(t.Context(), "rider@example.com", "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	fake.blockedUsers = map[string]bool{"u1": true}
+	h := newPeopleHarness(t, fake, func(s *api.Server) { s.Blocklist = bl })
+
+	resp := h.as("wilant", "domestique-users,domestique-admins", http.MethodPut, "/api/people/u1/blocked",
+		`{"blocked":false,"email":"rider@example.com"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if fake.blockedUsers["u1"] {
+		t.Error("Auth0 blocked flag is still set")
+	}
+	blocked, err := bl.IsBlocked(t.Context(), "rider@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked {
+		t.Error("local blocklist still reports this email as blocked")
+	}
+}
+
+func TestPeopleBlockRequiresAnEmail(t *testing.T) {
+	h := newPeopleHarness(t, &fakePeople{})
+	resp := h.as("wilant", "domestique-users,domestique-admins", http.MethodPut, "/api/people/u1/blocked", `{"blocked":true}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestPeopleDeleteRequiresAdmin(t *testing.T) {
+	h := newPeopleHarness(t, &fakePeople{})
+
+	resp := h.as("wilant", "domestique-users,cyclists", http.MethodDelete, "/api/people/u1", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// Purge-before-identity: the local data for the rider named in ?rider= is
+// removed first, and only then is the Auth0 identity itself deleted — the
+// same ordering handleDeleteMe uses, so a failure never leaves an identity
+// gone with local data still attached to it.
+func TestPeopleDeletePurgesLocalDataThenAuth0Identity(t *testing.T) {
+	fake := &fakePeople{}
+	h := newPeopleHarness(t, fake)
+
+	if _, err := h.source.Create(t.Context(), source.CreateRequest{
+		Name: "Departed Rider's Loop", UploadedBy: "gone",
+		GPX: []byte(`<gpx version="1.1"><trk><trkseg><trkpt lat="50" lon="3"/><trkpt lat="50.001" lon="3.001"/></trkseg></trk></gpx>`),
+	}); err != nil {
+		t.Fatalf("seed route: %v", err)
+	}
+
+	resp := h.as("wilant", "domestique-users,domestique-admins", http.MethodDelete, "/api/people/auth0|gone?rider=gone", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(fake.deletedUsers) != 1 || fake.deletedUsers[0] != "auth0|gone" {
+		t.Errorf("deletedUsers = %v, want [auth0|gone]", fake.deletedUsers)
+	}
+
+	routes, _, err := h.source.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 0 {
+		t.Errorf("routes = %+v, want the departed rider's route purged", routes)
+	}
+}
+
+// No ?rider= means the admin chose not to (or could not) confirm a local
+// rider identity to purge — the Auth0 identity is still deleted, but no
+// local data is touched, rather than guessing.
+func TestPeopleDeleteWithoutRiderOnlyDeletesTheIdentity(t *testing.T) {
+	fake := &fakePeople{}
+	h := newPeopleHarness(t, fake)
+
+	if _, err := h.source.Create(t.Context(), source.CreateRequest{
+		Name: "Someone's Loop", UploadedBy: "someone",
+		GPX: []byte(`<gpx version="1.1"><trk><trkseg><trkpt lat="50" lon="3"/><trkpt lat="50.001" lon="3.001"/></trkseg></trk></gpx>`),
+	}); err != nil {
+		t.Fatalf("seed route: %v", err)
+	}
+
+	resp := h.as("wilant", "domestique-users,domestique-admins", http.MethodDelete, "/api/people/auth0|someone", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(fake.deletedUsers) != 1 {
+		t.Errorf("deletedUsers = %v, want the identity still deleted", fake.deletedUsers)
+	}
+	routes, _, err := h.source.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Errorf("routes = %+v, want the route untouched (no rider named)", routes)
+	}
+}
+
+// An Auth0 failure after the purge already succeeded is surfaced, not
+// hidden — the caller needs to know the identity itself is still there.
+func TestPeopleDeleteSurfacesAnAuth0Failure(t *testing.T) {
+	fake := &fakePeople{deleteUserErr: assertErr}
+	h := newPeopleHarness(t, fake)
+
+	resp := h.as("wilant", "domestique-users,domestique-admins", http.MethodDelete, "/api/people/auth0|gone?rider=gone", "")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
 }
 

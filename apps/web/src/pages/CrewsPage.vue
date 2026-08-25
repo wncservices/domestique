@@ -50,7 +50,7 @@ const knownRiders = computed(() => {
   const set = new Set<string>()
   for (const a of accounts.value) if (a.rider) set.add(a.rider)
   for (const r of routes.value) if (r.owner) set.add(r.owner)
-  for (const c of crews.value) if (c.owner) set.add(c.owner)
+  for (const c of crews.value) for (const owner of c.owners) set.add(owner)
   for (const p of people.value) if (p.likelyRider) set.add(p.likelyRider)
   return [...set].sort((a, b) => a.localeCompare(b))
 })
@@ -371,6 +371,34 @@ async function toggleCanSchedule(crew: Crew, rider: string, value: boolean) {
     })
   } finally {
     togglingCanSchedule.value = ''
+  }
+}
+
+// --- per-member owner grant (owner/admin only) — "transfer ownership" is
+// just promoting a co-owner then, separately, demoting yourself; there is
+// no dedicated transfer action ---
+
+const togglingOwner = ref('')
+
+async function toggleOwner(crew: Crew, rider: string, owner: boolean) {
+  togglingOwner.value = `${crew.id}:${rider}`
+  try {
+    await api.setCrewMemberOwner(crew.id, rider, owner)
+    toast.add({
+      title: owner ? `${rider} is now an owner of ${crew.name}` : `${rider} is no longer an owner of ${crew.name}`,
+      icon: 'i-lucide-shield',
+      color: 'success',
+    })
+    await backgroundRefresh()
+  } catch (err) {
+    toast.add({
+      title: `Could not change ${rider}'s ownership`,
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    togglingOwner.value = ''
   }
 }
 
@@ -734,7 +762,7 @@ async function saveShare() {
             >
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm text-highlighted">{{ crew.name }}</p>
-                <p class="truncate font-mono text-xs text-dimmed">{{ crew.id }} · owner {{ crew.owner }}</p>
+                <p class="truncate font-mono text-xs text-dimmed">{{ crew.id }} · owner{{ crew.owners.length === 1 ? '' : 's' }} {{ crew.owners.join(', ') }}</p>
               </div>
               <UBadge color="neutral" variant="subtle" size="sm">
                 {{ crew.memberCount }} member{{ crew.memberCount === 1 ? '' : 's' }}
@@ -750,7 +778,7 @@ async function saveShare() {
                 Request to join
               </UButton>
               <template v-else-if="crew.membershipStatus === 'pending' && crew.membershipOrigin === 'invite'">
-                <span class="text-xs text-dimmed">{{ crew.owner }} invited you</span>
+                <span class="text-xs text-dimmed">{{ crew.owners.join(', ') }} invited you</span>
                 <UButton
                   size="sm"
                   color="success"
@@ -1154,11 +1182,26 @@ async function saveShare() {
                   <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">
                     {{ member.rider }}
                   </span>
-                  <UBadge v-if="member.rider.toLowerCase() === detailCrew.owner.toLowerCase()" color="primary" variant="subtle" size="sm">
-                    Owner
-                  </UBadge>
+                  <template v-if="member.owner">
+                    <UBadge color="primary" variant="subtle" size="sm">Owner</UBadge>
+                    <UTooltip
+                      :text="detailCrew.owners.length === 1
+                        ? 'Promote another owner first — a crew always needs at least one'
+                        : 'Remove this owner grant'"
+                    >
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-shield-off"
+                        :disabled="detailCrew.owners.length === 1"
+                        :loading="togglingOwner === `${detailCrew.id}:${member.rider}`"
+                        @click="toggleOwner(detailCrew!, member.rider, false)"
+                      />
+                    </UTooltip>
+                  </template>
                   <template v-else>
-                    <UTooltip text="May schedule a crew ride, the same as the owner">
+                    <UTooltip text="May schedule a crew ride, the same as an owner">
                       <label class="flex items-center gap-1.5 text-xs text-dimmed">
                         <USwitch
                           :model-value="member.canSchedule"
@@ -1168,6 +1211,16 @@ async function saveShare() {
                         />
                         <span class="hidden sm:inline">Can schedule</span>
                       </label>
+                    </UTooltip>
+                    <UTooltip text="Make this member an owner">
+                      <UButton
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        icon="i-lucide-shield"
+                        :loading="togglingOwner === `${detailCrew.id}:${member.rider}`"
+                        @click="toggleOwner(detailCrew!, member.rider, true)"
+                      />
                     </UTooltip>
                     <UButton
                       size="xs"
@@ -1198,7 +1251,12 @@ async function saveShare() {
                     {{ initials(rider) }}
                   </div>
                   <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ rider }}</span>
-                  <UBadge v-if="rider.toLowerCase() === detailCrew.owner.toLowerCase()" color="primary" variant="subtle" size="sm">
+                  <UBadge
+                    v-if="detailCrew.owners.some((o) => o.toLowerCase() === rider.toLowerCase())"
+                    color="primary"
+                    variant="subtle"
+                    size="sm"
+                  >
                     Owner
                   </UBadge>
                 </div>

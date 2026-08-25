@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -489,6 +490,75 @@ func TestSSOCallbackAccessDeniedRedirectsWithANotice(t *testing.T) {
 	}
 	if got := redirect.Query().Get("notice"); got != message {
 		t.Errorf("notice = %q, want the Action's own error_description", got)
+	}
+}
+
+// A blocked email must never reach a session, even on a brand-new Auth0
+// identity the admin who blocked them never saw — the whole reason
+// Blocklist exists as a local check separate from Auth0's own blocked flag.
+func TestSSOCallbackRejectsABlockedEmail(t *testing.T) {
+	db, err := source.OpenDB(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	bl, err := blocklist.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bl.Block(context.Background(), "blocked@example.com", "admin", "kicked from a crew"); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newSSOHarness(t, func(s *api.Server) { s.Blocklist = bl })
+	callback := h.loginWithUser([]string{"cyclists"}, map[string]any{
+		"preferred_username": "wilant", "email": "blocked@example.com",
+	})
+
+	if callback.StatusCode != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302", callback.StatusCode)
+	}
+	loc, err := callback.Location()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc.Query().Get("notice") == "" {
+		t.Errorf("redirect = %v, want a notice explaining the block", loc)
+	}
+
+	me := meBody(t, h.get("/api/me"))
+	if me["authenticated"] == true {
+		t.Fatal("a blocked rider ended up authenticated")
+	}
+}
+
+// A rider not on the blocklist must sign in exactly as before — the check
+// must not false-positive on an ordinary sign-in.
+func TestSSOCallbackAllowsAnUnblockedEmail(t *testing.T) {
+	db, err := source.OpenDB(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	bl, err := blocklist.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bl.Block(context.Background(), "someone-else@example.com", "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newSSOHarness(t, func(s *api.Server) { s.Blocklist = bl })
+	callback := h.loginWithUser([]string{"cyclists"}, map[string]any{
+		"preferred_username": "wilant", "email": "wilant@example.com",
+	})
+
+	if callback.StatusCode != http.StatusFound {
+		t.Fatalf("callback status = %d, want 302", callback.StatusCode)
+	}
+	me := meBody(t, h.get("/api/me"))
+	if me["authenticated"] != true {
+		t.Fatalf("me = %v, want authenticated — this email was never blocked", me)
 	}
 }
 

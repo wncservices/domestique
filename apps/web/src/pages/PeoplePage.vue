@@ -133,6 +133,95 @@ function lastSeen(person: Person): string {
   if (!person.lastLogin) return 'never signed in'
   return new Date(person.lastLogin).toLocaleDateString()
 }
+
+// --- block / unblock ---
+//
+// Blocking stops two things: this identity signing in again (Auth0's own
+// blocked flag) and a fresh signup with the same email getting back in
+// (this app's own local blocklist, checked at every OIDC callback) — see
+// api.setPersonBlocked's own doc comment. Confirmed either direction,
+// since un-blocking someone is also a real access decision worth a second
+// look, not just blocking.
+
+const blockTarget = ref<Person | null>(null)
+const blockReason = ref('')
+const togglingBlocked = ref('')
+
+async function confirmToggleBlocked() {
+  const target = blockTarget.value
+  if (!target) return
+  const blocked = !target.blocked
+  togglingBlocked.value = target.id
+  try {
+    const result = await api.setPersonBlocked(target.id, blocked, target.email, blocked ? blockReason.value.trim() : undefined)
+    target.blocked = blocked
+    blockTarget.value = null
+    blockReason.value = ''
+    if (result.error) {
+      toast.add({
+        title: blocked ? `${target.email} blocked, but only partially` : `${target.email} unblocked, but only partially`,
+        description: result.error,
+        icon: 'i-lucide-triangle-alert',
+        color: 'warning',
+      })
+    } else {
+      toast.add({
+        title: blocked ? `${target.email} is now blocked` : `${target.email} is no longer blocked`,
+        icon: blocked ? 'i-lucide-shield-off' : 'i-lucide-shield-check',
+        color: 'success',
+      })
+    }
+  } catch (err) {
+    toast.add({
+      title: `Could not ${blocked ? 'block' : 'unblock'} ${target.email}`,
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    togglingBlocked.value = ''
+  }
+}
+
+// --- delete ---
+//
+// likelyRider is only a guess at this person's local rider identity (see
+// Person.likelyRider's own doc comment) — surfaced here, editable, so an
+// admin can catch a wrong guess before the purge fires rather than after.
+
+const deleteTarget = ref<Person | null>(null)
+const deleteRider = ref('')
+const deletingPerson = ref('')
+
+function openDeleteConfirm(person: Person) {
+  deleteTarget.value = person
+  deleteRider.value = person.likelyRider ?? ''
+}
+
+async function confirmDeletePerson() {
+  const target = deleteTarget.value
+  if (!target) return
+  deletingPerson.value = target.id
+  try {
+    await api.deletePerson(target.id, deleteRider.value.trim() || undefined)
+    people.value = people.value.filter((p) => p.id !== target.id)
+    deleteTarget.value = null
+    toast.add({
+      title: `${target.email} deleted`,
+      icon: 'i-lucide-check',
+      color: 'success',
+    })
+  } catch (err) {
+    toast.add({
+      title: `Could not delete ${target.email}`,
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    deletingPerson.value = ''
+  }
+}
 </script>
 
 <template>
@@ -194,6 +283,7 @@ function lastSeen(person: Person): string {
               <p class="truncate text-sm text-highlighted">{{ person.name || person.email }}</p>
               <p class="truncate text-xs text-dimmed">{{ person.email }} · {{ lastSeen(person) }}</p>
             </div>
+            <UBadge v-if="person.blocked" color="error" variant="subtle" size="sm">blocked</UBadge>
             <UBadge :color="roleColor(person.role)" variant="subtle" size="sm">{{ person.role }}</UBadge>
             <USelect
               :model-value="person.role"
@@ -205,6 +295,28 @@ function lastSeen(person: Person): string {
               aria-label="Change role"
               @update:model-value="(role: AssignableRole) => changeRole(person, role)"
             />
+            <UTooltip :text="person.blocked ? 'Unblock' : 'Block'">
+              <UButton
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                :icon="person.blocked ? 'i-lucide-shield-check' : 'i-lucide-shield-off'"
+                :aria-label="person.blocked ? 'Unblock' : 'Block'"
+                :loading="togglingBlocked === person.id"
+                @click="blockTarget = person"
+              />
+            </UTooltip>
+            <UTooltip text="Delete">
+              <UButton
+                size="sm"
+                color="error"
+                variant="ghost"
+                icon="i-lucide-trash-2"
+                aria-label="Delete"
+                :loading="deletingPerson === person.id"
+                @click="openDeleteConfirm(person)"
+              />
+            </UTooltip>
           </div>
         </div>
 
@@ -260,6 +372,66 @@ function lastSeen(person: Person): string {
             </UButton>
           </div>
         </form>
+      </template>
+    </UModal>
+
+    <UModal
+      :open="!!blockTarget"
+      :title="blockTarget?.blocked ? 'Unblock this person?' : 'Block this person?'"
+      @update:open="blockTarget = null"
+    >
+      <template #body>
+        <p class="text-sm text-toned">
+          <template v-if="blockTarget?.blocked">
+            {{ blockTarget?.email }} will be able to sign in again, and a fresh signup with this
+            email will no longer be refused.
+          </template>
+          <template v-else>
+            {{ blockTarget?.email }} will be signed out and refused at sign-in — including a fresh
+            signup with this same email. Their existing routes and data are not touched, and this
+            can be undone later.
+          </template>
+        </p>
+        <UFormField v-if="!blockTarget?.blocked" label="Reason" hint="optional, for your own records" class="mt-3">
+          <UInput v-model="blockReason" class="w-full" />
+        </UFormField>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="!!togglingBlocked" @click="blockTarget = null">
+            Cancel
+          </UButton>
+          <UButton
+            :color="blockTarget?.blocked ? 'primary' : 'error'"
+            :loading="!!togglingBlocked"
+            @click="confirmToggleBlocked"
+          >
+            {{ blockTarget?.blocked ? 'Unblock' : 'Block' }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal :open="!!deleteTarget" title="Delete this person?" @update:open="deleteTarget = null">
+      <template #body>
+        <p class="text-sm text-toned">
+          Permanently deletes {{ deleteTarget?.email }}'s sign-in. There is no undo.
+        </p>
+        <UFormField
+          label="Local rider identity to also remove"
+          hint="their routes, linked devices and crew membership — best-effort guess, check or clear it"
+          class="mt-3"
+        >
+          <UInput v-model="deleteRider" placeholder="(leave empty to skip local data)" class="w-full" />
+        </UFormField>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="!!deletingPerson" @click="deleteTarget = null">
+            Cancel
+          </UButton>
+          <UButton color="error" :loading="!!deletingPerson" @click="confirmDeletePerson">Delete</UButton>
+        </div>
       </template>
     </UModal>
   </div>

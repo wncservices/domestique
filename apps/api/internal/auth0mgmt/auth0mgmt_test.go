@@ -24,12 +24,15 @@ type fakeTenant struct {
 	users       map[string]struct{ email, name string }
 	userRoles   map[string][]string // user id -> role ids currently held
 	lastSeen    map[string]struct{ createdAt, lastLogin, nickname string }
+	blocked     map[string]bool // user id -> blocked
 
 	createdUsers   []map[string]any
 	invitedEmails  []string
 	grantedRoles   map[string][]string
 	revokedRoles   map[string][]string
 	changePassBody []map[string]string
+	deletedUsers   []string
+	patchedUsers   []map[string]any // every PATCH body received, in order
 }
 
 func newFakeTenant(t *testing.T) *fakeTenant {
@@ -40,6 +43,7 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		users:        map[string]struct{ email, name string }{},
 		userRoles:    map[string][]string{},
 		lastSeen:     map[string]struct{ createdAt, lastLogin, nickname string }{},
+		blocked:      map[string]bool{},
 		grantedRoles: map[string][]string{},
 		revokedRoles: map[string][]string{},
 	}
@@ -76,15 +80,16 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		// trusting it blindly — exercises the same OR-of-ids shape lastSeen
 		// actually sends, the way a canned response would not.
 		q := r.URL.Query().Get("q")
-		var out []map[string]string
+		var out []map[string]any
 		for _, term := range strings.Split(q, " OR ") {
 			uid := strings.TrimSuffix(strings.TrimPrefix(term, `user_id:"`), `"`)
 			seen, ok := f.lastSeen[uid]
 			if !ok {
 				continue
 			}
-			out = append(out, map[string]string{
-				"user_id": uid, "created_at": seen.createdAt, "last_login": seen.lastLogin, "nickname": seen.nickname,
+			out = append(out, map[string]any{
+				"user_id": uid, "created_at": seen.createdAt, "last_login": seen.lastLogin,
+				"nickname": seen.nickname, "blocked": f.blocked[uid],
 			})
 		}
 		_ = json.NewEncoder(w).Encode(out)
@@ -136,6 +141,28 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 			}
 		}
 		_ = json.NewEncoder(w).Encode(out)
+	})
+	mux.HandleFunc("PATCH /api/v2/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		uid := r.PathValue("id")
+		f.patchedUsers = append(f.patchedUsers, body)
+		if blocked, ok := body["blocked"].(bool); ok {
+			f.blocked[uid] = blocked
+		}
+		if name, ok := body["name"].(string); ok {
+			u := f.users[uid]
+			u.name = name
+			f.users[uid] = u
+		}
+		u := f.users[uid]
+		_ = json.NewEncoder(w).Encode(map[string]string{"user_id": uid, "email": u.email, "name": u.name})
+	})
+	mux.HandleFunc("DELETE /api/v2/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		uid := r.PathValue("id")
+		f.deletedUsers = append(f.deletedUsers, uid)
+		delete(f.users, uid)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /dbconnections/change_password", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
@@ -418,6 +445,92 @@ func TestAPIErrorSurfacesTheMessage(t *testing.T) {
 	c := newTestClient(t, f)
 	_, err := c.Invite(t.Context(), "dupe@example.com", "Dupe", nil)
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("err = %v, want it to name Auth0's own message", err)
+	}
+}
+
+func TestSetBlockedTrue(t *testing.T) {
+	f := newFakeTenant(t)
+	f.users["u1"] = struct{ email, name string }{"rider@example.com", "Rider Person"}
+	c := newTestClient(t, f)
+
+	if err := c.SetBlocked(t.Context(), "u1", true); err != nil {
+		t.Fatal(err)
+	}
+	if !f.blocked["u1"] {
+		t.Error("blocked = false, want true after SetBlocked(true)")
+	}
+	if len(f.patchedUsers) != 1 || f.patchedUsers[0]["blocked"] != true {
+		t.Errorf("patched bodies = %+v, want one carrying blocked:true", f.patchedUsers)
+	}
+}
+
+func TestSetBlockedFalseUnblocks(t *testing.T) {
+	f := newFakeTenant(t)
+	f.users["u1"] = struct{ email, name string }{"rider@example.com", "Rider Person"}
+	f.blocked["u1"] = true
+	c := newTestClient(t, f)
+
+	if err := c.SetBlocked(t.Context(), "u1", false); err != nil {
+		t.Fatal(err)
+	}
+	if f.blocked["u1"] {
+		t.Error("blocked = true, want false after SetBlocked(false)")
+	}
+}
+
+// ListPeople's own blocked mapping rides the same search-endpoint lookup as
+// CreatedAt/LastLogin/Nickname (see lastSeen) — this is what lets the People
+// page render a Block/Unblock toggle reflecting current state, rather than
+// firing the action blind.
+func TestListPeopleReportsBlockedStatus(t *testing.T) {
+	f := newFakeTenant(t)
+	f.users["u1"] = struct{ email, name string }{"rider@example.com", "Rider Person"}
+	f.roleMembers["role-gate"] = []string{"u1"}
+	f.lastSeen["u1"] = struct{ createdAt, lastLogin, nickname string }{"2026-01-01T00:00:00.000Z", "", ""}
+	f.blocked["u1"] = true
+	c := newTestClient(t, f)
+
+	people, err := c.ListPeople(t.Context(), "domestique-users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(people) != 1 || !people[0].Blocked {
+		t.Fatalf("people = %+v, want the one person reported as blocked", people)
+	}
+}
+
+func TestDeleteUserRemovesTheIdentity(t *testing.T) {
+	f := newFakeTenant(t)
+	f.users["u1"] = struct{ email, name string }{"rider@example.com", "Rider Person"}
+	c := newTestClient(t, f)
+
+	if err := c.DeleteUser(t.Context(), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.deletedUsers) != 1 || f.deletedUsers[0] != "u1" {
+		t.Errorf("deletedUsers = %v, want [u1]", f.deletedUsers)
+	}
+	if _, err := c.FindByEmail(t.Context(), "rider@example.com"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteUserSurfacesAnAPIError(t *testing.T) {
+	f := newFakeTenant(t)
+	mux := http.NewServeMux()
+	f.server.Config.Handler = mux
+	mux.HandleFunc("POST /oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 86400})
+	})
+	mux.HandleFunc("DELETE /api/v2/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "The user does not exist.", "errorCode": "inexistent_user"})
+	})
+
+	c := newTestClient(t, f)
+	err := c.DeleteUser(t.Context(), "missing")
+	if err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("err = %v, want it to name Auth0's own message", err)
 	}
 }

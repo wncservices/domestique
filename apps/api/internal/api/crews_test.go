@@ -69,19 +69,30 @@ func (h *crewHarness) as(user, groups, method, path, body string) *http.Response
 }
 
 type crewDTOOut struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Owner            string `json:"owner"`
-	Mine             bool   `json:"mine"`
-	MembershipStatus string `json:"membershipStatus"`
-	MembershipOrigin string `json:"membershipOrigin"`
-	MemberCount      int    `json:"memberCount"`
-	AutoShare        bool   `json:"autoShare"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Owners           []string `json:"owners"`
+	Mine             bool     `json:"mine"`
+	MembershipStatus string   `json:"membershipStatus"`
+	MembershipOrigin string   `json:"membershipOrigin"`
+	MemberCount      int      `json:"memberCount"`
+	AutoShare        bool     `json:"autoShare"`
 	Members          []struct {
 		Rider  string `json:"rider"`
 		Status string `json:"status"`
 		Origin string `json:"origin"`
+		Owner  bool   `json:"owner"`
 	} `json:"members"`
+}
+
+// isOwner reports whether rider appears in a crewDTOOut's Owners list.
+func (c crewDTOOut) isOwner(rider string) bool {
+	for _, o := range c.Owners {
+		if strings.EqualFold(o, rider) {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeCrew(t *testing.T, resp *http.Response) crewDTOOut {
@@ -104,8 +115,8 @@ func TestCreateCrewEnrollsTheOwner(t *testing.T) {
 	if c.ID != "crew:sunday-club" {
 		t.Errorf("id = %q", c.ID)
 	}
-	if c.Owner != "wilant" || !c.Mine {
-		t.Errorf("owner = %q, mine = %v", c.Owner, c.Mine)
+	if !c.isOwner("wilant") || !c.Mine {
+		t.Errorf("owners = %v, mine = %v", c.Owners, c.Mine)
 	}
 	if c.MembershipStatus != "approved" || c.MemberCount != 1 {
 		t.Errorf("membershipStatus = %q, memberCount = %d, want approved/1", c.MembershipStatus, c.MemberCount)
@@ -393,6 +404,105 @@ func TestOnlyOwnerOrAdminCanSetAutoShare(t *testing.T) {
 	}
 	if updated := decodeCrew(t, adminResp); updated.AutoShare {
 		t.Errorf("autoShare = true after admin disabled it, want false")
+	}
+}
+
+func TestSetCrewMemberOwnerRequiresOwnerOrAdmin(t *testing.T) {
+	h := newCrewHarness(t)
+	created := decodeCrew(t, h.as("wilant", "cyclists", http.MethodPost, "/api/crews", `{"name":"Family"}`))
+	h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+created.ID+"/members", `{"rider":"other"}`)
+	h.as("other", "cyclists", http.MethodPut, "/api/crews/"+created.ID+"/members/other", "")
+
+	// A plain member (not yet an owner) may not promote themselves.
+	if resp := h.as("other", "cyclists", http.MethodPatch, "/api/crews/"+created.ID+"/members/other/owner", `{"owner":true}`); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-owner status = %d, want 403", resp.StatusCode)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodPatch, "/api/crews/"+created.ID+"/members/other/owner", `{"owner":true}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("owner status = %d, want 200", resp.StatusCode)
+	}
+	if promoted := decodeCrew(t, resp); !promoted.isOwner("other") {
+		t.Errorf("owners = %v, want other included", promoted.Owners)
+	}
+
+	// An admin may also promote/demote.
+	adminResp := h.as("boss", "admins", http.MethodPatch, "/api/crews/"+created.ID+"/members/other/owner", `{"owner":false}`)
+	if adminResp.StatusCode != http.StatusOK {
+		t.Fatalf("admin status = %d, want 200", adminResp.StatusCode)
+	}
+	if demoted := decodeCrew(t, adminResp); demoted.isOwner("other") {
+		t.Errorf("owners = %v, want other removed", demoted.Owners)
+	}
+}
+
+func TestSetCrewMemberOwnerRejectsDemotingTheLastOwner(t *testing.T) {
+	h := newCrewHarness(t)
+	created := decodeCrew(t, h.as("wilant", "cyclists", http.MethodPost, "/api/crews", `{"name":"Family"}`))
+
+	resp := h.as("wilant", "cyclists", http.MethodPatch, "/api/crews/"+created.ID+"/members/wilant/owner", `{"owner":false}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (cannot demote the last owner)", resp.StatusCode)
+	}
+}
+
+// The whole point of multi-owner: a crew survives one owner's departure as
+// long as another owner grant remains, and that co-owner can go on managing
+// it — deleting a rider (purgeRiderData's RemoveRiderEverywhere) is one way
+// an owner departs, but this test exercises the ordinary promote-then-leave
+// path through the HTTP API rather than the purge path directly (see
+// riderdelete_test.go for that one).
+func TestSecondOwnerCanManageAfterFirstOwnerLeaves(t *testing.T) {
+	h := newCrewHarness(t)
+	created := decodeCrew(t, h.as("wilant", "cyclists", http.MethodPost, "/api/crews", `{"name":"Family"}`))
+	h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+created.ID+"/members", `{"rider":"other"}`)
+	h.as("other", "cyclists", http.MethodPut, "/api/crews/"+created.ID+"/members/other", "")
+	h.as("wilant", "cyclists", http.MethodPatch, "/api/crews/"+created.ID+"/members/other/owner", `{"owner":true}`)
+
+	// wilant leaves — now fine, since other is also an owner.
+	if resp := h.as("wilant", "cyclists", http.MethodDelete, "/api/crews/"+created.ID+"/members/wilant", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("wilant leaving status = %d, want 200", resp.StatusCode)
+	}
+
+	// other, the remaining owner, can still manage the crew.
+	resp := h.as("other", "cyclists", http.MethodPatch, "/api/crews/"+created.ID, `{"autoShare":true}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("remaining owner status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// A crew whose only owner leaves (self-removal skips SetOwner's own
+// last-owner guard, the same way a deleted rider's RemoveRiderEverywhere
+// does — see crew.Store's own doc comment on that method) is left with zero
+// owners, on purpose. It must not vanish, and an admin must still be able
+// to manage it via canManageCrew's own override — the accepted outcome the
+// user-deletion feature is built around.
+func TestDeletingAnOwnerLeavesTheCrewIntact(t *testing.T) {
+	h := newCrewHarness(t)
+	created := decodeCrew(t, h.as("wilant", "cyclists", http.MethodPost, "/api/crews", `{"name":"Family"}`))
+
+	if resp := h.as("wilant", "cyclists", http.MethodDelete, "/api/crews/"+created.ID+"/members/wilant", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("owner leaving status = %d, want 200", resp.StatusCode)
+	}
+
+	// The crew is still there, just with no owners left.
+	list := h.as("boss", "admins", http.MethodGet, "/api/crews", "")
+	var crews []crewDTOOut
+	if err := json.NewDecoder(list.Body).Decode(&crews); err != nil {
+		t.Fatal(err)
+	}
+	if len(crews) != 1 || len(crews[0].Owners) != 0 {
+		t.Fatalf("crews = %+v, want the crew to survive with no owners", crews)
+	}
+
+	// A non-admin rider may not manage a crew nobody owns.
+	if resp := h.as("random", "cyclists", http.MethodPatch, "/api/crews/"+created.ID, `{"autoShare":true}`); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-admin status = %d, want 403", resp.StatusCode)
+	}
+
+	// An admin still can, regardless.
+	if resp := h.as("boss", "admins", http.MethodPatch, "/api/crews/"+created.ID, `{"autoShare":true}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin status = %d, want 200", resp.StatusCode)
 	}
 }
 

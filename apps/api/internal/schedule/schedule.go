@@ -287,3 +287,23 @@ func (s *Store) DeleteForCrew(ctx context.Context, crewID string) error {
 	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_rides WHERE crew_id = ?`), crewID)
 	return err
 }
+
+// ClearCreatedBy blanks created_by on every ride this rider scheduled,
+// without deleting the ride — called when the rider themselves is deleted
+// (see the API package's purgeRiderData). A scheduled ride is the crew's
+// plan, not solely its author's; deleting the author must not take the
+// ride down with them the way DeleteForCrew intentionally takes every ride
+// down when the crew itself goes.
+func (s *Store) ClearCreatedBy(ctx context.Context, rider string) (int, error) {
+	rider = strings.ToLower(strings.TrimSpace(rider))
+	if rider == "" {
+		return 0, nil
+	}
+	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`UPDATE crew_rides SET created_by = '' WHERE created_by = ?`), rider)
+	if err != nil {
+		return 0, fmt.Errorf("clear ride authorship: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}

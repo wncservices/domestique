@@ -59,6 +59,12 @@ var ErrConfirmationRequired = errors.New("crew: this is an invite — only the i
 // it is a self-request (OriginSelf), which only the owner may grant.
 var ErrNoInvite = errors.New("crew: no pending invite for that rider")
 
+// ErrLastOwner is returned by SetOwner when asked to revoke the crew's last
+// remaining owner grant. Every crew keeps at least one owner able to manage
+// it directly — short of an admin's own override (see the API package's
+// canManageCrew) — so the caller must promote someone else first.
+var ErrLastOwner = errors.New("crew: cannot remove the last owner")
+
 // MemberStatus is where a rider stands with a crew.
 type MemberStatus string
 
@@ -84,8 +90,14 @@ const (
 
 // Crew is a set of riders who trust each other with their routes.
 type Crew struct {
-	ID    string
-	Name  string
+	ID   string
+	Name string
+	// Owner is who originally created this crew — informational only.
+	// Ownership itself (who may manage the crew) now lives per-row on
+	// crew_members.is_owner (see Member.IsOwner), so a crew survives one
+	// owner's departure as long as another owner grant remains. Kept rather
+	// than dropped: repurposing an existing column is a smaller, reversible
+	// change than a schema migration nothing else here needs.
 	Owner string
 	// AutoShare, when true, makes this crew a default target: a member who
 	// uploads a route with no explicit sharing choice of their own gets it
@@ -113,6 +125,12 @@ type Member struct {
 	// Meaningless for a pending row; only ever set by the owner/admin on an
 	// approved member.
 	CanSchedule bool
+	// IsOwner is whether this rider holds an owner grant on the crew — may
+	// manage it (delete, auto-share, add/remove members, promote/demote
+	// other owners) the same way the single crews.owner column used to mean
+	// exclusively. Meaningless for a pending row; only ever set on an
+	// approved member, by SetOwner or by Create for the crew's creator.
+	IsOwner bool
 }
 
 // MemberSet is which riders currently, approvedly, belong to which crews —
@@ -190,8 +208,9 @@ CREATE TABLE IF NOT EXISTS crew_members (
     decided_by   TEXT NOT NULL DEFAULT '',
     decided_at   TEXT NOT NULL DEFAULT '',
     can_schedule %s NOT NULL DEFAULT FALSE,
+    is_owner     %s NOT NULL DEFAULT FALSE,
     PRIMARY KEY (crew_id, rider)
-);`, d.Boolean, d.Boolean)
+);`, d.Boolean, d.Boolean, d.Boolean)
 }
 
 // UseDB puts the crew tables in an already-open database — the same one
@@ -216,8 +235,14 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 	if err := store.addCanScheduleColumn(); err != nil {
 		return nil, fmt.Errorf("migrate crew tables: %w", err)
 	}
+	if err := store.addIsOwnerColumn(); err != nil {
+		return nil, fmt.Errorf("migrate crew tables: %w", err)
+	}
 	if err := store.normalizeExistingOwners(context.Background()); err != nil {
 		return nil, fmt.Errorf("normalize crew owners: %w", err)
+	}
+	if err := store.backfillOwnerFlag(context.Background()); err != nil {
+		return nil, fmt.Errorf("backfill crew owner flag: %w", err)
 	}
 	return store, nil
 }
@@ -292,6 +317,44 @@ func (s *Store) addCanScheduleColumn() error {
 	return err
 }
 
+// addIsOwnerColumn adds is_owner to a crew_members table that predates the
+// column, the same way addCanScheduleColumn does for can_schedule.
+func (s *Store) addIsOwnerColumn() error {
+	_, err := s.db.Exec(fmt.Sprintf(
+		`ALTER TABLE crew_members ADD COLUMN is_owner %s NOT NULL DEFAULT FALSE`, s.dialect.Boolean))
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
+}
+
+// backfillOwnerFlag is the one-time migration from the old singular-owner
+// column to per-row ownership: for every crew, it sets is_owner on whichever
+// crew_members row matches crews.owner. A plain per-crew loop, not a
+// cross-dialect UPDATE...JOIN — this runs once per startup against however
+// many crews exist, small enough that a straightforward loop is the right
+// trade, matching normalizeExistingOwners' own preference for simplicity
+// over cleverness in a one-time migration. Safe to run every startup: a row
+// already flagged an owner is simply set to TRUE again.
+func (s *Store) backfillOwnerFlag(ctx context.Context) error {
+	crews, err := s.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, c := range crews {
+		if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+            UPDATE crew_members SET is_owner = ? WHERE crew_id = ? AND rider = ?`),
+			true, c.ID, c.Owner); err != nil {
+			return fmt.Errorf("backfill owner flag for %s: %w", c.ID, err)
+		}
+	}
+	return nil
+}
+
 // idPrefix marks a target as a crew rather than the raw account ids
 // Targets held before this package existed. It is what lets a route's
 // Targets list hold crew ids in the same field/namespace a legacy account
@@ -338,9 +401,9 @@ func (s *Store) Create(ctx context.Context, name, owner string) (Crew, error) {
 	}
 
 	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
-        INSERT INTO crew_members (crew_id, rider, status, origin, requested_at, decided_by, decided_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`),
-		id, owner, string(StatusApproved), string(OriginSelf), now, owner, now); err != nil {
+        INSERT INTO crew_members (crew_id, rider, status, origin, requested_at, decided_by, decided_at, is_owner)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, owner, string(StatusApproved), string(OriginSelf), now, owner, now, true); err != nil {
 		return Crew{}, fmt.Errorf("enroll crew owner: %w", err)
 	}
 
@@ -468,7 +531,7 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 // approved together, which is what the owner's own view needs.
 func (s *Store) Members(ctx context.Context, crewID string) ([]Member, error) {
 	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`
-        SELECT crew_id, rider, status, origin, requested_at, decided_by, decided_at, can_schedule
+        SELECT crew_id, rider, status, origin, requested_at, decided_by, decided_at, can_schedule, is_owner
         FROM crew_members WHERE crew_id = ? ORDER BY requested_at`), crewID)
 	if err != nil {
 		return nil, fmt.Errorf("read crew members: %w", err)
@@ -479,7 +542,7 @@ func (s *Store) Members(ctx context.Context, crewID string) ([]Member, error) {
 	for rows.Next() {
 		var m Member
 		var status, origin string
-		if err := rows.Scan(&m.CrewID, &m.Rider, &status, &origin, &m.RequestedAt, &m.DecidedBy, &m.DecidedAt, &m.CanSchedule); err != nil {
+		if err := rows.Scan(&m.CrewID, &m.Rider, &status, &origin, &m.RequestedAt, &m.DecidedBy, &m.DecidedAt, &m.CanSchedule, &m.IsOwner); err != nil {
 			return nil, fmt.Errorf("read crew members: %w", err)
 		}
 		m.Status = MemberStatus(status)
@@ -509,6 +572,97 @@ func (s *Store) SetCanSchedule(ctx context.Context, crewID, rider string, can bo
 		return ErrNotFound
 	}
 	return nil
+}
+
+// IsOwner reports whether rider currently holds an owner grant on crewID —
+// approved membership required; a pending invite carries no authority yet.
+func (s *Store) IsOwner(ctx context.Context, crewID, rider string) (bool, error) {
+	rider = normalizeRider(rider)
+	var isOwner bool
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(`
+        SELECT is_owner FROM crew_members WHERE crew_id = ? AND rider = ? AND status = ?`),
+		crewID, rider, string(StatusApproved)).Scan(&isOwner)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("check crew ownership: %w", err)
+	default:
+		return isOwner, nil
+	}
+}
+
+// ownerCount reports how many approved members currently hold an owner
+// grant on crewID — what SetOwner checks before revoking one, so the crew
+// never ends up with none left through this call (it can still end up with
+// none if its sole owner is deleted outright — see the API package's
+// purgeRiderData / RemoveRiderEverywhere, an accepted outcome handled by an
+// admin's own override rather than by refusing the deletion).
+func (s *Store) ownerCount(ctx context.Context, crewID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(`
+        SELECT COUNT(1) FROM crew_members WHERE crew_id = ? AND status = ? AND is_owner = ?`),
+		crewID, string(StatusApproved), true).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count crew owners: %w", err)
+	}
+	return count, nil
+}
+
+// SetOwner grants or revokes rider's owner grant on crewID — approved
+// membership required, the same as IsOwner. Revoking the crew's last
+// remaining owner is refused (ErrLastOwner): every crew keeps at least one
+// owner able to manage it directly, short of an admin's own override.
+func (s *Store) SetOwner(ctx context.Context, crewID, rider string, isOwner bool) error {
+	rider = normalizeRider(rider)
+
+	if !isOwner {
+		currentlyOwner, err := s.IsOwner(ctx, crewID, rider)
+		if err != nil {
+			return err
+		}
+		if currentlyOwner {
+			count, err := s.ownerCount(ctx, crewID)
+			if err != nil {
+				return err
+			}
+			if count <= 1 {
+				return ErrLastOwner
+			}
+		}
+	}
+
+	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+        UPDATE crew_members SET is_owner = ? WHERE crew_id = ? AND rider = ? AND status = ?`),
+		isOwner, crewID, rider, string(StatusApproved))
+	if err != nil {
+		return fmt.Errorf("set crew ownership: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RemoveRiderEverywhere takes rider out of every crew's membership, pending
+// or approved, in one statement — only for when the rider themselves is
+// deleted (see the API package's purgeRiderData), never a substitute for
+// Deny/Remove's per-crew semantics. Removing this row also removes any
+// owner grant that lived on it (is_owner is a column on this same row) — a
+// crew left with zero owners is an accepted outcome, handled by
+// canManageCrew's admin override rather than refused here.
+func (s *Store) RemoveRiderEverywhere(ctx context.Context, rider string) (int, error) {
+	rider = normalizeRider(rider)
+	if rider == "" {
+		return 0, nil
+	}
+	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM crew_members WHERE rider = ?`), rider)
+	if err != nil {
+		return 0, fmt.Errorf("remove rider from all crews: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
 }
 
 // HasRider reports whether rider holds any row in crew_members, pending or

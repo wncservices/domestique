@@ -98,6 +98,12 @@ export const api = {
     }),
   sendPasswordReset: () =>
     request<{ status: string }>('/api/me/password-reset', { method: 'POST' }),
+  /** Deletes the caller's own account: every trace of their data in this
+   *  app, then their Auth0 identity, then the session this request was made
+   *  with. Irreversible. redirectTo is where to navigate afterward — the
+   *  issuer's own end-session URL when one is configured, same shape as
+   *  logout()'s own redirectTo. */
+  deleteMe: () => request<{ redirectTo: string }>('/api/me', { method: 'DELETE' }),
 
   mfaEnrollments: () => request<MfaEnrollment[]>('/api/me/mfa'),
   /** Returns Auth0's own hosted enrollment page — this app navigates the
@@ -370,6 +376,20 @@ export const api = {
       },
     ),
 
+  /** Grants or revokes one member's owner grant on the crew — owner or
+   *  admin only. "Transfer ownership" is just two calls to this: promote
+   *  the new owner, then optionally demote self. Rejected with a 409 if it
+   *  would demote the crew's last remaining owner. */
+  setCrewMemberOwner: (crewId: string, rider: string, owner: boolean) =>
+    request<Crew>(
+      `/api/crews/${encodeURIComponent(crewId)}/members/${encodeURIComponent(rider)}/owner`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner }),
+      },
+    ),
+
   crewRides: (crewId: string) => request<Ride[]>(`/api/crews/${encodeURIComponent(crewId)}/rides`),
   scheduleRide: (crewId: string, req: ScheduleRideRequest) =>
     request<Ride>(`/api/crews/${encodeURIComponent(crewId)}/rides`, {
@@ -422,4 +442,24 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role }),
     }),
+  /** Blocks or unblocks a person — both Auth0's own blocked flag on this
+   *  identity and this app's own local blocklist (which is what actually
+   *  stops a fresh signup with the same email from getting back in; see
+   *  internal/blocklist's own doc comment on the API side). Unblocking
+   *  clears both. */
+  setPersonBlocked: (id: string, blocked: boolean, email: string, reason?: string) =>
+    request<{ status: string; error?: string }>(`/api/people/${encodeURIComponent(id)}/blocked`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ blocked, email, reason }),
+    }),
+  /** Deletes a person entirely: their local data for the given rider
+   *  identity (best-effort — see Person.likelyRider), then their Auth0
+   *  identity. Irreversible. Pass no rider to delete only the Auth0
+   *  identity, leaving any local data untouched. */
+  deletePerson: (id: string, rider?: string) =>
+    request<{ status: string }>(
+      `/api/people/${encodeURIComponent(id)}${rider ? `?rider=${encodeURIComponent(rider)}` : ''}`,
+      { method: 'DELETE' },
+    ),
 }

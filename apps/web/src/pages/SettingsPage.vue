@@ -197,6 +197,32 @@ async function removeMfaFactor() {
   }
 }
 
+// --- delete my account: every trace of this rider's own data, then their
+// Auth0 identity, then the session itself. Irreversible — see api.deleteMe's
+// own doc comment. ---
+
+const deleteAccountOpen = ref(false)
+const deletingAccount = ref(false)
+
+async function deleteMyAccount() {
+  deletingAccount.value = true
+  try {
+    const { redirectTo } = await api.deleteMe()
+    // Full page navigation, not a router push — the session is gone and so
+    // is the account, there is nothing left in this app for the SPA to show.
+    window.location.href = redirectTo
+  } catch (err) {
+    toast.add({
+      title: 'Could not delete your account',
+      description: err instanceof ApiError ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+    deletingAccount.value = false
+    deleteAccountOpen.value = false
+  }
+}
+
 // Settings owns the Komoot connection now: this is the page where sign-ins
 // live, and the Add page only consumes the result.
 const connection = ref<KomootConnection>({ connected: false, shared: false, canConnect: false })
@@ -463,6 +489,18 @@ onMounted(async () => {
             </UButton>
           </div>
         </div>
+
+        <div class="border-t border-default pt-4">
+          <p class="mb-1 text-sm font-medium text-toned">Delete my account</p>
+          <p class="mb-2 text-xs text-dimmed">
+            Removes every route, linked device and crew membership you own, then your sign-in
+            itself. There is no undo — you'd need a fresh invite to come back, starting from
+            nothing.
+          </p>
+          <UButton size="sm" color="error" variant="soft" icon="i-lucide-trash-2" @click="deleteAccountOpen = true">
+            Delete my account
+          </UButton>
+        </div>
       </div>
     </UCard>
 
@@ -624,6 +662,30 @@ onMounted(async () => {
             Cancel
           </UButton>
           <UButton color="error" :loading="removingFactor" @click="removeMfaFactor">Remove</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      :open="deleteAccountOpen"
+      title="Delete your account?"
+      @update:open="deleteAccountOpen = $event"
+    >
+      <template #body>
+        <p class="text-sm text-toned">
+          This permanently removes your routes, linked devices and crew membership, then your
+          sign-in itself. You will be signed out immediately and cannot undo this — coming back
+          means a fresh invite and starting from nothing.
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="deletingAccount" @click="deleteAccountOpen = false">
+            Cancel
+          </UButton>
+          <UButton color="error" :loading="deletingAccount" @click="deleteMyAccount">
+            Delete my account
+          </UButton>
         </div>
       </template>
     </UModal>
