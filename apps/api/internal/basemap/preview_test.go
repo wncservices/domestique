@@ -1,8 +1,13 @@
 package basemap
 
 import (
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/paulmach/orb/maptile"
 )
@@ -77,5 +82,48 @@ func TestRouteBBoxFillsFullCanvas(t *testing.T) {
 	if !(south < 50.80 && north > 51.00) {
 		t.Errorf("bbox south=%f north=%f does not cover the route's own latitude span [50.80,51.00] plus padding",
 			south, north)
+	}
+}
+
+// TestFetchLayersReturnsEmptySlicesNotNilOutsideCoverage pins the fix for a
+// route whose bbox has zero tile coverage in the archive — not just near an
+// admin's extracted edge, genuinely outside it (e.g. a route in a different
+// country from whatever region was extracted). Before this fix,
+// PreviewLayers' fields were left at their nil zero value in that case, and
+// encoding/json marshals a nil slice as JSON null rather than [] — which
+// crashed TrackPreview.vue's ringsToPath/pointsToPath, both of which call
+// .map() on these fields with no null-guard. A fake archive whose
+// min/max zoom excludes every zoom FetchLayers ever requests
+// (previewMinZoom..previewMaxZoom, 8..13) reproduces "no coverage at all"
+// without needing a real tile directory: GetTile's own zoom check rejects
+// every tile before it ever touches directory data.
+func TestFetchLayersReturnsEmptySlicesNotNilOutsideCoverage(t *testing.T) {
+	header := make([]byte, pmtilesHeaderSize)
+	copy(header, "PMTiles")
+	header[7] = 3  // spec version
+	header[97] = 1 // internal compression: none
+	header[98] = 1 // tile compression: none
+	header[100] = 14
+	header[101] = 14 // min/max zoom, both outside [previewMinZoom, previewMaxZoom]
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeContent(w, r, "basemap.pmtiles", time.Time{}, bytes.NewReader(header))
+	}))
+	defer srv.Close()
+
+	tiles := NewPreviewTiles(srv.URL)
+	layers, err := tiles.FetchLayers(context.Background(), 4.55, 50.80, 4.85, 50.95)
+	if err != nil {
+		t.Fatalf("FetchLayers: %v", err)
+	}
+
+	for name, got := range map[string]any{
+		"Earth": layers.Earth, "Landuse": layers.Landuse, "Water": layers.Water,
+		"WaterLines": layers.WaterLines, "Roads": layers.Roads,
+	} {
+		if reflect.ValueOf(got).IsNil() {
+			t.Errorf("%s is nil, want a non-nil empty slice — a nil slice marshals as JSON null, "+
+				"which crashes TrackPreview.vue's ringsToPath/pointsToPath", name)
+		}
 	}
 }
