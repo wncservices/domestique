@@ -266,9 +266,27 @@ const fetchLayersTimeout = 30 * time.Second
 // the archive's own coverage, or one that fails to decode, is skipped
 // rather than failing the whole request — a route near the edge of
 // whatever an admin extracted still gets whatever land/water does exist.
+//
+// Initialized to empty slices, not left at their nil zero value: a route
+// whose bbox has *no* tile coverage at all (entirely outside whatever
+// region an admin extracted, not just near its edge) previously left every
+// field nil, and encoding/json marshals a nil slice as JSON null rather
+// than []. TrackPreview.vue's ringsToPath/pointsToPath call .map() on
+// these directly with no null-guard, so a route outside the basemap's
+// coverage crashed its own card's render with an uncaught TypeError
+// instead of silently showing no background wash, which is what every
+// other under-coverage case here already degrades to.
 func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north float64) (PreviewLayers, error) {
 	ctx, span := tracer.Start(ctx, "basemap.FetchLayers")
 	defer span.End()
+
+	out := PreviewLayers{
+		Earth:      [][]LatLon{},
+		Landuse:    [][]LatLon{},
+		Water:      [][]LatLon{},
+		WaterLines: [][]LatLon{},
+		Roads:      []RoadSegment{},
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, fetchLayersTimeout)
 	defer cancel()
@@ -282,8 +300,6 @@ func (p *PreviewTiles) FetchLayers(ctx context.Context, west, south, east, north
 		span.SetStatus(codes.Error, err.Error())
 		return PreviewLayers{}, err
 	}
-
-	var out PreviewLayers
 
 	header, err := p.client.getHeader(ctx)
 	if err != nil {

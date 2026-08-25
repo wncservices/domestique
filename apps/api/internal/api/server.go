@@ -1169,6 +1169,20 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 	for _, p := range points {
 		coords = append(coords, [2]float64{p.Lat, p.Lon})
 	}
+	// private, not public: mayView above already gates this per-rider (a
+	// route only visible to its owner or its crew must not be cached where
+	// another rider's browser — or a shared proxy — could serve it back).
+	// max-age=86400 matches handleTrackPreview's own reasoning: a route's
+	// points never change after import (a re-import creates a new route,
+	// it doesn't edit one in place), so the only thing that can ever make
+	// a cached response wrong is the route being deleted — a day-long
+	// staleness window on a 404 the rider would notice anyway is a
+	// cosmetic gap, not a correctness one. Every TrackPreview.vue card
+	// remounts from scratch on pagination (no per-card KeepAlive), so
+	// without this every page revisit re-fetched every visible card's full
+	// point list over the network for no reason tied to the data actually
+	// having changed.
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords})
 }
 
