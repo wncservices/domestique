@@ -489,18 +489,6 @@ onMounted(async () => {
             </UButton>
           </div>
         </div>
-
-        <div class="border-t border-default pt-4">
-          <p class="mb-1 text-sm font-medium text-toned">Delete my account</p>
-          <p class="mb-2 text-xs text-dimmed">
-            Removes every route, linked device and crew membership you own, then your sign-in
-            itself. There is no undo — you'd need a fresh invite to come back, starting from
-            nothing.
-          </p>
-          <UButton size="sm" color="error" variant="soft" icon="i-lucide-trash-2" @click="deleteAccountOpen = true">
-            Delete my account
-          </UButton>
-        </div>
       </div>
     </UCard>
 
@@ -644,6 +632,17 @@ onMounted(async () => {
         </div>
       </dl>
     </UCard>
+
+    <!-- Same gating as the Profile card above: only ever available under
+         authMode oidc with Auth0 Management API credentials configured.
+         Kept on its own, at the very bottom, rather than inside a card
+         with everything else — a destructive, rarely-used action doesn't
+         need to compete for attention with the rest of the page. -->
+    <div v-if="me?.canEditName" class="flex justify-end">
+      <UButton size="sm" color="error" variant="ghost" icon="i-lucide-trash-2" @click="deleteAccountOpen = true">
+        Delete my account
+      </UButton>
+    </div>
 
     <UModal
       :open="!!removeTarget"
