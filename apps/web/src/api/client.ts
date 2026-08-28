@@ -33,6 +33,7 @@ import type {
   Route,
   RouteDuplicateGroup,
   ScheduleRideRequest,
+  ScheduleRideSeriesRequest,
   Sport,
   TrackResponse,
   UploadRequest,
@@ -432,6 +433,26 @@ export const api = {
   deleteRide: (crewId: string, rideId: string) =>
     request<{ status: string }>(
       `/api/crews/${encodeURIComponent(crewId)}/rides/${encodeURIComponent(rideId)}`,
+      { method: 'DELETE' },
+    ),
+  /** Generates every occurrence up front (capped server-side at 52
+   *  regardless of the requested range) rather than a background job that
+   *  tops them up over time — see schedule.Store.CreateSeries's own doc
+   *  comment for why. Returns every generated ride, each carrying the new
+   *  series' id. */
+  scheduleRideSeries: (crewId: string, req: ScheduleRideSeriesRequest) =>
+    request<Ride[]>(`/api/crews/${encodeURIComponent(crewId)}/rides/series`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  /** Cancels every not-yet-happened occurrence of a series — rides already
+   *  in the past are left alone. `from` should be the caller's own local
+   *  today, the same reasoning upcomingRides' own from param already
+   *  follows. */
+  deleteRideSeries: (crewId: string, seriesId: string, from: string) =>
+    request<{ status: string }>(
+      `/api/crews/${encodeURIComponent(crewId)}/rides/series/${encodeURIComponent(seriesId)}?from=${encodeURIComponent(from)}`,
       { method: 'DELETE' },
     ),
   /** Pushes one scheduled ride's route to every one of the crew's own
