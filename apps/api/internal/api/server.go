@@ -296,6 +296,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/crews/{id}/rides", s.handleListRides)
 	mux.HandleFunc("POST /api/crews/{id}/rides", s.handleCreateRide)
+	mux.HandleFunc("POST /api/crews/{id}/rides/series", s.handleCreateRideSeries)
+	mux.HandleFunc("DELETE /api/crews/{id}/rides/series/{seriesId}", s.handleDeleteRideSeries)
 	mux.HandleFunc("DELETE /api/crews/{id}/rides/{rideId}", s.handleDeleteRide)
 	mux.HandleFunc("POST /api/crews/{id}/rides/{rideId}/sync", s.handleSyncRide)
 	mux.HandleFunc("GET /api/rides/upcoming", s.handleUpcomingRides)

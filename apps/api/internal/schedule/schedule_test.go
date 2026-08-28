@@ -28,6 +28,9 @@ func openStore(t *testing.T, dsn string) *Store {
 	if _, err := db.Conn().Exec(`DELETE FROM crew_rides`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Conn().Exec(`DELETE FROM ride_series`); err != nil {
+		t.Fatal(err)
+	}
 	return store
 }
 
@@ -293,6 +296,128 @@ func TestScheduleEachEngine(t *testing.T) {
 				}
 				if _, err := store.Create(ctx, "crew:sunday-club", "hill-loop", "2026-09-05", "", ""); err == nil {
 					t.Fatal("expected an error for a missing rider")
+				}
+			})
+
+			t.Run("CreateSeries generates one ride per interval, all sharing a series id", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				series, rides, err := store.CreateSeries(ctx, "crew:sunday-club", "hill-loop", 2,
+					"2026-09-01", "2026-09-29", "09:30", "wilant")
+				if err != nil {
+					t.Fatalf("CreateSeries: %v", err)
+				}
+				// Every 2 weeks from Sep 1 through Sep 29 inclusive: 1, 15, 29 — 3 rides.
+				want := []string{"2026-09-01", "2026-09-15", "2026-09-29"}
+				if len(rides) != len(want) {
+					t.Fatalf("rides = %+v, want %d occurrences", rides, len(want))
+				}
+				for i, date := range want {
+					if rides[i].Date != date {
+						t.Errorf("rides[%d].Date = %q, want %q", i, rides[i].Date, date)
+					}
+					if rides[i].SeriesID != series.ID {
+						t.Errorf("rides[%d].SeriesID = %q, want %q", i, rides[i].SeriesID, series.ID)
+					}
+					if rides[i].Time != "09:30" {
+						t.Errorf("rides[%d].Time = %q, want 09:30", i, rides[i].Time)
+					}
+				}
+
+				listed, err := store.ListForCrew(ctx, "crew:sunday-club")
+				if err != nil {
+					t.Fatalf("list: %v", err)
+				}
+				if len(listed) != 3 {
+					t.Fatalf("listed = %+v, want the 3 generated rides to show up like any other ride", listed)
+				}
+			})
+
+			t.Run("CreateSeries caps at 52 occurrences regardless of the requested range", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				// Weekly for 10 years would be ~520 occurrences without a cap.
+				_, rides, err := store.CreateSeries(ctx, "crew:sunday-club", "hill-loop", 1,
+					"2026-01-01", "2036-01-01", "", "wilant")
+				if err != nil {
+					t.Fatalf("CreateSeries: %v", err)
+				}
+				if len(rides) != maxSeriesOccurrences {
+					t.Fatalf("len(rides) = %d, want the cap of %d", len(rides), maxSeriesOccurrences)
+				}
+			})
+
+			t.Run("CreateSeries rejects an unsupported interval and an inverted range", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				if _, _, err := store.CreateSeries(ctx, "crew:sunday-club", "hill-loop", 3,
+					"2026-09-01", "2026-09-29", "", "wilant"); err == nil {
+					t.Error("expected an error for an unsupported interval")
+				}
+				if _, _, err := store.CreateSeries(ctx, "crew:sunday-club", "hill-loop", 1,
+					"2026-09-29", "2026-09-01", "", "wilant"); err == nil {
+					t.Error("expected an error for an end date before the start date")
+				}
+			})
+
+			t.Run("DeleteSeries removes only future occurrences, leaves history and other series alone", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				series, _, err := store.CreateSeries(ctx, "crew:sunday-club", "hill-loop", 1,
+					"2026-09-01", "2026-09-22", "", "wilant")
+				if err != nil {
+					t.Fatalf("CreateSeries: %v", err)
+				}
+				other, err := store.Create(ctx, "crew:sunday-club", "flat-loop", "2026-09-08", "", "wilant")
+				if err != nil {
+					t.Fatalf("create a plain ride: %v", err)
+				}
+
+				// "Today" is 2026-09-08: the 09-01 occurrence has already happened.
+				n, err := store.DeleteSeries(ctx, series.ID, "2026-09-08")
+				if err != nil {
+					t.Fatalf("DeleteSeries: %v", err)
+				}
+				if n != 3 {
+					t.Fatalf("deleted %d rides, want 3 (09-08, 09-15, 09-22)", n)
+				}
+
+				remaining, err := store.ListForCrew(ctx, "crew:sunday-club")
+				if err != nil {
+					t.Fatalf("list: %v", err)
+				}
+				if len(remaining) != 2 {
+					t.Fatalf("remaining = %+v, want the 09-01 occurrence and the unrelated plain ride left", remaining)
+				}
+				var gotPast, gotOther bool
+				for _, r := range remaining {
+					if r.Date == "2026-09-01" {
+						gotPast = true
+					}
+					if r.ID == other.ID {
+						gotOther = true
+					}
+				}
+				if !gotPast {
+					t.Error("the already-happened 09-01 occurrence should not have been deleted")
+				}
+				if !gotOther {
+					t.Error("a plain ride outside the series should not have been touched")
+				}
+			})
+
+			t.Run("DeleteSeries on a series with nothing left in range is not an error", func(t *testing.T) {
+				store := open(t)
+				n, err := store.DeleteSeries(t.Context(), "no-such-series", "2026-09-08")
+				if err != nil {
+					t.Fatalf("DeleteSeries: %v", err)
+				}
+				if n != 0 {
+					t.Fatalf("n = %d, want 0", n)
 				}
 			})
 		})

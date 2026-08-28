@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { Crew, Person, Ride, UpcomingRide } from '@/api/types'
+import type { Crew, Person, Ride, RideSeriesInterval, UpcomingRide } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
@@ -419,6 +419,28 @@ const timePresets = [
   { label: 'Evening · 17:00', value: '17:00' },
 ]
 
+// Repeat: off by default and revealed by a toggle — most rides are one-off,
+// and interval/until would be two more fields competing for attention on
+// every single schedule otherwise.
+const repeats = ref(false)
+const seriesInterval = ref<RideSeriesInterval>(1)
+const seriesIntervalOptions: { label: string; value: RideSeriesInterval }[] = [
+  { label: 'Every week', value: 1 },
+  { label: 'Every 2 weeks', value: 2 },
+  { label: 'Every 4 weeks', value: 4 },
+]
+const seriesUntil = ref('')
+// Defaults to three months out — a season-length span nobody has to think
+// about — the first time Repeats is switched on, and only then: once a
+// rider has picked their own "until," flipping the toggle off and back on
+// must not silently overwrite it.
+watch(repeats, (on) => {
+  if (!on || seriesUntil.value) return
+  const until = new Date(scheduleDate.value)
+  until.setMonth(until.getMonth() + 3)
+  seriesUntil.value = until.toISOString().slice(0, 10)
+})
+
 const scheduleSlug = ref('')
 const scheduling = ref(false)
 
@@ -461,14 +483,31 @@ async function scheduleRide() {
   if (!crew || !scheduleSlug.value) return
   scheduling.value = true
   try {
-    await api.scheduleRide(crew.id, {
-      slug: scheduleSlug.value,
-      date: scheduleDate.value,
-      time: scheduleTime.value || undefined,
-    })
-    toast.add({ title: 'Ride scheduled', icon: 'i-lucide-calendar-plus', color: 'success' })
+    if (repeats.value) {
+      const created = await api.scheduleRideSeries(crew.id, {
+        slug: scheduleSlug.value,
+        date: scheduleDate.value,
+        time: scheduleTime.value || undefined,
+        intervalWeeks: seriesInterval.value,
+        until: seriesUntil.value,
+      })
+      toast.add({
+        title: `Scheduled ${created.length} ride${created.length === 1 ? '' : 's'}`,
+        icon: 'i-lucide-calendar-plus',
+        color: 'success',
+      })
+    } else {
+      await api.scheduleRide(crew.id, {
+        slug: scheduleSlug.value,
+        date: scheduleDate.value,
+        time: scheduleTime.value || undefined,
+      })
+      toast.add({ title: 'Ride scheduled', icon: 'i-lucide-calendar-plus', color: 'success' })
+    }
     scheduleSlug.value = ''
     scheduleTime.value = ''
+    repeats.value = false
+    seriesUntil.value = ''
     await Promise.all([loadRides(crew.id), backgroundRefresh()])
   } catch (err) {
     toast.add({
@@ -500,6 +539,29 @@ async function deleteRide(ride: Ride) {
     })
   } finally {
     deletingRide.value = ''
+  }
+}
+
+const deletingSeries = ref('')
+
+// Cancels every not-yet-happened occurrence of a series — the ride passed
+// in is just whichever row the rider clicked; only its seriesId matters.
+async function deleteRideSeries(ride: Ride) {
+  const crew = detailCrew.value
+  if (!crew || !ride.seriesId) return
+  deletingSeries.value = ride.seriesId
+  try {
+    await api.deleteRideSeries(crew.id, ride.seriesId, todayISO())
+    await Promise.all([loadRides(crew.id), loadUpcomingRides()])
+  } catch (err) {
+    toast.add({
+      title: 'Could not cancel the series',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    deletingSeries.value = ''
   }
 }
 
@@ -918,7 +980,12 @@ async function saveShare() {
                   <span class="text-base font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-highlighted">{{ ride.routeName }}</p>
+                  <p class="flex items-center gap-1 truncate text-sm font-medium text-highlighted">
+                    {{ ride.routeName }}
+                    <UTooltip v-if="ride.seriesId" text="Part of a repeating series">
+                      <UIcon name="i-lucide-repeat" class="size-3 shrink-0 text-dimmed" />
+                    </UTooltip>
+                  </p>
                   <p class="truncate text-xs text-dimmed">
                     <template v-if="ride.time">{{ ride.time }} · </template>Scheduled by {{ ride.createdBy }}
                   </p>
@@ -933,19 +1000,42 @@ async function saveShare() {
                     @click="syncRide(ride)"
                   />
                 </UTooltip>
-                <UTooltip
-                  v-if="detailCrew.mine || ride.createdBy.toLowerCase() === (me?.user ?? '').toLowerCase()"
-                  text="Remove this ride"
-                >
-                  <UButton
-                    size="sm"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-trash-2"
-                    :loading="deletingRide === ride.id"
-                    @click="deleteRide(ride)"
-                  />
-                </UTooltip>
+                <template v-if="detailCrew.mine || ride.createdBy.toLowerCase() === (me?.user ?? '').toLowerCase()">
+                  <!-- A one-off ride keeps the plain button it always had;
+                       a series occurrence needs to ask which scope the
+                       rider means, so it gets a menu instead. -->
+                  <UTooltip v-if="!ride.seriesId" text="Remove this ride">
+                    <UButton
+                      size="sm"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-trash-2"
+                      :loading="deletingRide === ride.id"
+                      @click="deleteRide(ride)"
+                    />
+                  </UTooltip>
+                  <UDropdownMenu
+                    v-else
+                    :items="[
+                      [
+                        { label: 'Delete this ride', icon: 'i-lucide-trash-2', onSelect: () => deleteRide(ride) },
+                        {
+                          label: 'Delete this and future rides',
+                          icon: 'i-lucide-calendar-x',
+                          onSelect: () => deleteRideSeries(ride),
+                        },
+                      ],
+                    ]"
+                  >
+                    <UButton
+                      size="sm"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-trash-2"
+                      :loading="deletingRide === ride.id || deletingSeries === ride.seriesId"
+                    />
+                  </UDropdownMenu>
+                </template>
               </div>
             </div>
             <div v-else class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-default py-6">
@@ -1047,7 +1137,7 @@ async function saveShare() {
                   icon="i-lucide-calendar-plus"
                   class="w-full sm:ml-auto sm:w-auto"
                   :loading="scheduling"
-                  :disabled="!scheduleSlug"
+                  :disabled="!scheduleSlug || (repeats && !seriesUntil)"
                 >
                   Schedule
                 </UButton>
@@ -1073,6 +1163,30 @@ async function saveShare() {
                 >
                   {{ preset.label }}
                 </UButton>
+              </div>
+
+              <!-- Off by default: Interval and Until would be two more
+                   fields competing for attention on every single schedule
+                   otherwise, when most rides are one-off. -->
+              <div class="flex flex-col gap-2 border-t border-default pt-2">
+                <label class="flex items-center gap-2 text-xs text-dimmed">
+                  <USwitch v-model="repeats" size="sm" />
+                  Repeats
+                </label>
+                <div v-if="repeats" class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <UFormField label="Every" class="flex-1 sm:flex-initial">
+                    <USelect
+                      v-model="seriesInterval"
+                      :items="seriesIntervalOptions"
+                      value-key="value"
+                      size="sm"
+                      class="w-full sm:w-40"
+                    />
+                  </UFormField>
+                  <UFormField label="Until" class="flex-1">
+                    <UInput v-model="seriesUntil" type="date" size="sm" class="w-full" />
+                  </UFormField>
+                </div>
               </div>
             </form>
             <p v-if="detailCrew.canSchedule && !scheduleRouteOptions.length" class="text-xs text-dimmed">
