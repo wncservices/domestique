@@ -140,6 +140,12 @@ function fitToRoutes() {
  */
 function addRouteLayers() {
   if (!map) return
+  // Literal, not var(--ui-primary): MapLibre paint specs can't read CSS
+  // custom properties. Matches --ui-primary's own resolved value per theme
+  // (--color-primary-600 light, --color-primary-400 dark) — the same pair
+  // apps/api/internal/basemap/renderimage.go's cardImageThemes hardcodes
+  // for the card-grid preview, kept in sync by hand across both boundaries.
+  const routeColor = resolved.value === 'dark' ? '#14cfab' : '#049483'
   map.addSource(SOURCE_ID, { type: 'geojson', data: toFeatureCollection(props.routes) })
   map.addLayer({
     id: LINE_LAYER_ID,
@@ -147,10 +153,7 @@ function addRouteLayers() {
     source: SOURCE_ID,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: {
-      // Literal, not var(--ui-primary): MapLibre paint specs can't read CSS
-      // custom properties. Matches --color-primary-500 in styles.css — keep
-      // the two in sync by hand if that scale changes.
-      'line-color': '#04b99e',
+      'line-color': routeColor,
       'line-width': ['case', ['==', ['get', 'slug'], props.selectedSlug ?? ''], 5, 3],
       'line-opacity': ['case', ['==', ['get', 'slug'], props.selectedSlug ?? ''], 1, 0.75],
     },
@@ -160,7 +163,7 @@ function addRouteLayers() {
     type: 'circle',
     source: SOURCE_ID,
     filter: ['==', ['geometry-type'], 'LineString'],
-    paint: { 'circle-radius': 4, 'circle-color': '#04b99e' },
+    paint: { 'circle-radius': 4, 'circle-color': routeColor },
   })
 
   map.on('click', LINE_LAYER_ID, (e) => {

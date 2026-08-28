@@ -62,7 +62,7 @@ func linkAccount(t *testing.T, dsn, provider, rider string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Link(model.Provider(provider), rider, ""); err != nil {
+	if _, err := store.Link(t.Context(), model.Provider(provider), rider, ""); err != nil {
 		t.Fatal(err)
 	}
 }

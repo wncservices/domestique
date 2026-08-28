@@ -13,6 +13,7 @@
 package accounts
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -115,7 +116,7 @@ func ID(provider model.Provider, rider string) string {
 var RiderPattern = regexp.MustCompile(`^[a-zA-Z0-9._@|-]+$`)
 
 // Link records a rider's connection to a provider.
-func (s *Store) Link(provider model.Provider, rider, label string) (model.Account, error) {
+func (s *Store) Link(ctx context.Context, provider model.Provider, rider, label string) (model.Account, error) {
 	rider = strings.TrimSpace(rider)
 	if rider == "" {
 		return model.Account{}, errors.New("accounts: no rider — who is linking this?")
@@ -132,7 +133,7 @@ func (s *Store) Link(provider model.Provider, rider, label string) (model.Accoun
 	}
 
 	id := ID(provider, rider)
-	if _, err := s.Get(id); err == nil {
+	if _, err := s.Get(ctx, id); err == nil {
 		return model.Account{}, fmt.Errorf("%w: %s", ErrExists, id)
 	}
 
@@ -141,7 +142,7 @@ func (s *Store) Link(provider model.Provider, rider, label string) (model.Accoun
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(s.dialect.Rebind(`
+	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
         INSERT INTO accounts (id, provider, rider, label, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?)`),
 		id, string(provider), rider, label, now, now)
@@ -149,17 +150,17 @@ func (s *Store) Link(provider model.Provider, rider, label string) (model.Accoun
 		return model.Account{}, err
 	}
 
-	return s.Get(id)
+	return s.Get(ctx, id)
 }
 
 // Relabel changes the name shown in the UI. Nothing else about an account is
 // editable: the provider and rider are what make it that account.
-func (s *Store) Relabel(id, label string) (model.Account, error) {
+func (s *Store) Relabel(ctx context.Context, id, label string) (model.Account, error) {
 	if strings.TrimSpace(label) == "" {
 		return model.Account{}, errors.New("accounts: label cannot be empty")
 	}
 
-	result, err := s.db.Exec(
+	result, err := s.db.ExecContext(ctx,
 		s.dialect.Rebind(`UPDATE accounts SET label = ?, updated_at = ? WHERE id = ?`),
 		label, time.Now().UTC().Format(time.RFC3339), id)
 	if err != nil {
@@ -168,7 +169,7 @@ func (s *Store) Relabel(id, label string) (model.Account, error) {
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return model.Account{}, ErrNotFound
 	}
-	return s.Get(id)
+	return s.Get(ctx, id)
 }
 
 // Unlink removes an account.
@@ -176,8 +177,8 @@ func (s *Store) Relabel(id, label string) (model.Account, error) {
 // The sync state for it is left alone deliberately. Re-linking the same
 // provider gives the same id, and the recorded remote ids are still true —
 // the routes really are still on the device.
-func (s *Store) Unlink(id string) error {
-	result, err := s.db.Exec(s.dialect.Rebind(`DELETE FROM accounts WHERE id = ?`), id)
+func (s *Store) Unlink(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM accounts WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -188,9 +189,9 @@ func (s *Store) Unlink(id string) error {
 }
 
 // Get returns one account.
-func (s *Store) Get(id string) (model.Account, error) {
+func (s *Store) Get(ctx context.Context, id string) (model.Account, error) {
 	var a model.Account
-	err := s.db.QueryRow(s.dialect.Rebind(`
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(`
         SELECT id, provider, rider, label, auto_push FROM accounts WHERE id = ?`), id).
 		Scan(&a.ID, &a.Provider, &a.Rider, &a.Label, &a.AutoPush)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -200,8 +201,8 @@ func (s *Store) Get(id string) (model.Account, error) {
 }
 
 // List returns every linked account, in a stable order.
-func (s *Store) List() ([]model.Account, error) {
-	rows, err := s.db.Query(`
+func (s *Store) List(ctx context.Context) ([]model.Account, error) {
+	rows, err := s.db.QueryContext(ctx, `
         SELECT id, provider, rider, label, auto_push FROM accounts ORDER BY rider, provider`)
 	if err != nil {
 		return nil, fmt.Errorf("read accounts: %w", err)
@@ -223,8 +224,8 @@ func (s *Store) List() ([]model.Account, error) {
 // account. A manual "Push to devices" click ignores it entirely — this only
 // governs the unattended path (autoSyncIfEnabled, and the auto-import
 // poller's own push afterward), never a push the rider triggered themselves.
-func (s *Store) SetAutoPush(id string, enabled bool) error {
-	result, err := s.db.Exec(
+func (s *Store) SetAutoPush(ctx context.Context, id string, enabled bool) error {
+	result, err := s.db.ExecContext(ctx,
 		s.dialect.Rebind(`UPDATE accounts SET auto_push = ?, updated_at = ? WHERE id = ?`),
 		enabled, time.Now().UTC().Format(time.RFC3339), id)
 	if err != nil {

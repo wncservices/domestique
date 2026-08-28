@@ -78,7 +78,27 @@ var (
 		"domestique_push_errors_total",
 		metric.WithDescription("Failed push attempts per account."),
 	))
+
+	// garminSessionExpiry mirrors the push-staleness gauges' own reasoning:
+	// a value an alert rule watches, not a number only a person reads.
+	// Recorded every reconcile tick for every connected Garmin rider,
+	// expiring soon or not, so the threshold for "soon" lives in the alert
+	// rule rather than being baked into what gets exposed here. Labeled by
+	// rider, not by account id — a Garmin session is one per rider by
+	// construction (one account per rider per provider), and "rider" is
+	// what an operator reading the alert would want to reconnect.
+	garminSessionExpiry = must(meter.Float64Gauge(
+		"domestique_garmin_session_expiry_timestamp_seconds",
+		metric.WithDescription("Unix time each rider's stored Garmin session is expected to stop working."),
+	))
 )
+
+// recordGarminSessionExpiry is checkGarminExpiry's own metric-recording
+// call, kept here for the same reason recordTrackPreviewSize is: metrics.go
+// owns every instrument, callers just report a value against one.
+func recordGarminSessionExpiry(ctx context.Context, rider string, expiry time.Time) {
+	garminSessionExpiry.Record(ctx, float64(expiry.Unix()), metric.WithAttributes(attribute.String("rider", rider)))
+}
 
 // newMeter gives metrics.go its own MeterProvider bound to reg, independent
 // of whatever internal/telemetry sets as the *global* one for traces. Kept

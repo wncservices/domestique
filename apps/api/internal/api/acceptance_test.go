@@ -110,7 +110,7 @@ func seedAccounts(t *testing.T, db *source.DB) *accounts.Store {
 		{model.ProviderGarmin, "one"},
 		{model.ProviderWahoo, "two"},
 	} {
-		if _, err := store.Link(a.provider, a.rider, ""); err != nil {
+		if _, err := store.Link(t.Context(), a.provider, a.rider, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -465,12 +465,12 @@ func TestAccountsEndpointFlagsPossibleDuplicatesByMatchingLabel(t *testing.T) {
 	// label, which defaults to "one's Garmin". A second rider linking the
 	// same real Garmin account gets its own display name as a label — here,
 	// deliberately the same string, simulating that shared real account.
-	if _, err := acctStore.Link(model.ProviderGarmin, "duplicate-of-one", "one's Garmin"); err != nil {
+	if _, err := acctStore.Link(t.Context(), model.ProviderGarmin, "duplicate-of-one", "one's Garmin"); err != nil {
 		t.Fatal(err)
 	}
 	// A Wahoo account with a label that happens to match nothing else must
 	// not be flagged — different provider, no real collision.
-	if _, err := acctStore.Link(model.ProviderWahoo, "three", "one's Garmin"); err != nil {
+	if _, err := acctStore.Link(t.Context(), model.ProviderWahoo, "three", "one's Garmin"); err != nil {
 		t.Fatal(err)
 	}
 

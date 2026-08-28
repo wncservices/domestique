@@ -256,7 +256,7 @@ func (s *Server) handleWahooCallback(w http.ResponseWriter, r *http.Request) {
 	// Connecting is linking the head unit, the same rule as Garmin/Komoot:
 	// one intention, one step, rather than a second trip to add a push
 	// target for a connection that now exists but reaches nothing.
-	s.ensureAccount(st.Rider, model.ProviderWahoo, profile.DisplayName())
+	s.ensureAccount(r.Context(), st.Rider, model.ProviderWahoo, profile.DisplayName())
 
 	s.logger().Info("wahoo connected", "rider", st.Rider)
 
@@ -289,7 +289,7 @@ func (s *Server) handleWahooDisconnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.Accounts != nil {
-		if err := s.Accounts.Unlink(accounts.ID(model.ProviderWahoo, rider)); err != nil &&
+		if err := s.Accounts.Unlink(r.Context(), accounts.ID(model.ProviderWahoo, rider)); err != nil &&
 			!errors.Is(err, accounts.ErrNotFound) {
 			s.logger().Warn("unlinking the wahoo head unit failed", "rider", rider, "err", err)
 		}

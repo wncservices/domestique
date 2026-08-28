@@ -36,7 +36,7 @@ func seedRider(t *testing.T, dsn, rider string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acctStore.Link(model.ProviderGarmin, rider, ""); err != nil {
+	if _, err := acctStore.Link(t.Context(), model.ProviderGarmin, rider, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +84,7 @@ func assertGone(t *testing.T, dsn, oldRider string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := acctStore.List()
+	list, err := acctStore.List(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestRenameRiderMovesEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	newID := accounts.ID(model.ProviderGarmin, "auth0|64f2a1b2c3d4e5f6")
-	account, err := acctStore.Get(newID)
+	account, err := acctStore.Get(t.Context(), newID)
 	if err != nil {
 		t.Fatalf("Get(%s): %v", newID, err)
 	}
@@ -198,7 +198,7 @@ func TestRenameRiderAbortsOnConflictAndWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acctStore.Get(accounts.ID(model.ProviderGarmin, "wilant")); err != nil {
+	if _, err := acctStore.Get(t.Context(), accounts.ID(model.ProviderGarmin, "wilant")); err != nil {
 		t.Errorf("wilant's account is gone after an aborted rename: %v", err)
 	}
 	stateStore, err := state.UseDB(db.Conn(), db.DSN())
@@ -247,7 +247,7 @@ func TestRenameRiderReplaceKeepsTheOldRidersRowOnConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	friendID := accounts.ID(model.ProviderGarmin, "friend")
-	account, err := acctStore.Get(friendID)
+	account, err := acctStore.Get(t.Context(), friendID)
 	if err != nil {
 		t.Fatalf("Get(%s): %v", friendID, err)
 	}
@@ -319,7 +319,7 @@ func TestRenameRiderReplaceClearsOrphanedSyncStateWithNoAccount(t *testing.T) {
 	// Unlink friend's account — its sync_state (slug "a-ride", same slug
 	// seedRider always uses) is left behind, orphaned, exactly as it was in
 	// production after a UI unlink.
-	if err := acctStore.Unlink(accounts.ID(model.ProviderGarmin, "friend")); err != nil {
+	if err := acctStore.Unlink(t.Context(), accounts.ID(model.ProviderGarmin, "friend")); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -379,12 +379,12 @@ func TestRenameRiderReplaceDryRunWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account, err := acctStore.Get(accounts.ID(model.ProviderGarmin, "friend")); err != nil {
+	if account, err := acctStore.Get(t.Context(), accounts.ID(model.ProviderGarmin, "friend")); err != nil {
 		t.Errorf("dry run deleted friend's account: %v", err)
 	} else if account.Rider != "friend" {
 		t.Errorf("account.Rider = %q, want untouched", account.Rider)
 	}
-	if _, err := acctStore.Get(accounts.ID(model.ProviderGarmin, "wilant")); err != nil {
+	if _, err := acctStore.Get(t.Context(), accounts.ID(model.ProviderGarmin, "wilant")); err != nil {
 		t.Errorf("dry run moved wilant's account: %v", err)
 	}
 
@@ -468,10 +468,10 @@ func TestRenameRiderDryRunWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acctStore.Get(accounts.ID(model.ProviderGarmin, "wilant")); err != nil {
+	if _, err := acctStore.Get(t.Context(), accounts.ID(model.ProviderGarmin, "wilant")); err != nil {
 		t.Errorf("dry run moved the account: %v", err)
 	}
-	if _, err := acctStore.Get(accounts.ID(model.ProviderGarmin, "auth0|abc")); err == nil {
+	if _, err := acctStore.Get(t.Context(), accounts.ID(model.ProviderGarmin, "auth0|abc")); err == nil {
 		t.Error("dry run created the new account")
 	}
 }

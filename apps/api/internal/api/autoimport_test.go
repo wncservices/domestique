@@ -1,14 +1,20 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/source"
+	"github.com/wncservices/domestique/apps/api/internal/targets"
 )
 
 // A disabled deployment must make zero third-party calls, not merely skip
@@ -97,6 +103,67 @@ func TestAutoImportTickImportsNewGarminCoursesAndSkipsLikelyDuplicates(t *testin
 	}
 	if len(routes) != 2 {
 		t.Fatalf("routes after a second tick = %+v, want no change", routes)
+	}
+}
+
+// The reconcile half of the same tick: a route already in the library, with
+// nothing new for the poller to import, still gets pushed to a linked,
+// auto-push-enabled account it never reached — the only retry a
+// transiently-failed background push, or a device that was offline, ever
+// gets. Without the reconcile-every-tick change this stays red forever: the
+// old code only pushed when imported > 0.
+func TestAutoImportTickReconcilesPushEvenWithNothingNewToImport(t *testing.T) {
+	ledger := &fakeLedger{}
+	h := newConnectHarness(t, true, func(s *api.Server) {
+		s.TargetFactory = func(account model.Account) (targets.Target, error) {
+			return &fakeTarget{account: account, ledger: ledger}, nil
+		}
+	})
+	if err := h.settings.SetFlag(api.FlagAutoSync, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// seedRoleAccounts already links a Garmin account for "wilant", auto-push
+	// on by default — this route was never pushed to it, and nothing below
+	// makes it look importable, so autoImportGarmin finds nothing new.
+	if _, err := h.db.Create(context.Background(), source.CreateRequest{
+		Filename: "loop.gpx", Name: "Loop", GPX: exampleGPX(t), UploadedBy: "wilant",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AutoImportTick(context.Background())
+
+	if len(ledger.creates) != 1 {
+		t.Fatalf("creates = %v, want exactly one — the reconcile pass should have pushed the pre-existing route", ledger.creates)
+	}
+}
+
+// A Garmin session close to the end of its ~year-long life gets a Warn log
+// on the reconcile tick, before anything has actually failed — the whole
+// point being a rider finds out before the start of a ride, not after a
+// push already broke against an expired session.
+func TestAutoImportTickWarnsWhenGarminSessionIsExpiringSoon(t *testing.T) {
+	h := newConnectHarness(t, true)
+	h.connectGarmin("wilant")
+
+	// TokenExpiry has no public way to set directly — reach into the table
+	// the way providerlink's own adoption tests already do, and back-date
+	// the session to leave it a handful of days inside the warn window.
+	backdated := time.Now().Add(-360 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	if _, err := h.db.Conn().Exec(
+		`UPDATE provider_links SET updated_at = ? WHERE provider = 'garmin' AND rider = 'wilant'`,
+		backdated); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
+
+	h.srv.AutoImportTick(context.Background())
+
+	if !strings.Contains(logs.String(), "garmin session expiring soon") {
+		t.Fatalf("log = %q, want a warning about the expiring garmin session", logs.String())
 	}
 }
 

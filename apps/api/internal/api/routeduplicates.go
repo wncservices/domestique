@@ -49,7 +49,7 @@ func (s *Server) handleRouteDuplicates(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}

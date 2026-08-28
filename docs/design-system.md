@@ -76,13 +76,27 @@ reverted — a library screen is mostly *many* of these on screen together,
 and four competing hues across a grid or an overlapping map view read as
 noise rather than "this one is not that one," the opposite of what a
 categorical accent is for (see the rule above: distinguishing *different
-kinds* of thing, not *many instances of the same kind*). Both consumers use
-`var(--ui-primary)` — `.track-line` in `styles.css` for the grid preview,
-the literal hex in `RouteMap.vue` for the live map (kept in sync by hand,
-per that file's own comment, since MapLibre paint specs can't read CSS
-custom properties). Don't reintroduce per-route colour without a real design
-review — it's cheap to build (a slug hash into the four accents) but was
-already tried once and didn't read well in practice.
+kinds* of thing, not *many instances of the same kind*). That single colour
+is now maintained in **three** places, not two, each a literal because none
+of them can read a CSS custom property:
+
+- `.track-line` in `styles.css` — `var(--ui-primary)`, the SVG fallback
+  `TrackPreview.vue` draws only if its image request fails.
+- `apps/api/internal/basemap/renderimage.go`'s `cardImageThemes` map — the
+  *primary* card-preview path since the PNG-first change in `c9aa6b5`, a
+  Go-side rasterizer with no access to `styles.css` at all.
+- `RouteMap.vue`'s live map — a MapLibre paint spec, same restriction.
+
+All three are kept at `--ui-primary`'s own resolved value per theme
+(`--color-primary-600` light, `--color-primary-400` dark) by hand — there is
+no shared source of truth across the Go/TS/MapLibre boundary, so a change to
+the palette has to be copied to all three or they visibly disagree (this
+happened once: `RouteMap.vue` drifted to a fixed hex matching neither
+theme's `--ui-primary`, so the live map and the card grid showed different
+route colours in dark mode, until it was fixed to match the pair
+`renderimage.go` already had right). Don't reintroduce per-route colour
+without a real design review — it's cheap to build (a slug hash into the
+four accents) but was already tried once and didn't read well in practice.
 
 ### Type
 

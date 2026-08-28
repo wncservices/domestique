@@ -71,7 +71,7 @@ func TestPushWithoutAWahooConnectionFailsThatAccountOnly(t *testing.T) {
 	// The account has to exist to be a push target at all — linking it
 	// directly, the way an admin-added or CLI-imported account would be,
 	// without ever going through /wahoo/connect.
-	if _, err := h.accounts.Link("wahoo", "wilant", "wilant's Wahoo"); err != nil {
+	if _, err := h.accounts.Link(t.Context(), "wahoo", "wilant", "wilant's Wahoo"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +122,7 @@ func TestPushRefreshesAnExpiredWahooSession(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.accounts.Link("wahoo", "wilant", "wilant's Wahoo"); err != nil {
+	if _, err := h.accounts.Link(t.Context(), "wahoo", "wilant", "wilant's Wahoo"); err != nil {
 		t.Fatal(err)
 	}
 

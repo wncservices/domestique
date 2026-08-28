@@ -97,7 +97,7 @@ func TestPurgeRiderDataRemovesRoutesAccountsProviderLinksAndCrewMembership(t *te
 		t.Fatalf("create route: %v", err)
 	}
 
-	acct, err := h.accts.Link(model.ProviderGarmin, "gone", "")
+	acct, err := h.accts.Link(ctx, model.ProviderGarmin, "gone", "")
 	if err != nil {
 		t.Fatalf("link account: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestPurgeRiderDataRemovesRoutesAccountsProviderLinksAndCrewMembership(t *te
 		t.Fatalf("routes = %+v, want only the other rider's route left", routes)
 	}
 
-	if _, err := h.accts.Get(acct.ID); err == nil {
+	if _, err := h.accts.Get(ctx, acct.ID); err == nil {
 		t.Error("account still linked after purge")
 	}
 	entries, err := h.states.ForAccount(ctx, acct.ID)
@@ -219,7 +219,7 @@ func TestPurgeRiderDataIsRetrySafeOnAnAlreadyPurgedRider(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create route: %v", err)
 	}
-	if _, err := h.accts.Link(model.ProviderGarmin, "gone", ""); err != nil {
+	if _, err := h.accts.Link(ctx, model.ProviderGarmin, "gone", ""); err != nil {
 		t.Fatalf("link account: %v", err)
 	}
 

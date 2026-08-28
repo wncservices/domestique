@@ -438,7 +438,7 @@ func openAccounts(src *source.DB) ([]model.Account, error) {
 	if err != nil {
 		return nil, err
 	}
-	return store.List()
+	return store.List(context.Background())
 }
 
 // accountStoreFor builds the accounts store the API links through.
