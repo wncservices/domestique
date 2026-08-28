@@ -311,6 +311,13 @@ export const api = {
   sharedRouteTrack: (token: string) =>
     request<TrackResponse>(`/api/shares/${encodeURIComponent(token)}/track`),
   sharedRouteGpxUrl: (token: string) => `/api/shares/${encodeURIComponent(token)}/gpx`,
+  /** Copies the shared route straight into the caller's own library,
+   *  owned by them — a smarter download, landing where a route belongs
+   *  instead of a local file they'd otherwise have to re-upload by hand.
+   *  A second import of the same share 409s (ApiError, not a resolved
+   *  value) rather than creating a duplicate. */
+  importSharedRoute: (token: string) =>
+    request<{ slug: string }>(`/api/shares/${encodeURIComponent(token)}/import`, { method: 'POST' }),
 
   upload: (req: UploadRequest) => {
     const form = new FormData()

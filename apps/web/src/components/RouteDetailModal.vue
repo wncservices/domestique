@@ -28,7 +28,7 @@ const distance = computed(() => (props.route ? `${(props.route.distanceM / 1000)
 const ascent = computed(() => (props.route ? `${Math.round(props.route.ascentM)} m` : ''))
 const gpxUrl = computed(() => (props.route ? api.gpxUrl(props.route.slug) : ''))
 
-const INTERNAL_TAG_PREFIXES = ['komoot:', 'garmin:']
+const INTERNAL_TAG_PREFIXES = ['komoot:', 'garmin:', 'shared:']
 const visibleTags = computed(() =>
   (props.route?.tags ?? []).filter(
     (tag) => !INTERNAL_TAG_PREFIXES.some((prefix) => tag.startsWith(prefix)),

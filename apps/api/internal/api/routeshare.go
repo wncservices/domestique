@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -27,6 +28,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
+	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
 // sharesAvailable mirrors crewAvailable/scheduleAvailable — see either's own
@@ -386,4 +388,75 @@ func (s *Server) handleSharedRouteFIT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeFITAttachment(s.logger(), w, route.Slug, fitBytes)
+}
+
+// sharedImportTag is the dedup key a shared-route import gets tagged with —
+// the same shape komootTag/garminTag already use for their own re-import
+// detection (internal/api/komootconnect.go, garminconnect.go), keyed on
+// the *original* route's slug rather than the share token: two different
+// share links to the same route, or the same link visited twice, must
+// still only ever produce one imported copy per recipient.
+func sharedImportTag(slug string) string { return "shared:" + slug }
+
+// handleImportSharedRoute copies a shared route into the recipient's own
+// library — a smarter download, landing directly where a route belongs
+// instead of a local file they would otherwise have to re-upload by hand.
+// Exempted from the ordinary role gate the same way the GET reads are (see
+// authenticate's own doc comment) even though this one writes: the row it
+// creates is owned by the requester's own verified identity from the
+// session, never anyone else's, and never touches the shared route or its
+// owner — the same "ownership comes from session, never body" rule every
+// other write in this codebase already follows, just applied to someone
+// who may hold no role here at all yet. A route imported before its
+// importer is ever granted one just sits there, already correctly owned,
+// for the day an admin does.
+func (s *Server) handleImportSharedRoute(w http.ResponseWriter, r *http.Request) {
+	_, route, ok := s.resolveShare(w, r)
+	if !ok {
+		return
+	}
+	identity := auth.FromContext(r.Context())
+
+	raw, err := s.Source.GPX(r.Context(), route.Slug)
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+
+	tag := sharedImportTag(route.Slug)
+	existing, _, err := s.Source.List(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	for _, rt := range existing {
+		if !strings.EqualFold(rt.Owner, identity.User) {
+			continue
+		}
+		for _, t := range rt.Tags {
+			if t != tag {
+				continue
+			}
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "you've already imported this route",
+				"slug":  rt.Slug,
+			})
+			return
+		}
+	}
+
+	created, err := s.Source.Create(r.Context(), source.CreateRequest{
+		Name:       route.Name,
+		GPX:        raw,
+		UploadedBy: identity.User,
+		Tags:       []string{tag},
+		Sport:      route.EffectiveSport(),
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.logger().Info("shared route imported", "slug", route.Slug, "as", created.Slug, "by", identity.User)
+	writeJSON(w, http.StatusCreated, map[string]string{"slug": created.Slug})
 }
