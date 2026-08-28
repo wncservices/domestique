@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Account, Me, Route } from '@/api/types'
+import ShareRouteDialog from './ShareRouteDialog.vue'
 import SyncBadge from './SyncBadge.vue'
 import TrackPreview from './TrackPreview.vue'
 
@@ -32,6 +33,7 @@ const visibleTags = computed(() =>
 
 const confirming = ref(false)
 const deleting = ref(false)
+const sharing = ref(false)
 
 // Cycling/running is a two-way toggle, not a picker — one click flips it,
 // the same reasoning a checkbox gets over a dropdown for a binary choice.
@@ -357,6 +359,20 @@ async function remove() {
         aria-label="Choose target devices"
         @click.stop="openTargets"
       />
+      <!-- oidc only — mode: proxy blocks anonymous traffic before it ever
+           reaches this app at all, so a share link's recipient (someone
+           this deployment has never heard of) could never sign in to use
+           one; mode: none has no anonymous state to grant a share to in
+           the first place. See ShareRouteDialog.vue's own doc comment. -->
+      <UButton
+        v-if="canEdit && me?.authMode === 'oidc'"
+        icon="i-lucide-share-2"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        aria-label="Share this route"
+        @click.stop="sharing = true"
+      />
       <UButton
         v-if="canEdit"
         icon="i-lucide-trash-2"
@@ -367,6 +383,8 @@ async function remove() {
         @click.stop="confirming = true"
       />
     </div>
+
+    <ShareRouteDialog v-if="canEdit" v-model:open="sharing" :route="route" />
 
     <UModal v-model:open="editingTargets" title="Choose target devices">
       <template #body>

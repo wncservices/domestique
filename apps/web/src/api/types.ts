@@ -359,6 +359,51 @@ export interface UploadRequest {
   sport?: Sport
 }
 
+/** A link to one route for someone outside this deployment entirely — see
+ *  ShareRouteDialog.vue and SharedRoutePage.vue. Grants exactly that one
+ *  route, nothing about the rest of the library; only available under
+ *  authMode oidc (see Me.authMode), where a stranger can actually sign in
+ *  at all. */
+export interface RouteShare {
+  id: string
+  routeSlug: string
+  createdBy: string
+  createdAt: string
+  expiresAt: string
+  /** Absent unless the owner ended it early. */
+  revokedAt?: string
+  /** Everyone who has viewed the link — the owner's own "who's seen this,"
+   *  not a guest list; anyone holding the link may view it until it's
+   *  revoked or expires. */
+  redeemedBy: { rider: string; redeemedAt: string }[]
+}
+
+/** POST /api/routes/{slug}/shares's own response — the only place the raw
+ *  token is ever visible. Losing it means the link is gone even though the
+ *  RouteShare row survives (see the API's own doc comment). */
+export interface CreateRouteShareResponse extends RouteShare {
+  token: string
+  /** Ready to copy — origin + /shared/{token}, built server-side from the
+   *  request that created it. */
+  url: string
+}
+
+/** The only link lifetimes a share may be created with — see
+ *  routeshare.Store's own allowedTTLs. */
+export type RouteShareTTLDays = 7 | 30 | 90
+
+/** What GET /api/shares/{token} returns — deliberately narrow: a name and
+ *  three stats, nothing a Route carries about ownership, targets or sync
+ *  state. A share grants exactly this much. */
+export interface SharedRoute {
+  slug: string
+  name: string
+  distanceM: number
+  ascentM: number
+  sport: Sport
+  expiresAt: string
+}
+
 export interface LibraryResponse {
   routes: Route[]
   problems: string[]

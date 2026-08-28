@@ -122,12 +122,25 @@ watch(
   { immediate: true },
 )
 
-onMounted(refresh)
+// A share recipient is, by design, someone this deployment's library has
+// never heard of — useLibrary's own fetches (routes, accounts, crews...)
+// 403 for them the same way they would for any role-less identity, and
+// the ordinary header (library-wide stats, a "your role does not allow
+// routes:read" retry banner) would be actively wrong to show someone who
+// isn't looking at the library at all. SharedRoutePage.vue does its own
+// sign-in check and its own fetch through /api/shares/{token}, entirely
+// independent of useLibrary, so this skips the whole library-page shell
+// for that one route rather than trying to make it degrade gracefully.
+const isSharedRoutePage = computed(() => route.path.startsWith('/shared/'))
+
+onMounted(() => {
+  if (!isSharedRoutePage.value) refresh()
+})
 </script>
 
 <template>
   <UApp>
-    <div class="app-header sticky top-0 z-20">
+    <div v-if="!isSharedRoutePage" class="app-header sticky top-0 z-20">
       <UContainer class="max-w-5xl">
         <div class="flex items-center justify-between gap-4 py-3">
           <RouterLink to="/" class="flex min-w-0 items-center gap-3">
@@ -238,33 +251,35 @@ onMounted(refresh)
     </div>
 
     <UContainer class="flex max-w-5xl flex-col gap-6 py-6">
-      <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div v-for="stat in stats" :key="stat.label" class="app-card px-4 py-3">
-          <div class="flex items-center gap-1.5 text-[0.7rem] uppercase tracking-wide text-dimmed">
-            <span
-              class="flex size-4 items-center justify-center rounded"
-              :style="{ color: `var(--app-accent-${stat.color})` }"
-            >
-              <UIcon :name="stat.icon" class="size-3.5" />
-            </span>
-            {{ stat.label }}
+      <template v-if="!isSharedRoutePage">
+        <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div v-for="stat in stats" :key="stat.label" class="app-card px-4 py-3">
+            <div class="flex items-center gap-1.5 text-[0.7rem] uppercase tracking-wide text-dimmed">
+              <span
+                class="flex size-4 items-center justify-center rounded"
+                :style="{ color: `var(--app-accent-${stat.color})` }"
+              >
+                <UIcon :name="stat.icon" class="size-3.5" />
+              </span>
+              {{ stat.label }}
+            </div>
+            <div class="font-mono mt-1 truncate text-2xl tabular-nums text-highlighted">
+              {{ stat.value }}
+            </div>
           </div>
-          <div class="font-mono mt-1 truncate text-2xl tabular-nums text-highlighted">
-            {{ stat.value }}
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <UAlert
-        v-if="error"
-        color="error"
-        variant="subtle"
-        icon="i-lucide-plug-zap"
-        orientation="horizontal"
-        title="Could not reach the API"
-        :description="error"
-        :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => refresh() }]"
-      />
+        <UAlert
+          v-if="error"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-plug-zap"
+          orientation="horizontal"
+          title="Could not reach the API"
+          :description="error"
+          :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => refresh() }]"
+        />
+      </template>
 
       <!-- KeepAlive, LibraryPage only: every other page (Add, Settings,
            People, Crews) genuinely wants fresh state each visit, but
