@@ -90,17 +90,22 @@ var allowedRoadKinds = map[string]bool{
 	"highway": true, "major_road": true, "minor_road": true,
 }
 
-// RouteBBox computes exactly the bbox TrackPreview.vue's own `projection`
-// computed property does: not the route's raw min/max lat/lon, but what's
-// visible at the *card's own edges* once the route is centered and scaled
-// to fit (aspect-locked, so whichever axis has slack gets letterboxed).
-// Fetching only the route's tight bbox left that letterboxed margin with
-// no background at all — see the "Fill the whole preview card" fix this
-// mirrors. ok is false for a route with fewer than 2 points, same
+// cardProjection is the fitted lat/lon-to-card-pixel transform TrackPreview.vue's
+// own `projection` computed property builds — factored out of RouteBBox so
+// RenderCardImage (renderimage.go) can share the exact same math for its
+// forward projection rather than an independently-typed second copy that
+// could drift from RouteBBox's own inverse of it.
+type cardProjection struct {
+	minX, minY, lonScale, scale, offsetX, offsetY float64
+}
+
+// newCardProjection fits points to previewWidth x previewHeight (aspect-locked,
+// so whichever axis has slack gets letterboxed), the same fit TrackPreview.vue's
+// `projection` computed performs. ok is false for fewer than 2 points, same
 // threshold as the client's own projection computed.
-func RouteBBox(points [][2]float64) (west, south, east, north float64, ok bool) {
+func newCardProjection(points [][2]float64) (cardProjection, bool) {
 	if len(points) < 2 {
-		return 0, 0, 0, 0, false
+		return cardProjection{}, false
 	}
 
 	minLat, maxLat := points[0][0], points[0][0]
@@ -131,10 +136,42 @@ func RouteBBox(points [][2]float64) (west, south, east, north float64, ok bool) 
 	offsetX := (previewWidth - spanX*scale) / 2
 	offsetY := (previewHeight - spanY*scale) / 2
 
-	west = (-offsetX/scale + minX) / lonScale
-	east = ((previewWidth-offsetX)/scale + minX) / lonScale
-	south = minY - offsetY/scale
-	north = minY + (previewHeight-offsetY)/scale
+	return cardProjection{minX: minX, minY: minY, lonScale: lonScale, scale: scale, offsetX: offsetX, offsetY: offsetY}, true
+}
+
+// bbox is the lat/lon visible at the card's own edges — not the route's tight
+// bounding box, what RouteBBox's own doc comment explains fetching instead of.
+func (p cardProjection) bbox() (west, south, east, north float64) {
+	west = (-p.offsetX/p.scale + p.minX) / p.lonScale
+	east = ((previewWidth-p.offsetX)/p.scale + p.minX) / p.lonScale
+	south = p.minY - p.offsetY/p.scale
+	north = p.minY + (previewHeight-p.offsetY)/p.scale
+	return west, south, east, north
+}
+
+// project maps a lat/lon to its card-pixel position, mirroring TrackPreview.vue's
+// own `projection.project` exactly (including its y-flip: SVG y grows
+// downward, latitude grows north).
+func (p cardProjection) project(lat, lon float64) (x, y float64) {
+	x = p.offsetX + (lon*p.lonScale-p.minX)*p.scale
+	y = previewHeight - p.offsetY - (lat-p.minY)*p.scale
+	return x, y
+}
+
+// RouteBBox computes exactly the bbox TrackPreview.vue's own `projection`
+// computed property does: not the route's raw min/max lat/lon, but what's
+// visible at the *card's own edges* once the route is centered and scaled
+// to fit (aspect-locked, so whichever axis has slack gets letterboxed).
+// Fetching only the route's tight bbox left that letterboxed margin with
+// no background at all — see the "Fill the whole preview card" fix this
+// mirrors. ok is false for a route with fewer than 2 points, same
+// threshold as the client's own projection computed.
+func RouteBBox(points [][2]float64) (west, south, east, north float64, ok bool) {
+	proj, ok := newCardProjection(points)
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	west, south, east, north = proj.bbox()
 	return west, south, east, north, true
 }
 
