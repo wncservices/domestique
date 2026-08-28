@@ -381,9 +381,9 @@ func (s *Server) handleCreateRideSeries(w http.ResponseWriter, r *http.Request) 
 // series' own creator if still an approved member), since cancelling the
 // rest of a series is the same kind of act as cancelling one ride, just
 // wider. Occurrences already in the past are left alone; see
-// schedule.Store.DeleteSeries's own doc comment. from follows
-// handleUpcomingRides's own reasoning for taking the caller's idea of
-// "today" as an optional query param rather than assuming the server's.
+// schedule.Store.DeleteSeries's own doc comment. The `from` query param
+// follows handleUpcomingRides's own reasoning for taking the caller's idea
+// of "today" as an optional param rather than assuming the server's.
 func (s *Server) handleDeleteRideSeries(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageCrews) {
 		return
