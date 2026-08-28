@@ -18,6 +18,10 @@ const router = createRouter({
     { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
     { path: '/people', component: () => import('./pages/PeoplePage.vue') },
     { path: '/crews', component: () => import('./pages/CrewsPage.vue') },
+    // Not part of "the app" the way the rest of these are — a share
+    // recipient may hold no role in this deployment at all. See App.vue's
+    // own isSharedRoutePage for why it renders outside the usual shell.
+    { path: '/shared/:token', component: () => import('./pages/SharedRoutePage.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

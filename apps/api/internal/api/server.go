@@ -34,6 +34,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -159,6 +160,16 @@ type Server struct {
 	// unconditionally in runServe.
 	Schedule *schedule.Store
 
+	// Shares holds share links to a single route — see internal/routeshare.
+	// Same no-nil-degradation story as Crew and Schedule: no external
+	// credential, only the database every deployment already has, wired
+	// unconditionally in runServe. Only meaningful under mode: oidc — mode:
+	// proxy blocks anonymous traffic before it ever reaches this app, and
+	// mode: none has no anonymous state to grant a share to in the first
+	// place — but the store itself has no opinion about auth mode; the
+	// frontend decides whether to offer the feature from meDTO.AuthMode.
+	Shares *routeshare.Store
+
 	// Blocklist stops a blocked rider's email from creating a new local
 	// identity — see internal/blocklist. Auth0's own SetBlocked only refuses
 	// the identity an admin actually blocked, not a fresh signup with the
@@ -243,6 +254,20 @@ func (s *Server) Handler() http.Handler {
 	// nothing here.
 	mux.HandleFunc("POST /api/routes/{slug}/recalculate-elevation", s.handleRecalculateElevation)
 	mux.HandleFunc("DELETE /api/routes/{slug...}", s.handleDelete)
+
+	// Owner-side share management stays behind the ordinary gate — see
+	// routeshare.go's own doc comment for the shape of the whole feature.
+	mux.HandleFunc("POST /api/routes/{slug}/shares", s.handleCreateRouteShare)
+	mux.HandleFunc("GET /api/routes/{slug}/shares", s.handleListRouteShares)
+	mux.HandleFunc("DELETE /api/shares/{id}", s.handleRevokeRouteShare)
+	// Recipient-side reads are the GET /api/shares/{token}... paths
+	// authenticate's own exempt check carves out of the blanket
+	// Authorize gate — every handler still requires a real signed-in
+	// identity, just not one holding any recognized role.
+	mux.HandleFunc("GET /api/shares/{token}", s.handleSharedRoute)
+	mux.HandleFunc("GET /api/shares/{token}/track", s.handleSharedRouteTrack)
+	mux.HandleFunc("GET /api/shares/{token}/gpx", s.handleSharedRouteGPX)
+	mux.HandleFunc("GET /api/shares/{token}/fit", s.handleSharedRouteFIT)
 
 	mux.HandleFunc("GET /api/komoot/connection", s.handleKomootConnection)
 	mux.HandleFunc("POST /api/komoot/connection", s.handleKomootConnect)
@@ -376,7 +401,21 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		// caller (no recognized role) should still be blocked from PATCH /api/me
 		// and everything else this path serves. GET is the only verb the
 		// "explain the 403" case ever needed.
-		exempt := r.URL.Path == "/api/config" || (r.URL.Path == "/api/me" && r.Method == http.MethodGet)
+		//
+		// GET /api/shares/{token}... is exempted for a different reason: a
+		// share-link recipient is, by design, someone this deployment's role
+		// system has never heard of — that is the entire point of
+		// internal/routeshare. Only Authorize's blanket role/group check is
+		// skipped here; every one of those handlers still requires
+		// !id.Anonymous() itself (a real signed-in session) and does its own
+		// authorization entirely through the share record, never through
+		// role or group. GET only, deliberately: creating, listing and
+		// revoking a share (POST/GET/DELETE under /api/routes/{slug}/shares
+		// and DELETE /api/shares/{id}) are ordinary owner-only actions and
+		// stay behind the normal gate.
+		exempt := r.URL.Path == "/api/config" ||
+			(r.URL.Path == "/api/me" && r.Method == http.MethodGet) ||
+			(strings.HasPrefix(r.URL.Path, "/api/shares/") && r.Method == http.MethodGet)
 		if err := s.authenticator().Authorize(id); err != nil && !exempt {
 			// Only gate the API. The SPA itself must still load, or the
 			// browser gets a JSON blob instead of a page explaining itself.
@@ -1469,7 +1508,14 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		s.failLookup(w, err)
 		return
 	}
+	writeGPXAttachment(s.logger(), w, slug, raw)
+}
 
+// writeGPXAttachment is handleDownload's own response, factored out so
+// handleSharedRouteGPX (routeshare.go) — scoped through a share instead of
+// library visibility — writes byte-for-byte the same response rather than
+// a second, driftable copy of it.
+func writeGPXAttachment(log *slog.Logger, w http.ResponseWriter, slug string, raw []byte) {
 	filename := strings.ReplaceAll(slug, "/", "-") + ".gpx"
 	w.Header().Set("Content-Type", "application/gpx+xml")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
@@ -1478,7 +1524,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// #nosec G705 -- served as an attachment with a fixed content type, not HTML.
 	if _, err := w.Write(raw); err != nil {
-		s.logger().Error("write gpx", "err", err)
+		log.Error("write gpx", "err", err)
 	}
 }
 
@@ -1533,6 +1579,12 @@ func (s *Server) handleDownloadFIT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeFITAttachment(s.logger(), w, slug, fitBytes)
+}
+
+// writeFITAttachment is writeGPXAttachment's own twin for a FIT course —
+// see its doc comment; handleSharedRouteFIT (routeshare.go) shares this too.
+func writeFITAttachment(log *slog.Logger, w http.ResponseWriter, slug string, fitBytes []byte) {
 	filename := strings.ReplaceAll(slug, "/", "-") + ".fit"
 	w.Header().Set("Content-Type", "application/vnd.ant.fit")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
@@ -1540,7 +1592,7 @@ func (s *Server) handleDownloadFIT(w http.ResponseWriter, r *http.Request) {
 	// #nosec G705 -- binary FIT served as an attachment with a fixed content
 	// type and nosniff, never rendered as a page.
 	if _, err := w.Write(fitBytes); err != nil {
-		s.logger().Error("write fit", "err", err)
+		log.Error("write fit", "err", err)
 	}
 }
 

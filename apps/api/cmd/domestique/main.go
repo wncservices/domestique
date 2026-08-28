@@ -41,6 +41,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -713,6 +714,15 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Crew and Schedule — see
+	// api.Server.Shares' own doc comment for why the store itself has no
+	// opinion about auth mode even though the feature is only meaningful
+	// under mode: oidc.
+	sharesStore, err := routeshare.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	srv := &api.Server{
 		Source:    src,
 		Config:    cfg,
@@ -721,6 +731,7 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Crew:      crewStore,
 		Schedule:  scheduleStore,
 		Blocklist: blocklistStore,
+		Shares:    sharesStore,
 		Auth:      authenticator,
 		Log:       log,
 		// Pure in-memory, no external credential to be missing — wired

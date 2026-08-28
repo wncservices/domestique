@@ -28,11 +28,15 @@ import type {
   Person,
   PlanResponse,
   PushResponse,
+  CreateRouteShareResponse,
   Ride,
   UpcomingRide,
   Route,
   RouteDuplicateGroup,
+  RouteShare,
+  RouteShareTTLDays,
   ScheduleRideRequest,
+  SharedRoute,
   Sport,
   TrackResponse,
   UploadRequest,
@@ -287,6 +291,25 @@ export const api = {
     }),
 
   gpxUrl: (slug: string) => `/api/gpx/${encodeSlug(slug)}`,
+
+  routeShares: (slug: string) => request<RouteShare[]>(`/api/routes/${encodeSlug(slug)}/shares`),
+  createRouteShare: (slug: string, ttlDays: RouteShareTTLDays) =>
+    request<CreateRouteShareResponse>(`/api/routes/${encodeSlug(slug)}/shares`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ttlDays }),
+    }),
+  revokeRouteShare: (id: string) =>
+    request<{ status: string }>(`/api/shares/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /** The recipient side of a share — a token, not a slug, and no auth
+   *  header magic beyond the ordinary session cookie: GET /api/shares/{token}
+   *  is exempted from the deployment's role gate (see authenticate's own
+   *  doc comment in server.go), but still needs a signed-in caller. */
+  sharedRoute: (token: string) => request<SharedRoute>(`/api/shares/${encodeURIComponent(token)}`),
+  sharedRouteTrack: (token: string) =>
+    request<TrackResponse>(`/api/shares/${encodeURIComponent(token)}/track`),
+  sharedRouteGpxUrl: (token: string) => `/api/shares/${encodeURIComponent(token)}/gpx`,
 
   upload: (req: UploadRequest) => {
     const form = new FormData()
