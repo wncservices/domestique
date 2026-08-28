@@ -326,7 +326,7 @@ func (s *Server) Handler() http.Handler {
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
 	return otelhttp.NewHandler(
-		instrument(logRequests(s.logger(), s.authenticate(mux))),
+		instrument(logRequests(s.logger(), s.authenticate(compress(mux)))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + r.URL.Path
