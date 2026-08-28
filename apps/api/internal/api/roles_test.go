@@ -161,7 +161,7 @@ func seedRoleAccounts(t *testing.T, db *source.DB) *accounts.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Link(model.ProviderGarmin, "wilant", ""); err != nil {
+	if _, err := store.Link(t.Context(), model.ProviderGarmin, "wilant", ""); err != nil {
 		t.Fatal(err)
 	}
 	return store

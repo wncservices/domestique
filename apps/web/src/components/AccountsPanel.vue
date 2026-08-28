@@ -82,6 +82,24 @@ async function toggleAutoPush(account: Account, enabled: boolean) {
   }
 }
 
+// The reconcile pass now watches for this server-side (a Warn log and a
+// metric an alert rule can watch), but a rider looking at Settings before
+// that ever fires is still worth telling — the fields have been in the API
+// response all along, just never rendered. 30 days is deliberately wider
+// than the server's own 14-day warn window: a badge costs nothing to show
+// a little early, where a log line every tick for a month would be noise.
+const garminExpiry = computed(() => {
+  if (!props.garmin.expiresAt) return null
+  const days = Math.ceil((new Date(props.garmin.expiresAt).getTime() - Date.now()) / 86_400_000)
+  if (props.garmin.expired || days <= 0) {
+    return { label: 'sign-in expired', color: 'error' as const }
+  }
+  if (days <= 30) {
+    return { label: `sign-in expires in ${days} day${days === 1 ? '' : 's'}`, color: 'warning' as const }
+  }
+  return null
+})
+
 /** One account per rider per provider, so hide what is already linked. */
 const linkableGarmin = computed(
   () => !props.accounts.some((a) => a.provider === 'garmin' && isMine(a)),
@@ -232,6 +250,15 @@ async function unlink(account: Account) {
         >
           <UBadge color="warning" variant="subtle" size="sm" icon="i-lucide-triangle-alert">
             possible duplicate
+          </UBadge>
+        </UTooltip>
+
+        <UTooltip
+          v-if="account.provider === 'garmin' && isMine(account) && garminExpiry"
+          text="Garmin's sign-in lasts about a year, then pushes to this account fail until you reconnect it above."
+        >
+          <UBadge :color="garminExpiry!.color" variant="subtle" size="sm" icon="i-lucide-clock-alert">
+            {{ garminExpiry!.label }}
           </UBadge>
         </UTooltip>
 

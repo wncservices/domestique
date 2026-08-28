@@ -61,7 +61,7 @@ func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary
 	}
 
 	if s.Accounts != nil {
-		accountList, err := s.Accounts.List()
+		accountList, err := s.Accounts.List(ctx)
 		if err != nil {
 			return sum, fmt.Errorf("listing accounts: %w", err)
 		}
@@ -85,7 +85,7 @@ func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary
 					sum.SyncStateRows++
 				}
 			}
-			if err := s.Accounts.Unlink(a.ID); err != nil && !errors.Is(err, accounts.ErrNotFound) {
+			if err := s.Accounts.Unlink(ctx, a.ID); err != nil && !errors.Is(err, accounts.ErrNotFound) {
 				return sum, fmt.Errorf("unlinking %s: %w", a.ID, err)
 			}
 			sum.AccountsUnlinked++

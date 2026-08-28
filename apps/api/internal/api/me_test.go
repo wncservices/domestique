@@ -160,7 +160,7 @@ func TestUpdateMeRejectsANameThatCollidesWithAnotherRider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := accountStore.Link(model.ProviderGarmin, "someone-else", "their head unit"); err != nil {
+	if _, err := accountStore.Link(t.Context(), model.ProviderGarmin, "someone-else", "their head unit"); err != nil {
 		t.Fatal(err)
 	}
 

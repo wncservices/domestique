@@ -493,7 +493,7 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}

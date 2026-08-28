@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -190,7 +191,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 	// Signing in *is* linking the head unit. Asking a rider to sign in and
 	// then separately add a Garmin as a push target would be two steps for one
 	// intention, and would leave a linked account with no way to reach it.
-	s.ensureAccount(rider, model.ProviderGarmin, session.DisplayName)
+	s.ensureAccount(r.Context(), rider, model.ProviderGarmin, session.DisplayName)
 
 	s.logger().Info("garmin connected", "rider", rider, "account", session.DisplayName)
 	writeJSON(w, http.StatusOK, s.garminConnectionDTO(r))
@@ -280,7 +281,7 @@ func (s *Server) handleGarminDisconnect(w http.ResponseWriter, r *http.Request) 
 	// push target there is no longer any way to reach, which shows up as a
 	// failing sync rather than as the disconnection the rider asked for.
 	if s.Accounts != nil {
-		if err := s.Accounts.Unlink(accounts.ID(model.ProviderGarmin, rider)); err != nil &&
+		if err := s.Accounts.Unlink(r.Context(), accounts.ID(model.ProviderGarmin, rider)); err != nil &&
 			!errors.Is(err, accounts.ErrNotFound) {
 			s.logger().Warn("unlinking the garmin head unit failed", "rider", rider, "err", err)
 		}
@@ -294,7 +295,7 @@ func (s *Server) handleGarminDisconnect(w http.ResponseWriter, r *http.Request) 
 // nothing if they already had one. Failing to link is logged rather than
 // returned: the connection itself was stored, and reporting the sign-in as
 // failed would invite the rider to do it again to no effect.
-func (s *Server) ensureAccount(rider string, provider model.Provider, label string) {
+func (s *Server) ensureAccount(ctx context.Context, rider string, provider model.Provider, label string) {
 	if s.Accounts == nil {
 		return
 	}
@@ -302,7 +303,7 @@ func (s *Server) ensureAccount(rider string, provider model.Provider, label stri
 		label = string(provider)
 	}
 
-	switch _, err := s.Accounts.Link(provider, rider, label); {
+	switch _, err := s.Accounts.Link(ctx, provider, rider, label); {
 	case err == nil, errors.Is(err, accounts.ErrExists):
 	default:
 		s.logger().Warn("linking the head unit after sign-in failed",

@@ -172,7 +172,7 @@ func TestGarminConnectLinksTheHeadUnit(t *testing.T) {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 
-	if _, err := h.accounts.Get(accounts.ID(model.ProviderGarmin, "friend")); err != nil {
+	if _, err := h.accounts.Get(t.Context(), accounts.ID(model.ProviderGarmin, "friend")); err != nil {
 		t.Errorf("no head unit was linked after signing in: %v", err)
 	}
 }
@@ -385,7 +385,7 @@ func TestGarminDisconnectRemovesTheConnectionAndTheHeadUnit(t *testing.T) {
 	}
 	// A head unit with no sign-in behind it is a push target that can only
 	// fail, so it goes too.
-	if _, err := h.accounts.Get(accounts.ID(model.ProviderGarmin, "wilant")); err == nil {
+	if _, err := h.accounts.Get(t.Context(), accounts.ID(model.ProviderGarmin, "wilant")); err == nil {
 		t.Error("the head unit is still linked with no way to reach it")
 	}
 }

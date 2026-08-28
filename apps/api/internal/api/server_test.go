@@ -50,7 +50,7 @@ func linkedStore(t *testing.T, db *source.DB) *accounts.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Link(model.ProviderGarmin, "one", ""); err != nil {
+	if _, err := store.Link(t.Context(), model.ProviderGarmin, "one", ""); err != nil {
 		t.Fatal(err)
 	}
 	return store

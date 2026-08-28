@@ -54,7 +54,7 @@ func TestAccountsEachEngine(t *testing.T) {
 			t.Run("link and read back", func(t *testing.T) {
 				store := open(t)
 
-				account, err := store.Link(model.ProviderGarmin, "one", "")
+				account, err := store.Link(t.Context(), model.ProviderGarmin, "one", "")
 				if err != nil {
 					t.Fatalf("link: %v", err)
 				}
@@ -66,7 +66,7 @@ func TestAccountsEachEngine(t *testing.T) {
 					t.Error("no label was derived")
 				}
 
-				linked, err := store.List()
+				linked, err := store.List(t.Context())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -80,19 +80,19 @@ func TestAccountsEachEngine(t *testing.T) {
 			t.Run("no duplicates", func(t *testing.T) {
 				store := open(t)
 
-				if _, err := store.Link(model.ProviderGarmin, "one", ""); err != nil {
+				if _, err := store.Link(t.Context(), model.ProviderGarmin, "one", ""); err != nil {
 					t.Fatal(err)
 				}
-				_, err := store.Link(model.ProviderGarmin, "one", "")
+				_, err := store.Link(t.Context(), model.ProviderGarmin, "one", "")
 				if !errors.Is(err, ErrExists) {
 					t.Errorf("second link: err = %v, want ErrExists", err)
 				}
 
 				// A different rider, or a different provider, is fine.
-				if _, err := store.Link(model.ProviderGarmin, "two", ""); err != nil {
+				if _, err := store.Link(t.Context(), model.ProviderGarmin, "two", ""); err != nil {
 					t.Errorf("another rider: %v", err)
 				}
-				if _, err := store.Link(model.ProviderWahoo, "one", ""); err != nil {
+				if _, err := store.Link(t.Context(), model.ProviderWahoo, "one", ""); err != nil {
 					t.Errorf("another provider: %v", err)
 				}
 			})
@@ -100,17 +100,17 @@ func TestAccountsEachEngine(t *testing.T) {
 			t.Run("unlink", func(t *testing.T) {
 				store := open(t)
 
-				account, err := store.Link(model.ProviderWahoo, "one", "")
+				account, err := store.Link(t.Context(), model.ProviderWahoo, "one", "")
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := store.Unlink(account.ID); err != nil {
+				if err := store.Unlink(t.Context(), account.ID); err != nil {
 					t.Fatalf("unlink: %v", err)
 				}
-				if err := store.Unlink(account.ID); !errors.Is(err, ErrNotFound) {
+				if err := store.Unlink(t.Context(), account.ID); !errors.Is(err, ErrNotFound) {
 					t.Errorf("second unlink: err = %v, want ErrNotFound", err)
 				}
-				if _, err := store.Get(account.ID); !errors.Is(err, ErrNotFound) {
+				if _, err := store.Get(t.Context(), account.ID); !errors.Is(err, ErrNotFound) {
 					t.Errorf("get after unlink: err = %v, want ErrNotFound", err)
 				}
 			})
@@ -118,18 +118,18 @@ func TestAccountsEachEngine(t *testing.T) {
 			t.Run("relabel", func(t *testing.T) {
 				store := open(t)
 
-				account, err := store.Link(model.ProviderGarmin, "one", "Old name")
+				account, err := store.Link(t.Context(), model.ProviderGarmin, "one", "Old name")
 				if err != nil {
 					t.Fatal(err)
 				}
-				updated, err := store.Relabel(account.ID, "Edge 1040")
+				updated, err := store.Relabel(t.Context(), account.ID, "Edge 1040")
 				if err != nil {
 					t.Fatal(err)
 				}
 				if updated.Label != "Edge 1040" {
 					t.Errorf("label = %q", updated.Label)
 				}
-				if _, err := store.Relabel(account.ID, "  "); err == nil {
+				if _, err := store.Relabel(t.Context(), account.ID, "  "); err == nil {
 					t.Error("an empty label was accepted")
 				}
 			})
@@ -140,7 +140,7 @@ func TestAccountsEachEngine(t *testing.T) {
 			t.Run("auto-push defaults on and can be turned off", func(t *testing.T) {
 				store := open(t)
 
-				account, err := store.Link(model.ProviderGarmin, "one", "")
+				account, err := store.Link(t.Context(), model.ProviderGarmin, "one", "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -148,10 +148,10 @@ func TestAccountsEachEngine(t *testing.T) {
 					t.Error("a freshly linked account should default to auto-push on")
 				}
 
-				if err := store.SetAutoPush(account.ID, false); err != nil {
+				if err := store.SetAutoPush(t.Context(), account.ID, false); err != nil {
 					t.Fatalf("SetAutoPush: %v", err)
 				}
-				got, err := store.Get(account.ID)
+				got, err := store.Get(t.Context(), account.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -159,7 +159,7 @@ func TestAccountsEachEngine(t *testing.T) {
 					t.Error("AutoPush is still true after turning it off")
 				}
 
-				linked, err := store.List()
+				linked, err := store.List(t.Context())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -167,7 +167,7 @@ func TestAccountsEachEngine(t *testing.T) {
 					t.Errorf("list = %+v, want AutoPush false", linked)
 				}
 
-				if err := store.SetAutoPush("garmin:nobody", true); !errors.Is(err, ErrNotFound) {
+				if err := store.SetAutoPush(t.Context(), "garmin:nobody", true); !errors.Is(err, ErrNotFound) {
 					t.Errorf("SetAutoPush on a missing account: err = %v, want ErrNotFound", err)
 				}
 			})
@@ -213,7 +213,7 @@ func TestUseDBAddsTheAutoPushColumnToAnExistingDatabase(t *testing.T) {
 		t.Fatalf("UseDB on a pre-auto_push database: %v", err)
 	}
 
-	account, err := store.Get("garmin:one")
+	account, err := store.Get(t.Context(), "garmin:one")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestLinkRejectsUnusableRiders(t *testing.T) {
 	store := sqliteStore(t)
 
 	for _, rider := range []string{"", "   ", "with space", "with/slash", "with?query"} {
-		if _, err := store.Link(model.ProviderGarmin, rider, ""); err == nil {
+		if _, err := store.Link(t.Context(), model.ProviderGarmin, rider, ""); err == nil {
 			t.Errorf("rider %q was accepted", rider)
 		}
 	}
@@ -241,14 +241,14 @@ func TestLinkRejectsUnusableRiders(t *testing.T) {
 // somebody linked an account under mode: oidc.
 func TestLinkAcceptsAnOIDCSubShape(t *testing.T) {
 	store := sqliteStore(t)
-	if _, err := store.Link(model.ProviderGarmin, "auth0|64f2a1b2c3d4e5f6", ""); err != nil {
+	if _, err := store.Link(t.Context(), model.ProviderGarmin, "auth0|64f2a1b2c3d4e5f6", ""); err != nil {
 		t.Errorf("an Auth0-shaped rider was rejected: %v", err)
 	}
 }
 
 func TestLinkRejectsUnknownProvider(t *testing.T) {
 	store := sqliteStore(t)
-	if _, err := store.Link(model.Provider("strava"), "one", ""); err == nil {
+	if _, err := store.Link(t.Context(), model.Provider("strava"), "one", ""); err == nil {
 		t.Error("unknown provider accepted")
 	}
 }

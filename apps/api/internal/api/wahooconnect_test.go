@@ -331,7 +331,7 @@ func TestWahooCallbackStoresConnectionAndLinksAccount(t *testing.T) {
 		t.Fatalf("display name = %q", link.DisplayName)
 	}
 
-	acc, err := h.accounts.Get(accounts.ID(model.ProviderWahoo, "wilant"))
+	acc, err := h.accounts.Get(t.Context(), accounts.ID(model.ProviderWahoo, "wilant"))
 	if err != nil {
 		t.Fatalf("account was not linked: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestWahooDisconnectRemovesConnectionAndAccount(t *testing.T) {
 	if _, err := h.links.Get("wahoo", "wilant"); err == nil {
 		t.Fatal("connection survived disconnect")
 	}
-	if _, err := h.accounts.Get(accounts.ID(model.ProviderWahoo, "wilant")); err == nil {
+	if _, err := h.accounts.Get(t.Context(), accounts.ID(model.ProviderWahoo, "wilant")); err == nil {
 		t.Fatal("account survived disconnect")
 	}
 }

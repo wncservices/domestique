@@ -701,7 +701,7 @@ func (s *Server) riderIdentityInUse(ctx context.Context, candidate, self string)
 	}
 
 	if s.Accounts != nil {
-		accountList, err := s.Accounts.List()
+		accountList, err := s.Accounts.List(ctx)
 		if err != nil {
 			return false, fmt.Errorf("checking linked accounts: %w", err)
 		}
@@ -887,7 +887,7 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}
@@ -983,7 +983,7 @@ func (s *Server) handleLinkAccount(w http.ResponseWriter, r *http.Request) {
 		rider = body.Rider
 	}
 
-	account, err := s.Accounts.Link(model.Provider(body.Provider), rider, body.Label)
+	account, err := s.Accounts.Link(r.Context(), model.Provider(body.Provider), rider, body.Label)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, accounts.ErrExists) {
@@ -1014,7 +1014,7 @@ func (s *Server) handleSetAccountAutoPush(w http.ResponseWriter, r *http.Request
 	}
 
 	id := cleanSlug(r.PathValue("id"))
-	account, err := s.Accounts.Get(id)
+	account, err := s.Accounts.Get(r.Context(), id)
 	if err != nil {
 		s.failAccount(w, err)
 		return
@@ -1036,7 +1036,7 @@ func (s *Server) handleSetAccountAutoPush(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := s.Accounts.SetAutoPush(id, body.Enabled); err != nil {
+	if err := s.Accounts.SetAutoPush(r.Context(), id, body.Enabled); err != nil {
 		s.failAccount(w, err)
 		return
 	}
@@ -1062,7 +1062,7 @@ func (s *Server) handleUnlinkAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := cleanSlug(r.PathValue("id"))
-	account, err := s.Accounts.Get(id)
+	account, err := s.Accounts.Get(r.Context(), id)
 	if err != nil {
 		s.failAccount(w, err)
 		return
@@ -1076,7 +1076,7 @@ func (s *Server) handleUnlinkAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.Accounts.Unlink(id); err != nil {
+	if err := s.Accounts.Unlink(r.Context(), id); err != nil {
 		s.failAccount(w, err)
 		return
 	}
@@ -1094,8 +1094,8 @@ func (s *Server) failAccount(w http.ResponseWriter, err error) {
 }
 
 // linkedAccounts reads the accounts, or writes the error and reports false.
-func (s *Server) linkedAccounts(w http.ResponseWriter) ([]model.Account, bool) {
-	linked, err := s.Accounts.List()
+func (s *Server) linkedAccounts(ctx context.Context, w http.ResponseWriter) ([]model.Account, bool) {
+	linked, err := s.Accounts.List(ctx)
 	if err != nil {
 		s.fail(w, err)
 		return nil, false
@@ -1137,7 +1137,7 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}
@@ -1555,7 +1555,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}
@@ -1642,7 +1642,7 @@ func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, a
 		return pushResponse{}, err
 	}
 
-	linked, err := s.Accounts.List()
+	linked, err := s.Accounts.List(ctx)
 	if err != nil {
 		return pushResponse{}, err
 	}
@@ -1868,7 +1868,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}
@@ -1991,7 +1991,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		s.failLookup(w, err)
 		return
 	}
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}
@@ -2042,7 +2042,7 @@ func (s *Server) handleRecalculateElevation(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	linked, ok := s.linkedAccounts(w)
+	linked, ok := s.linkedAccounts(r.Context(), w)
 	if !ok {
 		return
 	}
