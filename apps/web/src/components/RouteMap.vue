@@ -19,34 +19,42 @@ const SOURCE_ID = 'routes'
 const LINE_LAYER_ID = 'routes-line'
 const START_LAYER_ID = 'routes-start'
 
+// Cached at module level, not per RouteMap instance: a second map on the
+// same page (a library map plus a popup, say) resolves every one of these
+// from cache instantly rather than re-importing or re-registering anything.
+let maplibregl: typeof import('maplibre-gl') | null = null
+let modulesReady: Promise<{
+  maplibregl: typeof import('maplibre-gl')
+  themes: typeof import('protomaps-themes-base')
+}> | null = null
+
 /**
- * pmtiles registers itself as a global maplibregl protocol handler, not a
- * per-map one — calling addProtocol twice across multiple RouteMap
- * instances on the same page (e.g. a library map plus a popup) is harmless
- * but pointless, so this only happens once per page load.
+ * Loads everything init() needs below — maplibre-gl (+ its CSS), the
+ * pmtiles protocol handler, and the themes package the first style build
+ * needs — as one Promise.all instead of four sequential awaits. None of
+ * the four imports themselves depend on each other: only the *synchronous*
+ * work after they all resolve does (addProtocol needs the maplibre-gl
+ * module object; building a style needs the themes module) — awaiting them
+ * one at a time paid a full network-plus-parse round trip per import for a
+ * dependency that only exists after every one of them is already loaded.
+ * pmtiles' own addProtocol call happens here too, guarded the same way the
+ * old ensureProtocol was: calling it twice across multiple RouteMap
+ * instances is harmless but pointless, so this whole Promise only runs once.
  */
-let protocolReady: Promise<void> | null = null
-function ensureProtocol(maplibregl: typeof import('maplibre-gl')) {
-  if (!protocolReady) {
-    protocolReady = import('pmtiles').then(({ Protocol }) => {
-      const protocol = new Protocol()
-      maplibregl.addProtocol('pmtiles', protocol.tile)
+function loadModules() {
+  if (!modulesReady) {
+    modulesReady = Promise.all([
+      import('maplibre-gl'),
+      import('maplibre-gl/dist/maplibre-gl.css'),
+      import('pmtiles'),
+      import('protomaps-themes-base'),
+    ]).then(([gl, , { Protocol }, themes]) => {
+      gl.addProtocol('pmtiles', new Protocol().tile)
+      maplibregl = gl
+      return { maplibregl: gl, themes }
     })
   }
-  return protocolReady
-}
-
-// Cached rather than re-imported on every use: init() awaits this once, and
-// everything after (addRouteLayers, the watchers) can assume it's already
-// resolved — a dynamic import() of an already-loaded module is cheap either
-// way, but this avoids every call site needing to be async just to get it.
-let maplibregl: typeof import('maplibre-gl') | null = null
-async function loadMaplibre() {
-  if (!maplibregl) {
-    maplibregl = await import('maplibre-gl')
-    await import('maplibre-gl/dist/maplibre-gl.css')
-  }
-  return maplibregl
+  return modulesReady
 }
 
 /**
@@ -56,9 +64,20 @@ async function loadMaplibre() {
  * CDN. Absolute URL, not a bare relative path: the pmtiles:// scheme wraps
  * a real fetchable URL, and building it from location.origin keeps this
  * working whether the app is reached at domestique.dev or app.domestique.dev.
+ *
+ * Split into a synchronous core (styleFromTheme) plus this async wrapper so
+ * init() below — which already has the themes module in hand from
+ * loadModules()'s single Promise.all — can build the initial style without
+ * a redundant await, while the theme-toggle watcher further down (which
+ * only ever needs this after the map already exists, no init() race to
+ * avoid) keeps the simpler "just await the import" form; the module is
+ * already cached by then, so that second import() resolves immediately.
  */
-async function buildStyle(theme: 'light' | 'dark'): Promise<StyleSpecification> {
-  const { layers, namedTheme } = await import('protomaps-themes-base')
+function styleFromTheme(
+  theme: 'light' | 'dark',
+  themes: typeof import('protomaps-themes-base'),
+): StyleSpecification {
+  const { layers, namedTheme } = themes
   const basemapUrl = `pmtiles://${window.location.origin}/tiles/basemap.pmtiles`
   return {
     version: 8,
@@ -73,6 +92,11 @@ async function buildStyle(theme: 'light' | 'dark'): Promise<StyleSpecification> 
     },
     layers: layers('protomaps', namedTheme(theme), { lang: 'en' }),
   }
+}
+
+async function buildStyle(theme: 'light' | 'dark'): Promise<StyleSpecification> {
+  const themes = await import('protomaps-themes-base')
+  return styleFromTheme(theme, themes)
 }
 
 function toFeatureCollection(routes: typeof props.routes) {
@@ -155,8 +179,7 @@ function addRouteLayers() {
 
 async function init() {
   if (!container.value) return
-  const gl = await loadMaplibre()
-  await ensureProtocol(gl)
+  const { maplibregl: gl, themes } = await loadModules()
 
   const theme = resolved.value === 'dark' ? 'dark' : 'light'
   // A local const, not the outer `map` variable, for the calls below: other
@@ -165,7 +188,7 @@ async function init() {
   // through them — this instance is exactly what was just constructed.
   const instance = new gl.Map({
     container: container.value,
-    style: await buildStyle(theme),
+    style: styleFromTheme(theme, themes),
     center: [4.35, 50.85],
     zoom: 7,
     attributionControl: { compact: true },
