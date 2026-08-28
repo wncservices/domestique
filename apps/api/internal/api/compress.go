@@ -28,7 +28,12 @@ func compress(next http.Handler) http.Handler {
 			return
 		}
 		cw := &compressingWriter{ResponseWriter: w}
-		defer cw.Close()
+		// A Close failure here means the gzip.Writer couldn't flush its
+		// trailer to a connection that's likely already gone (the client
+		// disconnected mid-response) — nothing left to do about it this
+		// late, and it's the same "already logged elsewhere" reasoning
+		// logRequests/otelhttp's own span cover for a broken connection.
+		defer func() { _ = cw.Close() }()
 		next.ServeHTTP(cw, r)
 	})
 }

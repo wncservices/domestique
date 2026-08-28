@@ -1417,7 +1417,12 @@ func (s *Server) handleTrackPreviewImage(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
+	// nosniff stops a browser deciding otherwise, same reasoning as
+	// handleDownload/handleDownloadFIT and writeTrackPreviewJSON above.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	recordTrackPreviewSize(r.Context(), "image", len(image))
+	// #nosec G705 -- this app's own server-rendered PNG (RenderCardImage),
+	// never user-supplied HTML, served with a fixed non-HTML content type.
 	_, _ = w.Write(image)
 }
 
