@@ -125,7 +125,6 @@ CREATE TABLE IF NOT EXISTS crew_rides (
     series_id  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_crew_rides_crew ON crew_rides (crew_id, date);
-CREATE INDEX IF NOT EXISTS idx_crew_rides_series ON crew_rides (series_id);
 
 CREATE TABLE IF NOT EXISTS ride_series (
     id             TEXT PRIMARY KEY,
@@ -153,6 +152,22 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 		return nil, fmt.Errorf("migrate crew_rides table: %w", err)
 	}
 	if err := store.addSeriesIDColumn(); err != nil {
+		return nil, fmt.Errorf("migrate crew_rides table: %w", err)
+	}
+	// Only safe here, after addSeriesIDColumn has guaranteed series_id
+	// exists on every table shape — a fresh install (created with the
+	// column already in schema's own CREATE TABLE) or one that predates
+	// this migration (schema's CREATE TABLE IF NOT EXISTS no-ops against
+	// it, so only the ALTER TABLE above actually adds the column). This
+	// used to sit inside schema() itself, right after crew_rides' own
+	// CREATE TABLE — which broke every deployment with an existing
+	// crew_rides table predating series_id: CREATE TABLE IF NOT EXISTS
+	// silently did nothing, and the CREATE INDEX right after it then
+	// failed outright ("column series_id does not exist"), aborting UseDB
+	// before addSeriesIDColumn ever got a chance to add the column it
+	// needed. A fresh test database never has a pre-existing table to
+	// no-op against, which is why TestEachEngine never caught this.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_crew_rides_series ON crew_rides (series_id)`); err != nil {
 		return nil, fmt.Errorf("migrate crew_rides table: %w", err)
 	}
 	return store, nil
