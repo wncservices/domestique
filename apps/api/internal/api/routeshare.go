@@ -457,6 +457,37 @@ func (s *Server) handleImportSharedRoute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// The check above and this create are not one atomic operation, so a
+	// second request racing this one (a double-click, a client retry) can
+	// pass it too and create its own copy before either commits. Re-check
+	// after writing and keep only the lexicographically-first slug — a
+	// deterministic, symmetric rule both requests would agree on, so
+	// whichever one runs this check after both commits have landed removes
+	// its own duplicate instead of leaving two behind.
+	survivor := created.Slug
+	if after, _, err := s.Source.List(r.Context()); err == nil {
+		for _, rt := range after {
+			if rt.Slug == created.Slug || !strings.EqualFold(rt.Owner, identity.User) {
+				continue
+			}
+			for _, t := range rt.Tags {
+				if t == tag && rt.Slug < survivor {
+					survivor = rt.Slug
+				}
+			}
+		}
+	}
+	if survivor != created.Slug {
+		if err := s.Source.Delete(r.Context(), created.Slug); err != nil {
+			s.logger().Warn("cleaning up duplicate shared-route import failed", "slug", created.Slug, "err", err)
+		}
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "you've already imported this route",
+			"slug":  survivor,
+		})
+		return
+	}
+
 	s.logger().Info("shared route imported", "slug", route.Slug, "as", created.Slug, "by", identity.User)
 	writeJSON(w, http.StatusCreated, map[string]string{"slug": created.Slug})
 }
