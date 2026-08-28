@@ -43,6 +43,25 @@ var (
 		metric.WithDescription("HTTP request duration by method and status."),
 	))
 
+	// format is bounded ("json" or "image"), not a slug — same
+	// no-unbounded-label reasoning as httpRequestDuration above. Exists so a
+	// regression like the one this metric was added for (every track-preview
+	// response running 1.5-2.6MB of JSON, discovered only by manually pulling
+	// Tempo traces one at a time) shows up in a dashboard instead.
+	//
+	// Explicit byte-sized bucket boundaries: the OTel SDK's default bucket
+	// set is tuned for second-denominated durations (largest boundary 10),
+	// so every sample here — bytes, five to seven digits — would otherwise
+	// land in the same +Inf overflow bucket, making a histogram in name
+	// only (sum/count still work, but no meaningful p50/p95).
+	trackPreviewResponseBytes = must(meter.Float64Histogram(
+		"domestique_track_preview_response_bytes",
+		metric.WithDescription("Track-preview response size in bytes, by format (json/image)."),
+		metric.WithExplicitBucketBoundaries(
+			1_000, 10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000,
+		),
+	))
+
 	// The two metrics docs/plan.md's own "Phase 6" describes: a staleness
 	// gauge and a per-account error counter, so an alert can catch "pushes
 	// stopped" instead of a rider noticing a route missing at the start of
@@ -135,6 +154,13 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// recordTrackPreviewSize is handleTrackPreview/handleTrackPreviewImage's
+// shared metric-recording call, kept here rather than importing
+// metric/attribute into server.go just for this one call site.
+func recordTrackPreviewSize(ctx context.Context, format string, bytes int) {
+	trackPreviewResponseBytes.Record(ctx, float64(bytes), metric.WithAttributes(attribute.String("format", format)))
 }
 
 // recordPushResult is sync.Apply's onResult callback for handlePush — the

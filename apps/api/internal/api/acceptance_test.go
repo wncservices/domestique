@@ -401,6 +401,25 @@ func TestConfigEndpoint(t *testing.T) {
 	}
 }
 
+// TestTrackPreviewImageEndpointUnavailable pins handleTrackPreviewImage's
+// "quietly missing" contract: newHarness leaves Basemap/PreviewTiles/
+// PreviewCache/PreviewImageCache all nil, the same "no tiles component
+// configured" shape a real deployment without one has, so this is a plain
+// 404 with no body worth parsing — same as its sibling /api/track-preview
+// endpoint, so TrackPreview.vue's own fallback (decode the tiles itself)
+// still has something to fall back to.
+func TestTrackPreviewImageEndpointUnavailable(t *testing.T) {
+	h := newHarness(t)
+	route := h.uploadExample("Image Preview Route")
+
+	resp := h.get("/api/track-preview-image/" + route.Slug)
+	h.expectStatus(resp, http.StatusNotFound)
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) != 0 {
+		t.Errorf("body = %q, want empty — a plain 404, not a parsed error", truncate(body))
+	}
+}
+
 func TestAccountsEndpoint(t *testing.T) {
 	h := newHarness(t)
 	resp := h.get("/api/accounts")

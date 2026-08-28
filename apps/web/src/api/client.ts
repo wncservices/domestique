@@ -83,7 +83,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** Slug segments are URL-safe already, but encode them so a stray space cannot break the path. */
-function encodeSlug(slug: string): string {
+export function encodeSlug(slug: string): string {
   return slug.split('/').map(encodeURIComponent).join('/')
 }
 

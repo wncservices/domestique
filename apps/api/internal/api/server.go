@@ -99,6 +99,11 @@ type Server struct {
 	// the client falls back to decoding the tiles itself.
 	PreviewTiles *basemap.PreviewTiles
 	PreviewCache *basemap.PreviewCache
+	// PreviewImageCache stores rendered card PNGs (see basemap/renderimage.go)
+	// per route+theme, same invalidation and "quietly unavailable" shape as
+	// PreviewCache above. Nil on a deployment without the tiles component,
+	// or when the client falls back to the JSON preview instead of the image.
+	PreviewImageCache *basemap.PreviewImageCache
 
 	// KomootEnabled is what the operator asked for, which is not the same as
 	// what they got: the config can turn Komoot on while the credentials are
@@ -225,6 +230,7 @@ func (s *Server) Handler() http.Handler {
 	// path prefix has no such overlap.
 	mux.HandleFunc("GET /api/tracks/{slug...}", s.handleTrack)
 	mux.HandleFunc("GET /api/track-preview/{slug...}", s.handleTrackPreview)
+	mux.HandleFunc("GET /api/track-preview-image/{slug...}", s.handleTrackPreviewImage)
 	mux.HandleFunc("GET /api/gpx/{slug...}", s.handleDownload)
 	mux.HandleFunc("GET /api/fit/{slug...}", s.handleDownloadFIT)
 
@@ -1198,30 +1204,35 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords})
 }
 
-// handleTrackPreview returns the earth/landuse/water/roads background wash
-// for a route's card preview, precomputed and cached server-side (see
-// basemap.PreviewTiles/PreviewCache) instead of every client re-fetching
-// and decoding PMTiles vector tiles itself. Unavailable — same "quietly
-// missing" shape as the rest of this package's optional features — is a
-// plain 404 with no body worth parsing; the client's own fallback is to
-// fall back to decoding the tiles itself, exactly as it did before this
-// endpoint existed, so a 404 here is not a broken deployment.
-func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
-	if !s.require(w, r, auth.PermReadRoutes) {
-		return
-	}
+// errPreviewUnavailable marks previewLayers' "this deployment has no basemap
+// configured (or none has ever built successfully)" case — the same
+// "quietly missing" 404 both handleTrackPreview and handleTrackPreviewImage
+// render it as, so a caller distinguishes it from a real failure with
+// errors.Is rather than a second nil-check of Basemap/PreviewTiles/PreviewCache.
+var errPreviewUnavailable = errors.New("track preview unavailable")
 
-	slug := cleanSlug(r.PathValue("slug"))
-	if !s.mayView(w, r, slug) {
-		return
-	}
+// errPreviewFetchFailed marks previewLayers' PreviewTiles.FetchLayers
+// failure specifically — the one failure mode with its own historical status
+// code (502, handleTrackPreview's own "upstream tile fetch failed" signal).
+var errPreviewFetchFailed = errors.New("fetching track preview layers failed")
 
+// previewLayers returns a route's background layers (from cache when
+// possible) plus the basemap.Record it was computed against, and the JSON
+// already serialized for handleTrackPreview's own response — computed once
+// here rather than a second json.Marshal in the caller. Shared by
+// handleTrackPreview and handleTrackPreviewImage so the image endpoint never
+// issues a second FetchLayers call when the JSON cache is already warm for
+// this slug.
+//
+// err is errPreviewUnavailable, errPreviewFetchFailed, a source.ErrNotFound
+// from the route lookup, or an unwrapped internal error (JSON encode) —
+// callers map each to their own response.
+func (s *Server) previewLayers(ctx context.Context, slug string) (layers basemap.PreviewLayers, layersJSON string, rec basemap.Record, err error) {
 	if s.Basemap == nil || s.PreviewTiles == nil || s.PreviewCache == nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return basemap.PreviewLayers{}, "", basemap.Record{}, errPreviewUnavailable
 	}
 
-	basemapRec, err := s.Basemap.LatestSucceeded()
+	rec, err = s.Basemap.LatestSucceeded()
 	if err != nil {
 		// basemap.ErrNoRecord (nobody has ever successfully built one) is
 		// the overwhelmingly likely case; any other error is logged, but
@@ -1229,24 +1240,25 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, basemap.ErrNoRecord) {
 			s.logger().Error("reading latest succeeded basemap failed", "err", err)
 		}
-		w.WriteHeader(http.StatusNotFound)
-		return
+		return basemap.PreviewLayers{}, "", basemap.Record{}, errPreviewUnavailable
 	}
 
-	if cached, found, err := s.PreviewCache.Get(slug, basemapRec.ID); err != nil {
+	if cachedJSON, found, cacheErr := s.PreviewCache.Get(slug, rec.ID); cacheErr != nil {
 		// Warn, not error: nothing below returns early on this — the
 		// preview just gets recomputed from scratch, the same as a cache
 		// miss. The request still succeeds either way.
-		s.logger().Warn("reading track preview cache failed", "slug", slug, "err", err)
+		s.logger().Warn("reading track preview cache failed", "slug", slug, "err", cacheErr)
 	} else if found {
-		writeTrackPreviewJSON(w, cached)
-		return
+		if unmarshalErr := json.Unmarshal([]byte(cachedJSON), &layers); unmarshalErr != nil {
+			s.logger().Warn("decoding cached track preview failed", "slug", slug, "err", unmarshalErr)
+		} else {
+			return layers, cachedJSON, rec, nil
+		}
 	}
 
-	points, err := s.Source.Track(r.Context(), slug)
+	points, err := s.Source.Track(ctx, slug)
 	if err != nil {
-		s.failLookup(w, err)
-		return
+		return basemap.PreviewLayers{}, "", basemap.Record{}, err
 	}
 	coords := make([][2]float64, 0, len(points))
 	for _, p := range points {
@@ -1254,7 +1266,7 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	layers := basemap.PreviewLayers{}
+	layers = basemap.PreviewLayers{}
 	west, south, east, north, ok := basemap.RouteBBox(coords)
 	if !ok {
 		// Fewer than 2 points — the same threshold TrackPreview.vue's own
@@ -1265,11 +1277,10 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 		// basemap doesn't cover it.
 		s.logger().Warn("track preview: route has too few points to compute a bbox", "slug", slug, "points", len(coords))
 	} else {
-		layers, err = s.PreviewTiles.FetchLayers(r.Context(), west, south, east, north)
+		layers, err = s.PreviewTiles.FetchLayers(ctx, west, south, east, north)
 		if err != nil {
 			s.logger().Error("fetching track preview layers failed", "slug", slug, "err", err)
-			w.WriteHeader(http.StatusBadGateway)
-			return
+			return basemap.PreviewLayers{}, "", basemap.Record{}, errPreviewFetchFailed
 		}
 		s.logger().Info("computed track preview",
 			"slug", slug, "elapsed", time.Since(start),
@@ -1281,16 +1292,133 @@ func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
 	body, err := json.Marshal(layers)
 	if err != nil {
 		s.logger().Error("encoding track preview failed", "slug", slug, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not encode preview"})
-		return
+		return basemap.PreviewLayers{}, "", basemap.Record{}, err
 	}
-	if err := s.PreviewCache.Put(slug, basemapRec.ID, string(body)); err != nil {
+	if err := s.PreviewCache.Put(slug, rec.ID, string(body)); err != nil {
 		// Warn, not error: the response is still good; only the next
 		// request pays the recompute cost again.
 		s.logger().Warn("caching track preview failed", "slug", slug, "err", err)
 	}
 
-	writeTrackPreviewJSON(w, string(body))
+	return layers, string(body), rec, nil
+}
+
+// handleTrackPreview returns the earth/landuse/water/roads background wash
+// for a route's card preview, precomputed and cached server-side (see
+// previewLayers above) instead of every client re-fetching and decoding
+// PMTiles vector tiles itself. Unavailable — same "quietly missing" shape as
+// the rest of this package's optional features — is a plain 404 with no
+// body worth parsing; the client's own fallback is to decode the tiles
+// itself, exactly as it did before this endpoint existed, so a 404 here is
+// not a broken deployment. Superseded in practice by
+// handleTrackPreviewImage's rendered PNG (see its own doc comment for why —
+// this JSON ran 1.5-2.6MB for a real dense route), kept as that endpoint's
+// own fallback and as the geometry source previewLayers renders from.
+func (s *Server) handleTrackPreview(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermReadRoutes) {
+		return
+	}
+
+	slug := cleanSlug(r.PathValue("slug"))
+	if !s.mayView(w, r, slug) {
+		return
+	}
+
+	_, layersJSON, _, err := s.previewLayers(r.Context(), slug)
+	if err != nil {
+		switch {
+		case errors.Is(err, errPreviewUnavailable):
+			w.WriteHeader(http.StatusNotFound)
+		case errors.Is(err, errPreviewFetchFailed):
+			w.WriteHeader(http.StatusBadGateway)
+		case errors.Is(err, source.ErrNotFound):
+			s.failLookup(w, err)
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not encode preview"})
+		}
+		return
+	}
+
+	recordTrackPreviewSize(r.Context(), "json", len(layersJSON))
+	writeTrackPreviewJSON(w, layersJSON)
+}
+
+// handleTrackPreviewImage returns a rendered PNG of a route's card preview —
+// the same background wash, route line and start dot handleTrackPreview's
+// JSON drives TrackPreview.vue to build as SVG client-side, pre-rendered
+// here instead (see basemap.RenderCardImage's own doc comment). Same
+// "quietly missing" 404 shape as handleTrackPreview, including when
+// previewLayers itself can't produce layers (errPreviewFetchFailed maps to
+// 404 here too, not 502 — this endpoint has no established client contract
+// yet to preserve, and TrackPreview.vue's fallback triggers on any non-2xx
+// regardless of the exact code). theme is "light" or "dark" via a query
+// param; anything else (including missing) defaults to "light".
+func (s *Server) handleTrackPreviewImage(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermReadRoutes) {
+		return
+	}
+
+	slug := cleanSlug(r.PathValue("slug"))
+	if !s.mayView(w, r, slug) {
+		return
+	}
+
+	if s.PreviewImageCache == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	theme := r.URL.Query().Get("theme")
+	if theme != "dark" {
+		theme = "light"
+	}
+
+	layers, _, rec, err := s.previewLayers(r.Context(), slug)
+	if err != nil {
+		switch {
+		case errors.Is(err, errPreviewUnavailable), errors.Is(err, errPreviewFetchFailed):
+			w.WriteHeader(http.StatusNotFound)
+		case errors.Is(err, source.ErrNotFound):
+			s.failLookup(w, err)
+		default:
+			s.fail(w, err)
+		}
+		return
+	}
+
+	image, found, err := s.PreviewImageCache.Get(slug, theme, rec.ID)
+	if err != nil {
+		s.logger().Warn("reading track preview image cache failed", "slug", slug, "theme", theme, "err", err)
+		found = false
+	}
+	if !found {
+		points, err := s.Source.Track(r.Context(), slug)
+		if err != nil {
+			s.failLookup(w, err)
+			return
+		}
+		coords := make([][2]float64, 0, len(points))
+		for _, p := range points {
+			coords = append(coords, [2]float64{p.Lat, p.Lon})
+		}
+		image, err = basemap.RenderCardImage(coords, layers, theme)
+		if err != nil {
+			// Fewer than 2 points — the same "nothing to show" shape
+			// previewLayers' own RouteBBox check already logs.
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err := s.PreviewImageCache.Put(slug, theme, rec.ID, image); err != nil {
+			// Warn, not error: the response is still good; only the next
+			// request pays the render cost again.
+			s.logger().Warn("caching track preview image failed", "slug", slug, "theme", theme, "err", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	recordTrackPreviewSize(r.Context(), "image", len(image))
+	_, _ = w.Write(image)
 }
 
 // writeTrackPreviewJSON writes an already-serialized track-preview JSON

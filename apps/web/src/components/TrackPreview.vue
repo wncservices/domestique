@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@/color-mode'
-import { api } from '@/api/client'
+import { api, encodeSlug } from '@/api/client'
 import { fetchBasemapLayers, ROAD_WIDTH, type BasemapLayers } from '@/utils/staticBasemap'
 
 const props = defineProps<{ slug: string }>()
@@ -38,6 +38,28 @@ const failed = ref(false)
 const loading = ref(true)
 const visible = ref(false)
 const background = ref<BasemapLayers>({ earth: [], landuse: [], water: [], waterLines: [], roads: [] })
+
+// The server-rendered PNG (see GET /api/track-preview-image) is tried
+// first — it replaces the megabytes-of-JSON-plus-client-side-SVG-build path
+// below with a file the browser just decodes, tens of KB instead of up to a
+// few MB for a dense route (see that endpoint's own doc comment). imageOk
+// stays true optimistically; only an actual @error (a deployment with no
+// tiles component 404s, same as the JSON endpoint always has) flips it,
+// which is what triggers load()/loadBackground() below — the fallback path
+// is otherwise not fetched at all, not just deferred.
+const imageOk = ref(true)
+const imageLoading = ref(true)
+const imageSrc = computed(() => {
+  if (!visible.value || !imageOk.value) return ''
+  const theme = resolved.value === 'dark' ? 'dark' : 'light'
+  return `/api/track-preview-image/${encodeSlug(props.slug)}?theme=${theme}`
+})
+
+function onImageError() {
+  imageOk.value = false
+  load()
+  loadBackground()
+}
 
 const WIDTH = 320
 const HEIGHT = 160
@@ -82,8 +104,9 @@ onMounted(() => {
       if (!entries[0]?.isIntersecting) return
       visible.value = true
       observer?.disconnect()
-      load()
-      loadBackground()
+      // Nothing else to do here: imageSrc reacting to visible becoming true
+      // is what starts the <img> fetch. load()/loadBackground() only run if
+      // that image fails (see onImageError above).
     },
     { rootMargin: '200px' },
   )
@@ -94,13 +117,20 @@ onBeforeUnmount(() => observer?.disconnect())
 
 // A remount-free slug change (props.slug reassigned on an existing
 // instance) only matters once the card has actually loaded once — reloading
-// before that would just fetch data for something still off-screen.
+// before that would just fetch data for something still off-screen. Gives
+// the image path a fresh attempt for the new slug (imageSrc's own reactivity
+// to props.slug picks up the new URL); load()/loadBackground() run again
+// only if that fails too, same as onImageError.
 watch(
   () => props.slug,
   () => {
     if (!visible.value) return
-    load()
-    loadBackground()
+    imageOk.value = true
+    imageLoading.value = true
+    if (failed.value || points.value.length) {
+      load()
+      loadBackground()
+    }
   },
 )
 
@@ -270,47 +300,62 @@ const roadPaths = computed(() => {
     ref="root"
     class="aspect-[2/1] grid place-items-center overflow-hidden rounded-lg bg-elevated/50"
   >
-    <USkeleton v-if="loading" class="size-full" />
+    <template v-if="imageOk">
+      <USkeleton v-if="imageLoading" class="size-full" />
+      <img
+        v-if="visible"
+        v-show="!imageLoading"
+        :src="imageSrc"
+        class="size-full object-cover"
+        :alt="`Route shape for ${slug}`"
+        @load="imageLoading = false"
+        @error="onImageError"
+      />
+    </template>
 
-    <svg
-      v-else-if="path"
-      :viewBox="`0 0 ${WIDTH} ${HEIGHT}`"
-      class="size-full"
-      role="img"
-      :aria-label="`Route shape for ${slug}`"
-    >
-      <path v-if="earthPath" :d="earthPath" :fill="mapColors.earth" stroke="none" />
-      <path v-if="landusePath" :d="landusePath" :fill="mapColors.landuse" stroke="none" />
-      <path v-if="waterPath" :d="waterPath" :fill="mapColors.water" stroke="none" />
-      <path
-        v-if="waterLinesPath"
-        :d="waterLinesPath"
-        :stroke="mapColors.water"
-        fill="none"
-        stroke-width="1"
-      />
-      <path
-        v-for="(road, index) in roadPaths"
-        :key="index"
-        :d="road.d"
-        class="stroke-[var(--ui-bg)]/70"
-        fill="none"
-        :stroke-width="road.width"
-        stroke-linecap="round"
-      />
-      <path
-        :d="path"
-        class="track-line"
-        fill="none"
-        stroke-width="2.5"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <circle v-if="start" :cx="start.x" :cy="start.y" r="4" class="fill-primary" />
-    </svg>
+    <template v-else>
+      <USkeleton v-if="loading" class="size-full" />
 
-    <p v-else class="text-sm text-muted">
-      {{ failed ? 'track unavailable' : 'no track' }}
-    </p>
+      <svg
+        v-else-if="path"
+        :viewBox="`0 0 ${WIDTH} ${HEIGHT}`"
+        class="size-full"
+        role="img"
+        :aria-label="`Route shape for ${slug}`"
+      >
+        <path v-if="earthPath" :d="earthPath" :fill="mapColors.earth" stroke="none" />
+        <path v-if="landusePath" :d="landusePath" :fill="mapColors.landuse" stroke="none" />
+        <path v-if="waterPath" :d="waterPath" :fill="mapColors.water" stroke="none" />
+        <path
+          v-if="waterLinesPath"
+          :d="waterLinesPath"
+          :stroke="mapColors.water"
+          fill="none"
+          stroke-width="1"
+        />
+        <path
+          v-for="(road, index) in roadPaths"
+          :key="index"
+          :d="road.d"
+          class="stroke-[var(--ui-bg)]/70"
+          fill="none"
+          :stroke-width="road.width"
+          stroke-linecap="round"
+        />
+        <path
+          :d="path"
+          class="track-line"
+          fill="none"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle v-if="start" :cx="start.x" :cy="start.y" r="4" class="fill-primary" />
+      </svg>
+
+      <p v-else class="text-sm text-muted">
+        {{ failed ? 'track unavailable' : 'no track' }}
+      </p>
+    </template>
   </div>
 </template>

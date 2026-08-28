@@ -791,6 +791,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 			return err
 		}
 		srv.PreviewCache = previewCache
+		previewImageCache, err := basemap.UsePreviewImageCacheDB(src.Conn(), src.DSN())
+		if err != nil {
+			return err
+		}
+		srv.PreviewImageCache = previewImageCache
 		srv.PreviewTiles = basemap.NewPreviewTiles(cfg.Basemap.TilesServiceURL)
 	}
 
