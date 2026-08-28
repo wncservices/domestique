@@ -14,6 +14,7 @@ type rideOut struct {
 	Date      string `json:"date"`
 	Time      string `json:"time"`
 	CreatedBy string `json:"createdBy"`
+	SeriesID  string `json:"seriesId"`
 }
 
 type upcomingRideOut struct {
@@ -725,6 +726,157 @@ func TestUpcomingRidesRejectsAMalformedFrom(t *testing.T) {
 	h.seedApprovedCrew(t, "wilant")
 
 	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/rides/upcoming?from=not-a-date", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestScheduleRideSeriesGeneratesEveryOccurrenceSharingOneRoute proves the
+// same route-sharing rule handleCreateRide already has (share once if not
+// already shared) applies once for the whole series, not once per
+// generated occurrence, and that every ride comes back tagged with the
+// same seriesId.
+func TestScheduleRideSeriesGeneratesEveryOccurrenceSharingOneRoute(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant", "friend")
+	route := h.seedRoute(t, "Hill Loop", "wilant") // no targets yet
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/series",
+		`{"slug":"`+route.Slug+`","date":"2026-09-01","time":"09:30","intervalWeeks":1,"until":"2026-09-15"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	rides := h.decodeRides(t, resp)
+	if len(rides) != 3 {
+		t.Fatalf("rides = %+v, want 3 weekly occurrences (09-01, 09-08, 09-15)", rides)
+	}
+	seriesID := rides[0].SeriesID
+	if seriesID == "" {
+		t.Fatal("seriesId is empty, want every generated ride to carry it")
+	}
+	for _, ride := range rides {
+		if ride.SeriesID != seriesID {
+			t.Errorf("ride %+v has a different seriesId than the first, want them all to match", ride)
+		}
+		if ride.Time != "09:30" {
+			t.Errorf("ride %+v Time, want 09:30", ride)
+		}
+	}
+
+	targets := h.routeTargetsFor(t, route.Slug)
+	if len(targets) != 1 || targets[0] != crewID {
+		t.Fatalf("route targets = %v, want [%s] shared exactly once", targets, crewID)
+	}
+
+	list := h.decodeRides(t, h.as("friend", "cyclists", http.MethodGet, "/api/crews/"+crewID+"/rides", ""))
+	if len(list) != 3 {
+		t.Fatalf("an approved member should see all 3 generated rides, got %+v", list)
+	}
+}
+
+// TestScheduleRideSeriesRequiresCanSchedule proves a series is gated by
+// the same canSchedule authority a single ride already requires — an
+// ungranted member cannot create one.
+func TestScheduleRideSeriesRequiresCanSchedule(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant", "friend")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+
+	resp := h.as("friend", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/series",
+		`{"slug":"`+route.Slug+`","date":"2026-09-01","intervalWeeks":1,"until":"2026-09-15"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestDeleteRideSeriesRemovesOnlyFutureOccurrences proves cancelling a
+// series leaves already-happened rides alone (schedule.Store.DeleteSeries's
+// own "never touches history" rule) and leaves an unrelated one-off ride
+// in the same crew untouched.
+func TestDeleteRideSeriesRemovesOnlyFutureOccurrences(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/series",
+		`{"slug":"`+route.Slug+`","date":"2026-09-01","intervalWeeks":1,"until":"2026-09-22"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create series: status = %d, want 201", resp.StatusCode)
+	}
+	rides := h.decodeRides(t, resp)
+	seriesID := rides[0].SeriesID
+
+	other := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-08")
+
+	// "Today" is 2026-09-08 — the 09-01 occurrence has already happened.
+	del := h.as("wilant", "cyclists", http.MethodDelete,
+		"/api/crews/"+crewID+"/rides/series/"+seriesID+"?from=2026-09-08", "")
+	if del.StatusCode != http.StatusOK {
+		t.Fatalf("delete series: status = %d, want 200", del.StatusCode)
+	}
+
+	remaining := h.decodeRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/crews/"+crewID+"/rides", ""))
+	var gotPast, gotOther bool
+	for _, r := range remaining {
+		if r.Date == "2026-09-01" {
+			gotPast = true
+		}
+		if r.ID == other.ID {
+			gotOther = true
+		}
+	}
+	if !gotPast {
+		t.Error("the already-happened 09-01 occurrence should not have been deleted")
+	}
+	if !gotOther {
+		t.Error("a plain ride outside the series should not have been touched")
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("remaining = %+v, want exactly the past occurrence and the unrelated ride", remaining)
+	}
+}
+
+// TestDeleteRideSeriesRequiresOwnerOrCreator mirrors TestDeleteRide's own
+// authority rule, applied to a whole series: an uninvolved approved member
+// cannot cancel someone else's series, but the crew owner can.
+func TestDeleteRideSeriesRequiresOwnerOrCreator(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant", "friend", "stranger")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+	if resp := h.as("wilant", "cyclists", http.MethodPatch,
+		"/api/crews/"+crewID+"/members/friend/schedule", `{"canSchedule":true}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("grant: status = %d", resp.StatusCode)
+	}
+
+	resp := h.as("friend", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/series",
+		`{"slug":"`+route.Slug+`","date":"2026-09-01","intervalWeeks":1,"until":"2026-09-15"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create series: status = %d, want 201", resp.StatusCode)
+	}
+	seriesID := h.decodeRides(t, resp)[0].SeriesID
+
+	forbidden := h.as("stranger", "cyclists", http.MethodDelete,
+		"/api/crews/"+crewID+"/rides/series/"+seriesID+"?from=2026-09-01", "")
+	if forbidden.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", forbidden.StatusCode)
+	}
+
+	allowed := h.as("wilant", "cyclists", http.MethodDelete,
+		"/api/crews/"+crewID+"/rides/series/"+seriesID+"?from=2026-09-01", "")
+	if allowed.StatusCode != http.StatusOK {
+		t.Fatalf("owner delete: status = %d, want 200", allowed.StatusCode)
+	}
+}
+
+// TestScheduleRideSeriesRejectsAnUnsupportedInterval proves the API layer
+// surfaces schedule.Store's own interval validation as a 400.
+func TestScheduleRideSeriesRejectsAnUnsupportedInterval(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID})
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/series",
+		`{"slug":"`+route.Slug+`","date":"2026-09-01","intervalWeeks":3,"until":"2026-09-15"}`)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}

@@ -78,6 +78,25 @@ type Ride struct {
 	Time      string // HH:MM, or "" for no specific time
 	CreatedBy string
 	CreatedAt string
+	// SeriesID names the Series that generated this ride, or "" for an
+	// ordinary one-off ride — see CreateSeries.
+	SeriesID string
+}
+
+// Series is a recurring-ride template: a crew, a route, an interval and a
+// time of day. It exists so a rider can later cancel "this and every ride
+// after it" in one action, and so the recurrence itself survives even if
+// every ride it generated is eventually deleted one at a time. The rides
+// themselves are ordinary Ride rows — nothing about listing, syncing, or
+// deleting a single occurrence needs to know a series exists at all.
+type Series struct {
+	ID            string
+	CrewID        string
+	Slug          string
+	IntervalWeeks int
+	Time          string
+	CreatedBy     string
+	CreatedAt     string
 }
 
 // Store holds crew rides.
@@ -102,9 +121,21 @@ CREATE TABLE IF NOT EXISTS crew_rides (
     date       TEXT NOT NULL,
     time       TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    series_id  TEXT NOT NULL DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_crew_rides_crew ON crew_rides (crew_id, date);`
+CREATE INDEX IF NOT EXISTS idx_crew_rides_crew ON crew_rides (crew_id, date);
+CREATE INDEX IF NOT EXISTS idx_crew_rides_series ON crew_rides (series_id);
+
+CREATE TABLE IF NOT EXISTS ride_series (
+    id             TEXT PRIMARY KEY,
+    crew_id        TEXT NOT NULL,
+    route_slug     TEXT NOT NULL,
+    interval_weeks INTEGER NOT NULL,
+    time           TEXT NOT NULL DEFAULT '',
+    created_by     TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);`
 }
 
 // UseDB puts the crew_rides table in an already-open database — the same
@@ -121,6 +152,9 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 	if err := store.addTimeColumn(); err != nil {
 		return nil, fmt.Errorf("migrate crew_rides table: %w", err)
 	}
+	if err := store.addSeriesIDColumn(); err != nil {
+		return nil, fmt.Errorf("migrate crew_rides table: %w", err)
+	}
 	return store, nil
 }
 
@@ -134,6 +168,22 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 // means going forward too.
 func (s *Store) addTimeColumn() error {
 	_, err := s.db.Exec(`ALTER TABLE crew_rides ADD COLUMN time TEXT NOT NULL DEFAULT ''`)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
+}
+
+// addSeriesIDColumn is addTimeColumn's own twin for series_id — same
+// idempotent-ALTER shape, same reasoning: a ride scheduled before
+// recurrence existed was never part of a series, which is exactly what the
+// ” default means going forward too.
+func (s *Store) addSeriesIDColumn() error {
+	_, err := s.db.Exec(`ALTER TABLE crew_rides ADD COLUMN series_id TEXT NOT NULL DEFAULT ''`)
 	if err == nil {
 		return nil
 	}
@@ -194,13 +244,142 @@ func (s *Store) Create(ctx context.Context, crewID, slug, date, timeOfDay, creat
 	return Ride{ID: id, CrewID: crewID, Slug: slug, Date: date, Time: timeOfDay, CreatedBy: createdBy, CreatedAt: now}, nil
 }
 
+// maxSeriesOccurrences caps how many rides a single CreateSeries call will
+// ever generate, regardless of the requested interval and end date. A
+// mistyped "until" a decade out must not silently fill the table — nothing
+// stops the rider from creating another series later, once the ones near
+// the cap have actually passed.
+const maxSeriesOccurrences = 52
+
+// seriesIntervals are the only recurrence intervals this package accepts —
+// weekly, fortnightly, or every four weeks. A crew's regular ride is the
+// case this exists for; anything odder is still just one-off rides
+// scheduled by hand.
+var seriesIntervals = map[int]bool{1: true, 2: true, 4: true}
+
+// CreateSeries generates one Ride every intervalWeeks starting at
+// startDate, up to and including until, capped at maxSeriesOccurrences
+// regardless of what that range implies. Every generated ride carries the
+// new Series's id in its own SeriesID, so a rider can later cancel "this
+// and every ride after it" (DeleteSeries) without the series concept
+// having to exist anywhere else — ListForCrew, ListUpcoming, syncing and
+// deleting a single occurrence all already work on an ordinary Ride row
+// and need no change to handle one that happens to belong to a series.
+//
+// The series row and every ride it generates commit together in one
+// transaction: a caller must never observe a half-created series.
+//
+// Like Create, this does not check crew membership, route existence, or
+// route-sharing — the API layer checks those once, before calling this,
+// exactly as it already does for a single ride.
+func (s *Store) CreateSeries(ctx context.Context, crewID, slug string, intervalWeeks int, startDate, until, timeOfDay, createdBy string) (Series, []Ride, error) {
+	crewID = strings.TrimSpace(crewID)
+	slug = strings.TrimSpace(slug)
+	startDate = strings.TrimSpace(startDate)
+	until = strings.TrimSpace(until)
+	timeOfDay = strings.TrimSpace(timeOfDay)
+	createdBy = strings.ToLower(strings.TrimSpace(createdBy))
+	switch {
+	case crewID == "":
+		return Series{}, nil, errors.New("schedule: no crew — for which crew is this series?")
+	case slug == "":
+		return Series{}, nil, errors.New("schedule: no route — which route is being ridden?")
+	case !seriesIntervals[intervalWeeks]:
+		return Series{}, nil, fmt.Errorf("schedule: %d is not a supported interval (1, 2 or 4 weeks)", intervalWeeks)
+	case !dateOnly(startDate):
+		return Series{}, nil, fmt.Errorf("schedule: %q is not a date in YYYY-MM-DD form", startDate)
+	case !dateOnly(until):
+		return Series{}, nil, fmt.Errorf("schedule: %q is not a date in YYYY-MM-DD form", until)
+	case !timeOnly(timeOfDay):
+		return Series{}, nil, fmt.Errorf("schedule: %q is not a time in HH:MM form", timeOfDay)
+	case createdBy == "":
+		return Series{}, nil, errors.New("schedule: no rider — who is scheduling this?")
+	}
+
+	start, _ := time.Parse(dateLayout, startDate)
+	end, _ := time.Parse(dateLayout, until)
+	if end.Before(start) {
+		return Series{}, nil, errors.New("schedule: the series can't end before it starts")
+	}
+
+	var dates []string
+	for d := start; !d.After(end) && len(dates) < maxSeriesOccurrences; d = d.AddDate(0, 0, intervalWeeks*7) {
+		dates = append(dates, d.Format(dateLayout))
+	}
+	if len(dates) == 0 {
+		return Series{}, nil, errors.New("schedule: that range generates no rides at all")
+	}
+
+	seriesID, err := newID()
+	if err != nil {
+		return Series{}, nil, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	series := Series{
+		ID: seriesID, CrewID: crewID, Slug: slug, IntervalWeeks: intervalWeeks,
+		Time: timeOfDay, CreatedBy: createdBy, CreatedAt: now,
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Series{}, nil, fmt.Errorf("schedule series: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`
+        INSERT INTO ride_series (id, crew_id, route_slug, interval_weeks, time, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		seriesID, crewID, slug, intervalWeeks, timeOfDay, createdBy, now); err != nil {
+		return Series{}, nil, fmt.Errorf("schedule series: %w", err)
+	}
+
+	rides := make([]Ride, 0, len(dates))
+	for _, date := range dates {
+		id, err := newID()
+		if err != nil {
+			return Series{}, nil, err
+		}
+		if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`
+            INSERT INTO crew_rides (id, crew_id, route_slug, date, time, created_by, created_at, series_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+			id, crewID, slug, date, timeOfDay, createdBy, now, seriesID); err != nil {
+			return Series{}, nil, fmt.Errorf("schedule series: %w", err)
+		}
+		rides = append(rides, Ride{
+			ID: id, CrewID: crewID, Slug: slug, Date: date, Time: timeOfDay,
+			CreatedBy: createdBy, CreatedAt: now, SeriesID: seriesID,
+		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Series{}, nil, fmt.Errorf("schedule series: %w", err)
+	}
+	return series, rides, nil
+}
+
+// DeleteSeries removes every ride in a series scheduled on or after
+// fromDate, leaving earlier ones — rides that have already happened —
+// untouched. The same "never touches history" rule Delete already follows
+// for a single ride, applied to a whole series at once. Zero rides left to
+// delete (every future occurrence was already cancelled one at a time) is
+// a valid outcome, not an error.
+func (s *Store) DeleteSeries(ctx context.Context, seriesID, fromDate string) (int, error) {
+	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM crew_rides WHERE series_id = ? AND date >= ?`), seriesID, fromDate)
+	if err != nil {
+		return 0, fmt.Errorf("delete ride series: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
 // ListForCrew returns every ride a crew has scheduled, soonest first —
 // earliest date, then (within a day) earliest time, ties broken by
 // creation order. A ride with no time sorts before a timed one on the same
 // day: ” collates before any "HH:MM" string.
 func (s *Store) ListForCrew(ctx context.Context, crewID string) ([]Ride, error) {
 	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`
-        SELECT id, crew_id, route_slug, date, time, created_by, created_at
+        SELECT id, crew_id, route_slug, date, time, created_by, created_at, series_id
         FROM crew_rides WHERE crew_id = ? ORDER BY date, time, created_at`), crewID)
 	if err != nil {
 		return nil, fmt.Errorf("read crew rides: %w", err)
@@ -210,7 +389,7 @@ func (s *Store) ListForCrew(ctx context.Context, crewID string) ([]Ride, error) 
 	var out []Ride
 	for rows.Next() {
 		var ride Ride
-		if err := rows.Scan(&ride.ID, &ride.CrewID, &ride.Slug, &ride.Date, &ride.Time, &ride.CreatedBy, &ride.CreatedAt); err != nil {
+		if err := rows.Scan(&ride.ID, &ride.CrewID, &ride.Slug, &ride.Date, &ride.Time, &ride.CreatedBy, &ride.CreatedAt, &ride.SeriesID); err != nil {
 			return nil, fmt.Errorf("read crew rides: %w", err)
 		}
 		out = append(out, ride)
@@ -228,7 +407,7 @@ func (s *Store) ListForCrew(ctx context.Context, crewID string) ([]Ride, error) 
 // after one simple query is preferable to a parameterized IN clause here.
 func (s *Store) ListUpcoming(ctx context.Context, from string) ([]Ride, error) {
 	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`
-        SELECT id, crew_id, route_slug, date, time, created_by, created_at
+        SELECT id, crew_id, route_slug, date, time, created_by, created_at, series_id
         FROM crew_rides WHERE date >= ? ORDER BY date, time, created_at`), from)
 	if err != nil {
 		return nil, fmt.Errorf("read upcoming rides: %w", err)
@@ -238,7 +417,7 @@ func (s *Store) ListUpcoming(ctx context.Context, from string) ([]Ride, error) {
 	var out []Ride
 	for rows.Next() {
 		var ride Ride
-		if err := rows.Scan(&ride.ID, &ride.CrewID, &ride.Slug, &ride.Date, &ride.Time, &ride.CreatedBy, &ride.CreatedAt); err != nil {
+		if err := rows.Scan(&ride.ID, &ride.CrewID, &ride.Slug, &ride.Date, &ride.Time, &ride.CreatedBy, &ride.CreatedAt, &ride.SeriesID); err != nil {
 			return nil, fmt.Errorf("read upcoming rides: %w", err)
 		}
 		out = append(out, ride)
@@ -250,9 +429,9 @@ func (s *Store) ListUpcoming(ctx context.Context, from string) ([]Ride, error) {
 func (s *Store) Get(ctx context.Context, id string) (Ride, error) {
 	var ride Ride
 	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(`
-        SELECT id, crew_id, route_slug, date, time, created_by, created_at
+        SELECT id, crew_id, route_slug, date, time, created_by, created_at, series_id
         FROM crew_rides WHERE id = ?`), id).
-		Scan(&ride.ID, &ride.CrewID, &ride.Slug, &ride.Date, &ride.Time, &ride.CreatedBy, &ride.CreatedAt)
+		Scan(&ride.ID, &ride.CrewID, &ride.Slug, &ride.Date, &ride.Time, &ride.CreatedBy, &ride.CreatedAt, &ride.SeriesID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Ride{}, ErrNotFound
 	}
