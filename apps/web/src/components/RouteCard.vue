@@ -23,10 +23,12 @@ const gpxUrl = computed(() => api.gpxUrl(props.route.slug))
 
 // Provider imports tag a route with their own id ("komoot:12345",
 // "garmin:502255241") so re-imports can be detected — see komootTag/garminTag
-// server-side. Useful for dedup, meaningless as a badge: nobody reading the
-// card needs to see the id, only that the route came from Komoot or Garmin,
-// which the plain "komoot"/"garmin" tag alongside it already says.
-const INTERNAL_TAG_PREFIXES = ['komoot:', 'garmin:']
+// server-side. A route imported from a share link gets the same shape
+// ("shared:original-slug" — see sharedImportTag server-side). Useful for
+// dedup, meaningless as a badge: nobody reading the card needs to see the
+// id, only where the route came from, which the sport badge and this
+// card's other own fields already say.
+const INTERNAL_TAG_PREFIXES = ['komoot:', 'garmin:', 'shared:']
 const visibleTags = computed(() =>
   props.route.tags.filter((tag) => !INTERNAL_TAG_PREFIXES.some((prefix) => tag.startsWith(prefix))),
 )

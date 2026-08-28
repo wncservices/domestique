@@ -369,3 +369,140 @@ func TestShareRedemptionIsRecorded(t *testing.T) {
 		t.Fatalf("shares = %+v, want exactly one redemption by friend", shares)
 	}
 }
+
+// TestImportSharedRouteCreatesARowOwnedByTheRecipient proves the actual
+// point of the feature: a signed-in identity with no role at all here
+// (the same ungrouped "outsider" TestSharedRouteRoleGateIsExempted uses)
+// can still import — the write lands owned by their own verified session
+// identity, tagged for dedup, without ever touching the original route.
+func TestImportSharedRouteCreatesARowOwnedByTheRecipient(t *testing.T) {
+	h := newShareHarness(t)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+	share := h.mustCreateShare(t, "wilant", route.Slug)
+
+	resp := h.as("outsider", "", http.MethodPost, "/api/shares/"+share.Token+"/import", "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var out struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Slug == route.Slug {
+		t.Fatal("the import must be a new row, not the original route")
+	}
+
+	routes, _, err := h.src.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var imported *model.Route
+	for i, rt := range routes {
+		if rt.Slug == out.Slug {
+			imported = &routes[i]
+		}
+	}
+	if imported == nil {
+		t.Fatalf("no route with slug %q was actually created", out.Slug)
+	}
+	if !strings.EqualFold(imported.Owner, "outsider") {
+		t.Errorf("owner = %q, want outsider", imported.Owner)
+	}
+	if imported.Name != "Hill Loop" {
+		t.Errorf("name = %q, want Hill Loop", imported.Name)
+	}
+	found := false
+	for _, tag := range imported.Tags {
+		if tag == "shared:"+route.Slug {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tags = %v, want the shared:%s dedup tag", imported.Tags, route.Slug)
+	}
+}
+
+// TestImportSharedRouteRejectsARepeatImport proves a second import by the
+// same recipient of the same shared route 409s rather than silently
+// duplicating it — the same tag-based dedup Komoot's own re-import
+// detection already relies on, applied here.
+func TestImportSharedRouteRejectsARepeatImport(t *testing.T) {
+	h := newShareHarness(t)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+	share := h.mustCreateShare(t, "wilant", route.Slug)
+
+	first := h.as("outsider", "", http.MethodPost, "/api/shares/"+share.Token+"/import", "")
+	if first.StatusCode != http.StatusCreated {
+		t.Fatalf("first import: status = %d, want 201", first.StatusCode)
+	}
+
+	second := h.as("outsider", "", http.MethodPost, "/api/shares/"+share.Token+"/import", "")
+	if second.StatusCode != http.StatusConflict {
+		t.Fatalf("second import: status = %d, want 409", second.StatusCode)
+	}
+
+	routes, _, err := h.src.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, rt := range routes {
+		if strings.EqualFold(rt.Owner, "outsider") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("outsider owns %d routes, want exactly 1 — the repeat import must not have created a second copy", count)
+	}
+}
+
+// TestImportSharedRouteRequiresSignIn mirrors
+// TestSharedRouteRequiresSignIn for the write path: the same exemption
+// that lets an unrecognized identity import must not also let a fully
+// anonymous request through.
+func TestImportSharedRouteRequiresSignIn(t *testing.T) {
+	h := newShareHarness(t)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+	share := h.mustCreateShare(t, "wilant", route.Slug)
+
+	resp := h.as("", "", http.MethodPost, "/api/shares/"+share.Token+"/import", "")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+// TestImportSharedRouteRevokedIsGone proves the import path is scoped
+// through the exact same share-validity check every read already is — a
+// revoked share can't be used to import either.
+func TestImportSharedRouteRevokedIsGone(t *testing.T) {
+	h := newShareHarness(t)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+	share := h.mustCreateShare(t, "wilant", route.Slug)
+
+	if resp := h.as("wilant", "cyclists,domestique-access", http.MethodDelete,
+		"/api/shares/"+share.ID, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke: status = %d, want 200", resp.StatusCode)
+	}
+
+	resp := h.as("outsider", "", http.MethodPost, "/api/shares/"+share.Token+"/import", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestDeleteSharedRouteStillOwnerOnly proves the auth-gate broadening for
+// POST .../import didn't loosen DELETE /api/shares/{id} (revoke) at all —
+// still exempted for GET and POST .../import only, matched precisely
+// enough that a stranger still can't revoke somebody else's share.
+func TestDeleteSharedRouteStillOwnerOnly(t *testing.T) {
+	h := newShareHarness(t)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+	share := h.mustCreateShare(t, "wilant", route.Slug)
+
+	resp := h.as("outsider", "", http.MethodDelete, "/api/shares/"+share.ID, "")
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 or 403 — an outsider must not be able to revoke someone else's share", resp.StatusCode)
+	}
+}

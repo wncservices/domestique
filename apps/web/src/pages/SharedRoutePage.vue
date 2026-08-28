@@ -10,9 +10,12 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useToast } from '@nuxt/ui/composables'
 import { ApiError, api } from '@/api/client'
 import type { Me, SharedRoute } from '@/api/types'
 import RouteMap from '@/components/RouteMap.vue'
+
+const toast = useToast()
 
 const route = useRoute()
 const token = computed(() => String(route.params.token ?? ''))
@@ -74,6 +77,47 @@ const gpxUrl = computed(() => api.sharedRouteGpxUrl(token.value))
 const mapRoutes = computed(() =>
   sharedRoute.value ? [{ slug: sharedRoute.value.slug, points: points.value }] : [],
 )
+
+// Copies the route straight into the recipient's own library, owned by
+// them, rather than leaving a download-then-re-upload round trip as the
+// only way to actually keep it. importedSlug sticks once it succeeds —
+// re-showing "Import" after a successful import would invite a second
+// click into the same 409 the server already treats as "nothing to do
+// here," so the button becomes a plain confirmation instead.
+const importing = ref(false)
+const importedSlug = ref('')
+
+async function importToLibrary() {
+  importing.value = true
+  try {
+    const result = await api.importSharedRoute(token.value)
+    importedSlug.value = result.slug
+    toast.add({
+      title: 'Added to your library',
+      description: "It'll show up once your own access to this deployment is set up, if it isn't already.",
+      icon: 'i-lucide-library-big',
+      color: 'success',
+    })
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      importedSlug.value = String(err.body.slug ?? '')
+      toast.add({
+        title: "You've already imported this route",
+        icon: 'i-lucide-library-big',
+        color: 'neutral',
+      })
+    } else {
+      toast.add({
+        title: 'Could not import this route',
+        description: err instanceof Error ? err.message : String(err),
+        icon: 'i-lucide-triangle-alert',
+        color: 'error',
+      })
+    }
+  } finally {
+    importing.value = false
+  }
+}
 </script>
 
 <template>
@@ -136,7 +180,7 @@ const mapRoutes = computed(() =>
     <div v-else-if="sharedRoute" class="flex flex-col gap-4">
       <div>
         <h2 class="font-display text-xl font-semibold text-highlighted">{{ sharedRoute.name }}</h2>
-        <p class="text-xs text-dimmed">Shared with you — you can view and download it, nothing more.</p>
+        <p class="text-xs text-dimmed">Shared with you — you can view it, add it to your own library, or download it. Nothing else in this library is visible to you.</p>
       </div>
 
       <div class="h-64 overflow-hidden rounded-lg bg-elevated/50 sm:h-80">
@@ -164,21 +208,28 @@ const mapRoutes = computed(() =>
         {{ sharedRoute.sport }}
       </UBadge>
 
-      <!-- external: a same-origin path otherwise reads as an internal
-           route to vue-router, which intercepts the click before
-           `download` gets a chance to fire — same reasoning as every
-           other GPX download button in this app. -->
-      <UButton
-        :href="gpxUrl"
-        external
-        download
-        icon="i-lucide-download"
-        color="neutral"
-        variant="subtle"
-        class="w-fit"
-      >
-        Download GPX
-      </UButton>
+      <div class="flex flex-wrap items-center gap-2">
+        <UButton
+          v-if="!importedSlug"
+          icon="i-lucide-library-big"
+          color="primary"
+          :loading="importing"
+          @click="importToLibrary"
+        >
+          Add to my library
+        </UButton>
+        <UBadge v-else color="success" variant="subtle" size="lg" icon="i-lucide-check">
+          Added to your library
+        </UBadge>
+
+        <!-- external: a same-origin path otherwise reads as an internal
+             route to vue-router, which intercepts the click before
+             `download` gets a chance to fire — same reasoning as every
+             other GPX download button in this app. -->
+        <UButton :href="gpxUrl" external download icon="i-lucide-download" color="neutral" variant="ghost">
+          Download GPX
+        </UButton>
+      </div>
     </div>
   </div>
 </template>

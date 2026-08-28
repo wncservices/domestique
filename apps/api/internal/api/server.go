@@ -263,11 +263,17 @@ func (s *Server) Handler() http.Handler {
 	// Recipient-side reads are the GET /api/shares/{token}... paths
 	// authenticate's own exempt check carves out of the blanket
 	// Authorize gate — every handler still requires a real signed-in
-	// identity, just not one holding any recognized role.
+	// identity, just not one holding any recognized role. import is the one
+	// recipient-side write, exempted the same way for the same reason (see
+	// handleImportSharedRoute's own doc comment) — authenticate's exempt
+	// check matches it by method and suffix precisely so a broader "any
+	// /api/shares/ write" rule never accidentally also exempts
+	// DELETE /api/shares/{id} above, which must stay owner-only.
 	mux.HandleFunc("GET /api/shares/{token}", s.handleSharedRoute)
 	mux.HandleFunc("GET /api/shares/{token}/track", s.handleSharedRouteTrack)
 	mux.HandleFunc("GET /api/shares/{token}/gpx", s.handleSharedRouteGPX)
 	mux.HandleFunc("GET /api/shares/{token}/fit", s.handleSharedRouteFIT)
+	mux.HandleFunc("POST /api/shares/{token}/import", s.handleImportSharedRoute)
 
 	mux.HandleFunc("GET /api/komoot/connection", s.handleKomootConnection)
 	mux.HandleFunc("POST /api/komoot/connection", s.handleKomootConnect)
@@ -411,13 +417,21 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		// skipped here; every one of those handlers still requires
 		// !id.Anonymous() itself (a real signed-in session) and does its own
 		// authorization entirely through the share record, never through
-		// role or group. GET only, deliberately: creating, listing and
-		// revoking a share (POST/GET/DELETE under /api/routes/{slug}/shares
-		// and DELETE /api/shares/{id}) are ordinary owner-only actions and
-		// stay behind the normal gate.
+		// role or group. POST .../import is the one recipient-side write —
+		// exempted for the same reason, since the row it creates is always
+		// owned by the caller's own verified identity, never anyone else's
+		// (see handleImportSharedRoute's own doc comment) — matched by
+		// method and suffix precisely so this never accidentally also
+		// exempts DELETE /api/shares/{id} (revoke), which must stay
+		// owner-only. Creating, listing and revoking a share itself
+		// (POST/GET/DELETE under /api/routes/{slug}/shares and
+		// DELETE /api/shares/{id}) are ordinary owner-only actions and stay
+		// behind the normal gate.
 		exempt := r.URL.Path == "/api/config" ||
 			(r.URL.Path == "/api/me" && r.Method == http.MethodGet) ||
-			(strings.HasPrefix(r.URL.Path, "/api/shares/") && r.Method == http.MethodGet)
+			(strings.HasPrefix(r.URL.Path, "/api/shares/") &&
+				(r.Method == http.MethodGet ||
+					(r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/import"))))
 		if err := s.authenticator().Authorize(id); err != nil && !exempt {
 			// Only gate the API. The SPA itself must still load, or the
 			// browser gets a JSON blob instead of a page explaining itself.
