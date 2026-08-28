@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useLibrary } from '@/composables/useLibrary'
+import { useColorMode } from '@/color-mode'
 import LibraryDuplicatesPanel from '@/components/LibraryDuplicatesPanel.vue'
 import PlanPanel from '@/components/PlanPanel.vue'
 import RouteCard from '@/components/RouteCard.vue'
@@ -8,6 +9,7 @@ import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import RouteMap from '@/components/RouteMap.vue'
 import type { Sport, UpcomingRide } from '@/api/types'
 import { formatRideWhen, todayISO } from '@/utils/rideDates'
+import { prefetchTrackPreviewImages } from '@/utils/prefetchPreviewImages'
 
 // Named explicitly for App.vue's <KeepAlive include="LibraryPage">, rather
 // than relying on build-tool filename inference: the whole point of that
@@ -27,6 +29,26 @@ const {
   canUpload,
   refresh,
 } = useLibrary()
+
+const { resolved } = useColorMode()
+
+// Fires as soon as the library itself is known — not gated on scrolling,
+// not gated on which page is showing — so a card's own IntersectionObserver
+// (TrackPreview.vue) usually finds its image already sitting in the browser
+// cache by the time the rider actually reaches it, rather than starting a
+// fresh request right then. Re-fires on a theme toggle too, since that
+// changes every image's URL (the ?theme= query param).
+watch(
+  [routes, resolved],
+  ([currentRoutes, theme]) => {
+    if (!currentRoutes.length) return
+    prefetchTrackPreviewImages(
+      currentRoutes.map((r) => r.slug),
+      theme === 'dark' ? 'dark' : 'light',
+    )
+  },
+  { immediate: true },
+)
 
 const search = ref('')
 const pushing = ref(false)
