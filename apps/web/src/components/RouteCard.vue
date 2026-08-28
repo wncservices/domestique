@@ -262,126 +262,138 @@ async function remove() {
       :ui="{ title: 'text-sm', description: 'text-xs' }"
     />
 
-    <div class="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
-      <SyncBadge v-if="route.syncState.length" :statuses="route.syncState" :accounts="accounts" />
-      <!-- syncState only ever shows the viewer's own devices now, so an
-           empty list has two genuinely different meanings: the route truly
-           reaches nobody, or it reaches real crew members' devices, just
-           not this viewer's own. route.targets (the crew names it was
-           shared to, not the resolved reach) is what tells the two apart —
-           claiming "hasn't been shared to a crew" when it plainly has
-           would be flatly wrong. -->
-      <UTooltip
-        v-if="!route.syncState.length && !route.targets.length"
-        text="This route doesn't reach any device right now — it hasn't been shared to a crew, or the crew it's shared to has no members with a linked account yet."
-      >
-        <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
-          no targets
-        </UBadge>
-      </UTooltip>
-      <UTooltip
-        v-if="!route.syncState.length && route.targets.length"
-        text="Shared to a crew, but not reaching any device of your own — other members' devices may still get it."
-      >
-        <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
-          not on your devices
-        </UBadge>
-      </UTooltip>
-
-      <span class="flex-1" />
-
-      <UTooltip v-if="route.owner" :text="`Uploaded by ${route.owner}`">
-        <UBadge color="neutral" variant="ghost" size="sm" icon="i-lucide-user">
-          {{ route.owner }}
-        </UBadge>
-      </UTooltip>
-      <!-- An import with no --owner, or an unclaimed Garmin sync-back:
-           nothing else on this card works until someone claims it, since
-           target-picking and crew-sharing both key off the owner's own
-           crew membership. First-come, so any edit-own rider gets the
-           button, not only an admin. -->
-      <UTooltip
-        v-else-if="canEdit"
-        text="This route has no owner yet, so it can't reach any device or be shared to a crew. Claim it to fix that."
-      >
-        <UButton
-          size="xs"
-          color="warning"
-          variant="outline"
-          icon="i-lucide-user-plus"
-          :loading="claiming"
-          @click.stop="claim"
+    <!-- flex-col, not one wrapping row: the badge below and the
+         owner/action-icon group used to share a single flex-wrap row split
+         by a flex-1 spacer, which worked while everything fit on one line
+         but broke the moment it didn't — "not on your devices" is long
+         enough to force a wrap on an ordinary card width, and a bare
+         flex-1 spacer has nothing to push once its own line is empty, so
+         the icons landed flush-left on their own line instead of flush-
+         right, and the card's footer grew a line taller than its
+         neighbours'. Two explicit rows makes the height predictable
+         regardless of which badge is showing. -->
+    <div class="mt-auto flex flex-col gap-1.5 pt-1">
+      <div class="flex flex-wrap items-center gap-1.5">
+        <SyncBadge v-if="route.syncState.length" :statuses="route.syncState" :accounts="accounts" />
+        <!-- syncState only ever shows the viewer's own devices now, so an
+             empty list has two genuinely different meanings: the route truly
+             reaches nobody, or it reaches real crew members' devices, just
+             not this viewer's own. route.targets (the crew names it was
+             shared to, not the resolved reach) is what tells the two apart —
+             claiming "hasn't been shared to a crew" when it plainly has
+             would be flatly wrong. -->
+        <UTooltip
+          v-if="!route.syncState.length && !route.targets.length"
+          text="This route doesn't reach any device right now — it hasn't been shared to a crew, or the crew it's shared to has no members with a linked account yet."
         >
-          Claim
-        </UButton>
-      </UTooltip>
+          <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
+            no targets
+          </UBadge>
+        </UTooltip>
+        <UTooltip
+          v-if="!route.syncState.length && route.targets.length"
+          text="Shared to a crew, but not reaching any device of your own — other members' devices may still get it."
+        >
+          <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
+            not on your devices
+          </UBadge>
+        </UTooltip>
+      </div>
 
-      <!-- external: without it, UButton's Link treats a same-origin
-           path like /api/gpx/... as an internal route and hands the click
-           to vue-router (Nuxt UI's own isExternal check is hasProtocol,
-           which a bare path never satisfies) — vue-router then does a
-           client-side navigate instead of a real browser request, so
-           `download` below never gets a chance to fire at all. -->
-      <UButton
-        :href="gpxUrl"
-        external
-        download
-        icon="i-lucide-download"
-        color="neutral"
-        variant="ghost"
-        size="xs"
-        aria-label="Download GPX"
-        @click.stop
-      />
-      <UTooltip
-        v-if="canEdit && !targetOptions.length"
-        :text="
-          route.owner
-            ? 'Join or create a crew first to share this route beyond your own devices'
-            : 'Claim this route above first — targets are chosen from the owner\'s own crews'
-        "
-      >
+      <div class="flex flex-wrap items-center justify-end gap-1.5">
+        <UTooltip v-if="route.owner" :text="`Uploaded by ${route.owner}`">
+          <UBadge color="neutral" variant="ghost" size="sm" icon="i-lucide-user">
+            {{ route.owner }}
+          </UBadge>
+        </UTooltip>
+        <!-- An import with no --owner, or an unclaimed Garmin sync-back:
+             nothing else on this card works until someone claims it, since
+             target-picking and crew-sharing both key off the owner's own
+             crew membership. First-come, so any edit-own rider gets the
+             button, not only an admin. -->
+        <UTooltip
+          v-else-if="canEdit"
+          text="This route has no owner yet, so it can't reach any device or be shared to a crew. Claim it to fix that."
+        >
+          <UButton
+            size="xs"
+            color="warning"
+            variant="outline"
+            icon="i-lucide-user-plus"
+            :loading="claiming"
+            @click.stop="claim"
+          >
+            Claim
+          </UButton>
+        </UTooltip>
+
+        <!-- external: without it, UButton's Link treats a same-origin
+             path like /api/gpx/... as an internal route and hands the click
+             to vue-router (Nuxt UI's own isExternal check is hasProtocol,
+             which a bare path never satisfies) — vue-router then does a
+             client-side navigate instead of a real browser request, so
+             `download` below never gets a chance to fire at all. -->
         <UButton
+          :href="gpxUrl"
+          external
+          download
+          icon="i-lucide-download"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          aria-label="Download GPX"
+          @click.stop
+        />
+        <UTooltip
+          v-if="canEdit && !targetOptions.length"
+          :text="
+            route.owner
+              ? 'Join or create a crew first to share this route beyond your own devices'
+              : 'Claim this route above first — targets are chosen from the owner\'s own crews'
+          "
+        >
+          <UButton
+            icon="i-lucide-watch"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            disabled
+            aria-label="Choose target devices"
+          />
+        </UTooltip>
+        <UButton
+          v-else-if="canEdit"
           icon="i-lucide-watch"
           color="neutral"
           variant="ghost"
           size="xs"
-          disabled
           aria-label="Choose target devices"
+          @click.stop="openTargets"
         />
-      </UTooltip>
-      <UButton
-        v-else-if="canEdit"
-        icon="i-lucide-watch"
-        color="neutral"
-        variant="ghost"
-        size="xs"
-        aria-label="Choose target devices"
-        @click.stop="openTargets"
-      />
-      <!-- oidc only — mode: proxy blocks anonymous traffic before it ever
-           reaches this app at all, so a share link's recipient (someone
-           this deployment has never heard of) could never sign in to use
-           one; mode: none has no anonymous state to grant a share to in
-           the first place. See ShareRouteDialog.vue's own doc comment. -->
-      <UButton
-        v-if="canEdit && me?.authMode === 'oidc'"
-        icon="i-lucide-share-2"
-        color="neutral"
-        variant="ghost"
-        size="xs"
-        aria-label="Share this route"
-        @click.stop="sharing = true"
-      />
-      <UButton
-        v-if="canEdit"
-        icon="i-lucide-trash-2"
-        color="error"
-        variant="ghost"
-        size="xs"
-        aria-label="Delete route"
-        @click.stop="confirming = true"
-      />
+        <!-- oidc only — mode: proxy blocks anonymous traffic before it ever
+             reaches this app at all, so a share link's recipient (someone
+             this deployment has never heard of) could never sign in to use
+             one; mode: none has no anonymous state to grant a share to in
+             the first place. See ShareRouteDialog.vue's own doc comment. -->
+        <UButton
+          v-if="canEdit && me?.authMode === 'oidc'"
+          icon="i-lucide-share-2"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          aria-label="Share this route"
+          @click.stop="sharing = true"
+        />
+        <UButton
+          v-if="canEdit"
+          icon="i-lucide-trash-2"
+          color="error"
+          variant="ghost"
+          size="xs"
+          aria-label="Delete route"
+          @click.stop="confirming = true"
+        />
+      </div>
     </div>
 
     <ShareRouteDialog v-if="canEdit" v-model:open="sharing" :route="route" />
