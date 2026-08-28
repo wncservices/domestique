@@ -46,6 +46,85 @@ func postgresStore(t *testing.T) *Store {
 	return openStore(t, dsn)
 }
 
+// preSeriesIDStore opens db and puts crew_rides in the table shape it had
+// immediately before series_id existed — the shape every real deployment's
+// database was actually in when that migration first shipped. Postgres
+// tests share a database, so this drops whatever a previous test left
+// first, the same way openStore's own DELETE does.
+func preSeriesIDStore(t *testing.T, dsn string) *source.DB {
+	t.Helper()
+	db, err := source.OpenDB(dsn)
+	if err != nil {
+		t.Fatalf("open %s: %v", dsn, err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Conn().Exec(`DROP TABLE IF EXISTS crew_rides`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Conn().Exec(`DROP TABLE IF EXISTS ride_series`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Conn().Exec(`
+CREATE TABLE crew_rides (
+    id         TEXT PRIMARY KEY,
+    crew_id    TEXT NOT NULL,
+    route_slug TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    time       TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)`); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// TestUseDBMigratesATableThatPredatesSeriesID is a regression test for a
+// real production incident: UseDB failed outright — "column series_id does
+// not exist" — against every database that already had a crew_rides table
+// from before this migration shipped, because the index on series_id used
+// to be created inside schema()'s own CREATE TABLE IF NOT EXISTS block,
+// before the ALTER TABLE that actually adds the column to a pre-existing
+// table ever ran. TestScheduleEachEngine's own openStore always starts
+// from UseDB having already succeeded once, so a fresh test database never
+// exercised this path — exactly why it shipped unnoticed until it
+// crash-looped a real deployment.
+func TestUseDBMigratesATableThatPredatesSeriesID(t *testing.T) {
+	for engine, open := range map[string]func(*testing.T) *source.DB{
+		"sqlite": func(t *testing.T) *source.DB {
+			return preSeriesIDStore(t, filepath.Join(t.TempDir(), "schedule.db"))
+		},
+		"postgres": func(t *testing.T) *source.DB {
+			dsn := os.Getenv(postgresEnv)
+			if dsn == "" {
+				t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
+			}
+			return preSeriesIDStore(t, dsn)
+		},
+	} {
+		t.Run(engine, func(t *testing.T) {
+			db := open(t)
+
+			store, err := UseDB(db.Conn(), db.DSN())
+			if err != nil {
+				t.Fatalf("UseDB against a pre-existing table without series_id: %v", err)
+			}
+
+			// The migration has to actually work end to end, not just not
+			// error — a series created afterward needs the column and the
+			// index both real.
+			_, rides, err := store.CreateSeries(t.Context(), "crew:sunday-club", "hill-loop", 1,
+				"2026-09-01", "2026-09-08", "", "wilant")
+			if err != nil {
+				t.Fatalf("CreateSeries after migrating a pre-existing table: %v", err)
+			}
+			if len(rides) != 2 {
+				t.Fatalf("rides = %+v, want 2", rides)
+			}
+		})
+	}
+}
+
 func TestScheduleEachEngine(t *testing.T) {
 	for engine, open := range map[string]func(*testing.T) *Store{
 		"sqlite":   sqliteStore,
