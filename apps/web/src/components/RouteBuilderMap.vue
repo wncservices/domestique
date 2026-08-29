@@ -265,6 +265,13 @@ function clearAll() {
 function closeLoop() {
   if (waypoints.length < 2) return
   const start = waypoints[0]
+  const last = waypoints[waypoints.length - 1]
+  // Already closed — a repeat click (or clicking it again after nothing
+  // else changed) would otherwise append a second copy of the start point,
+  // producing a redundant zero-length final segment and spending a whole
+  // routing-engine request on a path that already ends exactly where it
+  // starts.
+  if (last.lat === start.lat && last.lon === start.lon) return
   waypoints.push({ lat: start.lat, lon: start.lon })
   emit('update:waypointCount', waypoints.length)
   schedulePreview()
@@ -387,6 +394,14 @@ function currentPosition(): Promise<GeolocationPosition | null> {
   })
 }
 
+// Set the moment onBeforeUnmount runs, checked again after init()'s own
+// awaits below — geolocation alone can take up to GEOLOCATION_TIMEOUT_MS,
+// long enough that a rider can realistically navigate away before it
+// resolves. Without this check, that stale continuation would go on to
+// construct a real maplibre-gl Map against a template ref Vue has already
+// cleared to null, throwing from inside an unawaited promise chain.
+let unmounted = false
+
 async function init() {
   if (!container.value) return
   // No point asking for (and prompting permission for) geolocation when a
@@ -396,6 +411,7 @@ async function init() {
     loadMapLibreModules(),
     props.initialStart ? Promise.resolve(null) : currentPosition(),
   ])
+  if (unmounted || !container.value) return
   maplibregl = gl
 
   // A saved default start point wins over geolocation for the initial
@@ -441,6 +457,7 @@ async function init() {
 onMounted(init)
 
 onBeforeUnmount(() => {
+  unmounted = true
   if (debounceHandle) clearTimeout(debounceHandle)
   resizeObserver?.disconnect()
   for (const m of markers) m.remove()
