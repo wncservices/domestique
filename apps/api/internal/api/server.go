@@ -249,6 +249,17 @@ type Server struct {
 	// waypoint the way a route-builder preview is.
 	GeocodeLimiter *ratelimit.Limiter
 
+	// GeocodeGlobalLimiter caps this deployment's *total* location-search
+	// volume, on top of GeocodeLimiter's own per-rider budget above.
+	// Nominatim's usage policy is a shared ceiling — roughly one request a
+	// second across every user of every app, not per caller — so a handful
+	// of riders each comfortably within their own per-rider budget could
+	// still burst past it together and get this deployment's own outbound
+	// IP blocked, breaking search for everyone rather than just whoever
+	// went over. rateLimitGeocodeGlobal always checks the same fixed key,
+	// deliberately not one per rider, so every caller shares one bucket.
+	GeocodeGlobalLimiter *ratelimit.Limiter
+
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
 	pushMu sync.Mutex
@@ -2244,6 +2255,9 @@ func (s *Server) handleGeocodeSearch(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimitGeocode(w, rider) {
 		return
 	}
+	if !s.rateLimitGeocodeGlobal(w) {
+		return
+	}
 
 	if s.Geocoder == nil {
 		s.logger().Warn("location search requested but no geocoder is configured", "by", rider)
@@ -2726,6 +2740,13 @@ func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool
 // budget than rateLimitRouteBuilder's.
 func (s *Server) rateLimitGeocode(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.GeocodeLimiter, rider, "too many location searches — wait a few minutes and try again")
+}
+
+// rateLimitGeocodeGlobal enforces GeocodeGlobalLimiter — see that field's
+// own doc comment for why this is a separate, shared budget across every
+// rider rather than rateLimitGeocode's per-rider one.
+func (s *Server) rateLimitGeocodeGlobal(w http.ResponseWriter) bool {
+	return rateLimit(w, s.GeocodeGlobalLimiter, "global", "location search is busy right now — wait a moment and try again")
 }
 
 // rateLimit is rateLimitConnect and rateLimitAuthAction's shared check: nil

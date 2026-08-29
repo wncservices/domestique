@@ -777,6 +777,12 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// app), not a per-deployment API key, and a location search is a
 		// one-off action rather than a debounced call per waypoint.
 		GeocodeLimiter: ratelimit.New(20, 5*time.Minute),
+		// Comfortably under Nominatim's own "roughly one request a second"
+		// policy on average (50/min ≈ 0.83/sec) while still allowing a
+		// real burst of several riders searching at once — see
+		// GeocodeGlobalLimiter's own doc comment for why this is a
+		// separate, shared budget from GeocodeLimiter's per-rider one.
+		GeocodeGlobalLimiter: ratelimit.New(50, time.Minute),
 	}
 
 	// No config toggle, no credential — geocoding.NominatimClient needs

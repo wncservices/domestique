@@ -673,3 +673,53 @@ func TestGeocodeSearchFailurePropagatesAsBadGateway(t *testing.T) {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadGateway)
 	}
 }
+
+// GeocodeGlobalLimiter protects Nominatim's own shared usage policy across
+// every rider, not any one rider's own budget — checked here with
+// GeocodeLimiter left nil (unlimited) so only the global limiter can be
+// what blocks the second request.
+func TestGeocodeSearchIsRateLimitedGlobally(t *testing.T) {
+	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st, err := state.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct, err := accounts.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &api.Server{
+		Source:               db,
+		Store:                st,
+		Accounts:             acct,
+		Config:               &config.Config{},
+		Geocoder:             fakeGeocoder{results: []geocoding.Result{{Name: "Brussels", Lat: 50.85, Lon: 4.35}}},
+		GeocodeGlobalLimiter: ratelimit.New(1, time.Hour),
+	}
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(server.Close)
+	client := server.Client()
+
+	first, err := client.Get(server.URL + "/api/geocode?q=Brussels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", first.StatusCode)
+	}
+
+	second, err := client.Get(server.URL + "/api/geocode?q=Ghent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Body.Close()
+	if second.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second request status = %d, want %d — a different query should still share the global budget", second.StatusCode, http.StatusTooManyRequests)
+	}
+}

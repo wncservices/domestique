@@ -148,9 +148,16 @@ const (
 // concrete ORSClient, rather than as a decorator around the Client
 // interface, so the fake Client acceptance tests substitute in place of a
 // real one stays simple and does not need to know caching exists.
+//
+// resolve also coalesces concurrent identical requests — a double-click on
+// Generate, or the same debounced preview firing twice in close succession
+// — behind one real call: without that, two callers that both miss the
+// cache in the same instant would each spend the quota independently,
+// undermining the entire point of caching in the first place.
 type responseCache struct {
-	mu      sync.Mutex
-	entries map[string]cacheEntry
+	mu       sync.Mutex
+	entries  map[string]cacheEntry
+	inFlight map[string]*sync.WaitGroup
 }
 
 type cacheEntry struct {
@@ -159,7 +166,10 @@ type cacheEntry struct {
 }
 
 func newResponseCache() *responseCache {
-	return &responseCache{entries: make(map[string]cacheEntry)}
+	return &responseCache{
+		entries:  make(map[string]cacheEntry),
+		inFlight: make(map[string]*sync.WaitGroup),
+	}
 }
 
 func (c *responseCache) get(key string) ([]gpx.Point, bool) {
@@ -188,6 +198,46 @@ func (c *responseCache) put(key string, points []gpx.Point) {
 	c.entries[key] = cacheEntry{points: append([]gpx.Point(nil), points...), expires: time.Now().Add(cacheTTL)}
 }
 
+// resolve returns the cached value for key if there is one, otherwise calls
+// fetch — but only once per key even under concurrent callers. A caller
+// that arrives while another is already fetching the same key waits for
+// that call to finish and then re-checks the cache, rather than starting a
+// second, redundant outbound request of its own. If the winning call
+// failed (nothing to cache), a waiter falls through and becomes the next
+// attempt itself instead of propagating a stranger's error.
+func (c *responseCache) resolve(key string, fetch func() ([]gpx.Point, error)) ([]gpx.Point, error) {
+	if points, ok := c.get(key); ok {
+		return points, nil
+	}
+
+	c.mu.Lock()
+	if wg, waiting := c.inFlight[key]; waiting {
+		c.mu.Unlock()
+		wg.Wait()
+		if points, ok := c.get(key); ok {
+			return points, nil
+		}
+		return c.resolve(key, fetch)
+	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	c.inFlight[key] = wg
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.inFlight, key)
+		c.mu.Unlock()
+		wg.Done()
+	}()
+
+	points, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	c.put(key, points)
+	return points, nil
+}
+
 // cacheKey identifies a directions request by everything that can change
 // its answer: the profile (a different profile can route differently) and
 // the coordinates/round-trip options already resolved onto the request
@@ -200,8 +250,19 @@ func cacheKey(profile string, body directionsRequest) string {
 	for _, coord := range body.Coordinates {
 		fmt.Fprintf(&b, "|%.6f,%.6f", coord[0], coord[1])
 	}
-	if rt := body.Options; rt != nil && rt.RoundTrip != nil {
-		fmt.Fprintf(&b, "|rt:%.0f:%d:%d", rt.RoundTrip.Length, rt.RoundTrip.Points, rt.RoundTrip.Seed)
+	if opts := body.Options; opts != nil {
+		if rt := opts.RoundTrip; rt != nil {
+			fmt.Fprintf(&b, "|rt:%.0f:%d:%d", rt.Length, rt.Points, rt.Seed)
+		}
+		if len(opts.AvoidFeatures) > 0 {
+			// preferCyclePaths is the only value used anywhere today, so this
+			// never actually distinguishes two requests in practice — but a
+			// future caller that varies it (a rider toggle to allow
+			// highways, say) must not silently collide with a cached answer
+			// computed under a different constraint.
+			b.WriteString("|avoid:")
+			b.WriteString(strings.Join(opts.AvoidFeatures, ","))
+		}
 	}
 	return b.String()
 }
@@ -295,10 +356,12 @@ func (c *ORSClient) directions(ctx context.Context, profile string, body directi
 	}
 
 	key := cacheKey(profile, body)
-	if points, ok := c.cache.get(key); ok {
-		return points, nil
-	}
+	return c.cache.resolve(key, func() ([]gpx.Point, error) {
+		return c.fetchDirections(ctx, profile, body)
+	})
+}
 
+func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body directionsRequest) ([]gpx.Point, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -353,6 +416,5 @@ func (c *ORSClient) directions(ctx context.Context, profile string, body directi
 			points[i].Ele, points[i].HasEle = coord[2], true
 		}
 	}
-	c.cache.put(key, points)
 	return points, nil
 }
