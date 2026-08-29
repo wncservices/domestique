@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -28,17 +29,23 @@ import (
 // stubRoutingClient substitutes for a real ORS instance in tests, the same
 // reason fakeTarget substitutes for a real Garmin/Wahoo adapter — it always
 // returns the same fixed route regardless of what it's asked to snap or
-// generate, which is all TestRouteBuilderPreviewSnapsWaypoints needs.
+// generate, which is all most tests here need. failSeeds lets a suggest
+// test make specific seeds fail without a fake HTTP server of its own —
+// see TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed.
 type stubRoutingClient struct {
-	route []gpx.Point
-	err   error
+	route     []gpx.Point
+	err       error
+	failSeeds map[int]bool
 }
 
 func (s stubRoutingClient) Route(context.Context, []routing.LatLng, string) ([]gpx.Point, error) {
 	return s.route, s.err
 }
 
-func (s stubRoutingClient) RoundTrip(context.Context, routing.LatLng, float64, int, string) ([]gpx.Point, error) {
+func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, _ string) ([]gpx.Point, error) {
+	if s.failSeeds[seed] {
+		return nil, errors.New("stub: this seed is configured to fail")
+	}
 	return s.route, s.err
 }
 
@@ -276,5 +283,114 @@ func TestCreateRouteFromPointsRejectsTooFewPoints(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for a single-point route", resp.StatusCode)
+	}
+}
+
+func TestRouteBuilderSuggestRequiresARoutingEngine(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, nil)
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusPreconditionFailed)
+	}
+}
+
+func TestRouteBuilderSuggestRejectsNonPositiveDistance(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 0,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a non-positive distance", resp.StatusCode)
+	}
+}
+
+func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{
+			{Lat: 50.85, Lon: 4.35},
+			{Lat: 50.86, Lon: 4.37},
+			{Lat: 50.85, Lon: 4.35},
+		},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var out struct {
+		Candidates []struct {
+			Points    [][2]float64 `json:"points"`
+			DistanceM float64      `json:"distanceM"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Candidates) != 3 {
+		t.Fatalf("got %d candidates, want 3", len(out.Candidates))
+	}
+	for i, c := range out.Candidates {
+		if len(c.Points) != 3 || c.DistanceM <= 0 {
+			t.Errorf("candidate %d = %+v, want 3 points and a positive distance", i, c)
+		}
+	}
+}
+
+// A routing engine stumbling on one seed shouldn't sink the other two — see
+// AGENTS.md's "one bad route never aborts a run," applied here to a single
+// request's three sub-calls.
+func TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		failSeeds: map[int]bool{2: true},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 even with one failed seed", resp.StatusCode)
+	}
+
+	var out struct {
+		Candidates []struct{} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Candidates) != 2 {
+		t.Fatalf("got %d candidates, want 2 (one of three seeds was made to fail)", len(out.Candidates))
+	}
+}
+
+func TestRouteBuilderSuggestFailsWhenEverySeedFails(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		err: errors.New("routing engine unreachable"),
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d when every seed fails", resp.StatusCode, http.StatusBadGateway)
 	}
 }

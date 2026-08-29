@@ -380,6 +380,21 @@ export interface RouteBuilderPreview {
   distanceM: number
 }
 
+export interface RouteBuilderSuggestRequest {
+  start: Waypoint
+  distanceKm: number
+  profile?: string
+}
+
+/** One round-trip loop candidate — same shape as RouteBuilderPreview, since
+ *  both are just "a path nothing has saved yet," but named separately
+ *  because a suggestion is one of several offered side by side rather than
+ *  the single current draft. */
+export interface RouteBuilderCandidate {
+  points: [number, number][]
+  distanceM: number
+}
+
 /** What every route-builder tab's final pick — a manually drawn path, a
  *  chosen suggestion, a chosen AI candidate — turns into once a rider hits
  *  save. Mirrors UploadRequest's own metadata fields; only the geometry
