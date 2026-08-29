@@ -19,6 +19,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/routing"
 )
 
 // SourceConfig is where the route library lives.
@@ -69,6 +70,24 @@ type ElevationConfig struct {
 	// URL defaults to elevation.DefaultURL (the public Open-Elevation
 	// instance) when Enabled is true and this is left empty — set it to
 	// point at a self-hosted instance instead.
+	URL string `yaml:"url,omitempty"`
+}
+
+// RoutingConfig is how the route builder (manual, suggested and AI-native)
+// turns waypoints or a starting point into an actual rideable path — see
+// internal/routing. Same shape and same reasoning as ElevationConfig
+// above: off by default, because this is the other feature in this codebase
+// that sends a route's own coordinates to a service outside the deployment
+// on its own initiative.
+type RoutingConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// URL defaults to routing.DefaultURL (the public OpenRouteService
+	// instance) when Enabled is true and this is left empty — set it to
+	// point at a self-hosted instance instead.
+	//
+	// The API key is not here, same rule as Komoot/Garmin's credentials:
+	// it comes from DOMESTIQUE_ROUTING_API_KEY in the environment, even for
+	// the public instance's free tier.
 	URL string `yaml:"url,omitempty"`
 }
 
@@ -136,6 +155,7 @@ type Config struct {
 	Wahoo     WahooConfig     `yaml:"wahoo"`
 	Basemap   BasemapConfig   `yaml:"basemap"`
 	Elevation ElevationConfig `yaml:"elevation"`
+	Routing   RoutingConfig   `yaml:"routing"`
 }
 
 // DefaultDSN is where a database library lives unless configured otherwise.
@@ -190,6 +210,11 @@ func (c *Config) applyDefaults() {
 	// would be meaningless with nothing to use it.
 	if c.Elevation.Enabled && c.Elevation.URL == "" {
 		c.Elevation.URL = elevation.DefaultURL
+	}
+
+	// Same "only when opted in" rule as Elevation just above.
+	if c.Routing.Enabled && c.Routing.URL == "" {
+		c.Routing.URL = routing.DefaultURL
 	}
 
 	// Only when the feature is actually opted into (a namespace is set) —
@@ -258,6 +283,15 @@ func (c *Config) Validate() error {
 		u, err := url.Parse(c.Elevation.URL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return fmt.Errorf("elevation.url %q is not a valid absolute URL", c.Elevation.URL)
+		}
+	}
+
+	// Same reasoning as the elevation check above — a malformed routing.url
+	// would otherwise fail silently on every route-builder request instead.
+	if c.Routing.Enabled {
+		u, err := url.Parse(c.Routing.URL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("routing.url %q is not a valid absolute URL", c.Routing.URL)
 		}
 	}
 	return nil

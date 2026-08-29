@@ -135,14 +135,26 @@ komoot:
 # with the same 0.00000 placeholder by a route-planning site that never
 # touched real terrain data.
 #
-# Off by default: this is the one thing in this file that sends a route's
-# own coordinates to a service outside the deployment on its own initiative,
-# not because a rider asked to connect an account. A regular running route
-# can reveal where someone lives — turning this on is a decision to make on
-# purpose.
+# Off by default: this and routing below are the only things in this file
+# that send a route's own coordinates to a service outside the deployment
+# on their own initiative, not because a rider asked to connect an account.
+# A regular running route can reveal where someone lives — turning either
+# of these on is a decision to make on purpose.
 elevation:
   enabled: false
   # Defaults to the public Open-Elevation instance (api.open-elevation.com) —
   # free, no API key, open source. Point this at a self-hosted instance
   # instead if you would rather not depend on the public one.
   # url: https://api.open-elevation.com/api/v1/lookup
+
+# Powers the route builder: snapping manually-placed waypoints to real
+# roads, and suggesting round-trip loops for the suggested and AI-native
+# builders. Off by default, same reasoning as elevation above.
+routing:
+  enabled: false
+  # Defaults to the public OpenRouteService instance (api.openrouteservice.org)
+  # — self-hostable via the openrouteservice/openrouteservice Docker image
+  # instead if you would rather not depend on the public one. Either way an
+  # API key is required, even for the public instance's free tier — set
+  # DOMESTIQUE_ROUTING_API_KEY in the environment, never here.
+  # url: https://api.openrouteservice.org

@@ -79,6 +79,19 @@ var (
 		metric.WithDescription("Failed push attempts per account."),
 	))
 
+	// routeBuilderErrorsTotal is the same "an operator should see this in a
+	// dashboard, not learn about it from a rider" reasoning as
+	// pushErrorsTotal above, for the route builder's own outbound calls —
+	// a per-request span (via otelhttp, see internal/routing) already
+	// covers "did this one call succeed," so this is only for the
+	// aggregate: is the routing engine reliably reachable at all.
+	// Labeled by endpoint (preview/suggest), not by rider — an outage
+	// shows up the same way regardless of who triggered a given request.
+	routeBuilderErrorsTotal = must(meter.Int64Counter(
+		"domestique_routebuilder_errors_total",
+		metric.WithDescription("Failed route-builder calls to the routing engine, by endpoint."),
+	))
+
 	// garminSessionExpiry mirrors the push-staleness gauges' own reasoning:
 	// a value an alert rule watches, not a number only a person reads.
 	// Recorded every reconcile tick for every connected Garmin rider,
@@ -181,6 +194,12 @@ func (r *statusRecorder) WriteHeader(status int) {
 // metric/attribute into server.go just for this one call site.
 func recordTrackPreviewSize(ctx context.Context, format string, bytes int) {
 	trackPreviewResponseBytes.Record(ctx, float64(bytes), metric.WithAttributes(attribute.String("format", format)))
+}
+
+// recordRouteBuilderError is handleRouteBuilderPreview/Suggest's own
+// metric-recording call — endpoint is "preview" or "suggest".
+func recordRouteBuilderError(ctx context.Context, endpoint string) {
+	routeBuilderErrorsTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("endpoint", endpoint)))
 }
 
 // recordPushResult is sync.Apply's onResult callback for handlePush — the

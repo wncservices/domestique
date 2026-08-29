@@ -42,6 +42,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
+	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -762,6 +763,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// A separate instance from ConnectLimiter — see AuthActionLimiter's
 		// own doc comment for why the two must not share one budget.
 		AuthActionLimiter: ratelimit.New(5, 15*time.Minute),
+		// A much more generous budget than the two above — see
+		// RouteBuilderLimiter's own doc comment for why a sign-in-shaped
+		// limit would make interactive drawing unusable. 60 per 5 minutes
+		// comfortably covers a real editing session (one debounced call
+		// per waypoint placed, dragged or removed) while still bounding a
+		// script that would otherwise hammer the routing engine unchecked.
+		RouteBuilderLimiter: ratelimit.New(60, 5*time.Minute),
 	}
 
 	srv.LandingHost = cfg.Web.LandingHost
@@ -826,6 +834,14 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		}
 		srv.PreviewImageCache = previewImageCache
 		srv.PreviewTiles = basemap.NewPreviewTiles(cfg.Basemap.TilesServiceURL)
+	}
+
+	// Powers the route builder — see config.RoutingConfig's own doc comment
+	// for why this is opt-in like elevation above. API-only: unlike
+	// elevation, nothing the CLI does (import, push) ever calls a routing
+	// engine, so this is wired here rather than in openSource.
+	if cfg.Routing.Enabled {
+		srv.Routing = routing.New(cfg.Routing.URL, os.Getenv(routing.EnvAPIKey))
 	}
 
 	// The Job-triggering side is opt-in twice over: cfg.Basemap.TilesNamespace

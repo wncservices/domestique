@@ -139,6 +139,40 @@ func TestValidateRejectsAMalformedElevationURL(t *testing.T) {
 	}
 }
 
+// Same reasoning as TestValidateRejectsAMalformedElevationURL above, for
+// the route builder's own outbound call.
+func TestValidateRejectsAMalformedRoutingURL(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Source:  SourceConfig{DSN: "data/domestique.db"},
+			Routing: RoutingConfig{Enabled: true, URL: "https://example.com/ors"},
+		}
+	}
+
+	if err := base().Validate(); err != nil {
+		t.Fatalf("a valid routing.url was rejected: %v", err)
+	}
+
+	for _, bad := range []string{
+		"not a url at all",
+		"example.com/ors", // no scheme
+		"https://",        // no host
+	} {
+		cfg := base()
+		cfg.Routing.URL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%q: expected an error, got none", bad)
+		}
+	}
+
+	cfg := base()
+	cfg.Routing.Enabled = false
+	cfg.Routing.URL = "not a url at all"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("a bad url while disabled should be ignored: %v", err)
+	}
+}
+
 // A route with no targets used to reach every linked account, system-wide,
 // with no consent from whoever owned the other accounts. That was the gap
 // crews exist to close: the default now is the owner's own accounts only.
