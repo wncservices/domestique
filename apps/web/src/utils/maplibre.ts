@@ -30,6 +30,26 @@ export function loadMapLibreModules() {
 }
 
 /**
+ * Warms the dynamic-import cache above before either map component ever
+ * mounts — called once from main.ts on every app-shell page load (never
+ * from the separate `landing` entry, which must stay maplibre-free per
+ * this file's own bundle-boundary reasoning). Deferred to the browser's
+ * idle time, falling back to a short timeout on Safari (no
+ * requestIdleCallback there), so this never competes with the page's own
+ * critical first render — by the time a rider actually opens a map
+ * (LibraryPage's map view, a route detail modal, or /build), the modules
+ * are already fetched and parsed instead of starting cold. Errors are
+ * swallowed: this is a best-effort warmup only, and a real attempt (with
+ * its own error handling) happens when a map component actually mounts.
+ */
+export function prefetchMapLibreModules() {
+  const schedule = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 1))
+  schedule(() => {
+    loadMapLibreModules().catch(() => {})
+  })
+}
+
+/**
  * The .pmtiles basemap is self-hosted specifically so route coordinates
  * never reach a third party (see tiles/AGENTS.md in domestique-infra) —
  * style/sprite/glyphs carry no location data, so those come from a public
