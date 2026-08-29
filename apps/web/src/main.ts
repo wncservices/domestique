@@ -3,6 +3,7 @@ import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import { applyColorMode, initColorMode } from './color-mode'
+import { prefetchMapLibreModules } from './utils/maplibre'
 import './styles.css'
 
 // Each page answers a different question: what is in the library, how do I
@@ -33,3 +34,9 @@ createApp(App).use(router).use(ui).mount('#app')
 
 // Again, after mount: see applyColorMode.
 applyColorMode()
+
+// Warms maplibre-gl/pmtiles/protomaps-themes-base in the background from
+// the moment this app shell loads, not only once a rider actually opens a
+// map — see prefetchMapLibreModules' own doc comment. Deliberately not in
+// landing.html's own entry: that bundle must stay maplibre-free.
+prefetchMapLibreModules()
