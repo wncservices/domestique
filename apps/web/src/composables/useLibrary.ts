@@ -123,6 +123,11 @@ const totalAscent = computed(() => routes.value.reduce((sum, r) => sum + r.ascen
 /** Komoot is on the Add page, but only when the deployment has it enabled. */
 const komootEnabled = computed(() => (config.value?.komoot ?? 'disabled') !== 'disabled')
 
+/** The route builder's manual/suggested/AI-native tabs are on the Add page,
+ *  but only when a routing engine is actually configured — same reasoning
+ *  as komootEnabled above: don't offer a button that can only 412. */
+const routingConfigured = computed(() => config.value?.routingConfigured ?? false)
+
 export function useLibrary() {
   return {
     config,
@@ -146,6 +151,7 @@ export function useLibrary() {
     canManageCrews,
     canManageSettings,
     komootEnabled,
+    routingConfigured,
     totalDistance,
     totalAscent,
   }

@@ -15,6 +15,7 @@ const router = createRouter({
   routes: [
     { path: '/', component: () => import('./pages/LibraryPage.vue') },
     { path: '/add', component: () => import('./pages/AddPage.vue') },
+    { path: '/build', component: () => import('./pages/BuildRoutePage.vue') },
     { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
     { path: '/people', component: () => import('./pages/PeoplePage.vue') },
     { path: '/crews', component: () => import('./pages/CrewsPage.vue') },

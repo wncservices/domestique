@@ -308,6 +308,11 @@ export interface AppConfig {
    * "disabled" unless the UI says otherwise.
    */
   komoot: 'disabled' | 'unconfigured' | 'ready'
+  /** Whether a routing engine is configured for the route builder's manual,
+   *  suggested and AI-native tabs — see RouteBuilderPanel.vue, which hides
+   *  entirely rather than offer a button that can only 412, same as
+   *  Komoot's own 'disabled' state above. */
+  routingConfigured: boolean
 }
 
 /** What kind of activity a route is for — changes how it reaches a device,
@@ -357,6 +362,36 @@ export interface UploadRequest {
   uploadedBy?: string
   /** Omitted means 'cycling' — see Route.sport. */
   sport?: Sport
+}
+
+/** One point a route-builder tab sends, lat then lon — the order humans say
+ *  it, and the order every other point-carrying response in this file
+ *  (TrackResponse.points, most concretely) already uses. */
+export interface Waypoint {
+  lat: number
+  lon: number
+}
+
+/** The manual builder's live, unsaved preview of a snapped path — see
+ *  RouteBuilderMap.vue. Not persisted; only the eventual "save" step
+ *  (CreateRouteFromPointsRequest below) creates a real route. */
+export interface RouteBuilderPreview {
+  points: [number, number][]
+  distanceM: number
+}
+
+/** What every route-builder tab's final pick — a manually drawn path, a
+ *  chosen suggestion, a chosen AI candidate — turns into once a rider hits
+ *  save. Mirrors UploadRequest's own metadata fields; only the geometry
+ *  arrives differently (points instead of a GPX file). */
+export interface CreateRouteFromPointsRequest {
+  name: string
+  description?: string
+  tags?: string[]
+  targets?: string[]
+  /** Omitted means 'cycling' — see Route.sport. */
+  sport?: Sport
+  points: Waypoint[]
 }
 
 /** A link to one route for someone outside this deployment entirely — see
