@@ -28,10 +28,12 @@ import type {
   Person,
   PlanResponse,
   PushResponse,
+  CreateRouteFromPointsRequest,
   CreateRouteShareResponse,
   Ride,
   UpcomingRide,
   Route,
+  RouteBuilderPreview,
   RouteDuplicateGroup,
   RouteShare,
   RouteShareTTLDays,
@@ -41,6 +43,7 @@ import type {
   Sport,
   TrackResponse,
   UploadRequest,
+  Waypoint,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -331,6 +334,27 @@ export const api = {
     // No Content-Type header: the browser sets the multipart boundary.
     return request<Route>('/api/routes', { method: 'POST', body: form })
   },
+
+  /** Snaps a path through manually-placed waypoints for the manual route
+   *  builder's live preview — nothing is saved until createRouteFromPoints
+   *  below is called with a final pick. 412s (ApiError) when this
+   *  deployment has no routing engine configured — see AppConfig.routingConfigured,
+   *  which is what RouteBuilderPanel.vue checks before ever offering the tab. */
+  routeBuilderPreview: (waypoints: Waypoint[], profile?: string) =>
+    request<RouteBuilderPreview>('/api/routebuilder/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waypoints, profile }),
+    }),
+
+  /** Where every route-builder tab's final pick lands — see
+   *  CreateRouteFromPointsRequest's own doc comment. */
+  createRouteFromPoints: (req: CreateRouteFromPointsRequest) =>
+    request<Route>('/api/routes/from-points', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
 
   remove: (slug: string) =>
     request<void>(`/api/routes/${encodeSlug(slug)}`, { method: 'DELETE' }),

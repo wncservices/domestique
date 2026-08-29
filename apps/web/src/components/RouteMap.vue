@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@/color-mode'
-import type { Map as MapLibreMap, StyleSpecification } from 'maplibre-gl'
+import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
+import type { Map as MapLibreMap } from 'maplibre-gl'
 
 const props = defineProps<{
   routes: { slug: string; points: [number, number][] }[]
@@ -14,90 +15,22 @@ const { resolved } = useColorMode()
 
 const container = useTemplateRef<HTMLElement>('container')
 let map: MapLibreMap | null = null
+// MapLibre's trackResize option only listens for the window's own resize
+// event, not for this container changing size because of page layout alone
+// — see RouteBuilderMap.vue's identical fix for where that gap was found
+// live. A ResizeObserver on the container is what actually notices it.
+let resizeObserver: ResizeObserver | null = null
 
 const SOURCE_ID = 'routes'
 const LINE_LAYER_ID = 'routes-line'
 const START_LAYER_ID = 'routes-start'
 
-// Cached at module level, not per RouteMap instance: a second map on the
-// same page (a library map plus a popup, say) resolves every one of these
-// from cache instantly rather than re-importing or re-registering anything.
+// A component-local var, populated once loadMapLibreModules() resolves
+// below — the module import itself is cached at the real module level (see
+// utils/maplibre.ts), so a second map on the same page (a library map plus
+// a popup, say) still only pays that cost once, but each RouteMap instance
+// keeps its own reference for fitToRoutes() to use.
 let maplibregl: typeof import('maplibre-gl') | null = null
-let modulesReady: Promise<{
-  maplibregl: typeof import('maplibre-gl')
-  themes: typeof import('protomaps-themes-base')
-}> | null = null
-
-/**
- * Loads everything init() needs below — maplibre-gl (+ its CSS), the
- * pmtiles protocol handler, and the themes package the first style build
- * needs — as one Promise.all instead of four sequential awaits. None of
- * the four imports themselves depend on each other: only the *synchronous*
- * work after they all resolve does (addProtocol needs the maplibre-gl
- * module object; building a style needs the themes module) — awaiting them
- * one at a time paid a full network-plus-parse round trip per import for a
- * dependency that only exists after every one of them is already loaded.
- * pmtiles' own addProtocol call happens here too, guarded the same way the
- * old ensureProtocol was: calling it twice across multiple RouteMap
- * instances is harmless but pointless, so this whole Promise only runs once.
- */
-function loadModules() {
-  if (!modulesReady) {
-    modulesReady = Promise.all([
-      import('maplibre-gl'),
-      import('maplibre-gl/dist/maplibre-gl.css'),
-      import('pmtiles'),
-      import('protomaps-themes-base'),
-    ]).then(([gl, , { Protocol }, themes]) => {
-      gl.addProtocol('pmtiles', new Protocol().tile)
-      maplibregl = gl
-      return { maplibregl: gl, themes }
-    })
-  }
-  return modulesReady
-}
-
-/**
- * The .pmtiles basemap is self-hosted specifically so route coordinates
- * never reach a third party (see tiles/AGENTS.md in domestique-infra) —
- * style/sprite/glyphs carry no location data, so those come from a public
- * CDN. Absolute URL, not a bare relative path: the pmtiles:// scheme wraps
- * a real fetchable URL, and building it from location.origin keeps this
- * working whether the app is reached at domestique.dev or app.domestique.dev.
- *
- * Split into a synchronous core (styleFromTheme) plus this async wrapper so
- * init() below — which already has the themes module in hand from
- * loadModules()'s single Promise.all — can build the initial style without
- * a redundant await, while the theme-toggle watcher further down (which
- * only ever needs this after the map already exists, no init() race to
- * avoid) keeps the simpler "just await the import" form; the module is
- * already cached by then, so that second import() resolves immediately.
- */
-function styleFromTheme(
-  theme: 'light' | 'dark',
-  themes: typeof import('protomaps-themes-base'),
-): StyleSpecification {
-  const { layers, namedTheme } = themes
-  const basemapUrl = `pmtiles://${window.location.origin}/tiles/basemap.pmtiles`
-  return {
-    version: 8,
-    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-    sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${theme}`,
-    sources: {
-      protomaps: {
-        type: 'vector',
-        url: basemapUrl,
-        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
-      },
-    },
-    layers: layers('protomaps', namedTheme(theme), { lang: 'en' }),
-  }
-}
-
-async function buildStyle(theme: 'light' | 'dark'): Promise<StyleSpecification> {
-  const themes = await import('protomaps-themes-base')
-  return styleFromTheme(theme, themes)
-}
 
 function toFeatureCollection(routes: typeof props.routes) {
   return {
@@ -182,7 +115,8 @@ function addRouteLayers() {
 
 async function init() {
   if (!container.value) return
-  const { maplibregl: gl, themes } = await loadModules()
+  const { maplibregl: gl, themes } = await loadMapLibreModules()
+  maplibregl = gl
 
   const theme = resolved.value === 'dark' ? 'dark' : 'light'
   // A local const, not the outer `map` variable, for the calls below: other
@@ -200,11 +134,15 @@ async function init() {
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
 
   instance.on('load', addRouteLayers)
+
+  resizeObserver = new ResizeObserver(() => instance.resize())
+  resizeObserver.observe(container.value)
 }
 
 onMounted(init)
 
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
   map?.remove()
   map = null
 })
@@ -255,7 +193,7 @@ watch(
 
 watch(resolved, async (theme) => {
   if (!map) return
-  const style = await buildStyle(theme === 'dark' ? 'dark' : 'light')
+  const style = await buildMapStyle(theme === 'dark' ? 'dark' : 'light')
   map.once('style.load', addRouteLayers)
   map.setStyle(style)
 })
