@@ -14,11 +14,16 @@
 // a route's own coordinates to a service outside the deployment on its own
 // initiative, not because a rider asked to connect an account.
 //
-// Every request also steers away from motorway/trunk-class roads (see
-// preferCyclePaths) — this app is cycling-only, so a route that could
-// technically use a busy highway is never one worth generating, and doing
-// so pushes ORS's own cycling profile toward the cycle paths and lanes it
-// already prefers whenever it actually has a choice.
+// Every request also avoids the road features (see avoidFeatures) a bike
+// genuinely cannot or should not be routed onto — steps and unbridged
+// fords. There is no lever beyond that to bias a cycling profile *toward*
+// cycle paths specifically: ORS validates avoid_features per profile
+// category, and "highways" (the obvious-looking choice) is rejected
+// outright for every cycling-* profile — confirmed live against the real
+// API, not assumed, after shipping it once already broke every suggestion
+// request in production. cycling-regular's own bias toward cycleways and
+// lanes is baked into the profile's routing cost function itself, not
+// something this client can push further via the API.
 package routing
 
 import (
@@ -255,11 +260,10 @@ func cacheKey(profile string, body directionsRequest) string {
 			fmt.Fprintf(&b, "|rt:%.0f:%d:%d", rt.Length, rt.Points, rt.Seed)
 		}
 		if len(opts.AvoidFeatures) > 0 {
-			// preferCyclePaths is the only value used anywhere today, so this
+			// avoidFeatures is the only value used anywhere today, so this
 			// never actually distinguishes two requests in practice — but a
-			// future caller that varies it (a rider toggle to allow
-			// highways, say) must not silently collide with a cached answer
-			// computed under a different constraint.
+			// future caller that varies it must not silently collide with a
+			// cached answer computed under a different constraint.
 			b.WriteString("|avoid:")
 			b.WriteString(strings.Join(opts.AvoidFeatures, ","))
 		}
@@ -282,21 +286,22 @@ type directionsRequest struct {
 
 type directionsOpts struct {
 	RoundTrip *roundTripOpts `json:"round_trip,omitempty"`
-	// AvoidFeatures steers the routing engine away from road classes a
-	// cyclist should not be pushed onto given a real choice — set on every
-	// request (Route and RoundTrip both), not something a caller opts into,
-	// since this app is cycling-only (AGENTS.md's own note that it "has
-	// never produced any other kind of route"). "highways" is ORS's own
-	// name for the motorway/trunk-road class; avoiding it steers the
-	// routing engine's cost function toward the cycle paths, cycle lanes
-	// and quieter roads a cycling profile already prefers when given the
-	// option, rather than the fastest technically-cyclable road.
+	// AvoidFeatures steers the routing engine away from features a bike
+	// genuinely cannot or should not be routed onto — set on every request
+	// (Route and RoundTrip both). ORS validates this list per profile
+	// category, not universally: "highways"/"tollways" are driving-only and
+	// rejected outright for every cycling-* profile (HTTP 400, error code
+	// 2003, confirmed against the real API) — found live, after shipping
+	// exactly that and breaking every suggestion request in production.
+	// "steps"/"fords"/"ferries" are the ones cycling profiles actually
+	// accept; avoidFeatures below sticks to steps and fords, the two that
+	// are genuine obstacles rather than a legitimate route choice.
 	AvoidFeatures []string `json:"avoid_features,omitempty"`
 }
 
-// preferCyclePaths is applied to every directions request this client makes
-// — see AvoidFeatures' own doc comment.
-var preferCyclePaths = []string{"highways"}
+// avoidFeatures is applied to every directions request this client makes —
+// see AvoidFeatures' own doc comment for why these two and not others.
+var avoidFeatures = []string{"steps", "fords"}
 
 type roundTripOpts struct {
 	Length float64 `json:"length"`
@@ -322,7 +327,7 @@ func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile strin
 	}
 	req := directionsRequest{
 		Coordinates: coords,
-		Options:     &directionsOpts{AvoidFeatures: preferCyclePaths},
+		Options:     &directionsOpts{AvoidFeatures: avoidFeatures},
 		Elevation:   true,
 	}
 	return c.directions(ctx, profile, req)
@@ -340,7 +345,7 @@ func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float
 				Points: roundTripPoints,
 				Seed:   seed,
 			},
-			AvoidFeatures: preferCyclePaths,
+			AvoidFeatures: avoidFeatures,
 		},
 		Elevation: true,
 	}

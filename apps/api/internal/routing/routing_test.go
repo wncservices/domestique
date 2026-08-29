@@ -62,8 +62,8 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	if gotBody.Options == nil || gotBody.Options.RoundTrip != nil {
 		t.Error("a plain Route call must not set round_trip options")
 	}
-	if got := gotBody.Options.AvoidFeatures; len(got) != 1 || got[0] != "highways" {
-		t.Errorf("avoid_features = %v, want [\"highways\"] on every request", got)
+	if got := gotBody.Options.AvoidFeatures; len(got) != 2 || got[0] != "steps" || got[1] != "fords" {
+		t.Errorf("avoid_features = %v, want [\"steps\",\"fords\"] on every request", got)
 	}
 	if !gotBody.Elevation {
 		t.Error("a Route call must ask ORS for elevation")
@@ -137,8 +137,8 @@ func TestRoundTripSendsLengthAndSeed(t *testing.T) {
 	if gotBody.Options.RoundTrip.Length != 20000 || gotBody.Options.RoundTrip.Seed != 7 {
 		t.Errorf("round_trip options = %+v, want length=20000 seed=7", gotBody.Options.RoundTrip)
 	}
-	if got := gotBody.Options.AvoidFeatures; len(got) != 1 || got[0] != "highways" {
-		t.Errorf("avoid_features = %v, want [\"highways\"] on every request", got)
+	if got := gotBody.Options.AvoidFeatures; len(got) != 2 || got[0] != "steps" || got[1] != "fords" {
+		t.Errorf("avoid_features = %v, want [\"steps\",\"fords\"] on every request", got)
 	}
 }
 
@@ -295,16 +295,16 @@ func TestDifferentSeedsAreNotCachedTogether(t *testing.T) {
 func TestCacheKeyDiffersByAvoidFeatures(t *testing.T) {
 	base := directionsRequest{Coordinates: [][2]float64{{4.35, 50.85}, {4.36, 50.86}}}
 	withAvoid := base
-	withAvoid.Options = &directionsOpts{AvoidFeatures: []string{"highways"}}
+	withAvoid.Options = &directionsOpts{AvoidFeatures: []string{"steps"}}
 	withDifferentAvoid := base
-	withDifferentAvoid.Options = &directionsOpts{AvoidFeatures: []string{"tollways"}}
+	withDifferentAvoid.Options = &directionsOpts{AvoidFeatures: []string{"fords"}}
 
 	keyPlain := cacheKey("cycling-regular", base)
-	keyHighways := cacheKey("cycling-regular", withAvoid)
-	keyTollways := cacheKey("cycling-regular", withDifferentAvoid)
+	keySteps := cacheKey("cycling-regular", withAvoid)
+	keyFords := cacheKey("cycling-regular", withDifferentAvoid)
 
-	if keyPlain == keyHighways || keyHighways == keyTollways || keyPlain == keyTollways {
-		t.Errorf("cache keys = %q, %q, %q — want three distinct keys for three different avoid_features", keyPlain, keyHighways, keyTollways)
+	if keyPlain == keySteps || keySteps == keyFords || keyPlain == keyFords {
+		t.Errorf("cache keys = %q, %q, %q — want three distinct keys for three different avoid_features", keyPlain, keySteps, keyFords)
 	}
 }
 
