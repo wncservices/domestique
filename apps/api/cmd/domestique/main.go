@@ -42,6 +42,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
+	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -826,6 +827,14 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		}
 		srv.PreviewImageCache = previewImageCache
 		srv.PreviewTiles = basemap.NewPreviewTiles(cfg.Basemap.TilesServiceURL)
+	}
+
+	// Powers the route builder — see config.RoutingConfig's own doc comment
+	// for why this is opt-in like elevation above. API-only: unlike
+	// elevation, nothing the CLI does (import, push) ever calls a routing
+	// engine, so this is wired here rather than in openSource.
+	if cfg.Routing.Enabled {
+		srv.Routing = routing.New(cfg.Routing.URL, os.Getenv(routing.EnvAPIKey))
 	}
 
 	// The Job-triggering side is opt-in twice over: cfg.Basemap.TilesNamespace

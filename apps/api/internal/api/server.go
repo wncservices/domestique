@@ -35,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
+	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -127,6 +128,15 @@ type Server struct {
 	// real ones; tests substitute fakes, since the real adapters are stubs and
 	// a successful push would otherwise be unreachable.
 	TargetFactory func(model.Account) (targets.Target, error)
+
+	// Routing turns waypoints or a starting point into a rideable path for
+	// the route builder — see internal/routing. Nil means the deployment
+	// has none configured; the route-builder endpoints report "not
+	// configured" rather than reaching for a client that does not exist,
+	// the same shape Wahoo/Garmin already use for their own optional
+	// credentials. Tests substitute a fake, the same reason TargetFactory
+	// exists above.
+	Routing routing.Client
 
 	// OIDC drives the authorization-code exchange and ID-token verification
 	// for mode oidc. Nil in every other mode — the /sso/* endpoints 404
@@ -246,6 +256,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/fit/{slug...}", s.handleDownloadFIT)
 
 	mux.HandleFunc("POST /api/routes", s.handleUpload)
+	mux.HandleFunc("POST /api/routes/from-points", s.handleCreateRouteFromPoints)
+	mux.HandleFunc("POST /api/routebuilder/preview", s.handleRouteBuilderPreview)
 	mux.HandleFunc("PATCH /api/routes/{slug...}", s.handleUpdate)
 	// {slug}, not {slug...}: a "...to end of path" wildcard must be the
 	// pattern's final segment in Go's ServeMux, and this one isn't — a
@@ -493,6 +505,11 @@ type configDTO struct {
 	Source string `json:"source,omitempty"`
 	// Komoot is one of "disabled", "unconfigured" or "ready".
 	Komoot string `json:"komoot"`
+	// RoutingConfigured tells the UI whether the route builder's suggested
+	// and AI-native tabs (and the manual tab's road-snapping) have a
+	// routing engine to call — same "don't show a button that can only
+	// 412" reasoning as Komoot's own state above.
+	RoutingConfigured bool `json:"routingConfigured"`
 }
 
 type accountDTO struct {
@@ -592,7 +609,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	dto := configDTO{Komoot: s.komootState()}
+	dto := configDTO{Komoot: s.komootState(), RoutingConfigured: s.Routing != nil}
 	if auth.FromContext(r.Context()).Role.Can(auth.PermManageSettings) {
 		dto.Source = s.Source.Describe()
 	}
@@ -1951,6 +1968,149 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("route uploaded", "slug", route.Slug, "by", req.UploadedBy)
 	s.autoSyncIfEnabled(req.UploadedBy)
+	writeJSON(w, http.StatusCreated, s.toRouteDTO(r.Context(), route, linked, crews))
+}
+
+// routeBuilderWaypoint is one point a builder tab sends, lat then lon — the
+// order humans say it and the order every other JSON shape in this file
+// (handleTrack's own coords, most concretely) already uses.
+type routeBuilderWaypoint struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
+// handleRouteBuilderPreview snaps a path through manually-placed waypoints
+// for the manual route builder's live preview — no persistence, no
+// elevation lookup (that happens once, at save time, via the existing
+// analyse() path handleCreateRouteFromPoints below already goes through).
+func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermUploadRoute) {
+		return
+	}
+
+	if s.Routing == nil {
+		s.logger().Warn("route builder preview requested but no routing engine is configured",
+			"by", auth.FromContext(r.Context()).User)
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no routing engine configured",
+		})
+		return
+	}
+
+	var body struct {
+		Waypoints []routeBuilderWaypoint `json:"waypoints"`
+		Profile   string                 `json:"profile"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	waypoints := make([]routing.LatLng, len(body.Waypoints))
+	for i, wp := range body.Waypoints {
+		waypoints[i] = routing.LatLng{Lat: wp.Lat, Lon: wp.Lon}
+	}
+
+	points, err := s.Routing.Route(r.Context(), waypoints, body.Profile)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	coords := make([][2]float64, len(points))
+	var distance float64
+	for i, p := range points {
+		coords[i] = [2]float64{p.Lat, p.Lon}
+		if i > 0 {
+			distance += gpx.DistanceM(points[i-1], p)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"points": coords, "distanceM": distance})
+}
+
+// handleCreateRouteFromPoints is where every route-builder tab's final pick
+// — a manually drawn path, a chosen suggestion, a chosen AI candidate —
+// actually lands. gpx.Render (the reverse of ParsePoints, already used once
+// for the Wahoo FIT-decode import path) turns the point list into the same
+// GPX bytes an upload would have carried, so everything downstream —
+// content-hashing, elevation backfill, stats — happens exactly as it does
+// for handleUpload above. One landing spot rather than a second Create path
+// per builder tab.
+func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermUploadRoute) {
+		return
+	}
+
+	var body struct {
+		Name        string                 `json:"name"`
+		Description string                 `json:"description"`
+		Tags        []string               `json:"tags"`
+		Targets     *[]string              `json:"targets"`
+		Sport       string                 `json:"sport"`
+		Points      []routeBuilderWaypoint `json:"points"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxUploadBytes)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	sport, err := parseSport(body.Sport)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	points := make([]gpx.Point, len(body.Points))
+	for i, p := range body.Points {
+		points[i] = gpx.Point{Lat: p.Lat, Lon: p.Lon}
+	}
+	raw, err := gpx.Render(body.Name, points)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Ownership comes from the authenticated identity, never from the body
+	// — same rule handleUpload's own comment states for an upload.
+	rider := auth.FromContext(r.Context()).User
+
+	req := source.CreateRequest{
+		Name:       body.Name,
+		Descript:   body.Description,
+		Tags:       body.Tags,
+		UploadedBy: rider,
+		GPX:        raw,
+		Sport:      sport,
+		Targets:    body.Targets,
+	}
+
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	if req.Targets != nil {
+		if err := validateCrewTargets(*req.Targets, rider, crews); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	} else if auto := crews.AutoShareCrewsFor(rider); len(auto) > 0 {
+		req.Targets = &auto
+	}
+
+	route, err := s.Source.Create(r.Context(), req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	linked, ok := s.linkedAccounts(r.Context(), w)
+	if !ok {
+		return
+	}
+	linked = ownAccountsOnly(auth.FromContext(r.Context()), linked)
+
+	s.logger().Info("route built", "slug", route.Slug, "by", rider)
+	s.autoSyncIfEnabled(rider)
 	writeJSON(w, http.StatusCreated, s.toRouteDTO(r.Context(), route, linked, crews))
 }
 

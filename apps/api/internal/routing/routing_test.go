@@ -1,0 +1,144 @@
+package routing
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func geojsonResponse(coords [][]float64) string {
+	body := directionsResponse{
+		Features: []struct {
+			Geometry struct {
+				Coordinates [][]float64 `json:"coordinates"`
+			} `json:"geometry"`
+		}{
+			{Geometry: struct {
+				Coordinates [][]float64 `json:"coordinates"`
+			}{Coordinates: coords}},
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
+	var gotPath string
+	var gotBody directionsRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.Header.Get("Authorization"); got != "test-key" {
+			t.Errorf("Authorization header = %q, want test-key", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}, {4.37, 50.87}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "test-key")
+	points, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.87, Lon: 4.37}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.HasSuffix(gotPath, "/v2/directions/"+DefaultProfile+"/geojson") {
+		t.Errorf("path = %q, want a %s directions request", gotPath, DefaultProfile)
+	}
+	if len(gotBody.Coordinates) != 2 || gotBody.Coordinates[0] != [2]float64{4.35, 50.85} {
+		t.Errorf("request coordinates = %v, want [lon,lat] pairs matching the input waypoints", gotBody.Coordinates)
+	}
+	if gotBody.Options != nil {
+		t.Error("a plain Route call must not set round_trip options")
+	}
+
+	if len(points) != 3 || points[0].Lat != 50.85 || points[0].Lon != 4.35 {
+		t.Errorf("points = %v, want the geojson coordinates flipped back to lat/lon", points)
+	}
+}
+
+func TestRoundTripSendsLengthAndSeed(t *testing.T) {
+	var gotBody directionsRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}, {4.35, 50.85}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	_, err := c.RoundTrip(context.Background(), LatLng{Lat: 50.85, Lon: 4.35}, 20000, 7, "cycling-road")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if gotBody.Options == nil || gotBody.Options.RoundTrip == nil {
+		t.Fatal("a RoundTrip call must set round_trip options")
+	}
+	if gotBody.Options.RoundTrip.Length != 20000 || gotBody.Options.RoundTrip.Seed != 7 {
+		t.Errorf("round_trip options = %+v, want length=20000 seed=7", gotBody.Options.RoundTrip)
+	}
+}
+
+func TestRouteRejectsFewerThanTwoWaypoints(t *testing.T) {
+	c := New("http://unused.invalid", "")
+	if _, err := c.Route(context.Background(), []LatLng{{Lat: 1, Lon: 1}}, ""); err == nil {
+		t.Fatal("expected an error for a single waypoint")
+	}
+}
+
+func TestRoundTripRejectsNonPositiveDistance(t *testing.T) {
+	c := New("http://unused.invalid", "")
+	if _, err := c.RoundTrip(context.Background(), LatLng{Lat: 1, Lon: 1}, 0, 1, ""); err == nil {
+		t.Fatal("expected an error for a zero distance")
+	}
+}
+
+func TestNonOKStatusIsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"bad key"}`))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "wrong-key")
+	if _, err := c.Route(context.Background(), []LatLng{{Lat: 1, Lon: 1}, {Lat: 2, Lon: 2}}, ""); err == nil {
+		t.Fatal("expected an error for a non-200 response")
+	}
+}
+
+func TestEmptyFeaturesIsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse(nil)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	if _, err := c.Route(context.Background(), []LatLng{{Lat: 1, Lon: 1}, {Lat: 2, Lon: 2}}, ""); err == nil {
+		t.Fatal("expected an error when the engine returns no usable geometry")
+	}
+}
+
+func TestMalformedJSONIsAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("not json"))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	if _, err := c.Route(context.Background(), []LatLng{{Lat: 1, Lon: 1}, {Lat: 2, Lon: 2}}, ""); err == nil {
+		t.Fatal("expected an error for a malformed response body")
+	}
+}
