@@ -380,11 +380,13 @@ func (s *Server) handleSharedRouteFIT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cues := r.URL.Query().Get("cues") == "1"
+	nativeCues, _ := gpx.ParseCues(raw)
 	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{
-		Name:      route.Name,
-		Sport:     fitcourse.SportFromString(string(route.EffectiveSport())),
-		TurnCues:  cues,
-		ClimbCues: cues,
+		Name:       route.Name,
+		Sport:      fitcourse.SportFromString(string(route.EffectiveSport())),
+		TurnCues:   cues,
+		ClimbCues:  cues,
+		NativeCues: nativeCues,
 	})
 	if err != nil {
 		s.fail(w, err)

@@ -79,6 +79,9 @@ type Library interface {
 	Describe() string
 	List(ctx context.Context) ([]model.Route, []string, error)
 	Track(ctx context.Context, slug string) ([]gpx.Point, error)
+	// Cues returns whatever turn-by-turn instructions the route's own GPX
+	// carries — see gpx.ParseCues. Nil, not an error, when it has none.
+	Cues(ctx context.Context, slug string) ([]gpx.Cue, error)
 	GPX(ctx context.Context, slug string) ([]byte, error)
 	Create(ctx context.Context, req CreateRequest) (model.Route, error)
 	Update(ctx context.Context, slug string, req UpdateRequest) (model.Route, error)

@@ -23,6 +23,11 @@
 // category markers a rider or a non-Garmin device can read directly off the
 // course, the same board-at-the-bottom-of-the-climb cue road racing already
 // uses — not a substitute for ClimbPro and not something ClimbPro reads.
+//
+// A route planner that knows the road network (Komoot, RideWithGPS) can
+// produce better turn cues than DeriveTurns' own geometry guess — see
+// NativeTurns — and when its GPX carries any, Encode prefers them.
+//
 // The encoding itself is delegated to github.com/muktihari/fit. Hand-rolling a
 // FIT encoder is possible but it is a binary format with definition messages,
 // scaled fields and a CRC — exactly the kind of thing worth taking a
@@ -34,6 +39,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/muktihari/fit/decoder"
@@ -76,6 +83,12 @@ type Options struct {
 	// Off by default: the cues are inferred, not authored, and a wrong cue at
 	// a junction is worse than no cue at all. See DeriveTurns.
 	TurnCues bool
+	// NativeCues, when TurnCues is also set, are checked before falling back
+	// to DeriveTurns: cues from the route's own planner (its GPX's <rte> or
+	// <wpt>) win over a heuristic guessing from geometry alone. Nil is the
+	// ordinary case — most GPX has no cue sheet of its own — and behaves
+	// exactly as before this field existed. See NativeTurns.
+	NativeCues []gpx.Cue
 	// ClimbCues adds a category marker at the start of each climb the
 	// elevation profile suggests is significant, and a summit marker at its
 	// top. Off by default for the same reason TurnCues is: the category is
@@ -152,7 +165,11 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 	}
 
 	if opts.TurnCues {
-		for _, turn := range DeriveTurns(points, distances) {
+		turns := NativeTurns(points, opts.NativeCues)
+		if turns == nil {
+			turns = DeriveTurns(points, distances)
+		}
+		for _, turn := range turns {
 			course.CoursePoints = append(course.CoursePoints,
 				mesgdef.NewCoursePoint(nil).
 					SetTimestamp(timeAt(turn.Index)).
@@ -267,8 +284,8 @@ const (
 // that reason.
 //
 // A route planner that knows the road network (Komoot, RideWithGPS) produces
-// better cues, and when a route comes from one of those its own cues should be
-// preferred over these.
+// better cues than this ever will, and Encode falls back to this only when
+// the source GPX carried none of its own — see NativeTurns.
 func DeriveTurns(points []gpx.Point, distances []float64) []Turn {
 	if len(points) < 3 || len(distances) != len(points) {
 		return nil
@@ -354,6 +371,111 @@ func turnName(delta, magnitude float64) string {
 	default:
 		return "Right"
 	}
+}
+
+// nativeCueSnapRadiusM is how far a cue may sit from the track and still be
+// trusted as applying to it. Wider than a GPS-noise tolerance on purpose: a
+// planner's own route and its own track are rarely sampled identically, so a
+// cue a few metres off the nearest point is normal, not a sign it belongs to
+// a different track entirely.
+const nativeCueSnapRadiusM = 30.0
+
+// NativeTurns matches a GPX's own embedded cues — see gpx.ParseCues — to the
+// nearest track point and classifies each into a course_point type, for
+// Encode (and any other caller) to prefer over DeriveTurns's own geometry
+// guess. Returns nil, the same as DeriveTurns finding nothing, when cues is
+// empty or none of it classifies as a turn at all — the ordinary case for
+// the overwhelming majority of GPX, which carries no cue sheet of its own.
+//
+// A cue is trusted only as far as nativeCueSnapRadiusM from the nearest
+// point; further than that and it almost certainly belongs to a route that
+// has since diverged from the track, and placing it anyway would put a wrong
+// cue on the course, which DeriveTurns's own doc comment already argues is
+// worse than none.
+func NativeTurns(points []gpx.Point, cues []gpx.Cue) []Turn {
+	if len(points) == 0 {
+		return nil
+	}
+
+	var turns []Turn
+	for _, cue := range cues {
+		cat, ok := classifyCue(cue)
+		if !ok {
+			continue
+		}
+
+		best, bestDist := -1, math.Inf(1)
+		for i, p := range points {
+			if d := gpx.DistanceM(p, gpx.Point{Lat: cue.Lat, Lon: cue.Lon}); d < bestDist {
+				best, bestDist = i, d
+			}
+		}
+		if best < 0 || bestDist > nativeCueSnapRadiusM {
+			continue
+		}
+
+		// The planner's own wording — often a street name — is kept
+		// verbatim rather than replaced with a generic label: that
+		// wording is the whole reason to prefer this cue over a derived
+		// one in the first place.
+		name := firstNonEmpty(cue.Name, cue.Cmt, cue.Desc, cue.Sym)
+		if name == "" {
+			name = "Turn"
+		}
+		turns = append(turns, Turn{Index: best, Type: cat, Name: name})
+	}
+
+	sort.Slice(turns, func(i, j int) bool { return turns[i].Index < turns[j].Index })
+	return turns
+}
+
+// classifyCue reads whichever of a cue's text fields are populated and
+// matches common cue-sheet wording to a course_point type. This is
+// deliberately generic rather than a fixed per-planner symbol table: which
+// field carries the instruction, and in what words, varies by source, and a
+// table keyed to one planner's exact vocabulary would silently match nothing
+// from any other.
+func classifyCue(cue gpx.Cue) (typedef.CoursePoint, bool) {
+	text := strings.ToLower(cue.Sym + " " + cue.Name + " " + cue.Cmt + " " + cue.Desc)
+
+	hasLeft := strings.Contains(text, "left")
+	hasRight := strings.Contains(text, "right")
+
+	switch {
+	case strings.Contains(text, "u-turn") || strings.Contains(text, "u turn") || strings.Contains(text, "turn around"):
+		return typedef.CoursePointUTurn, true
+	case strings.Contains(text, "fork") && hasLeft:
+		return typedef.CoursePointLeftFork, true
+	case strings.Contains(text, "fork") && hasRight:
+		return typedef.CoursePointRightFork, true
+	case strings.Contains(text, "fork"):
+		return typedef.CoursePointMiddleFork, true
+	case strings.Contains(text, "sharp") && hasLeft:
+		return typedef.CoursePointSharpLeft, true
+	case strings.Contains(text, "sharp") && hasRight:
+		return typedef.CoursePointSharpRight, true
+	case (strings.Contains(text, "slight") || strings.Contains(text, "gentle") || strings.Contains(text, "bear")) && hasLeft:
+		return typedef.CoursePointSlightLeft, true
+	case (strings.Contains(text, "slight") || strings.Contains(text, "gentle") || strings.Contains(text, "bear")) && hasRight:
+		return typedef.CoursePointSlightRight, true
+	case hasLeft:
+		return typedef.CoursePointLeft, true
+	case hasRight:
+		return typedef.CoursePointRight, true
+	case strings.Contains(text, "straight") || strings.Contains(text, "continue"):
+		return typedef.CoursePointStraight, true
+	default:
+		return typedef.CoursePointInvalid, false
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // headingBefore is the bearing into point i, measured back ~lookaheadM.

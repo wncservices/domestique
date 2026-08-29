@@ -109,6 +109,69 @@ func ParsePoints(raw []byte) ([]Point, error) {
 	return points, nil
 }
 
+// Cue is a single turn-by-turn instruction embedded in the GPX itself by
+// whichever planner produced it — either one of a <rte>'s own rtept
+// elements, or a standalone top-level <wpt>, the two shapes route planners
+// use for a cue sheet.
+//
+// Elevation is deliberately not read here, unlike Point: a cue only needs to
+// say where it applies and what it means.
+type Cue struct {
+	Lat, Lon float64
+	// Name, Cmt, Desc and Sym are GPX's own generic per-point text fields.
+	// Which one (if any) a given planner puts the instruction text in
+	// varies, so all four are kept; fitcourse.NativeTurns checks every one
+	// of them rather than assuming a single field.
+	Name, Cmt, Desc, Sym string
+}
+
+// gpxCueDoc parses the same bytes ParsePoints does, independently: cues can
+// sit in a <rte> even when a <trk> supplied the actual geometry (a common
+// shape for a cue-sheet export — a dense breadcrumb track plus a sparse,
+// annotated route), and ParsePoints's own trk-first-rte-as-fallback logic
+// would never look at the route at all in that case.
+type gpxCueDoc struct {
+	XMLName   xml.Name      `xml:"gpx"`
+	Waypoints []gpxCuePoint `xml:"wpt"`
+	Routes    []struct {
+		Points []gpxCuePoint `xml:"rtept"`
+	} `xml:"rte"`
+}
+
+type gpxCuePoint struct {
+	Lat  float64 `xml:"lat,attr"`
+	Lon  float64 `xml:"lon,attr"`
+	Name string  `xml:"name"`
+	Cmt  string  `xml:"cmt"`
+	Desc string  `xml:"desc"`
+	Sym  string  `xml:"sym"`
+}
+
+func (p gpxCuePoint) toCue() Cue { return Cue(p) }
+
+// ParseCues extracts whatever turn-by-turn instructions a GPX carries
+// alongside its track. Most GPX — including everything this app itself
+// renders (see Render) and everything internal/komoot produces — has
+// neither a <rte> nor a <wpt>, and ParseCues returns nil rather than an
+// error for that: an absent cue sheet is the ordinary case, not a problem.
+func ParseCues(raw []byte) ([]Cue, error) {
+	var doc gpxCueDoc
+	if err := xml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("could not parse GPX: %w", err)
+	}
+
+	var cues []Cue
+	for _, wpt := range doc.Waypoints {
+		cues = append(cues, wpt.toCue())
+	}
+	for _, route := range doc.Routes {
+		for _, pt := range route.Points {
+			cues = append(cues, pt.toCue())
+		}
+	}
+	return cues, nil
+}
+
 // NeedsElevation reports whether points carries no usable elevation of its
 // own — either no point has any (HasEle false throughout, the ordinary
 // shape for a GPX that never had an <ele> tag at all), or, the shape that

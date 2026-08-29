@@ -27,6 +27,10 @@ type Garmin struct {
 	// Track returns the route's points. The adapter builds the file itself
 	// because the shape a provider wants is the adapter's business.
 	Track func(ctx context.Context, slug string) ([]gpx.Point, error)
+	// Cues returns the route's own turn-by-turn instructions, if its GPX
+	// carries any. Nil is fine — TurnCues still works, just falling back to
+	// a derived guess, same as if this were never wired up.
+	Cues func(ctx context.Context, slug string) ([]gpx.Cue, error)
 	// Courses is the signed-in client for this account's rider. Resolved per
 	// push rather than held, so a session that was refreshed or removed since
 	// the server started is the one used.
@@ -112,11 +116,28 @@ func (g *Garmin) prepare(ctx context.Context, route model.Route) (Courses, []byt
 		return nil, nil, fmt.Errorf("reading the track for %s: %w", route.Slug, err)
 	}
 
+	// A failure here degrades to no native cues, not a failed push: the
+	// route still has DeriveTurns to fall back on, and losing a course over
+	// a cue-sheet read is a worse outcome than the course just not getting
+	// the planner's own wording.
+	var cues []gpx.Cue
+	if g.Cues != nil {
+		if c, err := g.Cues(ctx, route.Slug); err != nil {
+			if g.Log != nil {
+				g.Log("garmin: could not read the route's own cues, falling back to derived ones",
+					"route", route.Slug, "err", err)
+			}
+		} else {
+			cues = c
+		}
+	}
+
 	data, err := fitcourse.Encode(points, fitcourse.Options{
-		Name:      route.Name,
-		Sport:     fitcourse.SportFromString(string(route.EffectiveSport())),
-		TurnCues:  g.TurnCues,
-		ClimbCues: g.ClimbCues,
+		Name:       route.Name,
+		Sport:      fitcourse.SportFromString(string(route.EffectiveSport())),
+		TurnCues:   g.TurnCues,
+		ClimbCues:  g.ClimbCues,
+		NativeCues: cues,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("building a course file for %s: %w", route.Slug, err)

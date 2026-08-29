@@ -436,6 +436,182 @@ func TestBearingCardinalDirections(t *testing.T) {
 	}
 }
 
+// ---------- native turn cues ----------
+
+// rightAngleTurn builds a track heading north for 400 m then due east for
+// 400 m — the same corner TestRightAngleTurnIsDetected uses, so the derived
+// cue and a native one can be compared directly.
+func rightAngleTurn() []gpx.Point {
+	var points []gpx.Point
+	latStep := 20.0 / 111_320.0
+	lonStep := 20.0 / 71_000.0
+	for i := 0; i < 20; i++ {
+		points = append(points, gpx.Point{Lat: 50.0 + float64(i)*latStep, Lon: 3.0})
+	}
+	corner := points[len(points)-1]
+	for i := 1; i <= 20; i++ {
+		points = append(points, gpx.Point{Lat: corner.Lat, Lon: corner.Lon + float64(i)*lonStep})
+	}
+	return points
+}
+
+func TestClassifyCueRecognisesCommonWording(t *testing.T) {
+	cases := []struct {
+		cue  gpx.Cue
+		want typedef.CoursePoint
+	}{
+		{gpx.Cue{Sym: "Right"}, typedef.CoursePointRight},
+		{gpx.Cue{Name: "Turn left onto Main St"}, typedef.CoursePointLeft},
+		{gpx.Cue{Desc: "Sharp right bend"}, typedef.CoursePointSharpRight},
+		{gpx.Cue{Cmt: "Sharp left"}, typedef.CoursePointSharpLeft},
+		{gpx.Cue{Name: "Bear right"}, typedef.CoursePointSlightRight},
+		{gpx.Cue{Name: "Slight left"}, typedef.CoursePointSlightLeft},
+		{gpx.Cue{Name: "U-turn"}, typedef.CoursePointUTurn},
+		{gpx.Cue{Name: "Turn around"}, typedef.CoursePointUTurn},
+		{gpx.Cue{Name: "Keep left at the fork"}, typedef.CoursePointLeftFork},
+		{gpx.Cue{Name: "Bear right at the fork"}, typedef.CoursePointRightFork},
+		{gpx.Cue{Name: "Fork"}, typedef.CoursePointMiddleFork},
+		{gpx.Cue{Name: "Continue straight"}, typedef.CoursePointStraight},
+	}
+	for _, tc := range cases {
+		got, ok := classifyCue(tc.cue)
+		if !ok {
+			t.Errorf("%+v: not recognised as a turn", tc.cue)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%+v: type = %v, want %v", tc.cue, got, tc.want)
+		}
+	}
+}
+
+func TestClassifyCueIgnoresNonTurnWaypoints(t *testing.T) {
+	for _, cue := range []gpx.Cue{
+		{Name: "Water stop"},
+		{Name: "Photo point"},
+		{Desc: "Café"},
+		{},
+	} {
+		if _, ok := classifyCue(cue); ok {
+			t.Errorf("%+v classified as a turn", cue)
+		}
+	}
+}
+
+func TestNativeTurnsSnapsToNearestPoint(t *testing.T) {
+	points := rightAngleTurn()
+	corner := points[19] // the point at the corner itself
+
+	turns := NativeTurns(points, []gpx.Cue{
+		{Lat: corner.Lat, Lon: corner.Lon, Name: "Turn right onto Market St", Sym: "Right"},
+	})
+	if len(turns) != 1 {
+		t.Fatalf("got %d native turns, want 1: %+v", len(turns), turns)
+	}
+	if turns[0].Index != 19 {
+		t.Errorf("index = %d, want 19 (the corner)", turns[0].Index)
+	}
+	if turns[0].Type != typedef.CoursePointRight {
+		t.Errorf("type = %v, want Right", turns[0].Type)
+	}
+	// The planner's own wording survives verbatim — that is the entire
+	// point of preferring it over a derived cue.
+	if turns[0].Name != "Turn right onto Market St" {
+		t.Errorf("name = %q, want the cue's own text", turns[0].Name)
+	}
+}
+
+func TestNativeTurnsDropsCuesTooFarFromTheTrack(t *testing.T) {
+	points := rightAngleTurn()
+	far := gpx.Point{Lat: points[19].Lat + 1.0, Lon: points[19].Lon + 1.0} // ~100+ km away
+
+	turns := NativeTurns(points, []gpx.Cue{{Lat: far.Lat, Lon: far.Lon, Sym: "Right"}})
+	if turns != nil {
+		t.Errorf("a cue far from the track should be dropped, got %+v", turns)
+	}
+}
+
+func TestNativeTurnsDropsUnrecognisedCues(t *testing.T) {
+	points := rightAngleTurn()
+	corner := points[19]
+
+	turns := NativeTurns(points, []gpx.Cue{{Lat: corner.Lat, Lon: corner.Lon, Name: "Water stop"}})
+	if turns != nil {
+		t.Errorf("a non-turn waypoint should be dropped, got %+v", turns)
+	}
+}
+
+func TestNativeTurnsSortsByIndex(t *testing.T) {
+	points := rightAngleTurn()
+	first, second := points[5], points[25]
+
+	turns := NativeTurns(points, []gpx.Cue{
+		{Lat: second.Lat, Lon: second.Lon, Sym: "Right"}, // given out of order
+		{Lat: first.Lat, Lon: first.Lon, Sym: "Left"},
+	})
+	if len(turns) != 2 {
+		t.Fatalf("got %d turns, want 2", len(turns))
+	}
+	if turns[0].Index >= turns[1].Index {
+		t.Errorf("turns are not sorted by index: %+v", turns)
+	}
+}
+
+func TestNativeTurnsEmptyWhenNoCuesClassify(t *testing.T) {
+	points := rightAngleTurn()
+	if got := NativeTurns(points, nil); got != nil {
+		t.Errorf("expected nil with no cues at all, got %+v", got)
+	}
+	if got := NativeTurns(points, []gpx.Cue{{Lat: points[19].Lat, Lon: points[19].Lon, Name: "Photo point"}}); got != nil {
+		t.Errorf("expected nil when nothing classifies, got %+v", got)
+	}
+}
+
+func TestEncodePrefersNativeCuesOverDerived(t *testing.T) {
+	points := rightAngleTurn()
+	corner := points[19]
+
+	raw, err := Encode(points, Options{
+		Name:     "Corner",
+		TurnCues: true,
+		NativeCues: []gpx.Cue{
+			{Lat: corner.Lat, Lon: corner.Lon, Name: "Turn right onto Market St", Sym: "Right"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	course := decode(t, raw)
+	if len(course.CoursePoints) != 1 {
+		t.Fatalf("got %d course points, want 1 (the native cue, not a derived one too)", len(course.CoursePoints))
+	}
+	if got := course.CoursePoints[0].Name; got != "Turn right onto Market St" {
+		t.Errorf("course point name = %q, want the native cue's own wording", got)
+	}
+}
+
+func TestEncodeFallsBackToDerivedWhenNativeCuesDoNotClassify(t *testing.T) {
+	points := rightAngleTurn()
+
+	raw, err := Encode(points, Options{
+		Name:       "Corner",
+		TurnCues:   true,
+		NativeCues: []gpx.Cue{{Lat: points[0].Lat, Lon: points[0].Lon, Name: "Water stop"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	course := decode(t, raw)
+	if len(course.CoursePoints) != 1 {
+		t.Fatalf("got %d course points, want 1 (DeriveTurns's own corner cue)", len(course.CoursePoints))
+	}
+	if got := course.CoursePoints[0].Name; got != "Right" {
+		t.Errorf("course point name = %q, want DeriveTurns's generic label", got)
+	}
+}
+
 // ---------- climb cues ----------
 
 type elevSegment struct{ LengthM, GradePercent float64 }
