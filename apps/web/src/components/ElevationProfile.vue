@@ -124,6 +124,15 @@ const scrub = computed(() => {
   const p = props.points[i]
   return { x: c.xs[i], y: c.ys[i], distanceM: p.distanceM, eleM: p.eleM }
 })
+
+// The tooltip pill's own position — clamped so it stays fully inside the
+// chart even when the scrub point is right at either edge, rather than
+// clipping off the side.
+const TOOLTIP_HALF_WIDTH = 30
+const tooltipX = computed(() =>
+  scrub.value ? Math.min(Math.max(scrub.value.x, TOOLTIP_HALF_WIDTH), WIDTH - TOOLTIP_HALF_WIDTH) : 0,
+)
+const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) : 0))
 </script>
 
 <template>
@@ -141,10 +150,17 @@ const scrub = computed(() => {
     >
       <line x1="0" :y1="HEIGHT - 0.5" :x2="WIDTH" :y2="HEIGHT - 0.5" stroke="currentColor" class="text-dimmed" stroke-width="1" />
 
-      <path :d="chart.area" fill="var(--ui-primary)" fill-opacity="0.15" stroke="none" />
+      <!-- Deliberately not .track-line's own --ui-primary — SurfaceBreakdown's
+           "paved" segment already uses that same accent for its bar, and a
+           height chart drawn in the identical colour right next to it reads
+           as though the two are the same measurement. --app-accent-sky is
+           this app's own existing colour for height (App.vue's Ascent stat
+           tile uses it too), and is visually distinct from every colour
+           SurfaceBreakdown's bar can show. -->
+      <path :d="chart.area" fill="var(--app-accent-sky)" fill-opacity="0.15" stroke="none" />
       <path
         :d="chart.line"
-        class="track-line"
+        stroke="var(--app-accent-sky)"
         fill="none"
         stroke-width="1.5"
         stroke-linecap="round"
@@ -155,7 +171,7 @@ const scrub = computed(() => {
       <text x="2" :y="HEIGHT - 3" font-size="8" fill="currentColor" class="text-dimmed">{{ chart.minEle }} m</text>
 
       <g v-for="(peak, i) in chart.peaks" :key="i">
-        <circle :cx="peak.x" :cy="peak.y" r="2" fill="currentColor" class="text-highlighted" />
+        <circle :cx="peak.x" :cy="peak.y" r="2" fill="var(--app-accent-sky)" />
         <text
           :x="Math.min(Math.max(peak.x, 24), WIDTH - 24)"
           y="10"
@@ -179,13 +195,21 @@ const scrub = computed(() => {
           stroke-dasharray="2,2"
           class="text-dimmed"
         />
-        <circle :cx="scrub.x" :cy="scrub.y" r="3" fill="currentColor" class="text-highlighted" />
+        <circle :cx="scrub.x" :cy="scrub.y" r="3" fill="var(--app-accent-sky)" stroke="var(--ui-bg)" stroke-width="1.5" />
+
+        <!-- The tooltip itself: a small pill that follows the scrub point,
+             clamped to stay inside the chart — the "need a tooltip" ask,
+             replacing what used to be a static readout below the chart
+             that was easy to miss and disconnected from the point it
+             described. -->
+        <g :transform="`translate(${tooltipX}, ${tooltipY})`">
+          <rect x="-30" y="-11" width="60" height="14" rx="3" fill="var(--ui-bg)" stroke="var(--ui-border)" stroke-width="0.75" />
+          <text text-anchor="middle" y="-1" font-size="7.5" fill="currentColor" class="text-highlighted">
+            {{ (scrub.distanceM / 1000).toFixed(2) }} km · {{ Math.round(scrub.eleM) }} m
+          </text>
+        </g>
       </g>
     </svg>
-
-    <p class="h-4 text-center text-xs text-highlighted">
-      <template v-if="scrub">{{ (scrub.distanceM / 1000).toFixed(2) }} km · {{ Math.round(scrub.eleM) }} m</template>
-    </p>
 
     <div class="flex justify-between text-xs text-muted">
       <span>0 km</span>
