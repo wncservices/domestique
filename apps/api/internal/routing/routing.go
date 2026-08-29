@@ -42,6 +42,21 @@ const DefaultURL = "https://api.openrouteservice.org"
 // this has never produced any other kind of route.
 const DefaultProfile = "cycling-regular"
 
+// ValidProfiles is the fixed set of real ORS cycling profiles a caller may
+// request — checked in directions below before profile ever reaches the
+// outbound request URL. Found live: profile arrives as a plain string on
+// an HTTP request body (see api.handleRouteBuilderPreview/Suggest) with
+// nothing upstream constraining it, and directions splices it straight
+// into a URL path with no escaping — an unvalidated value there is
+// attacker-controlled request content reaching this app's own
+// routing-engine credentials, not just a cosmetic input-shape concern.
+var ValidProfiles = map[string]bool{
+	"cycling-regular":  true,
+	"cycling-road":     true,
+	"cycling-mountain": true,
+	"cycling-electric": true,
+}
+
 // EnvAPIKey is where the routing engine's API key comes from — never
 // domestique.yaml, the same rule as GARMIN_OAUTH_CONSUMER_KEY and
 // KOMOOT_EMAIL/PASSWORD. Even the public instance's free tier requires one.
@@ -151,6 +166,9 @@ func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float
 func (c *ORSClient) directions(ctx context.Context, profile string, body directionsRequest) ([]gpx.Point, error) {
 	if profile == "" {
 		profile = DefaultProfile
+	}
+	if !ValidProfiles[profile] {
+		return nil, fmt.Errorf("routing: unsupported profile %q", profile)
 	}
 
 	raw, err := json.Marshal(body)

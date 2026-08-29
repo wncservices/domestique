@@ -763,6 +763,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// A separate instance from ConnectLimiter — see AuthActionLimiter's
 		// own doc comment for why the two must not share one budget.
 		AuthActionLimiter: ratelimit.New(5, 15*time.Minute),
+		// A much more generous budget than the two above — see
+		// RouteBuilderLimiter's own doc comment for why a sign-in-shaped
+		// limit would make interactive drawing unusable. 60 per 5 minutes
+		// comfortably covers a real editing session (one debounced call
+		// per waypoint placed, dragged or removed) while still bounding a
+		// script that would otherwise hammer the routing engine unchecked.
+		RouteBuilderLimiter: ratelimit.New(60, 5*time.Minute),
 	}
 
 	srv.LandingHost = cfg.Web.LandingHost

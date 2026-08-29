@@ -13,11 +13,13 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/state"
@@ -126,6 +128,90 @@ func TestRouteBuilderPreviewSnapsWaypoints(t *testing.T) {
 	}
 	if out.DistanceM <= 0 {
 		t.Errorf("distanceM = %v, want a positive distance", out.DistanceM)
+	}
+}
+
+func TestRouteBuilderPreviewRejectsAnUnsupportedProfile(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/preview", map[string]any{
+		"waypoints": []map[string]float64{{"lat": 50.85, "lon": 4.35}, {"lat": 50.87, "lon": 4.37}},
+		"profile":   "../admin",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unsupported profile", resp.StatusCode)
+	}
+}
+
+func TestRouteBuilderPreviewRejectsTooManyWaypoints(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+	})
+
+	// One more than the server's own maxRouteBuilderWaypoints (50).
+	waypoints := make([]map[string]float64, 51)
+	for i := range waypoints {
+		waypoints[i] = map[string]float64{"lat": 50.85, "lon": 4.35}
+	}
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/preview", map[string]any{
+		"waypoints": waypoints,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for too many waypoints", resp.StatusCode)
+	}
+}
+
+// A separate, inline harness rather than newRouteBuilderHarness above: this
+// is the one test that needs a real (tiny) RouteBuilderLimiter, and every
+// other test in this file relies on that field staying nil (unlimited) —
+// see ratelimit.Limiter.Allow's own doc comment for why nil fails open.
+func TestRouteBuilderPreviewIsRateLimited(t *testing.T) {
+	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st, err := state.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct, err := accounts.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &api.Server{
+		Source:   db,
+		Store:    st,
+		Accounts: acct,
+		Config:   &config.Config{},
+		Routing: stubRoutingClient{
+			route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		},
+		RouteBuilderLimiter: ratelimit.New(1, time.Hour),
+	}
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(server.Close)
+	client := server.Client()
+
+	body := map[string]any{
+		"waypoints": []map[string]float64{{"lat": 50.85, "lon": 4.35}, {"lat": 50.87, "lon": 4.37}},
+	}
+	first := doJSON(t, client, http.MethodPost, server.URL+"/api/routebuilder/preview", body)
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", first.StatusCode)
+	}
+
+	second := doJSON(t, client, http.MethodPost, server.URL+"/api/routebuilder/preview", body)
+	defer second.Body.Close()
+	if second.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second request status = %d, want %d", second.StatusCode, http.StatusTooManyRequests)
 	}
 }
 

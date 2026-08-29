@@ -215,6 +215,18 @@ type Server struct {
 	// unrelated action that happens to share the same rider key.
 	AuthActionLimiter *ratelimit.Limiter
 
+	// RouteBuilderLimiter throttles the route-builder preview/suggest
+	// endpoints by rider — both proxy an authenticated request straight
+	// through to a real, quota/cost-bearing routing engine, the same
+	// "unlimited, authenticated-only proxy against a third party" shape
+	// ConnectLimiter exists to close for Garmin/Komoot. A separate,
+	// deliberately more generous budget than ConnectLimiter/
+	// AuthActionLimiter: drawing one route interactively fires a debounced
+	// preview call per waypoint placed or dragged, which those tighter
+	// sign-in-shaped limits would make unusable well before anything
+	// resembling abuse.
+	RouteBuilderLimiter *ratelimit.Limiter
+
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
 	pushMu sync.Mutex
@@ -1979,6 +1991,23 @@ type routeBuilderWaypoint struct {
 	Lon float64 `json:"lon"`
 }
 
+// maxRouteBuilderWaypoints bounds a single preview request — manually
+// placing more than a few dozen waypoints has no realistic use, and each
+// one adds to what a single call asks the routing engine to resolve.
+// Found live: nothing upstream of routing.Client.Route otherwise limited
+// this, so an oversized body was free to turn into an oversized outbound
+// request on every call.
+const maxRouteBuilderWaypoints = 50
+
+// validRoutingProfile reports whether profile is safe to forward to the
+// routing engine — empty (meaning "use the default") or one of
+// routing.ValidProfiles. Checked here, at the trust boundary, rather than
+// only inside internal/routing: a caller should get a plain 400 for a bad
+// profile, not a 502 wrapping routing's own rejection.
+func validRoutingProfile(profile string) bool {
+	return profile == "" || routing.ValidProfiles[profile]
+}
+
 // handleRouteBuilderPreview snaps a path through manually-placed waypoints
 // for the manual route builder's live preview — no persistence, no
 // elevation lookup (that happens once, at save time, via the existing
@@ -1997,12 +2026,27 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	rider := auth.FromContext(r.Context()).User
+	if !s.rateLimitRouteBuilder(w, rider) {
+		return
+	}
+
 	var body struct {
 		Waypoints []routeBuilderWaypoint `json:"waypoints"`
 		Profile   string                 `json:"profile"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(body.Waypoints) > maxRouteBuilderWaypoints {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("too many waypoints (max %d)", maxRouteBuilderWaypoints),
+		})
+		return
+	}
+	if !validRoutingProfile(body.Profile) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported profile"})
 		return
 	}
 
@@ -2013,6 +2057,8 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 
 	points, err := s.Routing.Route(r.Context(), waypoints, body.Profile)
 	if err != nil {
+		s.logger().Error("route builder preview failed", "err", err, "by", rider)
+		recordRouteBuilderError(r.Context(), "preview")
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
@@ -2460,6 +2506,13 @@ func (s *Server) rateLimitConnect(w http.ResponseWriter, rider string) bool {
 // comment for why this is a separate budget from rateLimitConnect's.
 func (s *Server) rateLimitAuthAction(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.AuthActionLimiter, rider, "too many requests — wait a few minutes and try again")
+}
+
+// rateLimitRouteBuilder enforces RouteBuilderLimiter for a rider's own
+// preview/suggest calls — see that field's own doc comment for why this is
+// a separate, more generous budget than rateLimitConnect/rateLimitAuthAction.
+func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool {
+	return rateLimit(w, s.RouteBuilderLimiter, rider, "too many route-builder requests — wait a few minutes and try again")
 }
 
 // rateLimit is rateLimitConnect and rateLimitAuthAction's shared check: nil

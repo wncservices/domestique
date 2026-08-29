@@ -142,3 +142,37 @@ func TestMalformedJSONIsAnError(t *testing.T) {
 		t.Fatal("expected an error for a malformed response body")
 	}
 }
+
+// An unrecognised profile must be rejected before it ever reaches the
+// outbound request URL — directions splices it in unescaped, so the test
+// server below fails the test outright if a request lands at all.
+func TestUnsupportedProfileIsRejectedWithoutCallingOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("routing engine was called despite an unsupported profile")
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	waypoints := []LatLng{{Lat: 1, Lon: 1}, {Lat: 2, Lon: 2}}
+	for _, bad := range []string{"../admin", "cycling-regular/../secret", "walking", "cycling-regular?x=1"} {
+		if _, err := c.Route(context.Background(), waypoints, bad); err == nil {
+			t.Errorf("profile %q: expected an error, got none", bad)
+		}
+	}
+}
+
+func TestValidProfilesAreAccepted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{1, 1}, {2, 2}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	waypoints := []LatLng{{Lat: 1, Lon: 1}, {Lat: 2, Lon: 2}}
+	for profile := range ValidProfiles {
+		if _, err := c.Route(context.Background(), waypoints, profile); err != nil {
+			t.Errorf("profile %q: unexpected error: %v", profile, err)
+		}
+	}
+}
