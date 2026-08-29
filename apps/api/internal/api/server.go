@@ -2090,7 +2090,7 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 		waypoints[i] = routing.LatLng{Lat: wp.Lat, Lon: wp.Lon}
 	}
 
-	points, err := s.Routing.Route(r.Context(), waypoints, body.Profile)
+	path, err := s.Routing.Route(r.Context(), waypoints, body.Profile)
 	if err != nil {
 		s.logger().Error("route builder preview failed", "err", err, "by", rider)
 		recordRouteBuilderError(r.Context(), "preview")
@@ -2098,26 +2098,78 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	coords, distance, ascent := coordsDistanceAscent(points)
-	writeJSON(w, http.StatusOK, map[string]any{"points": coords, "distanceM": distance, "ascentM": ascent})
+	summary := summarizePath(path)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"points":           summary.Coords,
+		"distanceM":        summary.DistanceM,
+		"ascentM":          summary.AscentM,
+		"surface":          summary.Surface,
+		"elevationProfile": summary.Elevation,
+	})
 }
 
-// coordsDistanceAscent renders a routing engine's own []gpx.Point result as
-// the [lat,lon] pairs, total distance and height gain every route-builder
-// response (a preview, a suggestion candidate) shares — the same [lat,lon]
-// convention handleTrack's own coords already use. Ascent comes from
-// gpx.ComputeStats, fed by the elevation ORSClient.Route/RoundTrip already
-// asked the routing engine for on the same request — no second lookup.
-func coordsDistanceAscent(points []gpx.Point) ([][2]float64, float64, float64) {
+// surfaceDTO is one entry of a route's own "type of ground" breakdown —
+// routing.SurfaceSummary, reshaped for JSON.
+type surfaceDTO struct {
+	Type      string  `json:"type"`
+	DistanceM float64 `json:"distanceM"`
+	Fraction  float64 `json:"fraction"`
+}
+
+// elevationPointDTO is one sample of a route's elevation-over-distance
+// profile — distanceM is cumulative from the start, matching how a chart
+// would plot it, not the point's own index.
+type elevationPointDTO struct {
+	DistanceM float64 `json:"distanceM"`
+	EleM      float64 `json:"eleM"`
+}
+
+// pathSummary is what every route-builder response (a preview, a
+// suggestion candidate) derives from a routing engine's own Path — the map
+// line, total distance/ascent, the "type of ground" breakdown, and an
+// elevation-over-distance profile for a chart. One shared derivation so a
+// preview and a suggestion candidate never disagree on how any of these are
+// computed.
+type pathSummary struct {
+	Coords    [][2]float64
+	DistanceM float64
+	AscentM   float64
+	Surface   []surfaceDTO
+	Elevation []elevationPointDTO
+}
+
+func summarizePath(path routing.Path) pathSummary {
+	points := path.Points
 	coords := make([][2]float64, len(points))
+	// Not every point necessarily carries elevation (a self-hosted ORS
+	// without elevation support degrades to none, per Path's own doc
+	// comment) — elevation is appended only for the ones that do, so a
+	// partial profile still charts correctly rather than plotting a false
+	// zero for the gaps.
+	elevation := make([]elevationPointDTO, 0, len(points))
 	var distance float64
 	for i, p := range points {
 		coords[i] = [2]float64{p.Lat, p.Lon}
 		if i > 0 {
 			distance += gpx.DistanceM(points[i-1], p)
 		}
+		if p.HasEle {
+			elevation = append(elevation, elevationPointDTO{DistanceM: distance, EleM: p.Ele})
+		}
 	}
-	return coords, distance, gpx.ComputeStats(points).AscentM
+
+	surface := make([]surfaceDTO, len(path.Surface))
+	for i, s := range path.Surface {
+		surface[i] = surfaceDTO{Type: s.Type, DistanceM: s.DistanceM, Fraction: s.Fraction}
+	}
+
+	return pathSummary{
+		Coords:    coords,
+		DistanceM: distance,
+		AscentM:   gpx.ComputeStats(points).AscentM,
+		Surface:   surface,
+		Elevation: elevation,
+	}
 }
 
 // suggestSeeds returns three distinct seeds for one suggest request — a
@@ -2143,9 +2195,11 @@ func suggestSeeds() [3]int {
 const maxSuggestDistanceKm = 300
 
 type routeBuilderCandidate struct {
-	Points    [][2]float64 `json:"points"`
-	DistanceM float64      `json:"distanceM"`
-	AscentM   float64      `json:"ascentM"`
+	Points    [][2]float64        `json:"points"`
+	DistanceM float64             `json:"distanceM"`
+	AscentM   float64             `json:"ascentM"`
+	Surface   []surfaceDTO        `json:"surface"`
+	Elevation []elevationPointDTO `json:"elevationProfile"`
 }
 
 // handleRouteBuilderSuggest generates a handful of round-trip loop
@@ -2197,7 +2251,7 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	var candidates []routeBuilderCandidate
 	var lastErr error
 	for _, seed := range suggestSeeds() {
-		points, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
+		path, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
 		if err != nil {
 			// One bad candidate doesn't sink the other two — the same "one
 			// bad route never aborts a run" principle AGENTS.md states for
@@ -2212,8 +2266,14 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 			lastErr = err
 			continue
 		}
-		coords, distance, ascent := coordsDistanceAscent(points)
-		candidates = append(candidates, routeBuilderCandidate{Points: coords, DistanceM: distance, AscentM: ascent})
+		summary := summarizePath(path)
+		candidates = append(candidates, routeBuilderCandidate{
+			Points:    summary.Coords,
+			DistanceM: summary.DistanceM,
+			AscentM:   summary.AscentM,
+			Surface:   summary.Surface,
+			Elevation: summary.Elevation,
+		})
 	}
 	if len(candidates) == 0 {
 		// Unlike a partial failure above, the request itself fails here —

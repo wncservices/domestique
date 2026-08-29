@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +89,33 @@ const roundTripPoints = 5
 // boundary in this file, never in a caller-facing type.
 type LatLng struct{ Lat, Lon float64 }
 
+// Path is what a routing engine hands back for one request: the geometry
+// itself, plus what it's made of — the route builder's own "type of
+// ground" figure, alongside distance/ascent (gpx.ComputeStats, derived from
+// Points) and the map line (also Points). Requested on the same call that
+// already asks for elevation, not a second lookup.
+type Path struct {
+	Points []gpx.Point
+	// Surface breaks the route down by ORS's own surface classification
+	// (asphalt, gravel, dirt, ...), most-distance-first. Empty when ORS has
+	// no surface data for a stretch of road (common outside well-mapped
+	// areas) rather than an error — a route builder result is still useful
+	// without it.
+	Surface []SurfaceSummary
+}
+
+// SurfaceSummary is one surface type's share of a route's own distance —
+// ORS's own extras.surface.summary entry, translated from its numeric code
+// (see surfaceLabels) to a human label.
+type SurfaceSummary struct {
+	Type      string
+	DistanceM float64
+	// Fraction is 0-1, not 0-100 — ORS's own "amount" field is a percentage,
+	// converted once here so nothing downstream has to remember which unit
+	// this is in.
+	Fraction float64
+}
+
 // Client turns waypoints or a starting point into a rideable path. The one
 // real implementation is ORSClient; the interface exists so acceptance
 // tests can substitute a fake, the same reason api.Server.TargetFactory
@@ -95,13 +123,13 @@ type LatLng struct{ Lat, Lon float64 }
 type Client interface {
 	// Route snaps a path through every waypoint in order, for the manual
 	// route builder.
-	Route(ctx context.Context, waypoints []LatLng, profile string) ([]gpx.Point, error)
+	Route(ctx context.Context, waypoints []LatLng, profile string) (Path, error)
 	// RoundTrip returns one candidate loop of about distanceM, starting and
 	// ending at start. seed varies the loop's shape so a caller generating
 	// several candidates (the suggested and AI-native builders both call
 	// this three times) gets genuinely different ones, not the same loop
 	// three times over.
-	RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) ([]gpx.Point, error)
+	RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) (Path, error)
 }
 
 // ORSClient calls OpenRouteService's directions API.
@@ -166,7 +194,7 @@ type responseCache struct {
 }
 
 type cacheEntry struct {
-	points  []gpx.Point
+	path    Path
 	expires time.Time
 }
 
@@ -177,17 +205,27 @@ func newResponseCache() *responseCache {
 	}
 }
 
-func (c *responseCache) get(key string) ([]gpx.Point, bool) {
+// clone deep-copies a Path's slices — every cache read/write goes through
+// this so two callers sharing a cached entry never alias, and mutating one
+// caller's copy can never corrupt what the cache (or another caller) holds.
+func (p Path) clone() Path {
+	return Path{
+		Points:  append([]gpx.Point(nil), p.Points...),
+		Surface: append([]SurfaceSummary(nil), p.Surface...),
+	}
+}
+
+func (c *responseCache) get(key string) (Path, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[key]
 	if !ok || time.Now().After(entry.expires) {
-		return nil, false
+		return Path{}, false
 	}
-	return append([]gpx.Point(nil), entry.points...), true
+	return entry.path.clone(), true
 }
 
-func (c *responseCache) put(key string, points []gpx.Point) {
+func (c *responseCache) put(key string, path Path) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, exists := c.entries[key]; !exists && len(c.entries) >= cacheMaxEntries {
@@ -200,7 +238,7 @@ func (c *responseCache) put(key string, points []gpx.Point) {
 			break
 		}
 	}
-	c.entries[key] = cacheEntry{points: append([]gpx.Point(nil), points...), expires: time.Now().Add(cacheTTL)}
+	c.entries[key] = cacheEntry{path: path.clone(), expires: time.Now().Add(cacheTTL)}
 }
 
 // resolve returns the cached value for key if there is one, otherwise calls
@@ -210,17 +248,17 @@ func (c *responseCache) put(key string, points []gpx.Point) {
 // second, redundant outbound request of its own. If the winning call
 // failed (nothing to cache), a waiter falls through and becomes the next
 // attempt itself instead of propagating a stranger's error.
-func (c *responseCache) resolve(key string, fetch func() ([]gpx.Point, error)) ([]gpx.Point, error) {
-	if points, ok := c.get(key); ok {
-		return points, nil
+func (c *responseCache) resolve(key string, fetch func() (Path, error)) (Path, error) {
+	if path, ok := c.get(key); ok {
+		return path, nil
 	}
 
 	c.mu.Lock()
 	if wg, waiting := c.inFlight[key]; waiting {
 		c.mu.Unlock()
 		wg.Wait()
-		if points, ok := c.get(key); ok {
-			return points, nil
+		if path, ok := c.get(key); ok {
+			return path, nil
 		}
 		return c.resolve(key, fetch)
 	}
@@ -235,12 +273,12 @@ func (c *responseCache) resolve(key string, fetch func() ([]gpx.Point, error)) (
 		wg.Done()
 	}()
 
-	points, err := fetch()
+	path, err := fetch()
 	if err != nil {
-		return nil, err
+		return Path{}, err
 	}
-	c.put(key, points)
-	return points, nil
+	c.put(key, path)
+	return path, nil
 }
 
 // cacheKey identifies a directions request by everything that can change
@@ -282,6 +320,10 @@ type directionsRequest struct {
 	// spending a second outbound call against a different service for data
 	// this same response can carry.
 	Elevation bool `json:"elevation,omitempty"`
+	// ExtraInfo asks ORS for additional per-segment classification —
+	// "surface" is the route builder's own "type of ground" figure (Path.
+	// Surface below), same free-on-the-same-call reasoning as Elevation.
+	ExtraInfo []string `json:"extra_info,omitempty"`
 }
 
 type directionsOpts struct {
@@ -303,10 +345,48 @@ type directionsOpts struct {
 // see AvoidFeatures' own doc comment for why these two and not others.
 var avoidFeatures = []string{"steps", "fords"}
 
+// extraInfo is requested on every directions request — see Path.Surface's
+// own doc comment. "waytype" (cycleway/track/street) was left out
+// deliberately: the route builder's own ask was ground type, not road
+// class, and every extra_info value ORS is asked for is one more thing a
+// self-hosted instance might not have (see the warning handling below).
+var extraInfo = []string{"surface"}
+
 type roundTripOpts struct {
 	Length float64 `json:"length"`
 	Points int     `json:"points"`
 	Seed   int     `json:"seed"`
+}
+
+// surfaceLabels translates ORS's own numeric surface codes to a human
+// label — confirmed against the real API's response, not the fixed
+// "highways" mistake this package shipped once already: this table is the
+// documented ORS Surface ID list
+// (https://giscience.github.io/openrouteservice/api-reference/endpoints/directions/extra-info/surface),
+// not a guess. code 0 (Unknown) is included on purpose — ORS returns it for
+// real, common stretches (unmapped surface tags), and silently dropping it
+// would understate a route's own uncertain-surface distance rather than
+// naming it.
+var surfaceLabels = map[int]string{
+	0:  "Unknown",
+	1:  "Paved",
+	2:  "Unpaved",
+	3:  "Asphalt",
+	4:  "Concrete",
+	5:  "Cobblestone",
+	6:  "Metal",
+	7:  "Wood",
+	8:  "Compacted Gravel",
+	9:  "Fine Gravel",
+	10: "Gravel",
+	11: "Dirt",
+	12: "Ground",
+	13: "Ice",
+	14: "Paving Stones",
+	15: "Sand",
+	16: "Woodchips",
+	17: "Grass",
+	18: "Grass Paver",
 }
 
 type directionsResponse struct {
@@ -314,12 +394,23 @@ type directionsResponse struct {
 		Geometry struct {
 			Coordinates [][]float64 `json:"coordinates"`
 		} `json:"geometry"`
+		Properties struct {
+			Extras struct {
+				Surface struct {
+					Summary []struct {
+						Value    float64 `json:"value"`
+						Distance float64 `json:"distance"`
+						Amount   float64 `json:"amount"`
+					} `json:"summary"`
+				} `json:"surface"`
+			} `json:"extras"`
+		} `json:"properties"`
 	} `json:"features"`
 }
 
-func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile string) ([]gpx.Point, error) {
+func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile string) (Path, error) {
 	if len(waypoints) < 2 {
-		return nil, fmt.Errorf("routing: need at least 2 waypoints, got %d", len(waypoints))
+		return Path{}, fmt.Errorf("routing: need at least 2 waypoints, got %d", len(waypoints))
 	}
 	coords := make([][2]float64, len(waypoints))
 	for i, w := range waypoints {
@@ -329,13 +420,14 @@ func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile strin
 		Coordinates: coords,
 		Options:     &directionsOpts{AvoidFeatures: avoidFeatures},
 		Elevation:   true,
+		ExtraInfo:   extraInfo,
 	}
 	return c.directions(ctx, profile, req)
 }
 
-func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) ([]gpx.Point, error) {
+func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) (Path, error) {
 	if distanceM <= 0 {
-		return nil, fmt.Errorf("routing: distance must be positive, got %.0fm", distanceM)
+		return Path{}, fmt.Errorf("routing: distance must be positive, got %.0fm", distanceM)
 	}
 	req := directionsRequest{
 		Coordinates: [][2]float64{{start.Lon, start.Lat}},
@@ -348,34 +440,35 @@ func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float
 			AvoidFeatures: avoidFeatures,
 		},
 		Elevation: true,
+		ExtraInfo: extraInfo,
 	}
 	return c.directions(ctx, profile, req)
 }
 
-func (c *ORSClient) directions(ctx context.Context, profile string, body directionsRequest) ([]gpx.Point, error) {
+func (c *ORSClient) directions(ctx context.Context, profile string, body directionsRequest) (Path, error) {
 	if profile == "" {
 		profile = DefaultProfile
 	}
 	if !ValidProfiles[profile] {
-		return nil, fmt.Errorf("routing: unsupported profile %q", profile)
+		return Path{}, fmt.Errorf("routing: unsupported profile %q", profile)
 	}
 
 	key := cacheKey(profile, body)
-	return c.cache.resolve(key, func() ([]gpx.Point, error) {
+	return c.cache.resolve(key, func() (Path, error) {
 		return c.fetchDirections(ctx, profile, body)
 	})
 }
 
-func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body directionsRequest) ([]gpx.Point, error) {
+func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body directionsRequest) (Path, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return Path{}, err
 	}
 
 	url := fmt.Sprintf("%s/v2/directions/%s/geojson", c.url, profile)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
 	if err != nil {
-		return nil, err
+		return Path{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -385,7 +478,7 @@ func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body di
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return Path{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -395,22 +488,23 @@ func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body di
 		// this process's own point of view, so the error body is capped the
 		// same way elevation.Client's own response reading is.
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return nil, fmt.Errorf("routing service returned %s: %s", resp.Status, bytes.TrimSpace(msg))
+		return Path{}, fmt.Errorf("routing service returned %s: %s", resp.Status, bytes.TrimSpace(msg))
 	}
 
 	var out directionsResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
-		return nil, fmt.Errorf("decode routing response: %w", err)
+		return Path{}, fmt.Errorf("decode routing response: %w", err)
 	}
 	if len(out.Features) == 0 || len(out.Features[0].Geometry.Coordinates) < 2 {
-		return nil, fmt.Errorf("routing service returned no usable route")
+		return Path{}, fmt.Errorf("routing service returned no usable route")
 	}
+	feature := out.Features[0]
 
-	coords := out.Features[0].Geometry.Coordinates
+	coords := feature.Geometry.Coordinates
 	points := make([]gpx.Point, len(coords))
 	for i, coord := range coords {
 		if len(coord) < 2 {
-			return nil, fmt.Errorf("routing service returned a malformed coordinate")
+			return Path{}, fmt.Errorf("routing service returned a malformed coordinate")
 		}
 		points[i] = gpx.Point{Lat: coord[1], Lon: coord[0]}
 		// The elevation request above asks for a third value; a self-hosted
@@ -421,5 +515,28 @@ func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body di
 			points[i].Ele, points[i].HasEle = coord[2], true
 		}
 	}
-	return points, nil
+
+	// Same degrade-rather-than-error shape as elevation above: a
+	// self-hosted instance without surface data for this stretch of road
+	// (or without the extra_info feature enabled at all) just means an
+	// empty breakdown, not a failed request.
+	summary := feature.Properties.Extras.Surface.Summary
+	surface := make([]SurfaceSummary, 0, len(summary))
+	for _, s := range summary {
+		label, known := surfaceLabels[int(s.Value)]
+		if !known {
+			// A future ORS release adding a code this table doesn't have
+			// yet — show the raw distance under a label that says so,
+			// rather than silently dropping real distance from the total.
+			label = fmt.Sprintf("Unrecognised (%d)", int(s.Value))
+		}
+		surface = append(surface, SurfaceSummary{
+			Type:      label,
+			DistanceM: s.Distance,
+			Fraction:  s.Amount / 100,
+		})
+	}
+	sort.Slice(surface, func(i, j int) bool { return surface[i].DistanceM > surface[j].DistanceM })
+
+	return Path{Points: points, Surface: surface}, nil
 }

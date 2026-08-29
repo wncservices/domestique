@@ -41,6 +41,7 @@ import (
 // literal seed a given call will use.
 type stubRoutingClient struct {
 	route        []gpx.Point
+	surface      []routing.SurfaceSummary
 	err          error
 	failCallNums map[int]bool
 	callCount    *atomic.Int32
@@ -51,21 +52,21 @@ type stubRoutingClient struct {
 	onRoundTrip func(seed int)
 }
 
-func (s stubRoutingClient) Route(context.Context, []routing.LatLng, string) ([]gpx.Point, error) {
-	return s.route, s.err
+func (s stubRoutingClient) Route(context.Context, []routing.LatLng, string) (routing.Path, error) {
+	return routing.Path{Points: s.route, Surface: s.surface}, s.err
 }
 
-func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, _ string) ([]gpx.Point, error) {
+func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, _ string) (routing.Path, error) {
 	if s.onRoundTrip != nil {
 		s.onRoundTrip(seed)
 	}
 	if s.callCount != nil {
 		n := int(s.callCount.Add(1))
 		if s.failCallNums[n] {
-			return nil, errors.New("stub: this call is configured to fail")
+			return routing.Path{}, errors.New("stub: this call is configured to fail")
 		}
 	}
-	return s.route, s.err
+	return routing.Path{Points: s.route, Surface: s.surface}, s.err
 }
 
 func newRouteBuilderHarness(t *testing.T, rt routing.Client) (client *http.Client, base string) {
@@ -184,6 +185,52 @@ func TestRouteBuilderPreviewIncludesAscent(t *testing.T) {
 	}
 	if out.AscentM != 50 {
 		t.Errorf("ascentM = %v, want 50 (100 -> 150, the only climb)", out.AscentM)
+	}
+}
+
+// The route builder's own "type of ground" and elevation-profile figures —
+// routing.SurfaceSummary and the per-point elevation ORSClient.Route
+// already asked for on the same request — must reach the preview response
+// too, not just distance/ascent.
+func TestRouteBuilderPreviewIncludesSurfaceAndElevationProfile(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{
+			{Lat: 50.85, Lon: 4.35, Ele: 100, HasEle: true},
+			{Lat: 50.86, Lon: 4.36, Ele: 150, HasEle: true},
+		},
+		surface: []routing.SurfaceSummary{
+			{Type: "Asphalt", DistanceM: 900, Fraction: 0.9},
+			{Type: "Gravel", DistanceM: 100, Fraction: 0.1},
+		},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/preview", map[string]any{
+		"waypoints": []map[string]float64{{"lat": 50.85, "lon": 4.35}, {"lat": 50.86, "lon": 4.36}},
+	})
+	defer resp.Body.Close()
+
+	var out struct {
+		Surface []struct {
+			Type      string  `json:"type"`
+			DistanceM float64 `json:"distanceM"`
+			Fraction  float64 `json:"fraction"`
+		} `json:"surface"`
+		ElevationProfile []struct {
+			DistanceM float64 `json:"distanceM"`
+			EleM      float64 `json:"eleM"`
+		} `json:"elevationProfile"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Surface) != 2 || out.Surface[0].Type != "Asphalt" || out.Surface[0].Fraction != 0.9 {
+		t.Errorf("surface = %+v, want the two entries the routing engine returned", out.Surface)
+	}
+	if len(out.ElevationProfile) != 2 || out.ElevationProfile[0].EleM != 100 || out.ElevationProfile[1].EleM != 150 {
+		t.Errorf("elevationProfile = %+v, want one sample per point carrying elevation", out.ElevationProfile)
+	}
+	if out.ElevationProfile[0].DistanceM != 0 {
+		t.Errorf("elevationProfile[0].distanceM = %v, want 0 at the start", out.ElevationProfile[0].DistanceM)
 	}
 }
 
@@ -473,6 +520,42 @@ func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
 	for i, c := range out.Candidates {
 		if len(c.Points) != 3 || c.DistanceM <= 0 {
 			t.Errorf("candidate %d = %+v, want 3 points and a positive distance", i, c)
+		}
+	}
+}
+
+// Each suggested candidate gets its own "type of ground" breakdown, the
+// same as a manual preview — RouteCandidatePreview's own card shows this
+// per candidate, not just an aggregate for the whole request.
+func TestRouteBuilderSuggestCandidatesIncludeSurface(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{
+			{Lat: 50.85, Lon: 4.35},
+			{Lat: 50.86, Lon: 4.37},
+			{Lat: 50.85, Lon: 4.35},
+		},
+		surface: []routing.SurfaceSummary{{Type: "Gravel", DistanceM: 500, Fraction: 1}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+
+	var out struct {
+		Candidates []struct {
+			Surface []struct {
+				Type string `json:"type"`
+			} `json:"surface"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range out.Candidates {
+		if len(c.Surface) != 1 || c.Surface[0].Type != "Gravel" {
+			t.Errorf("candidate %d surface = %+v, want [Gravel]", i, c.Surface)
 		}
 	}
 }

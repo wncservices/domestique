@@ -4,6 +4,7 @@ import { useColorMode } from '@/color-mode'
 import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
 import type { Map as MapLibreMap, Marker } from 'maplibre-gl'
+import type { RouteBuilderPreview } from '@/api/types'
 
 const props = defineProps<{
   /** Switches the map's click behaviour from "append a drawn waypoint" to
@@ -27,7 +28,7 @@ const emit = defineEmits<{
    *  than two waypoints remain. Null means "still waiting on the routing
    *  engine" so the panel can show a busy state distinct from "nothing to
    *  save yet." */
-  'update:preview': [preview: { points: [number, number][]; distanceM: number; ascentM: number } | null]
+  'update:preview': [preview: RouteBuilderPreview | null]
   /** Raw waypoint count, distinct from the snapped preview's own point
    *  count — the panel's Undo/Clear buttons disable off this, not off
    *  update:preview, since a 2-waypoint route can easily snap to dozens of
@@ -148,7 +149,7 @@ function clearSuggestion() {
 async function requestPreview() {
   if (waypoints.length < 2) {
     setSnappedLine([])
-    emit('update:preview', { points: [], distanceM: 0, ascentM: 0 })
+    emit('update:preview', { points: [], distanceM: 0, ascentM: 0, surface: [], elevationProfile: [] })
     return
   }
 

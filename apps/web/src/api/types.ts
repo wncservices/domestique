@@ -372,6 +372,25 @@ export interface Waypoint {
   lon: number
 }
 
+/** One surface type's share of a route builder result's own distance —
+ *  the "type of ground" figure, most-distance-first (already sorted
+ *  server-side). See SurfaceBreakdown.vue. */
+export interface RouteBuilderSurface {
+  type: string
+  distanceM: number
+  /** 0-1, not 0-100. */
+  fraction: number
+}
+
+/** One sample of a route builder result's elevation-over-distance profile
+ *  — distanceM is cumulative from the start, matching how ElevationProfile.vue
+ *  plots it. Sparse rather than one-per-point when the routing engine only
+ *  had elevation for part of the route. */
+export interface RouteBuilderElevationPoint {
+  distanceM: number
+  eleM: number
+}
+
 /** The manual builder's live, unsaved preview of a snapped path — see
  *  RouteBuilderMap.vue. Not persisted; only the eventual "save" step
  *  (CreateRouteFromPointsRequest below) creates a real route. */
@@ -381,6 +400,8 @@ export interface RouteBuilderPreview {
   /** Height gain, derived server-side from the elevation the routing engine
    *  already returns alongside the path itself — no separate lookup. */
   ascentM: number
+  surface: RouteBuilderSurface[]
+  elevationProfile: RouteBuilderElevationPoint[]
 }
 
 export interface RouteBuilderSuggestRequest {
@@ -397,6 +418,8 @@ export interface RouteBuilderCandidate {
   points: [number, number][]
   distanceM: number
   ascentM: number
+  surface: RouteBuilderSurface[]
+  elevationProfile: RouteBuilderElevationPoint[]
 }
 
 /** One candidate location from the route builder's own place search — the

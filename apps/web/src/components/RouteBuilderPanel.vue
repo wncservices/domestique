@@ -2,10 +2,12 @@
 import { computed, ref, useTemplateRef } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import ElevationProfile from './ElevationProfile.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import RouteCandidatePreview from './RouteCandidatePreview.vue'
 import RouteSaveForm from './RouteSaveForm.vue'
-import type { RouteBuilderCandidate } from '@/api/types'
+import SurfaceBreakdown from './SurfaceBreakdown.vue'
+import type { RouteBuilderCandidate, RouteBuilderPreview } from '@/api/types'
 
 const emit = defineEmits<{ built: [] }>()
 
@@ -72,16 +74,18 @@ const waypointCount = ref(0)
 // null while the routing engine is still working on the latest change —
 // distinct from "zero points" (fewer than two waypoints placed yet), which
 // is what preview starts as before any click at all.
-const preview = ref<{ points: [number, number][]; distanceM: number; ascentM: number } | null>({
+const preview = ref<RouteBuilderPreview | null>({
   points: [],
   distanceM: 0,
   ascentM: 0,
+  surface: [],
+  elevationProfile: [],
 })
 const drawDistanceKm = computed(() =>
   preview.value ? (preview.value.distanceM / 1000).toFixed(1) : null,
 )
 
-function onPreview(next: { points: [number, number][]; distanceM: number; ascentM: number } | null) {
+function onPreview(next: RouteBuilderPreview | null) {
   preview.value = next
 }
 
@@ -284,6 +288,11 @@ function onSuggestSaved() {
               </div>
             </div>
 
+            <template v-if="preview && preview.points.length >= 2">
+              <SurfaceBreakdown v-if="preview.surface.length" :surface="preview.surface" />
+              <ElevationProfile v-if="preview.elevationProfile.length" :points="preview.elevationProfile" />
+            </template>
+
             <RouteSaveForm
               ref="drawSaveForm"
               :points="preview?.points ?? []"
@@ -330,6 +339,8 @@ function onSuggestSaved() {
                 class="flex flex-col gap-2"
               >
                 <RouteCandidatePreview :points="candidate.points" />
+                <ElevationProfile v-if="candidate.elevationProfile.length" :points="candidate.elevationProfile" />
+                <SurfaceBreakdown v-if="candidate.surface.length" :surface="candidate.surface" compact />
                 <div class="flex items-center justify-between text-sm text-muted">
                   <span>
                     {{ (candidate.distanceM / 1000).toFixed(1) }} km,
