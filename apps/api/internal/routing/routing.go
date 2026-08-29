@@ -13,6 +13,12 @@
 // internal/elevation: this is the other feature in this codebase that sends
 // a route's own coordinates to a service outside the deployment on its own
 // initiative, not because a rider asked to connect an account.
+//
+// Every request also steers away from motorway/trunk-class roads (see
+// preferCyclePaths) — this app is cycling-only, so a route that could
+// technically use a busy highway is never one worth generating, and doing
+// so pushes ORS's own cycling profile toward the cycle paths and lanes it
+// already prefers whenever it actually has a choice.
 package routing
 
 import (
@@ -133,14 +139,15 @@ const (
 // using this deployment's route builder), and the UI already produces
 // plenty of legitimate exact repeats of a request already answered: a
 // debounced preview firing again for waypoints that did not actually
-// change, an undo landing back on an earlier waypoint set, or "Generate 3
-// options" clicked again with the same start and distance (suggestSeeds in
-// api/server.go is fixed, so that really is the same three requests).
-// Caching those costs nothing and measurably reduces how fast the quota
-// gets spent. This lives here, on the concrete ORSClient, rather than as a
-// decorator around the Client interface, so the fake Client acceptance
-// tests substitute in place of a real one stays simple and does not need to
-// know caching exists.
+// change, or an undo landing back on an earlier waypoint set. Caching
+// those costs nothing and measurably reduces how fast the quota gets
+// spent. (A repeated "Generate 3 options" click deliberately does *not*
+// hit this cache — api/server.go's own suggestSeeds picks a fresh random
+// base each call precisely so pressing Generate again shows different
+// loops, not the same three answered from cache.) This lives here, on the
+// concrete ORSClient, rather than as a decorator around the Client
+// interface, so the fake Client acceptance tests substitute in place of a
+// real one stays simple and does not need to know caching exists.
 type responseCache struct {
 	mu      sync.Mutex
 	entries map[string]cacheEntry
@@ -213,8 +220,22 @@ type directionsRequest struct {
 }
 
 type directionsOpts struct {
-	RoundTrip *roundTripOpts `json:"round_trip"`
+	RoundTrip *roundTripOpts `json:"round_trip,omitempty"`
+	// AvoidFeatures steers the routing engine away from road classes a
+	// cyclist should not be pushed onto given a real choice — set on every
+	// request (Route and RoundTrip both), not something a caller opts into,
+	// since this app is cycling-only (AGENTS.md's own note that it "has
+	// never produced any other kind of route"). "highways" is ORS's own
+	// name for the motorway/trunk-road class; avoiding it steers the
+	// routing engine's cost function toward the cycle paths, cycle lanes
+	// and quieter roads a cycling profile already prefers when given the
+	// option, rather than the fastest technically-cyclable road.
+	AvoidFeatures []string `json:"avoid_features,omitempty"`
 }
+
+// preferCyclePaths is applied to every directions request this client makes
+// — see AvoidFeatures' own doc comment.
+var preferCyclePaths = []string{"highways"}
 
 type roundTripOpts struct {
 	Length float64 `json:"length"`
@@ -238,7 +259,12 @@ func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile strin
 	for i, w := range waypoints {
 		coords[i] = [2]float64{w.Lon, w.Lat}
 	}
-	return c.directions(ctx, profile, directionsRequest{Coordinates: coords, Elevation: true})
+	req := directionsRequest{
+		Coordinates: coords,
+		Options:     &directionsOpts{AvoidFeatures: preferCyclePaths},
+		Elevation:   true,
+	}
+	return c.directions(ctx, profile, req)
 }
 
 func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) ([]gpx.Point, error) {
@@ -247,11 +273,14 @@ func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float
 	}
 	req := directionsRequest{
 		Coordinates: [][2]float64{{start.Lon, start.Lat}},
-		Options: &directionsOpts{RoundTrip: &roundTripOpts{
-			Length: distanceM,
-			Points: roundTripPoints,
-			Seed:   seed,
-		}},
+		Options: &directionsOpts{
+			RoundTrip: &roundTripOpts{
+				Length: distanceM,
+				Points: roundTripPoints,
+				Seed:   seed,
+			},
+			AvoidFeatures: preferCyclePaths,
+		},
 		Elevation: true,
 	}
 	return c.directions(ctx, profile, req)

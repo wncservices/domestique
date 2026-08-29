@@ -56,8 +56,11 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	if len(gotBody.Coordinates) != 2 || gotBody.Coordinates[0] != [2]float64{4.35, 50.85} {
 		t.Errorf("request coordinates = %v, want [lon,lat] pairs matching the input waypoints", gotBody.Coordinates)
 	}
-	if gotBody.Options != nil {
+	if gotBody.Options == nil || gotBody.Options.RoundTrip != nil {
 		t.Error("a plain Route call must not set round_trip options")
+	}
+	if got := gotBody.Options.AvoidFeatures; len(got) != 1 || got[0] != "highways" {
+		t.Errorf("avoid_features = %v, want [\"highways\"] on every request", got)
 	}
 	if !gotBody.Elevation {
 		t.Error("a Route call must ask ORS for elevation")
@@ -130,6 +133,9 @@ func TestRoundTripSendsLengthAndSeed(t *testing.T) {
 	}
 	if gotBody.Options.RoundTrip.Length != 20000 || gotBody.Options.RoundTrip.Seed != 7 {
 		t.Errorf("round_trip options = %+v, want length=20000 seed=7", gotBody.Options.RoundTrip)
+	}
+	if got := gotBody.Options.AvoidFeatures; len(got) != 1 || got[0] != "highways" {
+		t.Errorf("avoid_features = %v, want [\"highways\"] on every request", got)
 	}
 }
 
