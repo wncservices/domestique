@@ -35,6 +35,10 @@ type Garmin struct {
 	// the deployment asked: an inferred cue at the wrong junction is worse
 	// than no cue at all.
 	TurnCues bool
+	// ClimbCues asks for climb category cues inferred from the track's
+	// elevation profile. Off unless the deployment asked, for the same
+	// reason TurnCues is.
+	ClimbCues bool
 	// Log receives what is worth knowing and not worth failing over. Nil is
 	// fine.
 	Log func(msg string, args ...any)
@@ -109,9 +113,10 @@ func (g *Garmin) prepare(ctx context.Context, route model.Route) (Courses, []byt
 	}
 
 	data, err := fitcourse.Encode(points, fitcourse.Options{
-		Name:     route.Name,
-		Sport:    fitcourse.SportFromString(string(route.EffectiveSport())),
-		TurnCues: g.TurnCues,
+		Name:      route.Name,
+		Sport:     fitcourse.SportFromString(string(route.EffectiveSport())),
+		TurnCues:  g.TurnCues,
+		ClimbCues: g.ClimbCues,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("building a course file for %s: %w", route.Slug, err)

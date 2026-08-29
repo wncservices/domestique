@@ -62,6 +62,9 @@ type Factory struct {
 	Wahoo func(ctx context.Context, rider string) (WahooRoutes, error)
 	// TurnCues asks adapters for cues inferred from the track's geometry.
 	TurnCues bool
+	// ClimbCues asks adapters for climb category cues inferred from the
+	// track's elevation profile.
+	ClimbCues bool
 	// Log receives what is worth knowing and not worth failing over.
 	Log func(msg string, args ...any)
 }
@@ -71,11 +74,12 @@ func (f Factory) Build(account model.Account) (Target, error) {
 	switch account.Provider {
 	case model.ProviderGarmin:
 		return &Garmin{
-			Account:  account,
-			Track:    f.Track,
-			Courses:  f.Garmin,
-			TurnCues: f.TurnCues,
-			Log:      f.Log,
+			Account:   account,
+			Track:     f.Track,
+			Courses:   f.Garmin,
+			TurnCues:  f.TurnCues,
+			ClimbCues: f.ClimbCues,
+			Log:       f.Log,
 		}, nil
 	case model.ProviderWahoo:
 		return &Wahoo{

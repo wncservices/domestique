@@ -436,6 +436,212 @@ func TestBearingCardinalDirections(t *testing.T) {
 	}
 }
 
+// ---------- climb cues ----------
+
+type elevSegment struct{ LengthM, GradePercent float64 }
+
+// elevationProfile builds a track heading due north at spacingM intervals,
+// its elevation following a sequence of segments back to back from baseEle.
+// Tests bracket the segment under test with flat margins well wider than
+// climbSmoothRadiusM, so smoothing at a segment boundary can't bias the
+// measurement taken from the middle of the interesting one.
+func elevationProfile(spacingM, baseEle float64, segments ...elevSegment) []gpx.Point {
+	latStep := spacingM / 111_320.0
+	points := []gpx.Point{{Lat: 50.0, Lon: 3.0, Ele: baseEle, HasEle: true}}
+	lat, ele := 50.0, baseEle
+	for _, seg := range segments {
+		rise := spacingM * seg.GradePercent / 100
+		for d := 0.0; d < seg.LengthM; d += spacingM {
+			lat += latStep
+			ele += rise
+			points = append(points, gpx.Point{Lat: lat, Lon: 3.0, Ele: ele, HasEle: true})
+		}
+	}
+	return points
+}
+
+func TestFlatTrackProducesNoClimbs(t *testing.T) {
+	points := straightNorth(80, 25)
+	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
+		t.Errorf("a flat track produced %d climbs: %+v", len(got), got)
+	}
+}
+
+func TestNoClimbCuesByDefault(t *testing.T) {
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{3000, 6}, elevSegment{300, 0})
+
+	raw, err := Encode(points, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(decode(t, raw).CoursePoints); got != 0 {
+		t.Errorf("got %d course points with ClimbCues off, want 0", got)
+	}
+}
+
+func TestSteadyClimbIsCategorised(t *testing.T) {
+	// 3000 m at 6% averages a Strava score of 18,000 — solidly inside the
+	// category 3 band (16,000-32,000), clear of either edge so smoothing at
+	// the climb's own boundaries can't tip it into a neighbouring category.
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{3000, 6}, elevSegment{300, 0})
+
+	climbs := DeriveClimbs(points, cumulativeDistances(points))
+	if len(climbs) != 1 {
+		t.Fatalf("got %d climbs, want 1: %+v", len(climbs), climbs)
+	}
+
+	c := climbs[0]
+	if c.Category != typedef.CoursePointThirdCategory {
+		t.Errorf("category = %v, want ThirdCategory", c.Category)
+	}
+	if c.Name == "" {
+		t.Error("climb has no name; devices display this")
+	}
+	if math.Abs(c.LengthM-3000) > 200 {
+		t.Errorf("length = %.0f, want ~3000", c.LengthM)
+	}
+	if math.Abs(c.AvgGradient-6) > 0.5 {
+		t.Errorf("avg gradient = %.1f%%, want ~6%%", c.AvgGradient)
+	}
+	if c.SummitIndex <= c.StartIndex {
+		t.Errorf("summit index %d must come after start index %d", c.SummitIndex, c.StartIndex)
+	}
+}
+
+func TestShortClimbBelowLengthThresholdIsIgnored(t *testing.T) {
+	// 300 m at 10% is steep, but shorter than climbMinLengthM and its score
+	// (3,000) is well under even a category 4 climb.
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{300, 10}, elevSegment{300, 0})
+	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
+		t.Errorf("a short climb produced %d climbs: %+v", len(got), got)
+	}
+}
+
+func TestClimbBelowAvgGradientThresholdIsIgnored(t *testing.T) {
+	// 5000 m at 2.9% is long enough, and its score (14,500) alone would
+	// clear category 4 — but the average gradient sits just under
+	// climbMinAvgGradient, which ClimbPro itself also won't show without.
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{5000, 2.9}, elevSegment{300, 0})
+	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
+		t.Errorf("a shallow climb produced %d climbs: %+v", len(got), got)
+	}
+}
+
+func TestClimbBelowScoreThresholdIsIgnored(t *testing.T) {
+	// 1000 m at 5% clears both the length and gradient minimums on their
+	// own, but its score (5,000) is still short of a category 4 climb.
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{1000, 5}, elevSegment{300, 0})
+	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
+		t.Errorf("a climb below the score threshold produced %d climbs: %+v", len(got), got)
+	}
+}
+
+func TestShortDipInsideAClimbIsMerged(t *testing.T) {
+	// A short false-flat dip mid-climb — well inside climbMergeGapM — must
+	// not split one climb into two, or hide it entirely: on its own, either
+	// half is far too short to categorise.
+	points := elevationProfile(25, 100,
+		elevSegment{300, 0}, elevSegment{2000, 5}, elevSegment{150, -4}, elevSegment{2000, 5}, elevSegment{300, 0})
+
+	climbs := DeriveClimbs(points, cumulativeDistances(points))
+	if len(climbs) != 1 {
+		t.Fatalf("got %d climbs, want 1 (the dip should merge): %+v", len(climbs), climbs)
+	}
+	// 2000+150+2000 m, net of the dip's own 4% loss over 150 m.
+	if got := climbs[0].LengthM; math.Abs(got-4150) > 250 {
+		t.Errorf("length = %.0f, want ~4150 (the dip should not have split it)", got)
+	}
+}
+
+func TestLongDescentSplitsIntoTwoClimbs(t *testing.T) {
+	// A 300 m descent is past climbMergeGapM, so this is genuinely two
+	// climbs with a valley between them, not one climb with a dip.
+	points := elevationProfile(25, 100,
+		elevSegment{300, 0}, elevSegment{1500, 6}, elevSegment{300, -5}, elevSegment{1500, 6}, elevSegment{300, 0})
+
+	climbs := DeriveClimbs(points, cumulativeDistances(points))
+	if len(climbs) != 2 {
+		t.Fatalf("got %d climbs, want 2 (the descent should have split them): %+v", len(climbs), climbs)
+	}
+	for i, c := range climbs {
+		if math.Abs(c.LengthM-1500) > 200 {
+			t.Errorf("climb %d length = %.0f, want ~1500", i, c.LengthM)
+		}
+	}
+	if climbs[0].SummitIndex >= climbs[1].StartIndex {
+		t.Error("the two climbs overlap; the descent between them should separate their indices")
+	}
+}
+
+func TestDeriveClimbsRequiresElevation(t *testing.T) {
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{3000, 6}, elevSegment{300, 0})
+	points[len(points)/2].HasEle = false
+
+	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
+		t.Errorf("a track missing elevation on one point produced %d climbs: %+v", len(got), got)
+	}
+}
+
+// DeriveClimbs indexes the distances it is handed, the same as DeriveTurns.
+// A caller passing a nil or mismatched slice used to panic; it now returns
+// nothing instead, and Climbs is the safe entry point.
+func TestDeriveClimbsIsSafeWithBadDistances(t *testing.T) {
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{3000, 6}, elevSegment{300, 0})
+
+	for name, distances := range map[string][]float64{
+		"nil":   nil,
+		"short": {0, 1, 2},
+		"long":  make([]float64, len(points)+5),
+	} {
+		if got := DeriveClimbs(points, distances); got != nil {
+			t.Errorf("%s: expected no climbs, got %d", name, len(got))
+		}
+	}
+}
+
+func TestClimbsComputesItsOwnDistances(t *testing.T) {
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{3000, 6}, elevSegment{300, 0})
+
+	if got := len(Climbs(points)); got != 1 {
+		t.Errorf("Climbs found %d climbs, want 1", got)
+	}
+	// And it must not panic on a track too short to have any.
+	if got := Climbs(points[:2]); got != nil {
+		t.Errorf("expected no climbs from 2 points, got %v", got)
+	}
+}
+
+func TestClimbCuesReachTheFile(t *testing.T) {
+	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{3000, 6}, elevSegment{300, 0})
+
+	raw, err := Encode(points, Options{Name: "Climb", ClimbCues: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	course := decode(t, raw)
+	if len(course.CoursePoints) != 2 {
+		t.Fatalf("got %d course points, want 2 (category marker + summit)", len(course.CoursePoints))
+	}
+
+	start, summit := course.CoursePoints[0], course.CoursePoints[1]
+	if start.Type != typedef.CoursePointThirdCategory {
+		t.Errorf("start marker type = %v, want ThirdCategory", start.Type)
+	}
+	if start.Name == "" {
+		t.Error("start marker has no name; devices display this")
+	}
+	if summit.Type != typedef.CoursePointSummit {
+		t.Errorf("summit marker type = %v, want Summit", summit.Type)
+	}
+	if summit.Name != "Summit" {
+		t.Errorf("summit marker name = %q, want %q", summit.Name, "Summit")
+	}
+	if summit.DistanceScaled() <= start.DistanceScaled() {
+		t.Error("summit must sit further along the course than the climb's start")
+	}
+}
+
 // ---------- independent format checks ----------
 
 // The round-trip tests prove the library agrees with itself. These check the
