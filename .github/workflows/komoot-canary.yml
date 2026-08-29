@@ -1,0 +1,99 @@
+name: Komoot canary
+
+# Komoot has no public API (see apps/api/internal/komoot's own doc comment) —
+# it can break without warning, and did change hands in 2025. Nothing else in
+# this repo notices that on its own: the app itself only finds out when a
+# rider tries to import and hits a 502. This runs the same read-only
+# `domestique komoot list` a rider would run, against the shared
+# deployment-wide account, purely to catch a break early rather than waiting
+# for someone to report one.
+#
+# On a failure it opens (or updates) a PR with no code change — just a status
+# note for a human to read and act on. It never tries to fix or disable
+# anything itself.
+on:
+  schedule:
+    # 06:17 UTC: an arbitrary off-the-hour time, not top-of-hour when a lot of
+    # other scheduled workflows across GitHub contend for runners.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Build the CLI
+        run: cd apps/api && go build -o /tmp/domestique ./cmd/domestique
+
+      # `komoot list` is read-only — it logs in and lists planned tours, never
+      # imports or deletes anything — so this cannot corrupt a real library.
+      # DOMESTIQUE_SOURCE_DSN points it at a throwaway SQLite file instead of
+      # a checked-in config, the same override the chart's own CI uses to run
+      # this binary with no config file at all.
+      - name: Run the canary
+        id: canary
+        env:
+          KOMOOT_EMAIL: ${{ secrets.KOMOOT_EMAIL }}
+          KOMOOT_PASSWORD: ${{ secrets.KOMOOT_PASSWORD }}
+          DOMESTIQUE_SOURCE_DSN: /tmp/komoot-canary.db
+        run: |
+          if [ -z "$KOMOOT_EMAIL" ] || [ -z "$KOMOOT_PASSWORD" ]; then
+            echo "::warning::KOMOOT_EMAIL/KOMOOT_PASSWORD are not set as repository secrets — nothing to check this run."
+            echo "broken=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if /tmp/domestique komoot list >/tmp/canary.log 2>&1; then
+            echo "broken=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "broken=true" >> "$GITHUB_OUTPUT"
+          fi
+          cat /tmp/canary.log
+
+      # komoot.Client's own errors never include the email/password/token —
+      # `internal/komoot`'s do() only ever returns the HTTP status and a
+      # snippet of Komoot's own response body — so the log is safe to publish
+      # verbatim in a public PR.
+      - name: Record the break
+        if: steps.canary.outputs.broken == 'true'
+        run: |
+          {
+            echo "# Komoot import: broken"
+            echo
+            echo "The scheduled canary (\`domestique komoot list\` against the shared"
+            echo "deployment-wide account) failed on $(date -u +%Y-%m-%dT%H:%M:%SZ), run"
+            echo "[${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+            echo
+            echo '```'
+            cat /tmp/canary.log
+            echo '```'
+            echo
+            echo "Komoot has no public API and can change without notice (see"
+            echo "\`apps/api/internal/komoot\`'s own doc comment) — this is not"
+            echo "necessarily a bug in this repo, and a rider's own Komoot sign-in may"
+            echo "still work even when the shared account above does not."
+            echo
+            echo "This PR makes no code change. Close it (do not merge) once the"
+            echo "canary is green again — whether that took a fix here or Komoot"
+            echo "recovering on its own."
+          } > docs/komoot-status.md
+
+      - name: Open or update the flagging PR
+        if: steps.canary.outputs.broken == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          add-paths: docs/komoot-status.md
+          commit-message: "Komoot canary: import is broken"
+          branch: komoot-canary/broken
+          title: "Komoot import appears to be broken"
+          body-path: docs/komoot-status.md
+          labels: bug
