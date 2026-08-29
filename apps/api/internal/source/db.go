@@ -245,6 +245,17 @@ func (d *DB) Track(ctx context.Context, slug string) ([]gpx.Point, error) {
 	return gpx.ParsePoints(raw)
 }
 
+// Cues returns whatever turn-by-turn instructions the route's own GPX
+// carries — see gpx.ParseCues. Nil, not an error, for the ordinary case of a
+// GPX with no cue sheet of its own.
+func (d *DB) Cues(ctx context.Context, slug string) ([]gpx.Cue, error) {
+	raw, err := d.GPX(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	return gpx.ParseCues(raw)
+}
+
 func (d *DB) GPX(ctx context.Context, slug string) ([]byte, error) {
 	var raw []byte
 	err := d.db.QueryRowContext(ctx, d.query(`SELECT gpx FROM routes WHERE slug = ?`), slug).Scan(&raw)

@@ -54,6 +54,10 @@ func Implemented(p model.Provider) bool {
 type Factory struct {
 	// Track returns a route's points by slug.
 	Track func(ctx context.Context, slug string) ([]gpx.Point, error)
+	// Cues returns whatever turn-by-turn instructions the route's own GPX
+	// carries, for TurnCues to prefer over a derived guess. Nil is the
+	// ordinary case; see fitcourse.NativeTurns.
+	Cues func(ctx context.Context, slug string) ([]gpx.Cue, error)
 	// Garmin resolves the signed-in Garmin client for a rider.
 	Garmin func(rider string) (Courses, error)
 	// Wahoo resolves the signed-in Wahoo client for a rider. Takes a
@@ -76,6 +80,7 @@ func (f Factory) Build(account model.Account) (Target, error) {
 		return &Garmin{
 			Account:   account,
 			Track:     f.Track,
+			Cues:      f.Cues,
 			Courses:   f.Garmin,
 			TurnCues:  f.TurnCues,
 			ClimbCues: f.ClimbCues,

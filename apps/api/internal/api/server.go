@@ -1586,11 +1586,13 @@ func (s *Server) handleDownloadFIT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cues := r.URL.Query().Get("cues") == "1"
+	nativeCues, _ := gpx.ParseCues(raw)
 	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{
-		Name:      name,
-		Sport:     fitcourse.SportFromString(string(sport)),
-		TurnCues:  cues,
-		ClimbCues: cues,
+		Name:       name,
+		Sport:      fitcourse.SportFromString(string(sport)),
+		TurnCues:   cues,
+		ClimbCues:  cues,
+		NativeCues: nativeCues,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -2678,6 +2680,7 @@ func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 func (s *Server) targetFactory() targets.Factory {
 	return targets.Factory{
 		Track:  s.Source.Track,
+		Cues:   s.Source.Cues,
 		Garmin: s.garminCourses,
 		Wahoo:  s.wahooRoutes,
 		// Off, matching the download's default. The cues are inferred from

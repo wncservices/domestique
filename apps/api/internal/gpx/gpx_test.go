@@ -42,6 +42,91 @@ func TestReadPointsAcceptsRouteElement(t *testing.T) {
 	}
 }
 
+func TestParseCuesReadsRteptAndWpt(t *testing.T) {
+	raw := []byte(`<?xml version="1.0"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <wpt lat="50.0050" lon="3.0000">
+    <name>Water stop</name>
+  </wpt>
+  <trk><trkseg>
+    <trkpt lat="50.0000" lon="3.0000"/>
+    <trkpt lat="50.0100" lon="3.0000"/>
+  </trkseg></trk>
+  <rte>
+    <rtept lat="50.0" lon="3.0">
+      <name>Turn right onto Main St</name>
+      <sym>Right</sym>
+    </rtept>
+  </rte>
+</gpx>`)
+
+	cues, err := ParseCues(raw)
+	if err != nil {
+		t.Fatalf("ParseCues: %v", err)
+	}
+	if len(cues) != 2 {
+		t.Fatalf("got %d cues, want 2: %+v", len(cues), cues)
+	}
+
+	wpt := cues[0]
+	if wpt.Name != "Water stop" {
+		t.Errorf("wpt name = %q, want %q", wpt.Name, "Water stop")
+	}
+
+	rtept := cues[1]
+	if rtept.Name != "Turn right onto Main St" || rtept.Sym != "Right" {
+		t.Errorf("rtept = %+v, want name %q and sym %q", rtept, "Turn right onto Main St", "Right")
+	}
+}
+
+// A <rte> alongside a <trk> is exactly the shape a cue-sheet export takes: a
+// dense track for the geometry, a sparse annotated route for the cues.
+// ParsePoints uses the track for geometry and never looks at the route at
+// all (see its own doc comment); ParseCues must still read the route's cue
+// regardless.
+func TestParseCuesReadsRteEvenWithATrkPresent(t *testing.T) {
+	raw := []byte(`<?xml version="1.0"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><trkseg>
+    <trkpt lat="50.0000" lon="3.0000"/>
+    <trkpt lat="50.0100" lon="3.0000"/>
+  </trkseg></trk>
+  <rte><rtept lat="50.0" lon="3.0"><name>Cue</name></rtept></rte>
+</gpx>`)
+
+	points, err := ParsePoints(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 {
+		t.Fatalf("ParsePoints should have used the track, got %d points", len(points))
+	}
+
+	cues, err := ParseCues(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cues) != 1 || cues[0].Name != "Cue" {
+		t.Errorf("ParseCues should still have read the route's cue, got %+v", cues)
+	}
+}
+
+func TestParseCuesReturnsNilForOrdinaryGPX(t *testing.T) {
+	cues, err := ParseCues([]byte(twoPointGPX))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cues != nil {
+		t.Errorf("expected no cues from a plain track, got %+v", cues)
+	}
+}
+
+func TestParseCuesRejectsGarbage(t *testing.T) {
+	if _, err := ParseCues([]byte("not xml")); err == nil {
+		t.Fatal("garbage bytes parsed without error")
+	}
+}
+
 func TestReadPointsRejectsTooFewPoints(t *testing.T) {
 	path := writeGPX(t, `<?xml version="1.0"?>
 <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">

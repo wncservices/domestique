@@ -92,9 +92,10 @@ fit:
   domestique fit <slug> [--out FILE] [--cues]
 
   Writes a FIT course, which can be copied straight onto a device over USB.
-  --cues adds turn cues inferred from the track's shape, and climb category
-  cues inferred from its elevation profile; both are heuristics, so check
-  them before trusting them on a ride.
+  --cues adds turn cues — the route's own, from its GPX's <rte> or <wpt>,
+  when it has any, otherwise a guess inferred from the track's shape — and
+  climb category cues inferred from its elevation profile. The inferred
+  ones are heuristics, so check them before trusting them on a ride.
 
 komoot:
   domestique komoot list             show the account's planned routes
@@ -248,6 +249,10 @@ func runFIT(src *source.DB, args []string, out string, cues bool) error {
 	if err != nil {
 		return err
 	}
+	nativeCues, err := gpx.ParseCues(raw)
+	if err != nil {
+		return err
+	}
 
 	name := slug
 	if routes, _, listErr := src.List(context.Background()); listErr == nil {
@@ -259,7 +264,9 @@ func runFIT(src *source.DB, args []string, out string, cues bool) error {
 		}
 	}
 
-	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{Name: name, TurnCues: cues, ClimbCues: cues})
+	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{
+		Name: name, TurnCues: cues, ClimbCues: cues, NativeCues: nativeCues,
+	})
 	if err != nil {
 		return err
 	}
@@ -277,14 +284,23 @@ func runFIT(src *source.DB, args []string, out string, cues bool) error {
 		return err
 	}
 
-	turns, climbs := 0, 0
+	turns, climbs, native := 0, 0, false
 	if cues {
-		turns = len(fitcourse.Turns(points))
+		t := fitcourse.NativeTurns(points, nativeCues)
+		native = t != nil
+		if !native {
+			t = fitcourse.Turns(points)
+		}
+		turns = len(t)
 		climbs = len(fitcourse.Climbs(points))
 	}
 	fmt.Printf("wrote %s (%d bytes, %d points", out, len(fitBytes), len(points))
 	if cues {
-		fmt.Printf(", %d turn cue(s), %d climb(s)", turns, climbs)
+		fmt.Printf(", %d turn cue(s)", turns)
+		if native {
+			fmt.Print(" (from the route's own planner)")
+		}
+		fmt.Printf(", %d climb(s)", climbs)
 	}
 	fmt.Println(")")
 	return nil
