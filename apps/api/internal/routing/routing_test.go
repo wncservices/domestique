@@ -59,9 +59,52 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	if gotBody.Options != nil {
 		t.Error("a plain Route call must not set round_trip options")
 	}
+	if !gotBody.Elevation {
+		t.Error("a Route call must ask ORS for elevation")
+	}
 
 	if len(points) != 3 || points[0].Lat != 50.85 || points[0].Lon != 4.35 {
 		t.Errorf("points = %v, want the geojson coordinates flipped back to lat/lon", points)
+	}
+}
+
+// The third coordinate value ORS returns when elevation is requested must
+// become the point's own Ele/HasEle — gpx.ComputeStats derives the route
+// builder's height-gain figure from exactly this, not a second lookup.
+func TestElevationIsReadFromTheThirdCoordinate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85, 12.5}, {4.36, 50.86, 40}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	points, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !points[0].HasEle || points[0].Ele != 12.5 || !points[1].HasEle || points[1].Ele != 40 {
+		t.Errorf("points = %+v, want elevation carried over from the third coordinate", points)
+	}
+}
+
+// A self-hosted instance an operator forgot to enable elevation support on
+// still answers with plain [lon,lat] pairs — that must degrade to "no
+// elevation", not an error.
+func TestMissingElevationCoordinateIsNotAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	points, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if points[0].HasEle || points[1].HasEle {
+		t.Errorf("points = %+v, want HasEle false with no third coordinate", points)
 	}
 }
 

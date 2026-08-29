@@ -29,6 +29,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
@@ -138,6 +139,16 @@ type Server struct {
 	// exists above.
 	Routing routing.Client
 
+	// Geocoder resolves a place name to a location for the route builder's
+	// location search — see internal/geocoding. Unlike Routing, this is
+	// never nil in a real deployment (no config toggle, no credential to be
+	// missing) — main.go always constructs one — but a nil value here still
+	// degrades the search endpoint to "not configured" rather than
+	// panicking, the same defensive shape as every other optional
+	// dependency on this struct, useful for a test that has no reason to
+	// exercise geocoding at all.
+	Geocoder geocoding.Client
+
 	// OIDC drives the authorization-code exchange and ID-token verification
 	// for mode oidc. Nil in every other mode — the /sso/* endpoints 404
 	// rather than reach for it.
@@ -227,6 +238,16 @@ type Server struct {
 	// resembling abuse.
 	RouteBuilderLimiter *ratelimit.Limiter
 
+	// GeocodeLimiter throttles the location-search endpoint by rider.
+	// Unlike RouteBuilderLimiter, this is protecting a shared *public*
+	// resource with its own strict usage policy (Nominatim asks for
+	// roughly one request a second, in total, across every user of this
+	// app) rather than a per-deployment API key — a tighter, sign-in-shaped
+	// budget is the right fit here, not RouteBuilderLimiter's more generous
+	// one; searching a place is a one-off action, not a debounced call per
+	// waypoint the way a route-builder preview is.
+	GeocodeLimiter *ratelimit.Limiter
+
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
 	pushMu sync.Mutex
@@ -271,6 +292,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/routes/from-points", s.handleCreateRouteFromPoints)
 	mux.HandleFunc("POST /api/routebuilder/preview", s.handleRouteBuilderPreview)
 	mux.HandleFunc("POST /api/routebuilder/suggest", s.handleRouteBuilderSuggest)
+	mux.HandleFunc("GET /api/geocode", s.handleGeocodeSearch)
 	mux.HandleFunc("PATCH /api/routes/{slug...}", s.handleUpdate)
 	// {slug}, not {slug...}: a "...to end of path" wildcard must be the
 	// pattern's final segment in Go's ServeMux, and this one isn't — a
@@ -2064,15 +2086,17 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	coords, distance := coordsAndDistance(points)
-	writeJSON(w, http.StatusOK, map[string]any{"points": coords, "distanceM": distance})
+	coords, distance, ascent := coordsDistanceAscent(points)
+	writeJSON(w, http.StatusOK, map[string]any{"points": coords, "distanceM": distance, "ascentM": ascent})
 }
 
-// coordsAndDistance renders a routing engine's own []gpx.Point result as the
-// [lat,lon] pairs plus total distance every route-builder response (a
-// preview, a suggestion candidate) shares — the same [lat,lon] convention
-// handleTrack's own coords already use.
-func coordsAndDistance(points []gpx.Point) ([][2]float64, float64) {
+// coordsDistanceAscent renders a routing engine's own []gpx.Point result as
+// the [lat,lon] pairs, total distance and height gain every route-builder
+// response (a preview, a suggestion candidate) shares — the same [lat,lon]
+// convention handleTrack's own coords already use. Ascent comes from
+// gpx.ComputeStats, fed by the elevation ORSClient.Route/RoundTrip already
+// asked the routing engine for on the same request — no second lookup.
+func coordsDistanceAscent(points []gpx.Point) ([][2]float64, float64, float64) {
 	coords := make([][2]float64, len(points))
 	var distance float64
 	for i, p := range points {
@@ -2081,7 +2105,7 @@ func coordsAndDistance(points []gpx.Point) ([][2]float64, float64) {
 			distance += gpx.DistanceM(points[i-1], p)
 		}
 	}
-	return coords, distance
+	return coords, distance, gpx.ComputeStats(points).AscentM
 }
 
 // suggestSeeds are fixed rather than random: three distinct, reproducible
@@ -2100,6 +2124,7 @@ const maxSuggestDistanceKm = 300
 type routeBuilderCandidate struct {
 	Points    [][2]float64 `json:"points"`
 	DistanceM float64      `json:"distanceM"`
+	AscentM   float64      `json:"ascentM"`
 }
 
 // handleRouteBuilderSuggest generates a handful of round-trip loop
@@ -2166,8 +2191,8 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 			lastErr = err
 			continue
 		}
-		coords, distance := coordsAndDistance(points)
-		candidates = append(candidates, routeBuilderCandidate{Points: coords, DistanceM: distance})
+		coords, distance, ascent := coordsDistanceAscent(points)
+		candidates = append(candidates, routeBuilderCandidate{Points: coords, DistanceM: distance, AscentM: ascent})
 	}
 	if len(candidates) == 0 {
 		// Unlike a partial failure above, the request itself fails here —
@@ -2179,6 +2204,70 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
+}
+
+// maxGeocodeQueryLen bounds a location search's own query string — nothing
+// realistic needs more than a short place name, and an unbounded string
+// forwarded straight into an outbound request is attacker-controlled
+// request content reaching a third party, not just a cosmetic input-shape
+// concern (the same class of risk ValidProfiles guards for routing).
+const maxGeocodeQueryLen = 200
+
+type geocodeResult struct {
+	Name string  `json:"name"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+}
+
+// handleGeocodeSearch resolves a place name to a location for the route
+// builder's own location search — offered whenever a rider's browser has
+// no (or declined) geolocation, or they simply want to look somewhere
+// other than wherever they are. See internal/geocoding for why this
+// proxies through the backend rather than hitting Nominatim straight from
+// the browser.
+func (s *Server) handleGeocodeSearch(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermUploadRoute) {
+		return
+	}
+
+	rider := auth.FromContext(r.Context()).User
+	if !s.rateLimitGeocode(w, rider) {
+		return
+	}
+
+	if s.Geocoder == nil {
+		s.logger().Warn("location search requested but no geocoder is configured", "by", rider)
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": "location search is not available",
+		})
+		return
+	}
+
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q must not be empty"})
+		return
+	}
+	if len(query) > maxGeocodeQueryLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("query too long (max %d characters)", maxGeocodeQueryLen),
+		})
+		return
+	}
+
+	results, err := s.Geocoder.Search(r.Context(), query)
+	if err != nil {
+		s.logger().Error("location search failed", "err", err, "by", rider)
+		recordRouteBuilderError(r.Context(), "geocode")
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	out := make([]geocodeResult, len(results))
+	for i, res := range results {
+		out[i] = geocodeResult{Name: res.Name, Lat: res.Lat, Lon: res.Lon}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
 // handleCreateRouteFromPoints is where every route-builder tab's final pick
@@ -2620,6 +2709,13 @@ func (s *Server) rateLimitAuthAction(w http.ResponseWriter, rider string) bool {
 // a separate, more generous budget than rateLimitConnect/rateLimitAuthAction.
 func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.RouteBuilderLimiter, rider, "too many route-builder requests — wait a few minutes and try again")
+}
+
+// rateLimitGeocode enforces GeocodeLimiter for a rider's own location
+// searches — see that field's own doc comment for why this is a tighter
+// budget than rateLimitRouteBuilder's.
+func (s *Server) rateLimitGeocode(w http.ResponseWriter, rider string) bool {
+	return rateLimit(w, s.GeocodeLimiter, rider, "too many location searches — wait a few minutes and try again")
 }
 
 // rateLimit is rateLimitConnect and rateLimitAuthAction's shared check: nil

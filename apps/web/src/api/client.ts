@@ -12,6 +12,7 @@ import type {
   GarminCourseImportResult,
   GarminDuplicateGroup,
   GarminDevice,
+  GeocodeResult,
   KomootImportResult,
   KomootConnection,
   KomootDuplicateGroup,
@@ -366,6 +367,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     }),
+
+  /** Resolves a place name to a location — the route builder's own search,
+   *  offered when a rider's browser has no (or declined) geolocation. */
+  geocodeSearch: (q: string) =>
+    request<{ results: GeocodeResult[] }>(`/api/geocode?q=${encodeURIComponent(q)}`),
 
   remove: (slug: string) =>
     request<void>(`/api/routes/${encodeSlug(slug)}`, { method: 'DELETE' }),

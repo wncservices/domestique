@@ -378,6 +378,9 @@ export interface Waypoint {
 export interface RouteBuilderPreview {
   points: [number, number][]
   distanceM: number
+  /** Height gain, derived server-side from the elevation the routing engine
+   *  already returns alongside the path itself — no separate lookup. */
+  ascentM: number
 }
 
 export interface RouteBuilderSuggestRequest {
@@ -393,6 +396,16 @@ export interface RouteBuilderSuggestRequest {
 export interface RouteBuilderCandidate {
   points: [number, number][]
   distanceM: number
+  ascentM: number
+}
+
+/** One candidate location from the route builder's own place search — the
+ *  fallback offered when a rider's browser has no (or declined)
+ *  geolocation. See RouteBuilderMap.vue/RouteBuilderPanel.vue. */
+export interface GeocodeResult {
+  name: string
+  lat: number
+  lon: number
 }
 
 /** What every route-builder tab's final pick — a manually drawn path, a

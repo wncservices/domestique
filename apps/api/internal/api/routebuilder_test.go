@@ -19,6 +19,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/config"
+	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
@@ -126,6 +127,7 @@ func TestRouteBuilderPreviewSnapsWaypoints(t *testing.T) {
 	var out struct {
 		Points    [][2]float64 `json:"points"`
 		DistanceM float64      `json:"distanceM"`
+		AscentM   float64      `json:"ascentM"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
@@ -135,6 +137,35 @@ func TestRouteBuilderPreviewSnapsWaypoints(t *testing.T) {
 	}
 	if out.DistanceM <= 0 {
 		t.Errorf("distanceM = %v, want a positive distance", out.DistanceM)
+	}
+}
+
+// The elevation ORSClient.Route/RoundTrip already asks the routing engine
+// for on the same request must reach the preview response as ascentM — see
+// coordsDistanceAscent, which derives it from gpx.ComputeStats rather than a
+// second elevation lookup.
+func TestRouteBuilderPreviewIncludesAscent(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{
+			{Lat: 50.85, Lon: 4.35, Ele: 100, HasEle: true},
+			{Lat: 50.86, Lon: 4.36, Ele: 150, HasEle: true},
+			{Lat: 50.87, Lon: 4.37, Ele: 120, HasEle: true},
+		},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/preview", map[string]any{
+		"waypoints": []map[string]float64{{"lat": 50.85, "lon": 4.35}, {"lat": 50.87, "lon": 4.37}},
+	})
+	defer resp.Body.Close()
+
+	var out struct {
+		AscentM float64 `json:"ascentM"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.AscentM != 50 {
+		t.Errorf("ascentM = %v, want 50 (100 -> 150, the only climb)", out.AscentM)
 	}
 }
 
@@ -469,5 +500,115 @@ func TestRouteBuilderSuggestFailsWhenEverySeedFails(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d when every seed fails", resp.StatusCode, http.StatusBadGateway)
+	}
+}
+
+// fakeGeocoder substitutes for a real Nominatim instance in tests, the same
+// reason stubRoutingClient substitutes for a real ORS one.
+type fakeGeocoder struct {
+	results []geocoding.Result
+	err     error
+}
+
+func (f fakeGeocoder) Search(context.Context, string) ([]geocoding.Result, error) {
+	return f.results, f.err
+}
+
+func newGeocodeHarness(t *testing.T, geocoder geocoding.Client) (client *http.Client, base string) {
+	t.Helper()
+
+	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	st, err := state.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct, err := accounts.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &api.Server{
+		Source:   db,
+		Store:    st,
+		Accounts: acct,
+		Config:   &config.Config{},
+		Geocoder: geocoder,
+	}
+
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(server.Close)
+	return server.Client(), server.URL
+}
+
+func TestGeocodeSearchReturnsResults(t *testing.T) {
+	client, base := newGeocodeHarness(t, fakeGeocoder{
+		results: []geocoding.Result{{Name: "Brussels, Belgium", Lat: 50.85, Lon: 4.35}},
+	})
+
+	resp, err := client.Get(base + "/api/geocode?q=Brussels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var out struct {
+		Results []struct {
+			Name string  `json:"name"`
+			Lat  float64 `json:"lat"`
+			Lon  float64 `json:"lon"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) != 1 || out.Results[0].Name != "Brussels, Belgium" {
+		t.Errorf("results = %+v, want one Brussels result", out.Results)
+	}
+}
+
+func TestGeocodeSearchRejectsAnEmptyQuery(t *testing.T) {
+	client, base := newGeocodeHarness(t, fakeGeocoder{})
+
+	resp, err := client.Get(base + "/api/geocode?q=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d for an empty query", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestGeocodeSearchRequiresAGeocoder(t *testing.T) {
+	client, base := newGeocodeHarness(t, nil)
+
+	resp, err := client.Get(base + "/api/geocode?q=Brussels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotImplemented)
+	}
+}
+
+func TestGeocodeSearchFailurePropagatesAsBadGateway(t *testing.T) {
+	client, base := newGeocodeHarness(t, fakeGeocoder{err: errors.New("nominatim unreachable")})
+
+	resp, err := client.Get(base + "/api/geocode?q=Brussels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadGateway)
 	}
 }
