@@ -33,7 +33,9 @@ import type {
   Ride,
   UpcomingRide,
   Route,
+  RouteBuilderCandidate,
   RouteBuilderPreview,
+  RouteBuilderSuggestRequest,
   RouteDuplicateGroup,
   RouteShare,
   RouteShareTTLDays,
@@ -345,6 +347,15 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ waypoints, profile }),
+    }),
+
+  /** Three round-trip loop candidates from one starting point — the
+   *  suggested route builder. Same 412 gate as routeBuilderPreview above. */
+  routeBuilderSuggest: (req: RouteBuilderSuggestRequest) =>
+    request<{ candidates: RouteBuilderCandidate[] }>('/api/routebuilder/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
     }),
 
   /** Where every route-builder tab's final pick lands — see

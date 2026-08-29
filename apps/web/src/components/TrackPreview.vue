@@ -3,6 +3,13 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import { useColorMode } from '@/color-mode'
 import { api, encodeSlug } from '@/api/client'
 import { fetchBasemapLayers, ROAD_WIDTH, type BasemapLayers } from '@/utils/staticBasemap'
+import {
+  PREVIEW_HEIGHT,
+  PREVIEW_WIDTH,
+  projectRoute,
+  routePath,
+  routeStart,
+} from '@/utils/routeProjection'
 
 const props = defineProps<{ slug: string }>()
 
@@ -60,10 +67,6 @@ function onImageError() {
   load()
   loadBackground()
 }
-
-const WIDTH = 320
-const HEIGHT = 160
-const PADDING = 10
 
 // A resolver for "this load cycle's points are in" — loadBackground's own
 // fallback (below) needs a local projection, but the two fetches otherwise
@@ -134,74 +137,20 @@ watch(
   },
 )
 
-/**
- * Projects lat/lon onto the viewbox. Longitude is scaled by cos(latitude) so a
- * route does not look stretched east-west — at Belgian latitudes a degree of
- * longitude is only ~63% of a degree of latitude.
- *
- * Shared by the route line and the basemap wash below (via project()) so
- * both ever use exactly one frame — computing this twice, even correctly,
- * would risk the two drifting apart pixel-for-pixel.
- */
-const projection = computed(() => {
-  if (points.value.length < 2) return null
-
-  const lats = points.value.map((p) => p[0])
-  const midLat = (Math.min(...lats) + Math.max(...lats)) / 2
-  const lonScale = Math.cos((midLat * Math.PI) / 180)
-
-  const xs = points.value.map((p) => p[1] * lonScale)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...lats)
-  const maxY = Math.max(...lats)
-
-  const spanX = maxX - minX || 1e-9
-  const spanY = maxY - minY || 1e-9
-  // One scale for both axes keeps the aspect ratio honest.
-  const scale = Math.min((WIDTH - 2 * PADDING) / spanX, (HEIGHT - 2 * PADDING) / spanY)
-  const offsetX = (WIDTH - spanX * scale) / 2
-  const offsetY = (HEIGHT - spanY * scale) / 2
-
-  return {
-    project(lat: number, lon: number) {
-      return {
-        x: offsetX + (lon * lonScale - minX) * scale,
-        // SVG y grows downward; latitude grows north, so flip it.
-        y: HEIGHT - offsetY - (lat - minY) * scale,
-      }
-    },
-    // The lat/lon visible at the *card's own edges*, not just the route's
-    // own tight bounding box — a route whose aspect ratio doesn't match the
-    // 2:1 card gets letterboxed by the scale/offset above, and fetching only
-    // the route's own bbox left that letterboxed margin with no background
-    // at all. Inverting project() at the four corners (x=0/WIDTH, y=0/HEIGHT)
-    // gives the actual visible extent, so the wash fills the whole card
-    // regardless of the route's shape.
-    bbox: {
-      west: (-offsetX / scale + minX) / lonScale,
-      east: ((WIDTH - offsetX) / scale + minX) / lonScale,
-      south: minY - offsetY / scale,
-      north: minY + (HEIGHT - offsetY) / scale,
-    },
-  }
-})
+// Shared with RouteCandidatePreview.vue — see utils/routeProjection's own
+// doc comment for why this used to be duplicated here.
+//
+// Shared by the route line and the basemap wash below (via project()) so
+// both ever use exactly one frame — computing this twice, even correctly,
+// would risk the two drifting apart pixel-for-pixel.
+const projection = computed(() => projectRoute(points.value))
 
 const path = computed(() => {
   const proj = projection.value
-  if (!proj) return ''
-  return points.value
-    .map((point, index) => {
-      const { x, y } = proj.project(point[0], point[1])
-      return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
-    })
-    .join(' ')
+  return proj ? routePath(points.value, proj) : ''
 })
 
-const start = computed(() => {
-  const match = path.value.match(/^M([\d.]+) ([\d.]+)/)
-  return match ? { x: Number(match[1]), y: Number(match[2]) } : null
-})
+const start = computed(() => routeStart(path.value))
 
 /**
  * A land/water wash behind the route line — vector tiles decoded directly
@@ -252,21 +201,12 @@ async function loadBackground() {
   }
 }
 
-function pointsToPath(points: [number, number][], proj: NonNullable<typeof projection.value>) {
-  return points
-    .map(([lat, lon], i) => {
-      const { x, y } = proj.project(lat, lon)
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
-    })
-    .join(' ')
-}
-
 function ringsToPath(
   rings: [number, number][][],
   proj: NonNullable<typeof projection.value>,
   closed: boolean,
 ) {
-  return rings.map((ring) => pointsToPath(ring, proj) + (closed ? ' Z' : '')).join(' ')
+  return rings.map((ring) => routePath(ring, proj) + (closed ? ' Z' : '')).join(' ')
 }
 
 const earthPath = computed(() => {
@@ -289,7 +229,7 @@ const roadPaths = computed(() => {
   const proj = projection.value
   if (!proj) return []
   return background.value.roads.map((road) => ({
-    d: pointsToPath(road.points, proj),
+    d: routePath(road.points, proj),
     width: ROAD_WIDTH[road.kind],
   }))
 })
@@ -318,7 +258,7 @@ const roadPaths = computed(() => {
 
       <svg
         v-else-if="path"
-        :viewBox="`0 0 ${WIDTH} ${HEIGHT}`"
+        :viewBox="`0 0 ${PREVIEW_WIDTH} ${PREVIEW_HEIGHT}`"
         class="size-full"
         role="img"
         :aria-label="`Route shape for ${slug}`"

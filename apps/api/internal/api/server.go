@@ -270,6 +270,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/routes", s.handleUpload)
 	mux.HandleFunc("POST /api/routes/from-points", s.handleCreateRouteFromPoints)
 	mux.HandleFunc("POST /api/routebuilder/preview", s.handleRouteBuilderPreview)
+	mux.HandleFunc("POST /api/routebuilder/suggest", s.handleRouteBuilderSuggest)
 	mux.HandleFunc("PATCH /api/routes/{slug...}", s.handleUpdate)
 	// {slug}, not {slug...}: a "...to end of path" wildcard must be the
 	// pattern's final segment in Go's ServeMux, and this one isn't — a
@@ -2063,6 +2064,15 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	coords, distance := coordsAndDistance(points)
+	writeJSON(w, http.StatusOK, map[string]any{"points": coords, "distanceM": distance})
+}
+
+// coordsAndDistance renders a routing engine's own []gpx.Point result as the
+// [lat,lon] pairs plus total distance every route-builder response (a
+// preview, a suggestion candidate) shares — the same [lat,lon] convention
+// handleTrack's own coords already use.
+func coordsAndDistance(points []gpx.Point) ([][2]float64, float64) {
 	coords := make([][2]float64, len(points))
 	var distance float64
 	for i, p := range points {
@@ -2071,7 +2081,104 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 			distance += gpx.DistanceM(points[i-1], p)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"points": coords, "distanceM": distance})
+	return coords, distance
+}
+
+// suggestSeeds are fixed rather than random: three distinct, reproducible
+// seeds are enough to get genuinely different loop shapes out of a
+// round-trip routing algorithm, and fixing them keeps this endpoint
+// deterministic for a given routing engine — nothing about "which three
+// loops" needs to vary run to run.
+var suggestSeeds = [3]int{1, 2, 3}
+
+// maxSuggestDistanceKm bounds handleRouteBuilderSuggest's own distanceKm —
+// same reasoning as maxRouteBuilderWaypoints: nothing otherwise stopped a
+// single request from asking the routing engine to resolve an absurd
+// round-trip length.
+const maxSuggestDistanceKm = 300
+
+type routeBuilderCandidate struct {
+	Points    [][2]float64 `json:"points"`
+	DistanceM float64      `json:"distanceM"`
+}
+
+// handleRouteBuilderSuggest generates a handful of round-trip loop
+// candidates from one starting point — the suggested route builder. Three
+// separate routing-engine calls, not one call for three results: ORS's own
+// round_trip option answers one loop per request, seeded so three calls
+// vary rather than repeat.
+func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermUploadRoute) {
+		return
+	}
+
+	rider := auth.FromContext(r.Context()).User
+
+	if s.Routing == nil {
+		s.logger().Warn("route builder suggestion requested but no routing engine is configured",
+			"by", rider)
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no routing engine configured",
+		})
+		return
+	}
+
+	if !s.rateLimitRouteBuilder(w, rider) {
+		return
+	}
+
+	var body struct {
+		Start      routeBuilderWaypoint `json:"start"`
+		DistanceKm float64              `json:"distanceKm"`
+		Profile    string               `json:"profile"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if body.DistanceKm <= 0 || body.DistanceKm > maxSuggestDistanceKm {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("distanceKm must be between 0 and %d", maxSuggestDistanceKm),
+		})
+		return
+	}
+	if !validRoutingProfile(body.Profile) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported profile"})
+		return
+	}
+
+	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
+	var candidates []routeBuilderCandidate
+	var lastErr error
+	for _, seed := range suggestSeeds {
+		points, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
+		if err != nil {
+			// One bad candidate doesn't sink the other two — the same "one
+			// bad route never aborts a run" principle AGENTS.md states for
+			// the library as a whole, applied here to a single request's
+			// three sub-calls: a routing engine that stumbles on one seed
+			// usually still has something to offer for the other two. Still
+			// worth a Warn (the request itself keeps going) and the shared
+			// error metric, so an operator sees an engine that is
+			// intermittently flaky even on requests that otherwise succeed.
+			s.logger().Warn("route builder suggestion seed failed", "seed", seed, "err", err, "by", rider)
+			recordRouteBuilderError(r.Context(), "suggest")
+			lastErr = err
+			continue
+		}
+		coords, distance := coordsAndDistance(points)
+		candidates = append(candidates, routeBuilderCandidate{Points: coords, DistanceM: distance})
+	}
+	if len(candidates) == 0 {
+		// Unlike a partial failure above, the request itself fails here —
+		// Error, not Warn, per the same "does the request still succeed"
+		// test AGENTS.md's own observability checklist uses.
+		s.logger().Error("route builder suggestion failed for every seed", "err", lastErr, "by", rider)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastErr.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
 }
 
 // handleCreateRouteFromPoints is where every route-builder tab's final pick

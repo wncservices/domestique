@@ -5,6 +5,16 @@ import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
 import type { Map as MapLibreMap, Marker } from 'maplibre-gl'
 
+const props = defineProps<{
+  /** Switches the map's click behaviour from "append a drawn waypoint" to
+   *  "place (or move) a single start-point marker" — the suggested
+   *  builder's own tab shares this same map component rather than a second
+   *  copy of the maplibre init/resize/theme boilerplate. Drawn waypoints
+   *  and lines from the Draw tab stay visible underneath; only what a
+   *  click *does* changes. */
+  pickStart?: boolean
+}>()
+
 const emit = defineEmits<{
   /** The manual builder's current, unsaved preview — empty/zero once fewer
    *  than two waypoints remain. Null means "still waiting on the routing
@@ -16,6 +26,8 @@ const emit = defineEmits<{
    *  update:preview, since a 2-waypoint route can easily snap to dozens of
    *  points. */
   'update:waypointCount': [count: number]
+  /** Fires only in pickStart mode, once per click. */
+  'update:start': [point: { lat: number; lon: number }]
   error: [message: string]
 }>()
 
@@ -42,6 +54,9 @@ const SNAPPED_SOURCE_ID = 'builder-snapped'
 // instances kept in lockstep, index for index.
 let waypoints: { lat: number; lon: number }[] = []
 let markers: Marker[] = []
+// The suggested builder's own single start-point marker — independent of
+// waypoints/markers above, since pickStart mode never draws or snaps a path.
+let startMarker: Marker | null = null
 // The last successful snap, kept around so a theme swap (which tears down
 // every custom source/layer) can redraw it immediately rather than leaving
 // the solid line blank until the next edit triggers a fresh request.
@@ -168,7 +183,40 @@ function clearAll() {
   schedulePreview()
 }
 
-defineExpose({ undoLast, clearAll })
+function setStartMarker(lat: number, lon: number) {
+  if (!map || !maplibregl) return
+  if (startMarker) {
+    startMarker.setLngLat([lon, lat])
+  } else {
+    startMarker = new maplibregl.Marker({ color: markerColor() }).setLngLat([lon, lat]).addTo(map)
+  }
+}
+
+function clearStart() {
+  startMarker?.remove()
+  startMarker = null
+}
+
+defineExpose({ undoLast, clearAll, clearStart })
+
+// Hides the Draw tab's own lines and markers while pickStart is active —
+// both sets of pins on screen at once (drawn waypoints *and* a start
+// marker) read as two unrelated things happening, when only one is. Drawn
+// state itself is untouched, just not shown; switching back to Draw
+// restores it exactly as it was.
+function setDrawVisible(visible: boolean) {
+  if (!map) return
+  const visibility = visible ? 'visible' : 'none'
+  for (const id of [DRAFT_SOURCE_ID, SNAPPED_SOURCE_ID]) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility)
+  }
+  for (const m of markers) m.getElement().style.display = visible ? '' : 'none'
+}
+
+watch(
+  () => props.pickStart,
+  (pickStart) => setDrawVisible(!pickStart),
+)
 
 function addRouteBuilderLayers() {
   if (!map) return
@@ -200,6 +248,7 @@ function addRouteBuilderLayers() {
   // handler per theme toggle.
   setDraftLine()
   setSnappedLine(lastSnappedPoints)
+  setDrawVisible(!props.pickStart)
 }
 
 async function init() {
@@ -219,6 +268,11 @@ async function init() {
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
   instance.on('load', addRouteBuilderLayers)
   instance.on('click', (e) => {
+    if (props.pickStart) {
+      setStartMarker(e.lngLat.lat, e.lngLat.lng)
+      emit('update:start', { lat: e.lngLat.lat, lon: e.lngLat.lng })
+      return
+    }
     waypoints.push({ lat: e.lngLat.lat, lon: e.lngLat.lng })
     addMarker(waypoints.length - 1)
     emit('update:waypointCount', waypoints.length)
@@ -235,6 +289,7 @@ onBeforeUnmount(() => {
   if (debounceHandle) clearTimeout(debounceHandle)
   resizeObserver?.disconnect()
   for (const m of markers) m.remove()
+  startMarker?.remove()
   map?.remove()
   map = null
 })
