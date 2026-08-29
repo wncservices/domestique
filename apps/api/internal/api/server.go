@@ -2172,21 +2172,38 @@ func summarizePath(path routing.Path) pathSummary {
 	}
 }
 
-// suggestSeeds returns three distinct seeds for one suggest request — a
-// fresh random base each call, not a fixed set, so pressing "Generate 3
-// options" again with the same start and distance shows genuinely
-// different loops instead of the exact same three every time (ORS's own
-// round_trip algorithm is otherwise deterministic per seed, so a fixed set
-// would repeat forever). +1/+2/+3 offsets from that base, rather than three
-// independently random values, is what still guarantees three distinct
-// shapes within a single request without any collision-checking.
-func suggestSeeds() [3]int {
+// suggestSeedBase returns a fresh random base for one suggest request — not
+// a fixed value, so pressing "Generate 3 options" again with the same start
+// and distance shows genuinely different loops instead of the exact same
+// three every time (ORS's own round_trip algorithm is otherwise
+// deterministic per seed). Individual attempts use base+1, base+2, ... —
+// sequential offsets, not independently random values, so a single request
+// still gets distinct shapes without any collision-checking, and a retry
+// past a seed ORS couldn't route (see maxSuggestAttempts) just continues
+// the same sequence rather than needing separate bookkeeping.
+func suggestSeedBase() int {
 	// #nosec G404 -- picking which loop *shape* a rider sees, not a secret
 	// or anything an attacker gains from predicting; math/rand/v2 is the
 	// right tool for cosmetic variety, crypto/rand's cost buys nothing here.
-	base := rand.IntN(1_000_000)
-	return [3]int{base + 1, base + 2, base + 3}
+	return rand.IntN(1_000_000)
 }
+
+// maxSuggestAttempts bounds how many seeds one suggest request will try
+// while looking for 3 candidates. ORS's own round_trip algorithm can pick a
+// seed that lands its loop on a genuinely unroutable point (found live: a
+// real 404 "Unable to find a route for point (...)" for one seed in three,
+// the other two routing fine) — that used to just mean 2 candidates instead
+// of 3 for that request. A few extra attempts past 3 let a bad seed get
+// silently replaced rather than shown as a rider-visible shortfall, while
+// still bounding how many routing-engine calls one request can spend
+// chasing a third candidate that may never come (an unlucky start point
+// with very little rideable loop nearby, say).
+const maxSuggestAttempts = 6
+
+// suggestCandidateCount is how many loop options "Generate 3 options"
+// promises — named rather than a repeated literal 3, since both the retry
+// loop and its own shortfall log line need to agree on the target.
+const suggestCandidateCount = 3
 
 // maxSuggestDistanceKm bounds handleRouteBuilderSuggest's own distanceKm —
 // same reasoning as maxRouteBuilderWaypoints: nothing otherwise stopped a
@@ -2248,19 +2265,24 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	}
 
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
+	base := suggestSeedBase()
 	var candidates []routeBuilderCandidate
 	var lastErr error
-	for _, seed := range suggestSeeds() {
+	var attempted int
+	for attempt := 1; len(candidates) < suggestCandidateCount && attempt <= maxSuggestAttempts; attempt++ {
+		attempted++
+		seed := base + attempt
 		path, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
 		if err != nil {
-			// One bad candidate doesn't sink the other two — the same "one
-			// bad route never aborts a run" principle AGENTS.md states for
-			// the library as a whole, applied here to a single request's
-			// three sub-calls: a routing engine that stumbles on one seed
-			// usually still has something to offer for the other two. Still
-			// worth a Warn (the request itself keeps going) and the shared
-			// error metric, so an operator sees an engine that is
-			// intermittently flaky even on requests that otherwise succeed.
+			// One bad seed doesn't sink the request — the same "one bad
+			// route never aborts a run" principle AGENTS.md states for the
+			// library as a whole. It also no longer even costs a candidate:
+			// the loop just keeps going (maxSuggestAttempts allowing), so a
+			// seed ORS couldn't route gets replaced rather than shown as a
+			// rider-visible shortfall. Still worth a Warn (the request
+			// itself keeps going) and the shared error metric, so an
+			// operator sees an engine that is intermittently flaky even on
+			// requests that otherwise succeed.
 			s.logger().Warn("route builder suggestion seed failed", "seed", seed, "err", err, "by", rider)
 			recordRouteBuilderError(r.Context(), "suggest")
 			lastErr = err
@@ -2279,9 +2301,18 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		// Unlike a partial failure above, the request itself fails here —
 		// Error, not Warn, per the same "does the request still succeed"
 		// test AGENTS.md's own observability checklist uses.
-		s.logger().Error("route builder suggestion failed for every seed", "err", lastErr, "by", rider)
+		s.logger().Error("route builder suggestion failed for every seed", "attempts", attempted, "err", lastErr, "by", rider)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastErr.Error()})
 		return
+	}
+	if len(candidates) < suggestCandidateCount {
+		// The retry budget ran out before reaching 3 — a genuinely unlucky
+		// start point (very little rideable loop nearby at this distance),
+		// not a routing engine that's down. Still Warn, not Error: the
+		// request itself succeeds and returns whatever it found, same
+		// "does the request still succeed" test as above.
+		s.logger().Warn("route builder suggestion returned fewer than requested after exhausting retries",
+			"got", len(candidates), "want", suggestCandidateCount, "attempts", attempted, "by", rider)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
