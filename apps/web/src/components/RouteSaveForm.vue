@@ -13,6 +13,13 @@ const emit = defineEmits<{ saved: [] }>()
 
 const toast = useToast()
 
+// A modal rather than fields sitting inline under every preview/candidate —
+// the same reasoning ShareRouteDialog.vue's own comment gives for linking a
+// head unit or sharing a route: naming and saving is a one-off action at
+// the very end, not something worth permanent screen space while a rider
+// is still drawing or comparing candidates.
+const open = ref(false)
+
 const name = ref('')
 const description = ref('')
 const tags = ref('')
@@ -27,6 +34,7 @@ const sportOptions: { label: string; value: Sport }[] = [
 const canSave = computed(() => !busy.value && !!name.value.trim() && props.points.length >= 2)
 
 function reset() {
+  open.value = false
   name.value = ''
   description.value = ''
   tags.value = ''
@@ -71,25 +79,38 @@ async function submit() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-3">
-    <div class="grid gap-3">
-      <UFormField label="Name">
-        <UInput v-model="name" placeholder="Kemmelberg Loop" class="w-full" />
-      </UFormField>
-      <UFormField label="Description">
-        <UInput v-model="description" placeholder="Optional" class="w-full" />
-      </UFormField>
-      <UFormField label="Tags" hint="comma separated">
-        <UInput v-model="tags" placeholder="gravel, hills" class="w-full" />
-      </UFormField>
-      <UFormField label="Sport">
-        <USelect v-model="sport" :items="sportOptions" class="w-full" />
-      </UFormField>
-    </div>
-    <div class="flex justify-end">
-      <UButton icon="i-lucide-route" :loading="busy" :disabled="!canSave" @click="submit">
-        Save route
-      </UButton>
-    </div>
+  <div>
+    <UButton icon="i-lucide-route" :disabled="points.length < 2" @click="open = true">
+      Save route
+    </UButton>
+
+    <UModal v-model:open="open" title="Save this route" :ui="{ content: 'sm:max-w-md' }">
+      <template #body>
+        <div class="grid gap-3">
+          <UFormField label="Name">
+            <UInput v-model="name" placeholder="Kemmelberg Loop" class="w-full" autofocus />
+          </UFormField>
+          <UFormField label="Description">
+            <UInput v-model="description" placeholder="Optional" class="w-full" />
+          </UFormField>
+          <UFormField label="Tags" hint="comma separated">
+            <UInput v-model="tags" placeholder="gravel, hills" class="w-full" />
+          </UFormField>
+          <UFormField label="Sport">
+            <USelect v-model="sport" :items="sportOptions" class="w-full" />
+          </UFormField>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="busy" @click="open = false">
+            Cancel
+          </UButton>
+          <UButton icon="i-lucide-route" :loading="busy" :disabled="!canSave" @click="submit">
+            Save route
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

@@ -601,10 +601,12 @@ func TestSuggestSeedsVaryBetweenRequests(t *testing.T) {
 	}
 }
 
-// A routing engine stumbling on one seed shouldn't sink the other two — see
-// AGENTS.md's "one bad route never aborts a run," applied here to a single
-// request's three sub-calls.
-func TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed(t *testing.T) {
+// A routing engine stumbling on one seed shouldn't cost a candidate at all
+// — found live: ORS's own round_trip algorithm can pick a seed that lands
+// on a genuinely unroutable point (a real 404 for one seed in three, the
+// other two fine), which used to just mean 2 candidates shown instead of 3.
+// The retry budget (maxSuggestAttempts) means a rider still gets all 3.
+func TestRouteBuilderSuggestRetriesAFailedSeedToStillReachThreeCandidates(t *testing.T) {
 	var calls atomic.Int32
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route:        []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
@@ -627,8 +629,42 @@ func TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Candidates) != 2 {
-		t.Fatalf("got %d candidates, want 2 (one of three seeds was made to fail)", len(out.Candidates))
+	if len(out.Candidates) != 3 {
+		t.Fatalf("got %d candidates, want 3 (the failed 2nd seed should have been retried)", len(out.Candidates))
+	}
+	if got := calls.Load(); got != 4 {
+		t.Errorf("routing engine was called %d times, want 4 (3 successes + the 1 retried failure)", got)
+	}
+}
+
+// A genuinely unlucky start point (very little rideable loop nearby at this
+// distance) shouldn't retry forever — once maxSuggestAttempts is exhausted,
+// the request still succeeds with whatever it found, same "one bad route
+// never aborts a run" shape, just fewer than 3.
+func TestRouteBuilderSuggestReturnsPartialWhenRetriesExhausted(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route:        []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		failCallNums: map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true},
+		callCount:    &atomic.Int32{},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — the request itself still succeeds", resp.StatusCode)
+	}
+
+	var out struct {
+		Candidates []struct{} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Candidates) != 1 {
+		t.Fatalf("got %d candidates, want 1 (only the 6th and final attempt succeeded)", len(out.Candidates))
 	}
 }
 
