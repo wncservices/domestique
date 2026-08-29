@@ -19,6 +19,32 @@ interface Peak {
   y: number
 }
 
+interface Segment {
+  lineD: string
+  areaD: string
+  color: string
+}
+
+// Climb-gradient colour scale — the same green→red-by-steepness convention
+// Strava/RideWithGPS use, so "red" reads as "steep" without an explicit
+// legend. Fixed hues rather than theme tokens on purpose: unlike the app's
+// own accent colours, these carry a universal meaning (steep = hot) that
+// shouldn't shift with light/dark mode.
+const GRADIENT_BANDS: [threshold: number, color: string][] = [
+  [0, '#38bdf8'], // descending — cool blue, "not climbing"
+  [3, '#4ade80'], // 0-3%: easy
+  [6, '#eab308'], // 3-6%: moderate
+  [9, '#f97316'], // 6-9%: steep
+  [12, '#ef4444'], // 9-12%: very steep
+  [Infinity, '#991b1b'], // 12%+: extreme
+]
+function gradientColor(pct: number): string {
+  for (const [threshold, color] of GRADIENT_BANDS) {
+    if (pct < threshold) return color
+  }
+  return GRADIENT_BANDS[GRADIENT_BANDS.length - 1][1]
+}
+
 // A route builder result's own elevation-over-distance profile — distinct
 // from RouteCandidatePreview's shape (a top-down line), this is a strip
 // chart: x is cumulative distance, y is height. Null below two points
@@ -42,11 +68,29 @@ const chart = computed(() => {
   const xs = pts.map((p) => x(p.distanceM))
   const ys = pts.map((p) => y(p.eleM))
 
-  const line = pts.map((_, i) => `${i === 0 ? 'M' : 'L'}${xs[i].toFixed(1)} ${ys[i].toFixed(1)}`).join(' ')
-  // The line, closed down to the axis and back to the start — the filled
-  // area under it, so the profile reads as "ground" rather than a bare
-  // squiggle.
-  const area = `${line} L${xs[xs.length - 1].toFixed(1)} ${HEIGHT} L${xs[0].toFixed(1)} ${HEIGHT} Z`
+  // One coloured segment per consecutive point pair, rather than a single
+  // flat-coloured line — each segment's own colour comes from its local
+  // gradient (rise/run as a %), so the profile reads as a climb-severity
+  // map at a glance instead of a plain height squiggle. Both the stroke and
+  // its own patch of the area fill share the colour, so the fill reinforces
+  // the line rather than diluting it.
+  const segments: Segment[] = []
+  const gradients: number[] = []
+  for (let i = 0; i < pts.length - 1; i++) {
+    const runM = pts[i + 1].distanceM - pts[i].distanceM
+    const riseM = pts[i + 1].eleM - pts[i].eleM
+    const gradientPct = runM > 0 ? (riseM / runM) * 100 : 0
+    gradients.push(gradientPct)
+    const x1 = xs[i].toFixed(1)
+    const y1 = ys[i].toFixed(1)
+    const x2 = xs[i + 1].toFixed(1)
+    const y2 = ys[i + 1].toFixed(1)
+    segments.push({
+      lineD: `M${x1} ${y1} L${x2} ${y2}`,
+      areaD: `M${x1} ${y1} L${x2} ${y2} L${x2} ${HEIGHT} L${x1} ${HEIGHT} Z`,
+      color: gradientColor(gradientPct),
+    })
+  }
 
   // Peaks: interior local maxima (a point higher than both neighbours),
   // most-prominent first, kept only if they sit far enough apart on the
@@ -68,8 +112,8 @@ const chart = computed(() => {
   }
 
   return {
-    line,
-    area,
+    segments,
+    gradients,
     xs,
     ys,
     minEle: Math.round(minEle),
@@ -122,7 +166,10 @@ const scrub = computed(() => {
   const i = scrubIndex.value
   if (!c || i === null) return null
   const p = props.points[i]
-  return { x: c.xs[i], y: c.ys[i], distanceM: p.distanceM, eleM: p.eleM }
+  // The gradient of the road right after this point — or, at the very last
+  // point, the segment just before it, since there's nothing after to read.
+  const gradientPct = c.gradients[i] ?? c.gradients[i - 1] ?? 0
+  return { x: c.xs[i], y: c.ys[i], distanceM: p.distanceM, eleM: p.eleM, gradientPct }
 })
 
 // The tooltip pill's own position — clamped so it stays fully inside the
@@ -150,17 +197,25 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
     >
       <line x1="0" :y1="HEIGHT - 0.5" :x2="WIDTH" :y2="HEIGHT - 0.5" stroke="currentColor" class="text-dimmed" stroke-width="1" />
 
-      <!-- Deliberately not .track-line's own --ui-primary — SurfaceBreakdown's
-           "paved" segment already uses that same accent for its bar, and a
-           height chart drawn in the identical colour right next to it reads
-           as though the two are the same measurement. --app-accent-sky is
-           this app's own existing colour for height (App.vue's Ascent stat
-           tile uses it too), and is visually distinct from every colour
-           SurfaceBreakdown's bar can show. -->
-      <path :d="chart.area" fill="var(--app-accent-sky)" fill-opacity="0.15" stroke="none" />
+      <!-- One path per segment, each in its own gradient-severity colour
+           (green = easy, red = steep, blue = descending) rather than a
+           single flat tone — SurfaceBreakdown's bar already owns "what the
+           ground is made of"; this is "how hard the climb is" instead, so a
+           deliberately different colour language (heat scale, not a theme
+           accent) rather than yet another flat --app-accent-*. -->
       <path
-        :d="chart.line"
-        stroke="var(--app-accent-sky)"
+        v-for="(seg, i) in chart.segments"
+        :key="`area-${i}`"
+        :d="seg.areaD"
+        :fill="seg.color"
+        fill-opacity="0.2"
+        stroke="none"
+      />
+      <path
+        v-for="(seg, i) in chart.segments"
+        :key="`line-${i}`"
+        :d="seg.lineD"
+        :stroke="seg.color"
         fill="none"
         stroke-width="1.5"
         stroke-linecap="round"
@@ -171,7 +226,7 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
       <text x="2" :y="HEIGHT - 3" font-size="8" fill="currentColor" class="text-dimmed">{{ chart.minEle }} m</text>
 
       <g v-for="(peak, i) in chart.peaks" :key="i">
-        <circle :cx="peak.x" :cy="peak.y" r="2" fill="var(--app-accent-sky)" />
+        <circle :cx="peak.x" :cy="peak.y" r="2" fill="currentColor" stroke="var(--ui-bg)" stroke-width="1" class="text-highlighted" />
         <text
           :x="Math.min(Math.max(peak.x, 24), WIDTH - 24)"
           y="10"
@@ -195,17 +250,18 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
           stroke-dasharray="2,2"
           class="text-dimmed"
         />
-        <circle :cx="scrub.x" :cy="scrub.y" r="3" fill="var(--app-accent-sky)" stroke="var(--ui-bg)" stroke-width="1.5" />
+        <circle :cx="scrub.x" :cy="scrub.y" r="3" fill="currentColor" stroke="var(--ui-bg)" stroke-width="1.5" class="text-highlighted" />
 
         <!-- The tooltip itself: a small pill that follows the scrub point,
              clamped to stay inside the chart — the "need a tooltip" ask,
              replacing what used to be a static readout below the chart
              that was easy to miss and disconnected from the point it
-             described. -->
+             described. Now also carries the local gradient %, the same
+             figure the segment colour under the point is encoding. -->
         <g :transform="`translate(${tooltipX}, ${tooltipY})`">
-          <rect x="-30" y="-11" width="60" height="14" rx="3" fill="var(--ui-bg)" stroke="var(--ui-border)" stroke-width="0.75" />
+          <rect x="-38" y="-11" width="76" height="14" rx="3" fill="var(--ui-bg)" stroke="var(--ui-border)" stroke-width="0.75" />
           <text text-anchor="middle" y="-1" font-size="7.5" fill="currentColor" class="text-highlighted">
-            {{ (scrub.distanceM / 1000).toFixed(2) }} km · {{ Math.round(scrub.eleM) }} m
+            {{ (scrub.distanceM / 1000).toFixed(2) }} km · {{ Math.round(scrub.eleM) }} m · {{ scrub.gradientPct > 0 ? '+' : '' }}{{ Math.round(scrub.gradientPct) }}%
           </text>
         </g>
       </g>
