@@ -92,8 +92,9 @@ fit:
   domestique fit <slug> [--out FILE] [--cues]
 
   Writes a FIT course, which can be copied straight onto a device over USB.
-  --cues adds turn cues inferred from the track's shape; they are a heuristic,
-  so check them before trusting them on a ride.
+  --cues adds turn cues inferred from the track's shape, and climb category
+  cues inferred from its elevation profile; both are heuristics, so check
+  them before trusting them on a ride.
 
 komoot:
   domestique komoot list             show the account's planned routes
@@ -258,7 +259,7 @@ func runFIT(src *source.DB, args []string, out string, cues bool) error {
 		}
 	}
 
-	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{Name: name, TurnCues: cues})
+	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{Name: name, TurnCues: cues, ClimbCues: cues})
 	if err != nil {
 		return err
 	}
@@ -276,13 +277,14 @@ func runFIT(src *source.DB, args []string, out string, cues bool) error {
 		return err
 	}
 
-	turns := 0
+	turns, climbs := 0, 0
 	if cues {
 		turns = len(fitcourse.Turns(points))
+		climbs = len(fitcourse.Climbs(points))
 	}
 	fmt.Printf("wrote %s (%d bytes, %d points", out, len(fitBytes), len(points))
 	if cues {
-		fmt.Printf(", %d turn cue(s)", turns)
+		fmt.Printf(", %d turn cue(s), %d climb(s)", turns, climbs)
 	}
 	fmt.Println(")")
 	return nil

@@ -1585,10 +1585,12 @@ func (s *Server) handleDownloadFIT(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	cues := r.URL.Query().Get("cues") == "1"
 	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{
-		Name:     name,
-		Sport:    fitcourse.SportFromString(string(sport)),
-		TurnCues: r.URL.Query().Get("cues") == "1",
+		Name:      name,
+		Sport:     fitcourse.SportFromString(string(sport)),
+		TurnCues:  cues,
+		ClimbCues: cues,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -2683,8 +2685,9 @@ func (s *Server) targetFactory() targets.Factory {
 		// worse than none — not something to opt a rider into silently on
 		// every push. The FIT download offers ?cues=1 for anyone who wants
 		// them.
-		TurnCues: false,
-		Log:      s.logger().Warn,
+		TurnCues:  false,
+		ClimbCues: false,
+		Log:       s.logger().Warn,
 	}
 }
 

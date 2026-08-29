@@ -15,8 +15,14 @@
 //	lap           start/end position and total distance, which some devices
 //	              use for the summary screen before you start
 //	record × N    the track itself
-//	course_point  optional turn cues
+//	course_point  optional turn and climb cues
 //
+// Garmin's own ClimbPro screen needs none of this: it detects climbs itself,
+// on the device, straight from the elevation in the record messages above.
+// The climb course_points DeriveClimbs adds are a second, explicit thing —
+// category markers a rider or a non-Garmin device can read directly off the
+// course, the same board-at-the-bottom-of-the-climb cue road racing already
+// uses — not a substitute for ClimbPro and not something ClimbPro reads.
 // The encoding itself is delegated to github.com/muktihari/fit. Hand-rolling a
 // FIT encoder is possible but it is a binary format with definition messages,
 // scaled fields and a CRC — exactly the kind of thing worth taking a
@@ -70,6 +76,13 @@ type Options struct {
 	// Off by default: the cues are inferred, not authored, and a wrong cue at
 	// a junction is worse than no cue at all. See DeriveTurns.
 	TurnCues bool
+	// ClimbCues adds a category marker at the start of each climb the
+	// elevation profile suggests is significant, and a summit marker at its
+	// top. Off by default for the same reason TurnCues is: the category is
+	// inferred from Strava's own length × gradient formula, not authored,
+	// and a wrong one is worse than none. Needs every point to carry
+	// elevation, or it finds nothing. See DeriveClimbs.
+	ClimbCues bool
 	// CreatedAt stamps the file. Zero uses the current time.
 	CreatedAt time.Time
 }
@@ -148,6 +161,26 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 					SetDistanceScaled(distances[turn.Index]).
 					SetType(turn.Type).
 					SetName(turn.Name))
+		}
+	}
+
+	if opts.ClimbCues {
+		for _, climb := range DeriveClimbs(points, distances) {
+			course.CoursePoints = append(course.CoursePoints,
+				mesgdef.NewCoursePoint(nil).
+					SetTimestamp(timeAt(climb.StartIndex)).
+					SetPositionLatDegrees(points[climb.StartIndex].Lat).
+					SetPositionLongDegrees(points[climb.StartIndex].Lon).
+					SetDistanceScaled(distances[climb.StartIndex]).
+					SetType(climb.Category).
+					SetName(climb.Name),
+				mesgdef.NewCoursePoint(nil).
+					SetTimestamp(timeAt(climb.SummitIndex)).
+					SetPositionLatDegrees(points[climb.SummitIndex].Lat).
+					SetPositionLongDegrees(points[climb.SummitIndex].Lon).
+					SetDistanceScaled(distances[climb.SummitIndex]).
+					SetType(typedef.CoursePointSummit).
+					SetName("Summit"))
 		}
 	}
 
@@ -377,6 +410,204 @@ func cumulativeDistances(points []gpx.Point) []float64 {
 	out := make([]float64, len(points))
 	for i := 1; i < len(points); i++ {
 		out[i] = out[i-1] + gpx.DistanceM(points[i-1], points[i])
+	}
+	return out
+}
+
+// Climbs infers climb cues for a track, computing the distances itself.
+//
+// Prefer this over DeriveClimbs unless the distances are already to hand:
+// DeriveClimbs indexes the slice it is given, so passing a short or nil one
+// panics.
+func Climbs(points []gpx.Point) []Climb {
+	if len(points) < 3 {
+		return nil
+	}
+	return DeriveClimbs(points, cumulativeDistances(points))
+}
+
+// Climb is a derived climb, categorised the way a race organiser marks one:
+// a category board at the bottom, a summit at the top.
+type Climb struct {
+	StartIndex  int
+	SummitIndex int
+	// Category is one of the typedef.CoursePoint*Category values, or
+	// CoursePointHorsCategory. Never CoursePointSummit — that goes on
+	// SummitIndex, not here.
+	Category typedef.CoursePoint
+	Name     string
+	LengthM  float64
+	GainM    float64
+	// AvgGradient is the average grade over the climb, in percent.
+	AvgGradient float64
+}
+
+// Climb detection and categorisation thresholds.
+//
+// The category score — length in metres times average gradient in percent —
+// is Strava's own formula, chosen because it is the one most cyclists
+// already read their climbs by, not because it is any more correct than the
+// alternatives: the Tour de France's own categorisation is openly
+// discretionary and cannot be reproduced from a GPX file at all.
+const (
+	// climbSmoothRadiusM denoises the elevation profile before grade is
+	// computed from it. Elevation is far noisier than heading — a single bad
+	// GPS or DEM sample reads as a wall — so this is wider than turn
+	// detection's lookaheadM.
+	climbSmoothRadiusM = 50.0
+	// climbMinGradient is the bar for a single (smoothed) point to count as
+	// "climbing" at all.
+	climbMinGradient = 1.5
+	// climbMergeGapM bridges a short false summit or a dip mid-climb — a
+	// switchback rarely descends for long — without splitting one climb into
+	// several. A gap longer than this ends the climb.
+	climbMergeGapM = 200.0
+	// climbMinLengthM and climbMinAvgGradient mirror Garmin ClimbPro's own
+	// published thresholds for what it will show at all, so a climb this
+	// package marks and a climb the device's own ClimbPro screen shows
+	// should agree.
+	climbMinLengthM     = 500.0
+	climbMinAvgGradient = 3.0
+
+	climbCat4Score = 8_000.0
+	climbCat3Score = 16_000.0
+	climbCat2Score = 32_000.0
+	climbCat1Score = 64_000.0
+	climbHCScore   = 80_000.0
+)
+
+// DeriveClimbs infers climb cues from the track's elevation profile.
+//
+// Like DeriveTurns, this is a heuristic and is off by default for it: the
+// category comes from Strava's length × gradient formula applied to
+// whatever elevation the track happens to carry, not from anything that
+// knows the road. A DEM-derived or barometer-smoothed track categorises
+// cleanly; a jittery GPS-altitude track can misjudge a climb's category or
+// miss it entirely.
+//
+// Every point must carry elevation, or this returns nothing — a climb
+// derived from a mix of real and absent elevation would be worse than no
+// climb at all.
+func DeriveClimbs(points []gpx.Point, distances []float64) []Climb {
+	if len(points) < 3 || len(distances) != len(points) {
+		return nil
+	}
+	for _, p := range points {
+		if !p.HasEle {
+			return nil
+		}
+	}
+
+	elev := smoothElevation(points, distances, climbSmoothRadiusM)
+
+	ascending := make([]bool, len(points))
+	for i := 1; i < len(points); i++ {
+		run := distances[i] - distances[i-1]
+		if run <= 0 {
+			continue
+		}
+		grade := (elev[i] - elev[i-1]) / run * 100
+		ascending[i] = grade >= climbMinGradient
+	}
+
+	var climbs []Climb
+	for i := 1; i < len(points); i++ {
+		if !ascending[i] {
+			continue
+		}
+
+		start := i - 1
+		peak := i
+		lastAscendingAt := distances[i]
+
+		j := i + 1
+		for j < len(points) {
+			if elev[j] > elev[peak] {
+				peak = j
+			}
+			if ascending[j] {
+				lastAscendingAt = distances[j]
+			} else if distances[j]-lastAscendingAt > climbMergeGapM {
+				break
+			}
+			j++
+		}
+
+		length := distances[peak] - distances[start]
+		gain := elev[peak] - elev[start]
+		if length >= climbMinLengthM && gain > 0 {
+			avgGradient := gain / length * 100
+			if avgGradient >= climbMinAvgGradient {
+				if cat, ok := climbCategory(length * avgGradient); ok {
+					climbs = append(climbs, Climb{
+						StartIndex:  start,
+						SummitIndex: peak,
+						Category:    cat,
+						Name:        climbName(cat),
+						LengthM:     length,
+						GainM:       gain,
+						AvgGradient: avgGradient,
+					})
+				}
+			}
+		}
+
+		i = j
+	}
+
+	return climbs
+}
+
+func climbCategory(score float64) (typedef.CoursePoint, bool) {
+	switch {
+	case score >= climbHCScore:
+		return typedef.CoursePointHorsCategory, true
+	case score >= climbCat1Score:
+		return typedef.CoursePointFirstCategory, true
+	case score >= climbCat2Score:
+		return typedef.CoursePointSecondCategory, true
+	case score >= climbCat3Score:
+		return typedef.CoursePointThirdCategory, true
+	case score >= climbCat4Score:
+		return typedef.CoursePointFourthCategory, true
+	default:
+		return typedef.CoursePointInvalid, false
+	}
+}
+
+func climbName(cat typedef.CoursePoint) string {
+	switch cat {
+	case typedef.CoursePointHorsCategory:
+		return "HC climb"
+	case typedef.CoursePointFirstCategory:
+		return "Cat 1 climb"
+	case typedef.CoursePointSecondCategory:
+		return "Cat 2 climb"
+	case typedef.CoursePointThirdCategory:
+		return "Cat 3 climb"
+	default:
+		return "Cat 4 climb"
+	}
+}
+
+// smoothElevation averages each point's elevation with its neighbours within
+// radiusM, as a sliding window over cumulative distance. Both window edges
+// move only forward as i increases, so this is one pass over the points
+// rather than one per point.
+func smoothElevation(points []gpx.Point, distances []float64, radiusM float64) []float64 {
+	out := make([]float64, len(points))
+	lo, hi := 0, -1
+	sum := 0.0
+	for i := range points {
+		for hi+1 < len(points) && distances[hi+1]-distances[i] <= radiusM {
+			hi++
+			sum += points[hi].Ele
+		}
+		for distances[i]-distances[lo] > radiusM {
+			sum -= points[lo].Ele
+			lo++
+		}
+		out[i] = sum / float64(hi-lo+1)
 	}
 	return out
 }

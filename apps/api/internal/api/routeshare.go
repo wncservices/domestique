@@ -362,7 +362,8 @@ func (s *Server) handleSharedRouteGPX(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSharedRouteFIT mirrors handleDownloadFIT, scoped through a share —
-// turn cues off by default, the same as the ordinary download.
+// turn and climb cues both off by default, the same as the ordinary
+// download.
 func (s *Server) handleSharedRouteFIT(w http.ResponseWriter, r *http.Request) {
 	_, route, ok := s.resolveShare(w, r)
 	if !ok {
@@ -378,10 +379,12 @@ func (s *Server) handleSharedRouteFIT(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	cues := r.URL.Query().Get("cues") == "1"
 	fitBytes, err := fitcourse.Encode(points, fitcourse.Options{
-		Name:     route.Name,
-		Sport:    fitcourse.SportFromString(string(route.EffectiveSport())),
-		TurnCues: r.URL.Query().Get("cues") == "1",
+		Name:      route.Name,
+		Sport:     fitcourse.SportFromString(string(route.EffectiveSport())),
+		TurnCues:  cues,
+		ClimbCues: cues,
 	})
 	if err != nil {
 		s.fail(w, err)
