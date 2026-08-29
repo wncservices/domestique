@@ -161,6 +161,80 @@ func TestUnsupportedProfileIsRejectedWithoutCallingOut(t *testing.T) {
 	}
 }
 
+// An identical request repeated — the debounced preview firing again for
+// waypoints that did not change, or "Generate 3 options" clicked twice with
+// the same start and distance — must not spend the API key's own quota
+// twice for an answer already in hand.
+func TestIdenticalRouteRequestsAreServedFromCache(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}, {4.37, 50.87}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "test-key")
+	waypoints := []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.87, Lon: 4.37}}
+
+	first, err := c.Route(context.Background(), waypoints, "cycling-road")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.Route(context.Background(), waypoints, "cycling-road")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("routing engine was called %d times for two identical requests, want 1", calls)
+	}
+	if len(second) != len(first) || second[0] != first[0] {
+		t.Errorf("cached response = %v, want the same points as the first call %v", second, first)
+	}
+
+	// A genuinely different request (a moved waypoint) is not the same
+	// question and must not be answered from the first request's cache entry.
+	if _, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 51.0, Lon: 4.5}}, "cycling-road"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("routing engine was called %d times after a genuinely different request, want 2", calls)
+	}
+}
+
+// RoundTrip's seed is part of what a request asks for — two different
+// seeds are two different candidate loops, not a repeat of one question,
+// so caching must not collapse them into the same cached answer.
+func TestDifferentSeedsAreNotCachedTogether(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}, {4.35, 50.85}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	start := LatLng{Lat: 50.85, Lon: 4.35}
+	if _, err := c.RoundTrip(context.Background(), start, 20000, 1, "cycling-road"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RoundTrip(context.Background(), start, 20000, 2, "cycling-road"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("routing engine was called %d times for two different seeds, want 2", calls)
+	}
+
+	// But the same seed again is the same question and should hit the cache.
+	if _, err := c.RoundTrip(context.Background(), start, 20000, 1, "cycling-road"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("routing engine was called %d times after repeating a seed, want still 2", calls)
+	}
+}
+
 func TestValidProfilesAreAccepted(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -97,6 +98,7 @@ type ORSClient struct {
 	url        string
 	apiKey     string
 	httpClient *http.Client
+	cache      *responseCache
 }
 
 // New builds an ORSClient. An empty url falls back to DefaultURL.
@@ -111,7 +113,90 @@ func New(url, apiKey string) *ORSClient {
 			Timeout:   requestTimeout,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		},
+		cache: newResponseCache(),
 	}
+}
+
+// cacheTTL and cacheMaxEntries bound responseCache below. An hour is
+// generous rather than exact: ORS routes the same coordinates against the
+// same road graph, which does not change on human timescales, so nothing is
+// lost by serving a same-input request out of cache well after the request
+// that first computed it.
+const (
+	cacheTTL        = time.Hour
+	cacheMaxEntries = 256
+)
+
+// responseCache is a small bounded, in-memory cache of ORS responses,
+// keyed by the exact request that produced them. The API key this client
+// carries is rate-limited (a free-tier quota, shared across every rider
+// using this deployment's route builder), and the UI already produces
+// plenty of legitimate exact repeats of a request already answered: a
+// debounced preview firing again for waypoints that did not actually
+// change, an undo landing back on an earlier waypoint set, or "Generate 3
+// options" clicked again with the same start and distance (suggestSeeds in
+// api/server.go is fixed, so that really is the same three requests).
+// Caching those costs nothing and measurably reduces how fast the quota
+// gets spent. This lives here, on the concrete ORSClient, rather than as a
+// decorator around the Client interface, so the fake Client acceptance
+// tests substitute in place of a real one stays simple and does not need to
+// know caching exists.
+type responseCache struct {
+	mu      sync.Mutex
+	entries map[string]cacheEntry
+}
+
+type cacheEntry struct {
+	points  []gpx.Point
+	expires time.Time
+}
+
+func newResponseCache() *responseCache {
+	return &responseCache{entries: make(map[string]cacheEntry)}
+}
+
+func (c *responseCache) get(key string) ([]gpx.Point, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok || time.Now().After(entry.expires) {
+		return nil, false
+	}
+	return append([]gpx.Point(nil), entry.points...), true
+}
+
+func (c *responseCache) put(key string, points []gpx.Point) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.entries[key]; !exists && len(c.entries) >= cacheMaxEntries {
+		// Evict an arbitrary entry rather than tracking real LRU order —
+		// this cache only exists to catch exact repeats of a recent
+		// request, not to be a precise working set, so a random eviction
+		// under pressure is enough to keep memory bounded.
+		for k := range c.entries {
+			delete(c.entries, k)
+			break
+		}
+	}
+	c.entries[key] = cacheEntry{points: append([]gpx.Point(nil), points...), expires: time.Now().Add(cacheTTL)}
+}
+
+// cacheKey identifies a directions request by everything that can change
+// its answer: the profile (a different profile can route differently) and
+// the coordinates/round-trip options already resolved onto the request
+// body. Built from the request actually sent, after profile defaulting, so
+// an explicit "" and an explicit DefaultProfile share one cache entry
+// rather than two.
+func cacheKey(profile string, body directionsRequest) string {
+	var b strings.Builder
+	b.WriteString(profile)
+	for _, coord := range body.Coordinates {
+		fmt.Fprintf(&b, "|%.6f,%.6f", coord[0], coord[1])
+	}
+	if rt := body.Options; rt != nil && rt.RoundTrip != nil {
+		fmt.Fprintf(&b, "|rt:%.0f:%d:%d", rt.RoundTrip.Length, rt.RoundTrip.Points, rt.RoundTrip.Seed)
+	}
+	return b.String()
 }
 
 type directionsRequest struct {
@@ -171,6 +256,11 @@ func (c *ORSClient) directions(ctx context.Context, profile string, body directi
 		return nil, fmt.Errorf("routing: unsupported profile %q", profile)
 	}
 
+	key := cacheKey(profile, body)
+	if points, ok := c.cache.get(key); ok {
+		return points, nil
+	}
+
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -218,5 +308,6 @@ func (c *ORSClient) directions(ctx context.Context, profile string, body directi
 		}
 		points[i] = gpx.Point{Lat: c[1], Lon: c[0]}
 	}
+	c.cache.put(key, points)
 	return points, nil
 }
