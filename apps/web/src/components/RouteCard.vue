@@ -264,18 +264,31 @@ async function remove() {
       :ui="{ title: 'text-sm', description: 'text-xs' }"
     />
 
-    <!-- flex-col, not one wrapping row: the badge below and the
-         owner/action-icon group used to share a single flex-wrap row split
-         by a flex-1 spacer, which worked while everything fit on one line
-         but broke the moment it didn't — "not on your devices" is long
-         enough to force a wrap on an ordinary card width, and a bare
-         flex-1 spacer has nothing to push once its own line is empty, so
-         the icons landed flush-left on their own line instead of flush-
-         right, and the card's footer grew a line taller than its
-         neighbours'. Two explicit rows makes the height predictable
-         regardless of which badge is showing. -->
-    <div class="mt-auto flex flex-col gap-1.5 pt-1">
-      <div class="flex flex-wrap items-center gap-1.5">
+    <!-- Grid, not a wrapping flex row: an earlier version split the status
+         badge and the owner/action-icon group across one flex-wrap row with
+         a flex-1 spacer, which worked while everything fit on one line but
+         broke the moment it didn't — "not on your devices" is long enough
+         to force a wrap on an ordinary card width, and a bare flex-1 spacer
+         has nothing to push once its own line is empty, so the icons landed
+         flush-left instead of flush-right. A two-column grid fixes that
+         directly: the right column (the icons) is a grid track, not a
+         wrapped flex line, so its position is fixed regardless of how much
+         the left column wraps above it — it never relocates.
+
+         The left column itself used to render "no targets"/"not on your
+         devices" as an outlined UBadge, the same pill shape as the
+         cycling/komoot tags two rows up — so a purely informational caption
+         read as one more tag competing for the same attention, and (once
+         given its own row to fix the wrap bug above) as a stray line with
+         nothing else on it. It's not a tag, it's a caption, so it's styled
+         like one: muted inline text with a dotted underline marking it
+         hoverable, sitting right next to the owner byline it belongs with
+         instead of floating alone above it. SyncBadge keeps its real badge
+         treatment — unlike the other two, its color is a genuine status
+         signal (synced/pending/stale), which is exactly what a badge is
+         for. -->
+    <div class="mt-auto grid grid-cols-[1fr_auto] items-start gap-x-2 gap-y-1 pt-1">
+      <div class="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-dimmed">
         <SyncBadge v-if="route.syncState.length" :statuses="route.syncState" :accounts="accounts" />
         <!-- syncState only ever shows the viewer's own devices now, so an
              empty list has two genuinely different meanings: the route truly
@@ -288,25 +301,26 @@ async function remove() {
           v-if="!route.syncState.length && !route.targets.length"
           text="This route doesn't reach any device right now — it hasn't been shared to a crew, or the crew it's shared to has no members with a linked account yet."
         >
-          <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
+          <span class="cursor-help underline decoration-dotted decoration-dimmed/50 underline-offset-2">
             no targets
-          </UBadge>
+          </span>
         </UTooltip>
         <UTooltip
           v-if="!route.syncState.length && route.targets.length"
           text="Shared to a crew, but not reaching any device of your own — other members' devices may still get it."
         >
-          <UBadge color="neutral" variant="outline" size="sm" class="cursor-help">
+          <span class="cursor-help underline decoration-dotted decoration-dimmed/50 underline-offset-2">
             not on your devices
-          </UBadge>
+          </span>
         </UTooltip>
-      </div>
 
-      <div class="flex flex-wrap items-center justify-end gap-1.5">
+        <span v-if="route.owner || canEdit" aria-hidden="true" class="text-dimmed/50">·</span>
+
         <UTooltip v-if="route.owner" :text="`Uploaded by ${route.owner}`">
-          <UBadge color="neutral" variant="ghost" size="sm" icon="i-lucide-user">
+          <span class="inline-flex items-center gap-1">
+            <UIcon name="i-lucide-user" class="size-3.5" />
             {{ route.owner }}
-          </UBadge>
+          </span>
         </UTooltip>
         <!-- An import with no --owner, or an unclaimed Garmin sync-back:
              nothing else on this card works until someone claims it, since
@@ -328,7 +342,9 @@ async function remove() {
             Claim
           </UButton>
         </UTooltip>
+      </div>
 
+      <div class="flex items-center gap-1.5">
         <!-- external: without it, UButton's Link treats a same-origin
              path like /api/gpx/... as an internal route and hands the click
              to vue-router (Nuxt UI's own isExternal check is hasProtocol,
