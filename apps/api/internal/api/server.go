@@ -2091,6 +2091,12 @@ func coordsAndDistance(points []gpx.Point) ([][2]float64, float64) {
 // loops" needs to vary run to run.
 var suggestSeeds = [3]int{1, 2, 3}
 
+// maxSuggestDistanceKm bounds handleRouteBuilderSuggest's own distanceKm —
+// same reasoning as maxRouteBuilderWaypoints: nothing otherwise stopped a
+// single request from asking the routing engine to resolve an absurd
+// round-trip length.
+const maxSuggestDistanceKm = 300
+
 type routeBuilderCandidate struct {
 	Points    [][2]float64 `json:"points"`
 	DistanceM float64      `json:"distanceM"`
@@ -2106,12 +2112,18 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	rider := auth.FromContext(r.Context()).User
+
 	if s.Routing == nil {
 		s.logger().Warn("route builder suggestion requested but no routing engine is configured",
-			"by", auth.FromContext(r.Context()).User)
+			"by", rider)
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment has no routing engine configured",
 		})
+		return
+	}
+
+	if !s.rateLimitRouteBuilder(w, rider) {
 		return
 	}
 
@@ -2124,8 +2136,14 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if body.DistanceKm <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "distanceKm must be positive"})
+	if body.DistanceKm <= 0 || body.DistanceKm > maxSuggestDistanceKm {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("distanceKm must be between 0 and %d", maxSuggestDistanceKm),
+		})
+		return
+	}
+	if !validRoutingProfile(body.Profile) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported profile"})
 		return
 	}
 
@@ -2139,7 +2157,12 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 			// bad route never aborts a run" principle AGENTS.md states for
 			// the library as a whole, applied here to a single request's
 			// three sub-calls: a routing engine that stumbles on one seed
-			// usually still has something to offer for the other two.
+			// usually still has something to offer for the other two. Still
+			// worth a Warn (the request itself keeps going) and the shared
+			// error metric, so an operator sees an engine that is
+			// intermittently flaky even on requests that otherwise succeed.
+			s.logger().Warn("route builder suggestion seed failed", "seed", seed, "err", err, "by", rider)
+			recordRouteBuilderError(r.Context(), "suggest")
 			lastErr = err
 			continue
 		}
@@ -2147,6 +2170,10 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		candidates = append(candidates, routeBuilderCandidate{Points: coords, DistanceM: distance})
 	}
 	if len(candidates) == 0 {
+		// Unlike a partial failure above, the request itself fails here —
+		// Error, not Warn, per the same "does the request still succeed"
+		// test AGENTS.md's own observability checklist uses.
+		s.logger().Error("route builder suggestion failed for every seed", "err", lastErr, "by", rider)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastErr.Error()})
 		return
 	}

@@ -314,6 +314,83 @@ func TestRouteBuilderSuggestRejectsNonPositiveDistance(t *testing.T) {
 	}
 }
 
+func TestRouteBuilderSuggestRejectsAnExcessiveDistance(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 100000,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a wildly excessive distance", resp.StatusCode)
+	}
+}
+
+func TestRouteBuilderSuggestRejectsAnUnsupportedProfile(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+		"profile":    "../admin",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unsupported profile", resp.StatusCode)
+	}
+}
+
+func TestRouteBuilderSuggestIsRateLimited(t *testing.T) {
+	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st, err := state.Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct, err := accounts.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &api.Server{
+		Source:   db,
+		Store:    st,
+		Accounts: acct,
+		Config:   &config.Config{},
+		Routing: stubRoutingClient{
+			route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		},
+		RouteBuilderLimiter: ratelimit.New(1, time.Hour),
+	}
+	server := httptest.NewServer(srv.Handler())
+	t.Cleanup(server.Close)
+	client := server.Client()
+
+	body := map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	}
+	first := doJSON(t, client, http.MethodPost, server.URL+"/api/routebuilder/suggest", body)
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", first.StatusCode)
+	}
+
+	second := doJSON(t, client, http.MethodPost, server.URL+"/api/routebuilder/suggest", body)
+	defer second.Body.Close()
+	if second.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second request status = %d, want %d", second.StatusCode, http.StatusTooManyRequests)
+	}
+}
+
 func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route: []gpx.Point{

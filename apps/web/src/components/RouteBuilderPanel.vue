@@ -65,6 +65,11 @@ const candidates = ref<RouteBuilderCandidate[]>([])
 const chosenIndex = ref<number | null>(null)
 const suggesting = ref(false)
 
+// `> 0` rather than `<= 0` negated: a cleared number input coerces to NaN
+// via v-model.number, and NaN <= 0 is false — the same comparison used the
+// other way around would leave Generate clickable for an empty field.
+const canGenerate = computed(() => !!start.value && suggestDistanceKm.value > 0)
+
 function onStart(point: { lat: number; lon: number }) {
   start.value = point
   candidates.value = []
@@ -72,7 +77,7 @@ function onStart(point: { lat: number; lon: number }) {
 }
 
 async function generate() {
-  if (!start.value || suggestDistanceKm.value <= 0) return
+  if (!start.value || !canGenerate.value) return
   suggesting.value = true
   candidates.value = []
   chosenIndex.value = null
@@ -186,7 +191,7 @@ function onSuggestSaved() {
               <UButton
                 icon="i-lucide-shuffle"
                 :loading="suggesting"
-                :disabled="!start || suggestDistanceKm <= 0"
+                :disabled="!canGenerate"
                 @click="generate"
               >
                 Generate 3 options
