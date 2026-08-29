@@ -1,0 +1,95 @@
+name: Komoot canary
+
+# Komoot has no public API (see apps/api/internal/komoot's own doc comment) —
+# it can break without warning, and did change hands in 2025. Nothing else in
+# this repo notices that on its own: the app itself only finds out when a
+# rider tries to import and hits a 502. This probes the same endpoint
+# internal/komoot.Login calls, on a daily schedule, with no real credentials
+# at all — this repo never keeps the shared account's password as a GitHub
+# secret, so a check that needed one would never actually run.
+#
+# On a failure it opens (or updates) a PR with no functional code change —
+# just a status note for a human to read and act on. It never tries to fix
+# or disable anything itself.
+on:
+  schedule:
+    # 06:17 UTC: an arbitrary off-the-hour time, not top-of-hour when a lot of
+    # other scheduled workflows across GitHub contend for runners.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # GET v006/account/email/{email}/ with basic auth is exactly what
+      # Login sends first — see internal/komoot/komoot.go. A bogus email and
+      # password can never succeed, but a healthy API still recognises the
+      # request and answers with its own BadCredentials shape (confirmed
+      # live before writing this: today it's
+      # `403 {"error":"BadCredentials","code":401,"message":"..."}`).
+      # Anything else — a connection failure, 404, 5xx, an unexpected 200, or
+      # a body with no "error" field — means the undocumented endpoint moved
+      # or changed shape, which is exactly the kind of break worth catching,
+      # and needs no real account to detect.
+      - name: Probe the Komoot login endpoint
+        id: canary
+        run: |
+          status=$(curl -sS -o /tmp/komoot-probe.json -w '%{http_code}' --max-time 15 \
+            -H 'Accept: application/hal+json, application/json' \
+            -H 'User-Agent: domestique/1.0 (+https://github.com/wncservices/domestique)' \
+            -u 'canary-nonexistent@example.invalid:not-a-real-password' \
+            'https://api.komoot.de/v006/account/email/canary-nonexistent%40example.invalid/' || echo "000")
+          echo "HTTP $status"
+          cat /tmp/komoot-probe.json 2>/dev/null || true
+          echo
+          if { [ "$status" = "401" ] || [ "$status" = "403" ]; } && grep -q '"error"' /tmp/komoot-probe.json 2>/dev/null; then
+            echo "broken=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "broken=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Record the break
+        if: steps.canary.outputs.broken == 'true'
+        run: |
+          {
+            echo "# Komoot import: possibly broken"
+            echo
+            echo "The scheduled canary — an unauthenticated probe of the same"
+            echo "endpoint \`internal/komoot.Login\` calls first — got an unexpected"
+            echo "response on $(date -u +%Y-%m-%dT%H:%M:%SZ), run"
+            echo "[${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+            echo "A healthy endpoint answers 401/403 with Komoot's own BadCredentials"
+            echo "JSON shape even for bogus credentials; this run didn't see that."
+            echo
+            echo '```'
+            cat /tmp/komoot-probe.json 2>/dev/null || echo "(no response body — see the run log for the curl error)"
+            echo '```'
+            echo
+            echo "This is a coarse signal: it only proves the login endpoint's shape"
+            echo "changed or it's unreachable, not that a real sign-in would fail, or"
+            echo "wouldn't. Komoot has no public API and can change without notice"
+            echo "(see \`apps/api/internal/komoot\`'s own doc comment) — this is not"
+            echo "necessarily a bug in this repo."
+            echo
+            echo "This PR makes no code change. Close it (do not merge) once the"
+            echo "canary is green again — whether that took a fix here or Komoot"
+            echo "recovering on its own."
+          } > docs/komoot-status.md
+
+      - name: Open or update the flagging PR
+        if: steps.canary.outputs.broken == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          add-paths: docs/komoot-status.md
+          commit-message: "Komoot canary: login endpoint looks broken"
+          branch: komoot-canary/broken
+          title: "Komoot import may be broken"
+          body-path: docs/komoot-status.md
+          labels: bug
