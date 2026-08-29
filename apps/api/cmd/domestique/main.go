@@ -35,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -770,7 +771,19 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// per waypoint placed, dragged or removed) while still bounding a
 		// script that would otherwise hammer the routing engine unchecked.
 		RouteBuilderLimiter: ratelimit.New(60, 5*time.Minute),
+		// Tighter than RouteBuilderLimiter — see GeocodeLimiter's own doc
+		// comment: this protects Nominatim's own shared public-usage
+		// policy (roughly one request a second across every user of this
+		// app), not a per-deployment API key, and a location search is a
+		// one-off action rather than a debounced call per waypoint.
+		GeocodeLimiter: ratelimit.New(20, 5*time.Minute),
 	}
+
+	// No config toggle, no credential — geocoding.NominatimClient needs
+	// neither (see that package's own doc comment for why), so this is
+	// wired unconditionally rather than gated behind an Enabled flag the
+	// way Routing is below.
+	srv.Geocoder = geocoding.New("")
 
 	srv.LandingHost = cfg.Web.LandingHost
 	if host := os.Getenv("DOMESTIQUE_LANDING_HOST"); host != "" {

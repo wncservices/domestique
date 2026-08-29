@@ -28,6 +28,43 @@ function onMapError(message: string) {
   })
 }
 
+// --- Location search ---
+// A fallback for whenever RouteBuilderMap's own geolocation-on-mount comes
+// back empty (unavailable, declined, or just slower than its own timeout) —
+// and equally useful when it succeeded, for a rider who wants to plan a
+// route somewhere other than wherever they currently are.
+
+const locationQuery = ref('')
+const searching = ref(false)
+
+async function searchLocation() {
+  const query = locationQuery.value.trim()
+  if (!query) return
+  searching.value = true
+  try {
+    const { results } = await api.geocodeSearch(query)
+    const first = results[0]
+    if (!first) {
+      toast.add({
+        title: 'No matching location found',
+        icon: 'i-lucide-map-pin-off',
+        color: 'warning',
+      })
+      return
+    }
+    mapRef.value?.flyTo(first.lat, first.lon)
+  } catch (err) {
+    toast.add({
+      title: 'Location search failed',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    searching.value = false
+  }
+}
+
 // --- Draw tab ---
 
 const drawSaveForm = useTemplateRef<InstanceType<typeof RouteSaveForm>>('drawSaveForm')
@@ -35,15 +72,16 @@ const waypointCount = ref(0)
 // null while the routing engine is still working on the latest change —
 // distinct from "zero points" (fewer than two waypoints placed yet), which
 // is what preview starts as before any click at all.
-const preview = ref<{ points: [number, number][]; distanceM: number } | null>({
+const preview = ref<{ points: [number, number][]; distanceM: number; ascentM: number } | null>({
   points: [],
   distanceM: 0,
+  ascentM: 0,
 })
 const drawDistanceKm = computed(() =>
   preview.value ? (preview.value.distanceM / 1000).toFixed(1) : null,
 )
 
-function onPreview(next: { points: [number, number][]; distanceM: number } | null) {
+function onPreview(next: { points: [number, number][]; distanceM: number; ascentM: number } | null) {
   preview.value = next
 }
 
@@ -74,6 +112,16 @@ function onStart(point: { lat: number; lon: number }) {
   start.value = point
   candidates.value = []
   chosenIndex.value = null
+  mapRef.value?.clearSuggestion()
+}
+
+/** Picking a candidate draws it on the real map too, not just its own small
+ *  preview card — RouteCandidatePreview's inline SVG is a quick shape to
+ *  compare three options side by side, but doesn't show where the loop
+ *  actually goes the way the interactive map does. */
+function chooseCandidate(index: number) {
+  chosenIndex.value = index
+  mapRef.value?.showSuggestion(candidates.value[index].points)
 }
 
 async function generate() {
@@ -81,6 +129,7 @@ async function generate() {
   suggesting.value = true
   candidates.value = []
   chosenIndex.value = null
+  mapRef.value?.clearSuggestion()
   try {
     const result = await api.routeBuilderSuggest({
       start: start.value,
@@ -101,6 +150,7 @@ async function generate() {
 
 function clearSuggestions() {
   mapRef.value?.clearStart()
+  mapRef.value?.clearSuggestion()
   start.value = null
   candidates.value = []
   chosenIndex.value = null
@@ -119,6 +169,25 @@ function onSuggestSaved() {
     </template>
 
     <div class="flex flex-col gap-4">
+      <div class="flex gap-2">
+        <UInput
+          v-model="locationQuery"
+          icon="i-lucide-search"
+          placeholder="Search a location…"
+          class="flex-1"
+          @keyup.enter="searchLocation"
+        />
+        <UButton
+          color="neutral"
+          variant="outline"
+          :loading="searching"
+          :disabled="!locationQuery.trim()"
+          @click="searchLocation"
+        >
+          Search
+        </UButton>
+      </div>
+
       <div class="h-[32rem] overflow-hidden rounded-lg border border-default">
         <RouteBuilderMap
           ref="map"
@@ -141,12 +210,21 @@ function onSuggestSaved() {
             <div class="flex items-center justify-between text-sm text-muted">
               <span v-if="preview === null">Snapping to roads…</span>
               <span v-else-if="drawDistanceKm !== null && preview.points.length >= 2">
-                {{ drawDistanceKm }} km, {{ waypointCount }} waypoint{{
-                  waypointCount === 1 ? '' : 's'
-                }}
+                {{ drawDistanceKm }} km, {{ Math.round(preview.ascentM) }} m ascent,
+                {{ waypointCount }} waypoint{{ waypointCount === 1 ? '' : 's' }}
               </span>
               <span v-else>Place at least two waypoints to draw a path.</span>
               <div class="flex gap-2">
+                <UButton
+                  v-if="waypointCount >= 2"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-repeat"
+                  @click="mapRef?.closeLoop()"
+                >
+                  Route back to start
+                </UButton>
                 <UButton
                   v-if="waypointCount > 0"
                   color="neutral"
@@ -216,11 +294,14 @@ function onSuggestSaved() {
               >
                 <RouteCandidatePreview :points="candidate.points" />
                 <div class="flex items-center justify-between text-sm text-muted">
-                  <span>{{ (candidate.distanceM / 1000).toFixed(1) }} km</span>
+                  <span>
+                    {{ (candidate.distanceM / 1000).toFixed(1) }} km,
+                    {{ Math.round(candidate.ascentM) }} m ascent
+                  </span>
                   <UButton
                     size="sm"
                     :variant="chosenIndex === index ? 'solid' : 'outline'"
-                    @click="chosenIndex = index"
+                    @click="chooseCandidate(index)"
                   >
                     {{ chosenIndex === index ? 'Selected' : 'Use this one' }}
                   </UButton>

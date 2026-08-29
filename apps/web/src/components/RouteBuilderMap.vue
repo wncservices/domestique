@@ -20,7 +20,7 @@ const emit = defineEmits<{
    *  than two waypoints remain. Null means "still waiting on the routing
    *  engine" so the panel can show a busy state distinct from "nothing to
    *  save yet." */
-  'update:preview': [preview: { points: [number, number][]; distanceM: number } | null]
+  'update:preview': [preview: { points: [number, number][]; distanceM: number; ascentM: number } | null]
   /** Raw waypoint count, distinct from the snapped preview's own point
    *  count — the panel's Undo/Clear buttons disable off this, not off
    *  update:preview, since a 2-waypoint route can easily snap to dozens of
@@ -48,6 +48,11 @@ let resizeObserver: ResizeObserver | null = null
 
 const DRAFT_SOURCE_ID = 'builder-draft'
 const SNAPPED_SOURCE_ID = 'builder-snapped'
+// The suggested builder's own chosen candidate, drawn independently of
+// DRAFT/SNAPPED above — those two hide while pickStart is active (see
+// setDrawVisible below), but a chosen suggestion is exactly what pickStart
+// mode is showing, so it stays visible regardless of tab.
+const SUGGESTED_SOURCE_ID = 'builder-suggested'
 
 // Waypoints the rider has placed, in order — the source of truth this
 // whole component draws from. markers are the DOM-side maplibregl.Marker
@@ -61,6 +66,9 @@ let startMarker: Marker | null = null
 // every custom source/layer) can redraw it immediately rather than leaving
 // the solid line blank until the next edit triggers a fresh request.
 let lastSnappedPoints: [number, number][] = []
+// Same reasoning as lastSnappedPoints, for the suggested builder's own
+// chosen candidate — see showSuggestion/clearSuggestion below.
+let lastSuggestedPoints: [number, number][] = []
 
 // Debounces the routing-engine call so a rapid string of clicks (or a drag
 // still in motion) doesn't fire one request per pixel — only the settled
@@ -102,10 +110,38 @@ function setSnappedLine(points: [number, number][]) {
   source?.setData(lineFeature(points))
 }
 
+function setSuggestedLine(points: [number, number][]) {
+  lastSuggestedPoints = points
+  const source = map?.getSource(SUGGESTED_SOURCE_ID) as
+    | import('maplibre-gl').GeoJSONSource
+    | undefined
+  source?.setData(lineFeature(points))
+}
+
+/** Draws a chosen suggestion on the real map (not just the small candidate
+ *  preview card) and fits the view to it, so picking a loop actually shows
+ *  where it goes rather than only its little inline-SVG thumbnail. */
+function showSuggestion(points: [number, number][]) {
+  if (!map || !maplibregl || points.length === 0) return
+  setSuggestedLine(points)
+  const bounds = points.reduce(
+    (b, [lat, lon]) => b.extend([lon, lat]),
+    new maplibregl.LngLatBounds(
+      [points[0][1], points[0][0]],
+      [points[0][1], points[0][0]],
+    ),
+  )
+  map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 300 })
+}
+
+function clearSuggestion() {
+  setSuggestedLine([])
+}
+
 async function requestPreview() {
   if (waypoints.length < 2) {
     setSnappedLine([])
-    emit('update:preview', { points: [], distanceM: 0 })
+    emit('update:preview', { points: [], distanceM: 0, ascentM: 0 })
     return
   }
 
@@ -130,18 +166,23 @@ function schedulePreview() {
   debounceHandle = setTimeout(requestPreview, PREVIEW_DEBOUNCE_MS)
 }
 
-function markerColor() {
-  // Matches RouteMap.vue's own per-theme route colour, so a waypoint reads
-  // as "the same kind of thing" as a saved route's line.
+// isStart picks out the route's own starting point — the first waypoint
+// placed in the Draw tab, or the Suggest tab's own dedicated start marker
+// — from every other waypoint, so a rider can tell at a glance which pin
+// is where the route actually begins.
+function markerColor(isStart: boolean) {
+  if (isStart) {
+    // The app's existing "ember" accent (styles.css), reused here rather
+    // than inventing a new colour — already means "distance/start of
+    // something" elsewhere in this app (App.vue's own distance stat tile).
+    return resolved.value === 'dark' ? '#ff8058' : '#e8502b'
+  }
+  // Matches RouteMap.vue's own per-theme route colour, so a regular
+  // waypoint reads as "the same kind of thing" as a saved route's line.
   return resolved.value === 'dark' ? '#14cfab' : '#049483'
 }
 
-function addMarker(index: number) {
-  if (!map || !maplibregl) return
-  const marker = new maplibregl.Marker({ draggable: true, color: markerColor() })
-    .setLngLat([waypoints[index].lon, waypoints[index].lat])
-    .addTo(map)
-
+function attachMarkerHandlers(marker: Marker) {
   marker.on('dragend', () => {
     const { lng, lat } = marker.getLngLat()
     const i = markers.indexOf(marker)
@@ -158,8 +199,31 @@ function addMarker(index: number) {
     if (i === -1) return
     removeWaypointAt(i)
   })
+}
 
+function addMarker(index: number) {
+  if (!map || !maplibregl) return
+  const marker = new maplibregl.Marker({ draggable: true, color: markerColor(index === 0) })
+    .setLngLat([waypoints[index].lon, waypoints[index].lat])
+    .addTo(map)
+  attachMarkerHandlers(marker)
   markers.splice(index, 0, marker)
+}
+
+// maplibre-gl's Marker has no public way to change an existing pin's colour
+// — recreating it at the same position (and reattaching the same handlers)
+// is what removeWaypointAt below uses to recolour the new first marker when
+// the one that used to be the start is removed.
+function recolorMarkerAt(index: number, isStart: boolean) {
+  const old = markers[index]
+  if (!old || !map || !maplibregl) return
+  const { lng, lat } = old.getLngLat()
+  old.remove()
+  const marker = new maplibregl.Marker({ draggable: true, color: markerColor(isStart) })
+    .setLngLat([lng, lat])
+    .addTo(map)
+  attachMarkerHandlers(marker)
+  markers[index] = marker
 }
 
 function removeWaypointAt(index: number) {
@@ -167,6 +231,9 @@ function removeWaypointAt(index: number) {
   markers.splice(index, 1)
   waypoints.splice(index, 1)
   emit('update:waypointCount', waypoints.length)
+  // The waypoint that used to be the start was just removed — whatever is
+  // now first needs the start colour it did not have a moment ago.
+  if (index === 0 && markers.length > 0) recolorMarkerAt(0, true)
   schedulePreview()
 }
 
@@ -183,12 +250,25 @@ function clearAll() {
   schedulePreview()
 }
 
+/** Routes straight back to the start from wherever the last waypoint is —
+ *  no new marker: the closing point sits exactly on top of the start pin,
+ *  so a second marker there would only stack invisibly rather than add
+ *  anything a rider can see. The routing engine still walks a real path
+ *  back, same as any other pair of waypoints. */
+function closeLoop() {
+  if (waypoints.length < 2) return
+  const start = waypoints[0]
+  waypoints.push({ lat: start.lat, lon: start.lon })
+  emit('update:waypointCount', waypoints.length)
+  schedulePreview()
+}
+
 function setStartMarker(lat: number, lon: number) {
   if (!map || !maplibregl) return
   if (startMarker) {
     startMarker.setLngLat([lon, lat])
   } else {
-    startMarker = new maplibregl.Marker({ color: markerColor() }).setLngLat([lon, lat]).addTo(map)
+    startMarker = new maplibregl.Marker({ color: markerColor(true) }).setLngLat([lon, lat]).addTo(map)
   }
 }
 
@@ -197,7 +277,14 @@ function clearStart() {
   startMarker = null
 }
 
-defineExpose({ undoLast, clearAll, clearStart })
+/** Recentres on a resolved location — the route builder's own location
+ *  search (RouteBuilderPanel.vue), for whenever geolocation was unavailable
+ *  or declined, or a rider just wants to look somewhere else. */
+function flyTo(lat: number, lon: number, zoom = LOCATED_ZOOM) {
+  map?.flyTo({ center: [lon, lat], zoom })
+}
+
+defineExpose({ undoLast, clearAll, clearStart, closeLoop, showSuggestion, clearSuggestion, flyTo })
 
 // Hides the Draw tab's own lines and markers while pickStart is active —
 // both sets of pins on screen at once (drawn waypoints *and* a start
@@ -226,7 +313,7 @@ function addRouteBuilderLayers() {
     type: 'line',
     source: DRAFT_SOURCE_ID,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': markerColor(), 'line-width': 2, 'line-dasharray': [2, 2] },
+    paint: { 'line-color': markerColor(false), 'line-width': 2, 'line-dasharray': [2, 2] },
   })
   map.addSource(SNAPPED_SOURCE_ID, { type: 'geojson', data: lineFeature([]) })
   map.addLayer({
@@ -234,7 +321,17 @@ function addRouteBuilderLayers() {
     type: 'line',
     source: SNAPPED_SOURCE_ID,
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': markerColor(), 'line-width': 4 },
+    paint: { 'line-color': markerColor(false), 'line-width': 4 },
+  })
+  map.addSource(SUGGESTED_SOURCE_ID, { type: 'geojson', data: lineFeature([]) })
+  map.addLayer({
+    id: SUGGESTED_SOURCE_ID,
+    type: 'line',
+    source: SUGGESTED_SOURCE_ID,
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    // Not toggled by setDrawVisible below — a chosen suggestion is exactly
+    // what pickStart mode is showing, so it stays on regardless of tab.
+    paint: { 'line-color': markerColor(false), 'line-width': 4 },
   })
 
   // Redraw both lines from what's already known — a style swap (the theme
@@ -248,20 +345,55 @@ function addRouteBuilderLayers() {
   // handler per theme toggle.
   setDraftLine()
   setSnappedLine(lastSnappedPoints)
+  setSuggestedLine(lastSuggestedPoints)
   setDrawVisible(!props.pickStart)
+}
+
+// Brussels — no better default than "somewhere," but every deployment needs
+// one for a rider whose location is unavailable or declined, before the
+// search box (RouteBuilderPanel.vue) gets a chance to offer anywhere better.
+const DEFAULT_CENTER: [number, number] = [4.35, 50.85]
+const DEFAULT_ZOOM = 7
+// Close enough to actually see street/path-level detail (the basemap's own
+// "path" road kind — footways, cycleways, tracks — only renders from
+// roughly this zoom up) rather than a country-wide view nobody would ever
+// draw a waypoint at usefully.
+const LOCATED_ZOOM = 15
+const GEOLOCATION_TIMEOUT_MS = 5000
+
+/** Resolves to the browser's geolocation, or null if it's unavailable,
+ *  denied, or slower than GEOLOCATION_TIMEOUT_MS — never rejects, so a
+ *  rider who has not (or cannot) share their location still gets a map,
+ *  just not centred on them. RouteBuilderPanel.vue's search box is the
+ *  fallback for that case. */
+function currentPosition(): Promise<GeolocationPosition | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null)
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(pos),
+      () => resolve(null),
+      { timeout: GEOLOCATION_TIMEOUT_MS, maximumAge: 5 * 60 * 1000 },
+    )
+  })
 }
 
 async function init() {
   if (!container.value) return
-  const { maplibregl: gl, themes } = await loadMapLibreModules()
+  const [{ maplibregl: gl, themes }, position] = await Promise.all([
+    loadMapLibreModules(),
+    currentPosition(),
+  ])
   maplibregl = gl
 
   const theme = resolved.value === 'dark' ? 'dark' : 'light'
   const instance = new gl.Map({
     container: container.value,
     style: styleFromTheme(theme, themes),
-    center: [4.35, 50.85],
-    zoom: 7,
+    center: position ? [position.coords.longitude, position.coords.latitude] : DEFAULT_CENTER,
+    zoom: position ? LOCATED_ZOOM : DEFAULT_ZOOM,
     attributionControl: { compact: true },
   })
   map = instance

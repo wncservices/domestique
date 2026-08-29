@@ -202,6 +202,14 @@ func cacheKey(profile string, body directionsRequest) string {
 type directionsRequest struct {
 	Coordinates [][2]float64    `json:"coordinates"`
 	Options     *directionsOpts `json:"options,omitempty"`
+	// Elevation asks ORS to append a third coordinate (metres) to every
+	// point in the response geometry — the route builder's own height-gain
+	// figure (gpx.ComputeStats' AscentM) is derived from this rather than a
+	// second, separate elevation lookup: the routing engine already has to
+	// walk this exact path, so asking it for elevation too is free, unlike
+	// spending a second outbound call against a different service for data
+	// this same response can carry.
+	Elevation bool `json:"elevation,omitempty"`
 }
 
 type directionsOpts struct {
@@ -230,7 +238,7 @@ func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile strin
 	for i, w := range waypoints {
 		coords[i] = [2]float64{w.Lon, w.Lat}
 	}
-	return c.directions(ctx, profile, directionsRequest{Coordinates: coords})
+	return c.directions(ctx, profile, directionsRequest{Coordinates: coords, Elevation: true})
 }
 
 func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) ([]gpx.Point, error) {
@@ -244,6 +252,7 @@ func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float
 			Points: roundTripPoints,
 			Seed:   seed,
 		}},
+		Elevation: true,
 	}
 	return c.directions(ctx, profile, req)
 }
@@ -302,11 +311,18 @@ func (c *ORSClient) directions(ctx context.Context, profile string, body directi
 
 	coords := out.Features[0].Geometry.Coordinates
 	points := make([]gpx.Point, len(coords))
-	for i, c := range coords {
-		if len(c) < 2 {
+	for i, coord := range coords {
+		if len(coord) < 2 {
 			return nil, fmt.Errorf("routing service returned a malformed coordinate")
 		}
-		points[i] = gpx.Point{Lat: c[1], Lon: c[0]}
+		points[i] = gpx.Point{Lat: coord[1], Lon: coord[0]}
+		// The elevation request above asks for a third value; a self-hosted
+		// instance an operator forgot to enable elevation support on still
+		// answers, just without it — degrade to "no elevation" rather than
+		// treat a 2-element coordinate as an error.
+		if len(coord) >= 3 {
+			points[i].Ele, points[i].HasEle = coord[2], true
+		}
 	}
 	c.cache.put(key, points)
 	return points, nil
