@@ -13,17 +13,54 @@ import (
 )
 
 func geojsonResponse(coords [][]float64) string {
-	body := directionsResponse{
-		Features: []struct {
-			Geometry struct {
-				Coordinates [][]float64 `json:"coordinates"`
-			} `json:"geometry"`
-		}{
-			{Geometry: struct {
-				Coordinates [][]float64 `json:"coordinates"`
-			}{Coordinates: coords}},
-		},
+	return geojsonResponseWithSurface(coords, nil)
+}
+
+// surfaceFixture is one entry of a fake ORS response's own
+// extras.surface.summary — matching the real API's shape (confirmed live,
+// see routing.go's own comment on why that matters here), not guessed.
+type surfaceFixture struct {
+	Value    float64
+	Distance float64
+	Amount   float64
+}
+
+// geojsonResponseWithSurface builds a fake ORS directions response as raw
+// JSON text — deliberately not a directionsResponse{} literal, since that
+// struct's own anonymous nested types would have to be repeated exactly
+// here; marshaling a small local type into the same JSON shape is what a
+// real server actually sends, which is all a test double needs to match.
+func geojsonResponseWithSurface(coords [][]float64, surface []surfaceFixture) string {
+	type summaryEntry struct {
+		Value    float64 `json:"value"`
+		Distance float64 `json:"distance"`
+		Amount   float64 `json:"amount"`
 	}
+	summary := make([]summaryEntry, len(surface))
+	for i, s := range surface {
+		summary[i] = summaryEntry(s)
+	}
+
+	type feature struct {
+		Geometry struct {
+			Coordinates [][]float64 `json:"coordinates"`
+		} `json:"geometry"`
+		Properties struct {
+			Extras struct {
+				Surface struct {
+					Summary []summaryEntry `json:"summary"`
+				} `json:"surface"`
+			} `json:"extras"`
+		} `json:"properties"`
+	}
+	var f feature
+	f.Geometry.Coordinates = coords
+	f.Properties.Extras.Surface.Summary = summary
+
+	body := struct {
+		Features []feature `json:"features"`
+	}{Features: []feature{f}}
+
 	raw, err := json.Marshal(body)
 	if err != nil {
 		panic(err)
@@ -48,7 +85,7 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL, "test-key")
-	points, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.87, Lon: 4.37}}, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.87, Lon: 4.37}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,9 +105,12 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	if !gotBody.Elevation {
 		t.Error("a Route call must ask ORS for elevation")
 	}
+	if len(gotBody.ExtraInfo) != 1 || gotBody.ExtraInfo[0] != "surface" {
+		t.Errorf("extra_info = %v, want [\"surface\"] on every request", gotBody.ExtraInfo)
+	}
 
-	if len(points) != 3 || points[0].Lat != 50.85 || points[0].Lon != 4.35 {
-		t.Errorf("points = %v, want the geojson coordinates flipped back to lat/lon", points)
+	if len(path.Points) != 3 || path.Points[0].Lat != 50.85 || path.Points[0].Lon != 4.35 {
+		t.Errorf("points = %v, want the geojson coordinates flipped back to lat/lon", path.Points)
 	}
 }
 
@@ -85,10 +125,11 @@ func TestElevationIsReadFromTheThirdCoordinate(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL, "")
-	points, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	points := path.Points
 	if !points[0].HasEle || points[0].Ele != 12.5 || !points[1].HasEle || points[1].Ele != 40 {
 		t.Errorf("points = %+v, want elevation carried over from the third coordinate", points)
 	}
@@ -105,12 +146,100 @@ func TestMissingElevationCoordinateIsNotAnError(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL, "")
-	points, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if points[0].HasEle || points[1].HasEle {
-		t.Errorf("points = %+v, want HasEle false with no third coordinate", points)
+	if path.Points[0].HasEle || path.Points[1].HasEle {
+		t.Errorf("points = %+v, want HasEle false with no third coordinate", path.Points)
+	}
+}
+
+// The route builder's own "type of ground" figure comes from exactly this —
+// ORS's own extras.surface.summary, confirmed against the real API's
+// response shape (see routing.go's own comment on why that matters here),
+// translated from numeric code to a human label and sorted most-distance-
+// first so a caller can show the dominant surface without sorting itself.
+func TestSurfaceSummaryIsParsedAndSortedByDistance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponseWithSurface(
+			[][]float64{{4.35, 50.85}, {4.36, 50.86}},
+			[]surfaceFixture{
+				{Value: 0, Distance: 134.0, Amount: 4.21},   // Unknown
+				{Value: 3, Distance: 2995.1, Amount: 94.03}, // Asphalt
+				{Value: 14, Distance: 56.2, Amount: 1.76},   // Paving Stones
+			},
+		)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(path.Surface) != 3 {
+		t.Fatalf("surface = %+v, want 3 entries", path.Surface)
+	}
+	// Sorted by distance descending: Asphalt (2995.1) first, Unknown (134.0)
+	// second, Paving Stones (56.2) last — not ORS's own summary order, which
+	// listed Unknown before Asphalt.
+	if path.Surface[0].Type != "Asphalt" || path.Surface[0].DistanceM != 2995.1 {
+		t.Errorf("surface[0] = %+v, want Asphalt at 2995.1m first", path.Surface[0])
+	}
+	if got := path.Surface[0].Fraction; got < 0.9403-0.0001 || got > 0.9403+0.0001 {
+		t.Errorf("surface[0].Fraction = %v, want 0.9403 (ORS's 94.03%% divided by 100)", got)
+	}
+	if path.Surface[1].Type != "Unknown" {
+		t.Errorf("surface[1] = %+v, want Unknown second", path.Surface[1])
+	}
+	if path.Surface[2].Type != "Paving Stones" {
+		t.Errorf("surface[2] = %+v, want Paving Stones last", path.Surface[2])
+	}
+}
+
+// A future ORS release adding a surface code this table doesn't have yet
+// must not silently drop that stretch of road's distance from the total —
+// it shows up labelled as unrecognised instead.
+func TestUnrecognisedSurfaceCodeIsLabelledNotDropped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponseWithSurface(
+			[][]float64{{4.35, 50.85}, {4.36, 50.86}},
+			[]surfaceFixture{{Value: 99, Distance: 500, Amount: 100}},
+		)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path.Surface) != 1 || path.Surface[0].DistanceM != 500 || path.Surface[0].Type != "Unrecognised (99)" {
+		t.Errorf("surface = %+v, want one entry labelled Unrecognised (99) at 500m", path.Surface)
+	}
+}
+
+// A self-hosted instance without the surface extra_info enabled (or
+// without data for this stretch of road) must degrade to an empty
+// breakdown, not an error — the same shape as missing elevation.
+func TestMissingSurfaceDataIsNotAnError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path.Surface) != 0 {
+		t.Errorf("surface = %+v, want empty with no surface data in the response", path.Surface)
 	}
 }
 
@@ -240,8 +369,8 @@ func TestIdenticalRouteRequestsAreServedFromCache(t *testing.T) {
 	if calls != 1 {
 		t.Errorf("routing engine was called %d times for two identical requests, want 1", calls)
 	}
-	if len(second) != len(first) || second[0] != first[0] {
-		t.Errorf("cached response = %v, want the same points as the first call %v", second, first)
+	if len(second.Points) != len(first.Points) || second.Points[0] != first.Points[0] {
+		t.Errorf("cached response = %v, want the same points as the first call %v", second.Points, first.Points)
 	}
 
 	// A genuinely different request (a moved waypoint) is not the same
