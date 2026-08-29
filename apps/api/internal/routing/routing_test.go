@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func geojsonResponse(coords [][]float64) string {
@@ -56,8 +59,11 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	if len(gotBody.Coordinates) != 2 || gotBody.Coordinates[0] != [2]float64{4.35, 50.85} {
 		t.Errorf("request coordinates = %v, want [lon,lat] pairs matching the input waypoints", gotBody.Coordinates)
 	}
-	if gotBody.Options != nil {
+	if gotBody.Options == nil || gotBody.Options.RoundTrip != nil {
 		t.Error("a plain Route call must not set round_trip options")
+	}
+	if got := gotBody.Options.AvoidFeatures; len(got) != 1 || got[0] != "highways" {
+		t.Errorf("avoid_features = %v, want [\"highways\"] on every request", got)
 	}
 	if !gotBody.Elevation {
 		t.Error("a Route call must ask ORS for elevation")
@@ -130,6 +136,9 @@ func TestRoundTripSendsLengthAndSeed(t *testing.T) {
 	}
 	if gotBody.Options.RoundTrip.Length != 20000 || gotBody.Options.RoundTrip.Seed != 7 {
 		t.Errorf("round_trip options = %+v, want length=20000 seed=7", gotBody.Options.RoundTrip)
+	}
+	if got := gotBody.Options.AvoidFeatures; len(got) != 1 || got[0] != "highways" {
+		t.Errorf("avoid_features = %v, want [\"highways\"] on every request", got)
 	}
 }
 
@@ -275,6 +284,72 @@ func TestDifferentSeedsAreNotCachedTogether(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("routing engine was called %d times after repeating a seed, want still 2", calls)
+	}
+}
+
+// cacheKey's own doc comment promises to capture everything that can change
+// a directions response — AvoidFeatures included, even though every caller
+// today sets it to the same fixed value. A future caller that varies it
+// must not silently collide with a cached answer computed under a
+// different constraint.
+func TestCacheKeyDiffersByAvoidFeatures(t *testing.T) {
+	base := directionsRequest{Coordinates: [][2]float64{{4.35, 50.85}, {4.36, 50.86}}}
+	withAvoid := base
+	withAvoid.Options = &directionsOpts{AvoidFeatures: []string{"highways"}}
+	withDifferentAvoid := base
+	withDifferentAvoid.Options = &directionsOpts{AvoidFeatures: []string{"tollways"}}
+
+	keyPlain := cacheKey("cycling-regular", base)
+	keyHighways := cacheKey("cycling-regular", withAvoid)
+	keyTollways := cacheKey("cycling-regular", withDifferentAvoid)
+
+	if keyPlain == keyHighways || keyHighways == keyTollways || keyPlain == keyTollways {
+		t.Errorf("cache keys = %q, %q, %q — want three distinct keys for three different avoid_features", keyPlain, keyHighways, keyTollways)
+	}
+}
+
+// Two callers asking for the exact same route at the same moment must not
+// each spend the routing engine's own rate-limited quota independently —
+// this is exactly the "double-click Generate" / two-tabs-open shape the
+// response cache exists to protect against, but only if concurrent misses
+// are coalesced into one real call rather than each firing its own.
+func TestConcurrentIdenticalRequestsAreCoalesced(t *testing.T) {
+	var calls int32
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		<-release // hold every request that reaches the server open
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	waypoints := []LatLng{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}}
+
+	const concurrent = 5
+	var wg sync.WaitGroup
+	wg.Add(concurrent)
+	for range concurrent {
+		go func() {
+			defer wg.Done()
+			if _, err := c.Route(context.Background(), waypoints, "cycling-road"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+
+	// Give every goroutine time to reach either the server or the in-flight
+	// wait, whichever this call actually does, before letting the one real
+	// request (if coalescing worked) or every request (if it didn't)
+	// through — either way this unblocks everything and the call count
+	// alone tells us which happened.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("routing engine was called %d times for %d concurrent identical requests, want 1", got, concurrent)
 	}
 }
 

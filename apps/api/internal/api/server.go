@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -247,6 +248,17 @@ type Server struct {
 	// one; searching a place is a one-off action, not a debounced call per
 	// waypoint the way a route-builder preview is.
 	GeocodeLimiter *ratelimit.Limiter
+
+	// GeocodeGlobalLimiter caps this deployment's *total* location-search
+	// volume, on top of GeocodeLimiter's own per-rider budget above.
+	// Nominatim's usage policy is a shared ceiling — roughly one request a
+	// second across every user of every app, not per caller — so a handful
+	// of riders each comfortably within their own per-rider budget could
+	// still burst past it together and get this deployment's own outbound
+	// IP blocked, breaking search for everyone rather than just whoever
+	// went over. rateLimitGeocodeGlobal always checks the same fixed key,
+	// deliberately not one per rider, so every caller shares one bucket.
+	GeocodeGlobalLimiter *ratelimit.Limiter
 
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
@@ -2108,12 +2120,21 @@ func coordsDistanceAscent(points []gpx.Point) ([][2]float64, float64, float64) {
 	return coords, distance, gpx.ComputeStats(points).AscentM
 }
 
-// suggestSeeds are fixed rather than random: three distinct, reproducible
-// seeds are enough to get genuinely different loop shapes out of a
-// round-trip routing algorithm, and fixing them keeps this endpoint
-// deterministic for a given routing engine — nothing about "which three
-// loops" needs to vary run to run.
-var suggestSeeds = [3]int{1, 2, 3}
+// suggestSeeds returns three distinct seeds for one suggest request — a
+// fresh random base each call, not a fixed set, so pressing "Generate 3
+// options" again with the same start and distance shows genuinely
+// different loops instead of the exact same three every time (ORS's own
+// round_trip algorithm is otherwise deterministic per seed, so a fixed set
+// would repeat forever). +1/+2/+3 offsets from that base, rather than three
+// independently random values, is what still guarantees three distinct
+// shapes within a single request without any collision-checking.
+func suggestSeeds() [3]int {
+	// #nosec G404 -- picking which loop *shape* a rider sees, not a secret
+	// or anything an attacker gains from predicting; math/rand/v2 is the
+	// right tool for cosmetic variety, crypto/rand's cost buys nothing here.
+	base := rand.IntN(1_000_000)
+	return [3]int{base + 1, base + 2, base + 3}
+}
 
 // maxSuggestDistanceKm bounds handleRouteBuilderSuggest's own distanceKm —
 // same reasoning as maxRouteBuilderWaypoints: nothing otherwise stopped a
@@ -2175,7 +2196,7 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
 	var candidates []routeBuilderCandidate
 	var lastErr error
-	for _, seed := range suggestSeeds {
+	for _, seed := range suggestSeeds() {
 		points, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
 		if err != nil {
 			// One bad candidate doesn't sink the other two — the same "one
@@ -2232,6 +2253,9 @@ func (s *Server) handleGeocodeSearch(w http.ResponseWriter, r *http.Request) {
 
 	rider := auth.FromContext(r.Context()).User
 	if !s.rateLimitGeocode(w, rider) {
+		return
+	}
+	if !s.rateLimitGeocodeGlobal(w) {
 		return
 	}
 
@@ -2716,6 +2740,13 @@ func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool
 // budget than rateLimitRouteBuilder's.
 func (s *Server) rateLimitGeocode(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.GeocodeLimiter, rider, "too many location searches — wait a few minutes and try again")
+}
+
+// rateLimitGeocodeGlobal enforces GeocodeGlobalLimiter — see that field's
+// own doc comment for why this is a separate, shared budget across every
+// rider rather than rateLimitGeocode's per-rider one.
+func (s *Server) rateLimitGeocodeGlobal(w http.ResponseWriter) bool {
+	return rateLimit(w, s.GeocodeGlobalLimiter, "global", "location search is busy right now — wait a moment and try again")
 }
 
 // rateLimit is rateLimitConnect and rateLimitAuthAction's shared check: nil

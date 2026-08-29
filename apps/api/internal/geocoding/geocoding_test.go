@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func nominatimResponse(entries ...[3]string) string {
@@ -121,5 +124,43 @@ func TestMalformedLatLonIsSkippedNotFatal(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Name != "good" {
 		t.Errorf("results = %+v, want only the well-formed entry", results)
+	}
+}
+
+// Two riders searching the same place at the same moment (or one rider's
+// double-click) must not each spend Nominatim's own shared, policy-limited
+// budget independently — this is the exact scenario the cache exists for,
+// but only if concurrent misses are coalesced into one real call.
+func TestConcurrentIdenticalSearchesAreCoalesced(t *testing.T) {
+	var calls int32
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(nominatimResponse([3]string{"Ghent, Belgium", "51.0543", "3.7174"})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL)
+
+	const concurrent = 5
+	var wg sync.WaitGroup
+	wg.Add(concurrent)
+	for range concurrent {
+		go func() {
+			defer wg.Done()
+			if _, err := c.Search(context.Background(), "Ghent"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("geocoding service was called %d times for %d concurrent identical searches, want 1", got, concurrent)
 	}
 }

@@ -110,10 +110,12 @@ func (c *NominatimClient) Search(ctx context.Context, query string) ([]Result, e
 	}
 
 	key := strings.ToLower(query)
-	if results, ok := c.cache.get(key); ok {
-		return results, nil
-	}
+	return c.cache.resolve(key, func() ([]Result, error) {
+		return c.fetchSearch(ctx, query)
+	})
+}
 
+func (c *NominatimClient) fetchSearch(ctx context.Context, query string) ([]Result, error) {
 	reqURL := fmt.Sprintf("%s/search?q=%s&format=jsonv2&limit=%d", c.url, url.QueryEscape(query), maxResults)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -149,13 +151,19 @@ func (c *NominatimClient) Search(ctx context.Context, query string) ([]Result, e
 		results = append(results, Result{Name: r.DisplayName, Lat: lat, Lon: lon})
 	}
 
-	c.cache.put(key, results)
 	return results, nil
 }
 
+// responseCache also coalesces concurrent identical searches behind one
+// real call — the same "double-click, or two riders searching the same
+// city at once" gap internal/routing's own cache closes, and just as
+// relevant here: Nominatim's usage policy is a shared ceiling, so two
+// callers that both miss the cache in the same instant both spending a
+// request undermines the whole reason this cache exists.
 type responseCache struct {
-	mu      sync.Mutex
-	entries map[string]cacheEntry
+	mu       sync.Mutex
+	entries  map[string]cacheEntry
+	inFlight map[string]*sync.WaitGroup
 }
 
 type cacheEntry struct {
@@ -164,7 +172,10 @@ type cacheEntry struct {
 }
 
 func newResponseCache() *responseCache {
-	return &responseCache{entries: make(map[string]cacheEntry)}
+	return &responseCache{
+		entries:  make(map[string]cacheEntry),
+		inFlight: make(map[string]*sync.WaitGroup),
+	}
 }
 
 func (c *responseCache) get(key string) ([]Result, bool) {
@@ -190,4 +201,41 @@ func (c *responseCache) put(key string, results []Result) {
 		}
 	}
 	c.entries[key] = cacheEntry{results: append([]Result(nil), results...), expires: time.Now().Add(cacheTTL)}
+}
+
+// resolve returns the cached value for key if there is one, otherwise calls
+// fetch — but only once per key even under concurrent callers, the same
+// shape as internal/routing's own responseCache.resolve (see that one's
+// doc comment for the full reasoning).
+func (c *responseCache) resolve(key string, fetch func() ([]Result, error)) ([]Result, error) {
+	if results, ok := c.get(key); ok {
+		return results, nil
+	}
+
+	c.mu.Lock()
+	if wg, waiting := c.inFlight[key]; waiting {
+		c.mu.Unlock()
+		wg.Wait()
+		if results, ok := c.get(key); ok {
+			return results, nil
+		}
+		return c.resolve(key, fetch)
+	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	c.inFlight[key] = wg
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		delete(c.inFlight, key)
+		c.mu.Unlock()
+		wg.Done()
+	}()
+
+	results, err := fetch()
+	if err != nil {
+		return nil, err
+	}
+	c.put(key, results)
+	return results, nil
 }

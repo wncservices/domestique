@@ -13,6 +13,13 @@ const props = defineProps<{
    *  and lines from the Draw tab stay visible underneath; only what a
    *  click *does* changes. */
   pickStart?: boolean
+  /** The suggested builder's own persisted default start point
+   *  (RouteBuilderPanel.vue's localStorage-backed "remember my last pick"),
+   *  shown the moment the map is ready rather than waiting for a rider to
+   *  click the same location again every visit. Read once at init — not a
+   *  live binding, since after that the marker's position is driven by
+   *  clicks (setStartMarker), not by this prop changing. */
+  initialStart?: { lat: number; lon: number }
 }>()
 
 const emit = defineEmits<{
@@ -258,6 +265,13 @@ function clearAll() {
 function closeLoop() {
   if (waypoints.length < 2) return
   const start = waypoints[0]
+  const last = waypoints[waypoints.length - 1]
+  // Already closed — a repeat click (or clicking it again after nothing
+  // else changed) would otherwise append a second copy of the start point,
+  // producing a redundant zero-length final segment and spending a whole
+  // routing-engine request on a path that already ends exactly where it
+  // starts.
+  if (last.lat === start.lat && last.lon === start.lon) return
   waypoints.push({ lat: start.lat, lon: start.lon })
   emit('update:waypointCount', waypoints.length)
   schedulePreview()
@@ -380,23 +394,48 @@ function currentPosition(): Promise<GeolocationPosition | null> {
   })
 }
 
+// Set the moment onBeforeUnmount runs, checked again after init()'s own
+// awaits below — geolocation alone can take up to GEOLOCATION_TIMEOUT_MS,
+// long enough that a rider can realistically navigate away before it
+// resolves. Without this check, that stale continuation would go on to
+// construct a real maplibre-gl Map against a template ref Vue has already
+// cleared to null, throwing from inside an unawaited promise chain.
+let unmounted = false
+
 async function init() {
   if (!container.value) return
+  // No point asking for (and prompting permission for) geolocation when a
+  // saved default start already answers "where should this map open"
+  // more specifically than "wherever this rider happens to be right now."
   const [{ maplibregl: gl, themes }, position] = await Promise.all([
     loadMapLibreModules(),
-    currentPosition(),
+    props.initialStart ? Promise.resolve(null) : currentPosition(),
   ])
+  if (unmounted || !container.value) return
   maplibregl = gl
 
+  // A saved default start point wins over geolocation for the initial
+  // view — that is the whole point of it being "default": a rider who set
+  // one wants to land there, not wherever they happen to be standing today.
+  let center: [number, number] = DEFAULT_CENTER
+  let zoom = DEFAULT_ZOOM
+  if (props.initialStart) {
+    center = [props.initialStart.lon, props.initialStart.lat]
+    zoom = LOCATED_ZOOM
+  } else if (position) {
+    center = [position.coords.longitude, position.coords.latitude]
+    zoom = LOCATED_ZOOM
+  }
   const theme = resolved.value === 'dark' ? 'dark' : 'light'
   const instance = new gl.Map({
     container: container.value,
     style: styleFromTheme(theme, themes),
-    center: position ? [position.coords.longitude, position.coords.latitude] : DEFAULT_CENTER,
-    zoom: position ? LOCATED_ZOOM : DEFAULT_ZOOM,
+    center,
+    zoom,
     attributionControl: { compact: true },
   })
   map = instance
+  if (props.initialStart) setStartMarker(props.initialStart.lat, props.initialStart.lon)
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
   instance.on('load', addRouteBuilderLayers)
   instance.on('click', (e) => {
@@ -418,6 +457,7 @@ async function init() {
 onMounted(init)
 
 onBeforeUnmount(() => {
+  unmounted = true
   if (debounceHandle) clearTimeout(debounceHandle)
   resizeObserver?.disconnect()
   for (const m of markers) m.remove()
