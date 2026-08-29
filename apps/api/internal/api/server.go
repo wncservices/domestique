@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -2108,12 +2109,21 @@ func coordsDistanceAscent(points []gpx.Point) ([][2]float64, float64, float64) {
 	return coords, distance, gpx.ComputeStats(points).AscentM
 }
 
-// suggestSeeds are fixed rather than random: three distinct, reproducible
-// seeds are enough to get genuinely different loop shapes out of a
-// round-trip routing algorithm, and fixing them keeps this endpoint
-// deterministic for a given routing engine — nothing about "which three
-// loops" needs to vary run to run.
-var suggestSeeds = [3]int{1, 2, 3}
+// suggestSeeds returns three distinct seeds for one suggest request — a
+// fresh random base each call, not a fixed set, so pressing "Generate 3
+// options" again with the same start and distance shows genuinely
+// different loops instead of the exact same three every time (ORS's own
+// round_trip algorithm is otherwise deterministic per seed, so a fixed set
+// would repeat forever). +1/+2/+3 offsets from that base, rather than three
+// independently random values, is what still guarantees three distinct
+// shapes within a single request without any collision-checking.
+func suggestSeeds() [3]int {
+	// #nosec G404 -- picking which loop *shape* a rider sees, not a secret
+	// or anything an attacker gains from predicting; math/rand/v2 is the
+	// right tool for cosmetic variety, crypto/rand's cost buys nothing here.
+	base := rand.IntN(1_000_000)
+	return [3]int{base + 1, base + 2, base + 3}
+}
 
 // maxSuggestDistanceKm bounds handleRouteBuilderSuggest's own distanceKm —
 // same reasoning as maxRouteBuilderWaypoints: nothing otherwise stopped a
@@ -2175,7 +2185,7 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
 	var candidates []routeBuilderCandidate
 	var lastErr error
-	for _, seed := range suggestSeeds {
+	for _, seed := range suggestSeeds() {
 		points, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
 		if err != nil {
 			// One bad candidate doesn't sink the other two — the same "one

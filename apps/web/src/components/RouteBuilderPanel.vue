@@ -97,7 +97,42 @@ function onDrawSaved() {
 
 // --- Suggest tab ---
 
-const start = ref<{ lat: number; lon: number } | null>(null)
+// Remembers the last start point a rider picked, across visits — so
+// reopening the builder to plan another loop from the same place (home,
+// most likely) doesn't mean clicking the map in the same spot again every
+// time. Per-viewer convenience, not shared/critical state, so localStorage
+// rather than a backend field; a private window or a cleared/full store
+// just means falling back to no default, same as a first-time visitor.
+const DEFAULT_START_STORAGE_KEY = 'domestique:routebuilder:defaultStart'
+
+function loadDefaultStart(): { lat: number; lon: number } | null {
+  try {
+    const raw = localStorage.getItem(DEFAULT_START_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.lat === 'number' && typeof parsed?.lon === 'number') {
+      return { lat: parsed.lat, lon: parsed.lon }
+    }
+  } catch {
+    // Corrupted or inaccessible storage — fall back to no default.
+  }
+  return null
+}
+
+function saveDefaultStart(point: { lat: number; lon: number }) {
+  try {
+    localStorage.setItem(DEFAULT_START_STORAGE_KEY, JSON.stringify(point))
+  } catch {
+    // Best-effort only — see loadDefaultStart's own comment.
+  }
+}
+
+// Read once, before the map ever mounts: RouteBuilderMap's own initialStart
+// prop is a one-time seed for its initial view and start marker, not a live
+// binding, so this deliberately stays a plain value rather than a ref.
+const initialStart = loadDefaultStart()
+
+const start = ref<{ lat: number; lon: number } | null>(initialStart)
 const suggestDistanceKm = ref(20)
 const candidates = ref<RouteBuilderCandidate[]>([])
 const chosenIndex = ref<number | null>(null)
@@ -113,6 +148,7 @@ function onStart(point: { lat: number; lon: number }) {
   candidates.value = []
   chosenIndex.value = null
   mapRef.value?.clearSuggestion()
+  saveDefaultStart(point)
 }
 
 /** Picking a candidate draws it on the real map too, not just its own small
@@ -192,6 +228,7 @@ function onSuggestSaved() {
         <RouteBuilderMap
           ref="map"
           :pick-start="activeTab === 'suggest'"
+          :initial-start="initialStart ?? undefined"
           @update:preview="onPreview"
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"

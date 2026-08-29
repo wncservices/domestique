@@ -13,6 +13,13 @@ const props = defineProps<{
    *  and lines from the Draw tab stay visible underneath; only what a
    *  click *does* changes. */
   pickStart?: boolean
+  /** The suggested builder's own persisted default start point
+   *  (RouteBuilderPanel.vue's localStorage-backed "remember my last pick"),
+   *  shown the moment the map is ready rather than waiting for a rider to
+   *  click the same location again every visit. Read once at init — not a
+   *  live binding, since after that the marker's position is driven by
+   *  clicks (setStartMarker), not by this prop changing. */
+  initialStart?: { lat: number; lon: number }
 }>()
 
 const emit = defineEmits<{
@@ -382,21 +389,37 @@ function currentPosition(): Promise<GeolocationPosition | null> {
 
 async function init() {
   if (!container.value) return
+  // No point asking for (and prompting permission for) geolocation when a
+  // saved default start already answers "where should this map open"
+  // more specifically than "wherever this rider happens to be right now."
   const [{ maplibregl: gl, themes }, position] = await Promise.all([
     loadMapLibreModules(),
-    currentPosition(),
+    props.initialStart ? Promise.resolve(null) : currentPosition(),
   ])
   maplibregl = gl
 
+  // A saved default start point wins over geolocation for the initial
+  // view — that is the whole point of it being "default": a rider who set
+  // one wants to land there, not wherever they happen to be standing today.
+  let center: [number, number] = DEFAULT_CENTER
+  let zoom = DEFAULT_ZOOM
+  if (props.initialStart) {
+    center = [props.initialStart.lon, props.initialStart.lat]
+    zoom = LOCATED_ZOOM
+  } else if (position) {
+    center = [position.coords.longitude, position.coords.latitude]
+    zoom = LOCATED_ZOOM
+  }
   const theme = resolved.value === 'dark' ? 'dark' : 'light'
   const instance = new gl.Map({
     container: container.value,
     style: styleFromTheme(theme, themes),
-    center: position ? [position.coords.longitude, position.coords.latitude] : DEFAULT_CENTER,
-    zoom: position ? LOCATED_ZOOM : DEFAULT_ZOOM,
+    center,
+    zoom,
     attributionControl: { compact: true },
   })
   map = instance
+  if (props.initialStart) setStartMarker(props.initialStart.lat, props.initialStart.lon)
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
   instance.on('load', addRouteBuilderLayers)
   instance.on('click', (e) => {

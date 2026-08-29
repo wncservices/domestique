@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,13 +32,23 @@ import (
 // stubRoutingClient substitutes for a real ORS instance in tests, the same
 // reason fakeTarget substitutes for a real Garmin/Wahoo adapter — it always
 // returns the same fixed route regardless of what it's asked to snap or
-// generate, which is all most tests here need. failSeeds lets a suggest
-// test make specific seeds fail without a fake HTTP server of its own —
-// see TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed.
+// generate, which is all most tests here need. failCallNums lets a suggest
+// test make one specific call (the 1st, 2nd, ...) of a multi-seed request
+// fail without a fake HTTP server of its own — see
+// TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed. Keyed by call
+// number rather than the seed value itself: server.go's suggestSeeds picks
+// a fresh random base per request, so a test can no longer predict which
+// literal seed a given call will use.
 type stubRoutingClient struct {
-	route     []gpx.Point
-	err       error
-	failSeeds map[int]bool
+	route        []gpx.Point
+	err          error
+	failCallNums map[int]bool
+	callCount    *atomic.Int32
+	// onRoundTrip, when set, is called with every seed RoundTrip receives —
+	// TestSuggestSeedsVaryBetweenRequests' own way of observing what
+	// server.go's suggestSeeds actually generated, since it is unexported
+	// and this file is package api_test.
+	onRoundTrip func(seed int)
 }
 
 func (s stubRoutingClient) Route(context.Context, []routing.LatLng, string) ([]gpx.Point, error) {
@@ -44,8 +56,14 @@ func (s stubRoutingClient) Route(context.Context, []routing.LatLng, string) ([]g
 }
 
 func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, _ string) ([]gpx.Point, error) {
-	if s.failSeeds[seed] {
-		return nil, errors.New("stub: this seed is configured to fail")
+	if s.onRoundTrip != nil {
+		s.onRoundTrip(seed)
+	}
+	if s.callCount != nil {
+		n := int(s.callCount.Add(1))
+		if s.failCallNums[n] {
+			return nil, errors.New("stub: this call is configured to fail")
+		}
 	}
 	return s.route, s.err
 }
@@ -459,13 +477,56 @@ func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
 	}
 }
 
+// A fixed set of seeds would make every "Generate 3 options" click show the
+// exact same three loops forever — server.go's suggestSeeds instead picks a
+// fresh random base per request. Checked directly against what RoundTrip
+// actually receives, not just trusting the doc comment.
+func TestSuggestSeedsVaryBetweenRequests(t *testing.T) {
+	var mu sync.Mutex
+	var perRequest [][]int
+	recordSeeds := func() *[]int {
+		mu.Lock()
+		defer mu.Unlock()
+		perRequest = append(perRequest, nil)
+		i := len(perRequest) - 1
+		return &perRequest[i]
+	}
+
+	seeds := recordSeeds()
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		onRoundTrip: func(seed int) {
+			mu.Lock()
+			defer mu.Unlock()
+			*seeds = append(*seeds, seed)
+		},
+	})
+
+	body := map[string]any{"start": map[string]float64{"lat": 50.85, "lon": 4.35}, "distanceKm": 20}
+	doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", body).Body.Close()
+	seeds = recordSeeds()
+	doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", body).Body.Close()
+
+	if len(perRequest) != 2 || len(perRequest[0]) != 3 || len(perRequest[1]) != 3 {
+		t.Fatalf("recorded seeds = %v, want two requests of three seeds each", perRequest)
+	}
+	if perRequest[0][0] == perRequest[0][1] || perRequest[0][1] == perRequest[0][2] {
+		t.Errorf("seeds within one request = %v, want three distinct values", perRequest[0])
+	}
+	if perRequest[0][0] == perRequest[1][0] {
+		t.Errorf("both requests picked the same base seed (%d) — suggestSeeds is not varying between requests", perRequest[0][0])
+	}
+}
+
 // A routing engine stumbling on one seed shouldn't sink the other two — see
 // AGENTS.md's "one bad route never aborts a run," applied here to a single
 // request's three sub-calls.
 func TestRouteBuilderSuggestReturnsWhicheverCandidatesSucceed(t *testing.T) {
+	var calls atomic.Int32
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
-		failSeeds: map[int]bool{2: true},
+		route:        []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		failCallNums: map[int]bool{2: true},
+		callCount:    &calls,
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
