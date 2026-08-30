@@ -106,11 +106,18 @@ function onDrawSaved() {
 // for a road-type preference to bias there. Scoped to this tab alone
 // rather than shared with Draw (an earlier version of this control lived
 // above the map for both tabs).
+//
+// ORS has exactly four cycling profiles (routing.ValidProfiles) — there is
+// no "gravel" one. "Gravel bike" is mapped to cycling-regular (ORS's own
+// general-purpose profile, the middle ground between road's paved-surface
+// bias and mountain's off-road one) rather than inventing a fifth option
+// this app can't actually send. "Electric bike" is dropped from the list
+// by request — cycling-electric stays a valid routing.ValidProfiles entry
+// server-side, just not offered as a rider-facing choice here.
 const ROAD_TYPE_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Regular bike', value: 'cycling-regular' },
   { label: 'Road bike', value: 'cycling-road' },
+  { label: 'Gravel bike', value: 'cycling-regular' },
   { label: 'Mountain bike', value: 'cycling-mountain' },
-  { label: 'Electric bike', value: 'cycling-electric' },
 ]
 const roadType = ref('cycling-regular')
 
