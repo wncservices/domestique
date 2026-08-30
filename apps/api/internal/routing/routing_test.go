@@ -31,31 +31,61 @@ type surfaceFixture struct {
 // here; marshaling a small local type into the same JSON shape is what a
 // real server actually sends, which is all a test double needs to match.
 func geojsonResponseWithSurface(coords [][]float64, surface []surfaceFixture) string {
+	return geojsonResponseWithExtras(coords, surface, nil, nil)
+}
+
+// valueTriple is one entry of a fake ORS response's own extras.*.values —
+// [startIndex, endIndex, code] over the route's own coordinate array, the
+// same per-segment shape confirmed live for both surface and waytype (see
+// routing.go's own comment on inferUnknownSurfaceRatios).
+type valueTriple struct {
+	StartIndex int
+	EndIndex   int
+	Value      float64
+}
+
+// geojsonResponseWithExtras is geojsonResponseWithSurface's richer sibling —
+// also fills in extras.surface.values and extras.waytype.values, needed for
+// TestUnknownSurfaceIsInferredFromWaytype and friends below. Deliberately
+// not a directionsResponse{} literal, same reasoning as
+// geojsonResponseWithSurface's own comment.
+func geojsonResponseWithExtras(coords [][]float64, surfaceSummary []surfaceFixture, surfaceValues, waytypeValues []valueTriple) string {
 	type summaryEntry struct {
 		Value    float64 `json:"value"`
 		Distance float64 `json:"distance"`
 		Amount   float64 `json:"amount"`
 	}
-	summary := make([]summaryEntry, len(surface))
-	for i, s := range surface {
+	summary := make([]summaryEntry, len(surfaceSummary))
+	for i, s := range surfaceSummary {
 		summary[i] = summaryEntry(s)
 	}
+	toValues := func(vs []valueTriple) [][3]float64 {
+		out := make([][3]float64, len(vs))
+		for i, v := range vs {
+			out[i] = [3]float64{float64(v.StartIndex), float64(v.EndIndex), v.Value}
+		}
+		return out
+	}
 
+	type extraBlock struct {
+		Values  [][3]float64   `json:"values"`
+		Summary []summaryEntry `json:"summary,omitempty"`
+	}
 	type feature struct {
 		Geometry struct {
 			Coordinates [][]float64 `json:"coordinates"`
 		} `json:"geometry"`
 		Properties struct {
 			Extras struct {
-				Surface struct {
-					Summary []summaryEntry `json:"summary"`
-				} `json:"surface"`
+				Surface extraBlock `json:"surface"`
+				Waytype extraBlock `json:"waytype"`
 			} `json:"extras"`
 		} `json:"properties"`
 	}
 	var f feature
 	f.Geometry.Coordinates = coords
-	f.Properties.Extras.Surface.Summary = summary
+	f.Properties.Extras.Surface = extraBlock{Values: toValues(surfaceValues), Summary: summary}
+	f.Properties.Extras.Waytype = extraBlock{Values: toValues(waytypeValues)}
 
 	body := struct {
 		Features []feature `json:"features"`
@@ -105,8 +135,8 @@ func TestRouteSnapsThroughEveryWaypoint(t *testing.T) {
 	if !gotBody.Elevation {
 		t.Error("a Route call must ask ORS for elevation")
 	}
-	if len(gotBody.ExtraInfo) != 1 || gotBody.ExtraInfo[0] != "surface" {
-		t.Errorf("extra_info = %v, want [\"surface\"] on every request", gotBody.ExtraInfo)
+	if len(gotBody.ExtraInfo) != 2 || gotBody.ExtraInfo[0] != "surface" || gotBody.ExtraInfo[1] != "waytype" {
+		t.Errorf("extra_info = %v, want [\"surface\",\"waytype\"] on every request", gotBody.ExtraInfo)
 	}
 
 	if len(path.Points) != 3 || path.Points[0].Lat != 50.85 || path.Points[0].Lon != 4.35 {
@@ -240,6 +270,144 @@ func TestMissingSurfaceDataIsNotAnError(t *testing.T) {
 	}
 	if len(path.Surface) != 0 {
 		t.Errorf("surface = %+v, want empty with no surface data in the response", path.Surface)
+	}
+}
+
+// fiveEvenlySpacedCoords is 5 points along the same latitude, longitude
+// increasing by a fixed delta — 4 equal-length hops (indices 0-1, 1-2, 2-3,
+// 3-4), so a waytype split exactly down the middle (first 2 hops one code,
+// last 2 hops another) produces an exact, assertable 50/50 distance split
+// rather than something that only holds within a tolerance.
+var fiveEvenlySpacedCoords = [][]float64{
+	{4.000, 51.000},
+	{4.001, 51.000},
+	{4.002, 51.000},
+	{4.003, 51.000},
+	{4.004, 51.000},
+}
+
+func TestUnknownSurfaceIsInferredFromWaytype(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponseWithExtras(
+			fiveEvenlySpacedCoords,
+			[]surfaceFixture{{Value: 0, Distance: 1000, Amount: 100}},
+			[]valueTriple{{StartIndex: 0, EndIndex: 4, Value: 0}}, // the whole route reported Unknown
+			[]valueTriple{{StartIndex: 0, EndIndex: 4, Value: 3}}, // ...but it's all a Street
+		)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 51.0, Lon: 4.0}, {Lat: 51.0, Lon: 4.004}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path.Surface) != 1 || path.Surface[0].Type != "Likely paved" {
+		t.Fatalf("surface = %+v, want a single \"Likely paved\" entry", path.Surface)
+	}
+	if got := path.Surface[0].DistanceM; got < 999 || got > 1001 {
+		t.Errorf("DistanceM = %v, want ~1000 (the whole Unknown total)", got)
+	}
+	if got := path.Surface[0].Fraction; got < 0.99 || got > 1.01 {
+		t.Errorf("Fraction = %v, want ~1.0", got)
+	}
+}
+
+func TestUnknownSurfaceSplitsBetweenPavedAndUnpavedWaytype(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponseWithExtras(
+			fiveEvenlySpacedCoords,
+			[]surfaceFixture{{Value: 0, Distance: 1000, Amount: 100}},
+			[]valueTriple{{StartIndex: 0, EndIndex: 4, Value: 0}},
+			[]valueTriple{
+				{StartIndex: 0, EndIndex: 2, Value: 3}, // Street  — first half
+				{StartIndex: 2, EndIndex: 4, Value: 5}, // Track   — second half
+			},
+		)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 51.0, Lon: 4.0}, {Lat: 51.0, Lon: 4.004}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path.Surface) != 2 {
+		t.Fatalf("surface = %+v, want two entries (Likely paved + Likely unpaved)", path.Surface)
+	}
+	byType := map[string]SurfaceSummary{}
+	for _, s := range path.Surface {
+		byType[s.Type] = s
+	}
+	paved, ok := byType["Likely paved"]
+	if !ok {
+		t.Fatalf("surface = %+v, missing \"Likely paved\"", path.Surface)
+	}
+	unpaved, ok := byType["Likely unpaved"]
+	if !ok {
+		t.Fatalf("surface = %+v, missing \"Likely unpaved\"", path.Surface)
+	}
+	if got := paved.DistanceM; got < 490 || got > 510 {
+		t.Errorf("Likely paved DistanceM = %v, want ~500 (half of the 1000m Unknown total)", got)
+	}
+	if got := unpaved.DistanceM; got < 490 || got > 510 {
+		t.Errorf("Likely unpaved DistanceM = %v, want ~500", got)
+	}
+}
+
+func TestUnknownSurfaceStaysUnknownWithoutWaytypeData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// A self-hosted instance without waytype enabled: surface.values
+		// present, waytype.values entirely absent — the exact "nothing to
+		// infer from" case inferUnknownSurfaceRatios' own doc comment
+		// describes degrading from.
+		_, _ = w.Write([]byte(geojsonResponseWithExtras(
+			fiveEvenlySpacedCoords,
+			[]surfaceFixture{{Value: 0, Distance: 1000, Amount: 100}},
+			[]valueTriple{{StartIndex: 0, EndIndex: 4, Value: 0}},
+			nil,
+		)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 51.0, Lon: 4.0}, {Lat: 51.0, Lon: 4.004}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path.Surface) != 1 || path.Surface[0].Type != "Unknown" || path.Surface[0].DistanceM != 1000 {
+		t.Errorf("surface = %+v, want the original single \"Unknown\" entry unchanged", path.Surface)
+	}
+}
+
+func TestUnknownSurfaceStaysUnknownWhenWaytypeAlsoUnresolved(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponseWithExtras(
+			fiveEvenlySpacedCoords,
+			[]surfaceFixture{{Value: 0, Distance: 1000, Amount: 100}},
+			[]valueTriple{{StartIndex: 0, EndIndex: 4, Value: 0}},
+			// waytype itself has no opinion (0) for part of it, and reports
+			// a ferry (9) for the rest — neither is in pavedWaytypes or
+			// unpavedWaytypes, so this should resolve nothing.
+			[]valueTriple{
+				{StartIndex: 0, EndIndex: 2, Value: 0},
+				{StartIndex: 2, EndIndex: 4, Value: 9},
+			},
+		)))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	path, err := c.Route(context.Background(), []LatLng{{Lat: 51.0, Lon: 4.0}, {Lat: 51.0, Lon: 4.004}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(path.Surface) != 1 || path.Surface[0].Type != "Unknown" || path.Surface[0].DistanceM != 1000 {
+		t.Errorf("surface = %+v, want the original single \"Unknown\" entry unchanged", path.Surface)
 	}
 }
 

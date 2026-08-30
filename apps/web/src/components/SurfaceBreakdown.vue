@@ -22,6 +22,13 @@ const PAVED = new Set([
   'Metal',
   'Wood',
   'Grass Paver',
+  // Not ORS's own surface data — routing.inferUnknownSurfaceRatios' own
+  // best guess for a stretch ORS reports no surface for at all, from the
+  // road class (street, cycleway, ...) instead. Grouped into the same
+  // colour as confirmed Paved (this bar already collapses ~19 codes into
+  // 3 colours), but rendered at reduced opacity below so it still reads as
+  // less certain than data ORS actually measured.
+  'Likely paved',
 ])
 const UNPAVED = new Set([
   'Unpaved',
@@ -33,6 +40,8 @@ const UNPAVED = new Set([
   'Sand',
   'Woodchips',
   'Grass',
+  // See "Likely paved" above — same inference, opposite direction.
+  'Likely unpaved',
 ])
 
 const CATEGORIES = [
@@ -54,6 +63,11 @@ const segments = computed(() =>
     ...s,
     color: colorFor(s.type),
     percent: Math.round(s.fraction * 100),
+    // A guess from road class, not something ORS actually measured — see
+    // "Likely paved"'s own comment above. Faded in the bar so a rider can
+    // tell it apart from confirmed data at a glance, not just from the
+    // wording of the label.
+    inferred: s.type.startsWith('Likely '),
   })),
 )
 
@@ -75,7 +89,7 @@ const presentCategories = computed(() => {
       <div
         v-for="(s, i) in segments"
         :key="i"
-        :style="{ width: `${s.percent}%`, backgroundColor: s.color }"
+        :style="{ width: `${s.percent}%`, backgroundColor: s.color, opacity: s.inferred ? 0.55 : 1 }"
         :title="`${s.type}: ${s.percent}%`"
       />
     </div>
