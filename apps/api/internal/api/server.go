@@ -2296,30 +2296,49 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
 	base := suggestSeedBase()
-	var pool []suggestPoolEntry
-	var lastErr error
-	var attempted int
 	// Always spends the full attempt budget rather than stopping at 3
 	// successes — see selectByHilliness's own doc comment for why: a
 	// hilliness preference only actually shows up in what a rider sees if
 	// there's a real pool of candidates to choose the best-fitting 3 from,
-	// not just whichever 3 seeds happened to succeed first.
-	for attempt := 1; attempt <= maxSuggestAttempts; attempt++ {
-		attempted++
-		seed := base + attempt
-		path, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile, hilliness)
-		if err != nil {
+	// not just whichever 3 seeds happened to succeed first. Fired
+	// concurrently, not one after another: found live, one slow/flaky
+	// moment from ORS (three 20-second Client.Timeouts in the same
+	// request) turned a sequential loop into a rider-visible "stopped
+	// loading" — up to maxSuggestAttempts*requestTimeout in the worst
+	// case. Running all attempts at once bounds the whole request by the
+	// single slowest call instead of their sum, at the same total ORS
+	// load (six calls either way).
+	results := make([]struct {
+		path routing.Path
+		err  error
+	}, maxSuggestAttempts)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			seed := base + i + 1
+			results[i].path, results[i].err = s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile, hilliness)
+		}(i)
+	}
+	wg.Wait()
+
+	var pool []suggestPoolEntry
+	var lastErr error
+	attempted := maxSuggestAttempts
+	for i, res := range results {
+		if res.err != nil {
 			// One bad seed doesn't sink the request — the same "one bad
 			// route never aborts a run" principle AGENTS.md states for the
 			// library as a whole. Still worth a Warn and the shared error
 			// metric, so an operator sees an engine that is intermittently
 			// flaky even on requests that otherwise succeed.
-			s.logger().Warn("route builder suggestion seed failed", "seed", seed, "err", err, "by", rider)
+			s.logger().Warn("route builder suggestion seed failed", "seed", base+i+1, "err", res.err, "by", rider)
 			recordRouteBuilderError(r.Context(), "suggest")
-			lastErr = err
+			lastErr = res.err
 			continue
 		}
-		summary := summarizePath(path)
+		summary := summarizePath(res.path)
 		pool = append(pool, suggestPoolEntry{
 			candidate: routeBuilderCandidate{
 				Points:    summary.Coords,

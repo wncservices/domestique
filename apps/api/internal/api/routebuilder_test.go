@@ -67,6 +67,12 @@ type stubRoutingClient struct {
 	// prove selectByHilliness actually picks by climbing rate rather than
 	// just returning whichever 3 calls happened to succeed first.
 	routeForCall map[int][]gpx.Point
+	// delay, when set, is slept before RoundTrip returns —
+	// TestRouteBuilderSuggestFiresAttemptsConcurrently's own way of
+	// proving the suggest handler's maxSuggestAttempts calls run in
+	// parallel: a sequential loop of 6 calls each sleeping delay would
+	// take roughly 6*delay; concurrent calls take roughly one delay.
+	delay time.Duration
 }
 
 func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile string) (routing.Path, error) {
@@ -77,6 +83,9 @@ func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile 
 }
 
 func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, profile string, hilliness int) (routing.Path, error) {
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	if s.onHilliness != nil {
 		s.onHilliness(hilliness)
 	}
@@ -482,10 +491,16 @@ func TestRouteBuilderSuggestRejectsAnExcessiveDistance(t *testing.T) {
 // Same reasoning as TestRouteBuilderPreviewForwardsChosenProfile, for the
 // Suggest tab's own RoundTrip call.
 func TestRouteBuilderSuggestForwardsChosenProfile(t *testing.T) {
-	var got string
+	// A plain string/int written from onProfile/onHilliness below is a real
+	// data race, not just untidy — the suggest handler now fires all
+	// maxSuggestAttempts RoundTrip calls concurrently (see server.go's own
+	// comment on why), so every one of these tests observes the callback
+	// from multiple goroutines at once, even though every call in a given
+	// test sees the identical value.
+	var got atomic.Value
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
-		onProfile: func(profile string) { got = profile },
+		onProfile: func(profile string) { got.Store(profile) },
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -497,7 +512,7 @@ func TestRouteBuilderSuggestForwardsChosenProfile(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got != "cycling-road" {
+	if got := got.Load(); got != "cycling-road" {
 		t.Errorf("routing.Client.RoundTrip received profile %q, want %q", got, "cycling-road")
 	}
 }
@@ -506,10 +521,14 @@ func TestRouteBuilderSuggestForwardsChosenProfile(t *testing.T) {
 // sends actually reaches the routing engine — same reasoning as
 // TestRouteBuilderSuggestForwardsChosenProfile above.
 func TestRouteBuilderSuggestForwardsChosenHilliness(t *testing.T) {
-	got := -99 // a value neither -1 (unspecified) nor 0-3 could ever be, so a missed call is obvious
+	// -99: a value neither -1 (unspecified) nor 0-3 could ever be, so a
+	// missed call is obvious. See TestRouteBuilderSuggestForwardsChosenProfile's
+	// own comment on why this needs to be an atomic, not a plain int.
+	var got atomic.Int32
+	got.Store(-99)
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route:       []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
-		onHilliness: func(hilliness int) { got = hilliness },
+		onHilliness: func(hilliness int) { got.Store(int32(hilliness)) },
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -521,7 +540,7 @@ func TestRouteBuilderSuggestForwardsChosenHilliness(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got != 0 {
+	if got := got.Load(); got != 0 {
 		t.Errorf("routing.Client.RoundTrip received hilliness %d, want the explicit 0 (Novice)", got)
 	}
 }
@@ -531,10 +550,11 @@ func TestRouteBuilderSuggestForwardsChosenHilliness(t *testing.T) {
 // *int field distinguishes "not sent" from "sent as 0" for exactly this
 // reason (see server.go's own comment on the request body's Hilliness field).
 func TestRouteBuilderSuggestOmittedHillinessIsUnspecified(t *testing.T) {
-	got := -99
+	var got atomic.Int32
+	got.Store(-99)
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route:       []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
-		onHilliness: func(hilliness int) { got = hilliness },
+		onHilliness: func(hilliness int) { got.Store(int32(hilliness)) },
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -545,7 +565,7 @@ func TestRouteBuilderSuggestOmittedHillinessIsUnspecified(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got != -1 {
+	if got := got.Load(); got != -1 {
 		t.Errorf("routing.Client.RoundTrip received hilliness %d, want -1 (unspecified) for an omitted field", got)
 	}
 }
@@ -638,6 +658,38 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 			}
 		}
 	})
+}
+
+// Found live on preview.domestique.dev: a single slow/flaky moment from
+// ORS (three 20-second Client.Timeouts inside one request) made the whole
+// suggest request take up to maxSuggestAttempts*requestTimeout when the 6
+// attempts ran one after another — long enough to read as "stopped
+// loading." This is the regression test for firing them concurrently
+// instead: 6 attempts each sleeping 200ms take ~1.2s sequentially, but
+// well under that run in parallel.
+func TestRouteBuilderSuggestFiresAttemptsConcurrently(t *testing.T) {
+	const delay = 200 * time.Millisecond
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		delay: delay,
+	})
+
+	start := time.Now()
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	elapsed := time.Since(start)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	// A generous ceiling (3 delays, not 6) — comfortably below "ran
+	// sequentially" while tolerant of scheduling noise on a busy CI runner.
+	if max := delay * 3; elapsed > max {
+		t.Errorf("suggest request took %v, want well under %v (6 attempts of %v should run concurrently, not sequentially)", elapsed, max, delay)
+	}
 }
 
 func TestRouteBuilderSuggestRejectsAnUnsupportedProfile(t *testing.T) {
