@@ -423,7 +423,7 @@ func TestRoundTripSendsLengthAndSeed(t *testing.T) {
 	defer server.Close()
 
 	c := New(server.URL, "")
-	_, err := c.RoundTrip(context.Background(), LatLng{Lat: 50.85, Lon: 4.35}, 20000, 7, "cycling-road")
+	_, err := c.RoundTrip(context.Background(), LatLng{Lat: 50.85, Lon: 4.35}, 20000, 7, "cycling-road", -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,6 +439,63 @@ func TestRoundTripSendsLengthAndSeed(t *testing.T) {
 	}
 }
 
+// A negative hilliness ("unspecified" — server.go's own sentinel for an
+// omitted request field) must substitute DefaultSteepnessDifficulty rather
+// than reach ORS as-is (a real negative int there would 400/500, confirmed
+// live against the real API for an out-of-range positive value).
+func TestRoundTripSubstitutesDefaultHilliness(t *testing.T) {
+	var gotBody directionsRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	if _, err := c.RoundTrip(context.Background(), LatLng{Lat: 50.85, Lon: 4.35}, 20000, 1, "cycling-road", -1); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody.Options.ProfileParams == nil || gotBody.Options.ProfileParams.Weightings == nil {
+		t.Fatal("a RoundTrip call must always set profile_params.weightings")
+	}
+	if got := gotBody.Options.ProfileParams.Weightings.SteepnessDifficulty; got != DefaultSteepnessDifficulty {
+		t.Errorf("steepness_difficulty = %d, want the default %d", got, DefaultSteepnessDifficulty)
+	}
+}
+
+// An explicit hilliness must reach ORS exactly as given — 0 (Novice)
+// included, which is why -1 rather than 0 is the "unspecified" sentinel
+// (see RoundTrip's own doc comment).
+func TestRoundTripForwardsExplicitHilliness(t *testing.T) {
+	var gotBody directionsRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(geojsonResponse([][]float64{{4.35, 50.85}, {4.36, 50.86}})))
+	}))
+	defer server.Close()
+
+	c := New(server.URL, "")
+	if _, err := c.RoundTrip(context.Background(), LatLng{Lat: 50.85, Lon: 4.35}, 20000, 1, "cycling-road", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := gotBody.Options.ProfileParams.Weightings.SteepnessDifficulty; got != 0 {
+		t.Errorf("steepness_difficulty = %d, want the explicit 0 (Novice), not the default", got)
+	}
+}
+
+func TestRoundTripRejectsHillinessAboveTheValidRange(t *testing.T) {
+	c := New("http://unused.invalid", "")
+	if _, err := c.RoundTrip(context.Background(), LatLng{Lat: 1, Lon: 1}, 20000, 1, "", MaxSteepnessDifficulty+1); err == nil {
+		t.Fatal("expected an error for an out-of-range hilliness")
+	}
+}
+
 func TestRouteRejectsFewerThanTwoWaypoints(t *testing.T) {
 	c := New("http://unused.invalid", "")
 	if _, err := c.Route(context.Background(), []LatLng{{Lat: 1, Lon: 1}}, ""); err == nil {
@@ -448,7 +505,7 @@ func TestRouteRejectsFewerThanTwoWaypoints(t *testing.T) {
 
 func TestRoundTripRejectsNonPositiveDistance(t *testing.T) {
 	c := New("http://unused.invalid", "")
-	if _, err := c.RoundTrip(context.Background(), LatLng{Lat: 1, Lon: 1}, 0, 1, ""); err == nil {
+	if _, err := c.RoundTrip(context.Background(), LatLng{Lat: 1, Lon: 1}, 0, 1, "", -1); err == nil {
 		t.Fatal("expected an error for a zero distance")
 	}
 }
@@ -565,10 +622,10 @@ func TestDifferentSeedsAreNotCachedTogether(t *testing.T) {
 
 	c := New(server.URL, "")
 	start := LatLng{Lat: 50.85, Lon: 4.35}
-	if _, err := c.RoundTrip(context.Background(), start, 20000, 1, "cycling-road"); err != nil {
+	if _, err := c.RoundTrip(context.Background(), start, 20000, 1, "cycling-road", -1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.RoundTrip(context.Background(), start, 20000, 2, "cycling-road"); err != nil {
+	if _, err := c.RoundTrip(context.Background(), start, 20000, 2, "cycling-road", -1); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
@@ -576,7 +633,7 @@ func TestDifferentSeedsAreNotCachedTogether(t *testing.T) {
 	}
 
 	// But the same seed again is the same question and should hit the cache.
-	if _, err := c.RoundTrip(context.Background(), start, 20000, 1, "cycling-road"); err != nil {
+	if _, err := c.RoundTrip(context.Background(), start, 20000, 1, "cycling-road", -1); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
@@ -602,6 +659,21 @@ func TestCacheKeyDiffersByAvoidFeatures(t *testing.T) {
 
 	if keyPlain == keySteps || keySteps == keyFords || keyPlain == keyFords {
 		t.Errorf("cache keys = %q, %q, %q — want three distinct keys for three different avoid_features", keyPlain, keySteps, keyFords)
+	}
+}
+
+func TestCacheKeyDiffersByHilliness(t *testing.T) {
+	base := directionsRequest{Coordinates: [][2]float64{{4.35, 50.85}, {4.36, 50.86}}}
+	novice := base
+	novice.Options = &directionsOpts{ProfileParams: &profileParams{Weightings: &weightings{SteepnessDifficulty: 0}}}
+	pro := base
+	pro.Options = &directionsOpts{ProfileParams: &profileParams{Weightings: &weightings{SteepnessDifficulty: 3}}}
+
+	keyNovice := cacheKey("cycling-regular", novice)
+	keyPro := cacheKey("cycling-regular", pro)
+
+	if keyNovice == keyPro {
+		t.Errorf("cache keys = %q, %q — want distinct keys for two different hilliness preferences", keyNovice, keyPro)
 	}
 }
 
