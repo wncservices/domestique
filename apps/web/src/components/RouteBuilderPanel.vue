@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import ElevationProfile from './ElevationProfile.vue'
@@ -18,6 +18,20 @@ const tabItems = [
   { label: 'Draw', value: 'draw', icon: 'i-lucide-pencil', slot: 'draw' as const },
   { label: 'Suggest', value: 'suggest', icon: 'i-lucide-shuffle', slot: 'suggest' as const },
 ]
+
+// --- Road type ---
+// One selector shared by both tabs rather than a per-tab copy — it drives
+// the same routing.Client.Route/RoundTrip "profile" argument either way
+// (apps/api/internal/routing/routing.go's ValidProfiles), so a rider
+// choosing "mountain bike" expects it to bias the Draw tab's own snapping
+// too, not just the Suggest tab's loops.
+const ROAD_TYPE_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Regular bike', value: 'cycling-regular' },
+  { label: 'Road bike', value: 'cycling-road' },
+  { label: 'Mountain bike', value: 'cycling-mountain' },
+  { label: 'Electric bike', value: 'cycling-electric' },
+]
+const roadType = ref('cycling-regular')
 
 const mapRef = useTemplateRef<InstanceType<typeof RouteBuilderMap>>('map')
 
@@ -174,6 +188,7 @@ async function generate() {
     const result = await api.routeBuilderSuggest({
       start: start.value,
       distanceKm: suggestDistanceKm.value,
+      profile: roadType.value,
     })
     candidates.value = result.candidates
   } catch (err) {
@@ -187,6 +202,18 @@ async function generate() {
     suggesting.value = false
   }
 }
+
+// Candidates already on screen were generated for whichever bike was
+// selected at the time — leaving them up after switching road type would
+// show, say, a mountain-bike loop under a "Road bike" selector with no
+// indication it's now stale. Regenerating isn't automatic (Generate still
+// costs a real routing-engine round trip) but showing the old answer as if
+// it still applied would be worse.
+watch(roadType, () => {
+  candidates.value = []
+  chosenIndex.value = null
+  mapRef.value?.clearSuggestion()
+})
 
 function clearSuggestions() {
   mapRef.value?.clearStart()
@@ -228,11 +255,16 @@ function onSuggestSaved() {
         </UButton>
       </div>
 
+      <UFormField label="Road type" class="max-w-56">
+        <USelect v-model="roadType" :items="ROAD_TYPE_OPTIONS" class="w-full" />
+      </UFormField>
+
       <div class="h-[32rem] overflow-hidden rounded-lg border border-default">
         <RouteBuilderMap
           ref="map"
           :pick-start="activeTab === 'suggest'"
           :initial-start="initialStart ?? undefined"
+          :profile="roadType"
           @update:preview="onPreview"
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"

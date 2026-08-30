@@ -21,6 +21,12 @@ const props = defineProps<{
    *  live binding, since after that the marker's position is driven by
    *  clicks (setStartMarker), not by this prop changing. */
   initialStart?: { lat: number; lon: number }
+  /** One of routing.ValidProfiles (apps/api/internal/routing/routing.go) —
+   *  "what kind of bike," which changes which ways the routing engine will
+   *  even consider. A live binding, unlike initialStart above: changing it
+   *  mid-draw should re-snap the Draw tab's current waypoints against the
+   *  newly-chosen profile, not just apply to the next route drawn. */
+  profile?: string
 }>()
 
 const emit = defineEmits<{
@@ -156,7 +162,7 @@ async function requestPreview() {
   const seq = ++requestSeq
   emit('update:preview', null)
   try {
-    const preview = await api.routeBuilderPreview(waypoints)
+    const preview = await api.routeBuilderPreview(waypoints, props.profile)
     // A slower earlier request resolving after a faster later one would
     // otherwise overwrite the up-to-date result with a stale one.
     if (seq !== requestSeq) return
@@ -319,6 +325,12 @@ watch(
   () => props.pickStart,
   (pickStart) => setDrawVisible(!pickStart),
 )
+
+// A road-type change should re-snap whatever is already drawn against the
+// new profile rather than only affecting the next waypoint placed —
+// schedulePreview (not a direct requestPreview) so a rapid back-and-forth
+// through the selector still only fires one request.
+watch(() => props.profile, schedulePreview)
 
 function addRouteBuilderLayers() {
   if (!map) return
