@@ -10,12 +10,14 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -2200,16 +2202,15 @@ func suggestSeedBase() int {
 	return rand.IntN(1_000_000)
 }
 
-// maxSuggestAttempts bounds how many seeds one suggest request will try
-// while looking for 3 candidates. ORS's own round_trip algorithm can pick a
-// seed that lands its loop on a genuinely unroutable point (found live: a
+// maxSuggestAttempts bounds how many seeds one suggest request will try —
+// originally purely a retry budget (ORS's own round_trip algorithm can pick
+// a seed that lands its loop on a genuinely unroutable point, found live: a
 // real 404 "Unable to find a route for point (...)" for one seed in three,
-// the other two routing fine) — that used to just mean 2 candidates instead
-// of 3 for that request. A few extra attempts past 3 let a bad seed get
-// silently replaced rather than shown as a rider-visible shortfall, while
-// still bounding how many routing-engine calls one request can spend
-// chasing a third candidate that may never come (an unlucky start point
-// with very little rideable loop nearby, say).
+// the other two routing fine), now also the size of the pool
+// selectByHilliness picks 3 best-fit candidates from — see its own doc
+// comment for why a bigger pool is what makes "Flat" and "Hilly" actually
+// behave differently. Still bounds how many routing-engine calls one
+// request can spend, the same reasoning as before.
 const maxSuggestAttempts = 6
 
 // suggestCandidateCount is how many loop options "Generate 3 options"
@@ -2295,37 +2296,42 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
 	base := suggestSeedBase()
-	var candidates []routeBuilderCandidate
+	var pool []suggestPoolEntry
 	var lastErr error
 	var attempted int
-	for attempt := 1; len(candidates) < suggestCandidateCount && attempt <= maxSuggestAttempts; attempt++ {
+	// Always spends the full attempt budget rather than stopping at 3
+	// successes — see selectByHilliness's own doc comment for why: a
+	// hilliness preference only actually shows up in what a rider sees if
+	// there's a real pool of candidates to choose the best-fitting 3 from,
+	// not just whichever 3 seeds happened to succeed first.
+	for attempt := 1; attempt <= maxSuggestAttempts; attempt++ {
 		attempted++
 		seed := base + attempt
 		path, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile, hilliness)
 		if err != nil {
 			// One bad seed doesn't sink the request — the same "one bad
 			// route never aborts a run" principle AGENTS.md states for the
-			// library as a whole. It also no longer even costs a candidate:
-			// the loop just keeps going (maxSuggestAttempts allowing), so a
-			// seed ORS couldn't route gets replaced rather than shown as a
-			// rider-visible shortfall. Still worth a Warn (the request
-			// itself keeps going) and the shared error metric, so an
-			// operator sees an engine that is intermittently flaky even on
-			// requests that otherwise succeed.
+			// library as a whole. Still worth a Warn and the shared error
+			// metric, so an operator sees an engine that is intermittently
+			// flaky even on requests that otherwise succeed.
 			s.logger().Warn("route builder suggestion seed failed", "seed", seed, "err", err, "by", rider)
 			recordRouteBuilderError(r.Context(), "suggest")
 			lastErr = err
 			continue
 		}
 		summary := summarizePath(path)
-		candidates = append(candidates, routeBuilderCandidate{
-			Points:    summary.Coords,
-			DistanceM: summary.DistanceM,
-			AscentM:   summary.AscentM,
-			Surface:   summary.Surface,
-			Elevation: summary.Elevation,
+		pool = append(pool, suggestPoolEntry{
+			candidate: routeBuilderCandidate{
+				Points:    summary.Coords,
+				DistanceM: summary.DistanceM,
+				AscentM:   summary.AscentM,
+				Surface:   summary.Surface,
+				Elevation: summary.Elevation,
+			},
+			ascentPerKm: ascentPerKm(summary.AscentM, summary.DistanceM),
 		})
 	}
+	candidates := selectByHilliness(pool, hilliness, suggestCandidateCount)
 	if len(candidates) == 0 {
 		// Unlike a partial failure above, the request itself fails here —
 		// Error, not Warn, per the same "does the request still succeed"
@@ -2345,6 +2351,94 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
+}
+
+// suggestPoolEntry is one successful RoundTrip result, kept around with its
+// own climbing rate until selectByHilliness has picked the final 3 — see
+// that function's own doc comment for why raw AscentM alone isn't enough to
+// select by.
+type suggestPoolEntry struct {
+	candidate   routeBuilderCandidate
+	ascentPerKm float64
+}
+
+// ascentPerKm is the one number a hilliness preference can actually be
+// judged against — see selectByHilliness's own doc comment. Guards a zero
+// distance (never happens for a real successful route, but a stray 0/0
+// reads as "flattest possible" otherwise, which would bias selection
+// toward a result that was never really measured).
+func ascentPerKm(ascentM, distanceM float64) float64 {
+	if distanceM <= 0 {
+		return 0
+	}
+	return ascentM / (distanceM / 1000)
+}
+
+// medianOf returns the median of vals — used only by selectByHilliness's
+// own "Moderate" case, and only ever over the handful of candidates one
+// suggest request generates, so a plain sort is plenty.
+func medianOf(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), vals...)
+	sort.Float64s(sorted)
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 1 {
+		return sorted[mid]
+	}
+	return (sorted[mid-1] + sorted[mid]) / 2
+}
+
+// selectByHilliness picks the n candidates from pool that best fit
+// hilliness, rather than just however many of the first few seeds happened
+// to succeed.
+//
+// Found live: ORS's own steepness_difficulty weighting (see
+// routing.RoundTrip's own doc comment) does bias climbing rate the right
+// way on average — confirmed against the real API across 5 seeds, "Pro"
+// climbed more per kilometre than "Novice" every single time — but
+// round_trip's own loop length varies by up to 50% from the requested
+// distance independently of that weighting. That variance swamps the
+// signal in *total* ascent: a "Flat" request that happens to land a longer
+// loop can easily show more total climbing than a "Hilly" request that
+// lands a shorter one, even though the Hilly one is climbing faster the
+// whole way — exactly the complaint that motivated this function. Ranking
+// the whole pool by ascent-per-km and keeping the best-fitting n, instead
+// of accepting the first n successes, is what actually makes "Flat" read
+// as flatter than "Hilly" to a rider looking at the result.
+//
+// hilliness here is always a resolved 0-3 value (RoundTrip's own -1
+// "unspecified" sentinel is substituted with routing.DefaultSteepnessDifficulty
+// by the caller before this runs) — 0-1 favours the lowest climbing rates
+// in the pool, 2-3 the highest, and exactly
+// routing.DefaultSteepnessDifficulty picks whichever are closest to the
+// pool's own median, since "Moderate" has no obvious direction to sort by.
+func selectByHilliness(pool []suggestPoolEntry, hilliness, n int) []routeBuilderCandidate {
+	sorted := append([]suggestPoolEntry(nil), pool...)
+	switch {
+	case hilliness <= 0:
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].ascentPerKm < sorted[j].ascentPerKm })
+	case hilliness >= routing.MaxSteepnessDifficulty-1:
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].ascentPerKm > sorted[j].ascentPerKm })
+	default:
+		rates := make([]float64, len(sorted))
+		for i, e := range sorted {
+			rates[i] = e.ascentPerKm
+		}
+		median := medianOf(rates)
+		sort.Slice(sorted, func(i, j int) bool {
+			return math.Abs(sorted[i].ascentPerKm-median) < math.Abs(sorted[j].ascentPerKm-median)
+		})
+	}
+	if len(sorted) > n {
+		sorted = sorted[:n]
+	}
+	candidates := make([]routeBuilderCandidate, len(sorted))
+	for i, e := range sorted {
+		candidates[i] = e.candidate
+	}
+	return candidates
 }
 
 // maxGeocodeQueryLen bounds a location search's own query string — nothing
