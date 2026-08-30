@@ -340,27 +340,35 @@ function onSuggestSaved() {
               loop options to choose from.
             </p>
 
-            <div class="flex items-end gap-3">
-              <UFormField label="Distance" hint="km" class="flex-1">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <UFormField label="Distance" hint="km" class="sm:flex-1">
                 <UInput v-model.number="suggestDistanceKm" type="number" min="1" class="w-full" />
               </UFormField>
-              <UButton
-                icon="i-lucide-shuffle"
-                :loading="suggesting"
-                :disabled="!canGenerate"
-                @click="generate"
-              >
-                Generate 3 options
-              </UButton>
-              <UButton
-                v-if="start"
-                color="neutral"
-                variant="ghost"
-                :disabled="suggesting"
-                @click="clearSuggestions"
-              >
-                Clear
-              </UButton>
+              <!-- A narrow (mobile) viewport has no room for the distance
+                   field and both buttons on one row — the whole row used to
+                   squeeze "Generate 3 options" onto two lines instead.
+                   Stacking below sm keeps every control on its own
+                   full-width line; this inner row keeps Generate and Clear
+                   together rather than each getting a stacked line too. -->
+              <div class="flex gap-3">
+                <UButton
+                  icon="i-lucide-shuffle"
+                  :loading="suggesting"
+                  :disabled="!canGenerate"
+                  @click="generate"
+                >
+                  Generate 3 options
+                </UButton>
+                <UButton
+                  v-if="start"
+                  color="neutral"
+                  variant="ghost"
+                  :disabled="suggesting"
+                  @click="clearSuggestions"
+                >
+                  Clear
+                </UButton>
+              </div>
             </div>
             <p v-if="!start" class="text-sm text-muted">Place a starting point on the map first.</p>
 
