@@ -13,6 +13,10 @@ import (
 
 func poolEntry(ascentM float64) suggestPoolEntry {
 	const distanceM = 10000 // fixed, so ascentPerKm ranks identically to raw ascentM
+	return poolEntryDist(distanceM, ascentM)
+}
+
+func poolEntryDist(distanceM, ascentM float64) suggestPoolEntry {
 	return suggestPoolEntry{
 		candidate:   routeBuilderCandidate{AscentM: ascentM, DistanceM: distanceM},
 		ascentPerKm: ascentPerKm(ascentM, distanceM),
@@ -95,5 +99,57 @@ func TestSelectByHillinessReturnsWhateverThePoolHas(t *testing.T) {
 	got := selectByHilliness(pool, 0, 3)
 	if len(got) != 1 {
 		t.Fatalf("got %d candidates, want 1 (the whole pool)", len(got))
+	}
+}
+
+// Reported live: asking for 80km returned 90-102km loops. Reproduces that
+// exact shape — a wild distance outlier that also happens to be the
+// steepest-climbing entry in the pool, so selectByHilliness alone (no
+// notion of distance at all) would pick it for a "Very hilly" request even
+// though it missed the target by 27%. selectSuggestCandidates must exclude
+// it from consideration before hilliness ever gets a vote.
+func TestSelectSuggestCandidatesExcludesTheWorstDistanceOutlier(t *testing.T) {
+	const targetM = 80000
+	pool := []suggestPoolEntry{
+		poolEntryDist(102100, 636), // +27.6% — the outlier: climbs the most per km, but wildly over
+		poolEntryDist(90000, 394),
+		poolEntryDist(89700, 369),
+		poolEntryDist(85000, 300),
+		poolEntryDist(81000, 250),
+		poolEntryDist(79000, 200),
+	}
+	got := selectSuggestCandidates(pool, targetM, routing.MaxSteepnessDifficulty, 3)
+	if len(got) != 3 {
+		t.Fatalf("got %d candidates, want 3", len(got))
+	}
+	for _, c := range got {
+		if c.DistanceM == 102100 {
+			t.Errorf("selected the 102.1km outlier (+27.6%% of the 80km target) — distance should have excluded it before hilliness ever ran")
+		}
+	}
+}
+
+// A pool no bigger than distanceShortlistSize has nothing to narrow —
+// every candidate stays eligible, same result as calling selectByHilliness
+// directly.
+func TestSelectSuggestCandidatesSkipsNarrowingASmallPool(t *testing.T) {
+	pool := []suggestPoolEntry{poolEntryDist(200000, 100), poolEntryDist(100, 50), poolEntryDist(50000, 10)}
+	got := selectSuggestCandidates(pool, 80000, 0, 3)
+	if len(got) != 3 {
+		t.Fatalf("got %d candidates, want all 3 (pool is not larger than distanceShortlistSize)", len(got))
+	}
+}
+
+// targetDistanceM <= 0 shouldn't happen past handleRouteBuilderSuggest's
+// own validation, but this function doesn't assume its caller — it must
+// skip the narrowing rather than dividing by a non-positive target.
+func TestSelectSuggestCandidatesSkipsNarrowingWithoutATarget(t *testing.T) {
+	pool := []suggestPoolEntry{
+		poolEntryDist(200000, 100), poolEntryDist(100, 50), poolEntryDist(50000, 10),
+		poolEntryDist(300000, 5), poolEntryDist(400000, 1), poolEntryDist(500000, 1),
+	}
+	got := selectSuggestCandidates(pool, 0, 0, 3)
+	if len(got) != 3 {
+		t.Fatalf("got %d candidates, want 3", len(got))
 	}
 }

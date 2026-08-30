@@ -599,21 +599,36 @@ func rideWithAscent(ascentM float64) []gpx.Point {
 	}
 }
 
+// rideWithAscentFarFromTarget is rideWithAscent's own shape stretched out
+// much longer, so selectSuggestCandidates' own distance-closeness
+// shortlist (see server.go's own comment on distanceShortlistSize) always
+// excludes it before hilliness selection ever runs — used to pin down
+// *which* pool entry the shortlist drops in
+// TestRouteBuilderSuggestPicksBestFitByHilliness below, rather than
+// leaving it to whichever entry happens to tie on distance.
+func rideWithAscentFarFromTarget(ascentM float64) []gpx.Point {
+	return []gpx.Point{
+		{Lat: 50.85, Lon: 4.35, Ele: 100, HasEle: true},
+		{Lat: 51.85, Lon: 5.35, Ele: 100 + ascentM, HasEle: true},
+		{Lat: 52.87, Lon: 6.37, Ele: 100 + ascentM, HasEle: true},
+	}
+}
+
 // The exact regression case the "Flat gave more height metres than Hilly"
 // report described: 6 seeds succeed with a spread of real climbing
 // amounts, and the hilliness preference must pick the best-fitting 3 out
 // of that pool, not just the first 3 that happened to succeed (which, with
 // ORS's own round_trip loop length varying independently of the hilliness
 // weighting, was never reliably correlated with which setting a rider
-// chose — see selectByHilliness's own doc comment).
+// chose — see selectByHilliness's own doc comment). One entry on the
+// *other* side of the split is deliberately pushed far from the requested
+// distance in each subtest below — selectSuggestCandidates' own distance
+// shortlist (added after a later "asked for 80km, got 90-102km" report)
+// now drops one pool entry before hilliness ever gets a vote, and this
+// pins down which one, so that drop can never accidentally remove one of
+// the three entries a subtest's own assertion actually needs.
 func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
-	ascents := map[int]float64{1: 110, 2: 10, 3: 70, 4: 20, 5: 90, 6: 45}
-	routeForCall := make(map[int][]gpx.Point, len(ascents))
-	for call, a := range ascents {
-		routeForCall[call] = rideWithAscent(a)
-	}
-
-	suggest := func(t *testing.T, hilliness int) []float64 {
+	suggest := func(t *testing.T, routeForCall map[int][]gpx.Point, hilliness int) []float64 {
 		t.Helper()
 		client, base := newRouteBuilderHarness(t, stubRoutingClient{
 			callCount:    &atomic.Int32{},
@@ -644,7 +659,17 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 	}
 
 	t.Run("flat picks the 3 lowest-climbing candidates", func(t *testing.T) {
-		for _, a := range suggest(t, 0) {
+		// The highest-ascent entry (110, irrelevant to this assertion) is
+		// the one pushed far from the target distance.
+		routeForCall := map[int][]gpx.Point{
+			1: rideWithAscentFarFromTarget(110),
+			2: rideWithAscent(10),
+			3: rideWithAscent(70),
+			4: rideWithAscent(20),
+			5: rideWithAscent(90),
+			6: rideWithAscent(45),
+		}
+		for _, a := range suggest(t, routeForCall, 0) {
 			if a > 45 {
 				t.Errorf("candidate ascent = %v, want one of the 3 lowest (10, 20, 45)", a)
 			}
@@ -652,7 +677,17 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 	})
 
 	t.Run("very hilly picks the 3 highest-climbing candidates", func(t *testing.T) {
-		for _, a := range suggest(t, 3) {
+		// The lowest-ascent entry (10, irrelevant to this assertion) is
+		// the one pushed far from the target distance instead.
+		routeForCall := map[int][]gpx.Point{
+			1: rideWithAscent(110),
+			2: rideWithAscentFarFromTarget(10),
+			3: rideWithAscent(70),
+			4: rideWithAscent(20),
+			5: rideWithAscent(90),
+			6: rideWithAscent(45),
+		}
+		for _, a := range suggest(t, routeForCall, 3) {
 			if a < 70 {
 				t.Errorf("candidate ascent = %v, want one of the 3 highest (70, 90, 110)", a)
 			}

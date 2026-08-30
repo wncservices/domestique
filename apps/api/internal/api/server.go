@@ -2350,7 +2350,7 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 			ascentPerKm: ascentPerKm(summary.AscentM, summary.DistanceM),
 		})
 	}
-	candidates := selectByHilliness(pool, hilliness, suggestCandidateCount)
+	candidates := selectSuggestCandidates(pool, body.DistanceKm*1000, hilliness, suggestCandidateCount)
 	if len(candidates) == 0 {
 		// Unlike a partial failure above, the request itself fails here —
 		// Error, not Warn, per the same "does the request still succeed"
@@ -2458,6 +2458,43 @@ func selectByHilliness(pool []suggestPoolEntry, hilliness, n int) []routeBuilder
 		candidates[i] = e.candidate
 	}
 	return candidates
+}
+
+// distanceShortlistSize is how many of the pool's closest-to-target
+// candidates selectSuggestCandidates keeps before ranking by hilliness —
+// n+2 (5 out of a full 6-attempt pool), so the worst one or two distance
+// outliers (round_trip's own loop length can land up to ~50% off the
+// requested distance, independently of anything this app controls) never
+// make the final 3 just because they happened to fit the hilliness
+// preference best, while still leaving selectByHilliness real choice to
+// work with rather than collapsing straight to "closest 3, no matter how
+// they climb."
+const distanceShortlistSize = suggestCandidateCount + 2
+
+// selectSuggestCandidates narrows pool to whichever candidates land
+// closest to the requested distance before handing off to
+// selectByHilliness — found live (a rider asking for 80km got 90-102km
+// loops back): selectByHilliness alone has no notion of distance at all,
+// so a candidate that missed the target by a wide margin could still win
+// purely on climbing-rate fit. targetDistanceM <= 0 (shouldn't happen past
+// handleRouteBuilderSuggest's own validation, but this function doesn't
+// assume its caller) skips the narrowing rather than dividing by it.
+func selectSuggestCandidates(pool []suggestPoolEntry, targetDistanceM float64, hilliness, n int) []routeBuilderCandidate {
+	shortlist := pool
+	if targetDistanceM > 0 && len(pool) > distanceShortlistSize {
+		sorted := append([]suggestPoolEntry(nil), pool...)
+		// Stable, not just sorted: two pool entries can land on the exact
+		// same distance (confirmed by a test fixture that does exactly
+		// this), and an unstable sort would then drop an arbitrary one of
+		// them rather than a deterministic, reproducible one.
+		sort.SliceStable(sorted, func(i, j int) bool {
+			di := math.Abs(sorted[i].candidate.DistanceM - targetDistanceM)
+			dj := math.Abs(sorted[j].candidate.DistanceM - targetDistanceM)
+			return di < dj
+		})
+		shortlist = sorted[:distanceShortlistSize]
+	}
+	return selectByHilliness(shortlist, hilliness, n)
 }
 
 // maxGeocodeQueryLen bounds a location search's own query string — nothing
