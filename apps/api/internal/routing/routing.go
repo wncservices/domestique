@@ -346,11 +346,16 @@ type directionsOpts struct {
 var avoidFeatures = []string{"steps", "fords"}
 
 // extraInfo is requested on every directions request — see Path.Surface's
-// own doc comment. "waytype" (cycleway/track/street) was left out
-// deliberately: the route builder's own ask was ground type, not road
-// class, and every extra_info value ORS is asked for is one more thing a
-// self-hosted instance might not have (see the warning handling below).
-var extraInfo = []string{"surface"}
+// own doc comment. "waytype" (road class: street, path, cycleway, ...) is
+// requested alongside "surface" not because the route builder cares about
+// road class for its own sake, but as a fallback signal for exactly the
+// stretches surface has nothing to say about — see
+// inferUnknownSurfaceRatios' own doc comment. Confirmed live against the
+// real API that asking for both together doesn't 400 (a self-hosted
+// instance is still free to not have waytype enabled; ORS degrades that to
+// a response-level warning this client already ignores, the same as it
+// already does for "surface" on an instance without that enabled).
+var extraInfo = []string{"surface", "waytype"}
 
 type roundTripOpts struct {
 	Length float64 `json:"length"`
@@ -389,6 +394,34 @@ var surfaceLabels = map[int]string{
 	18: "Grass Paver",
 }
 
+// pavedWaytypes/unpavedWaytypes classify a *road class* (ORS's Waytype ID
+// list, https://giscience.github.io/openrouteservice/api-reference/endpoints/directions/extra-info/waytype,
+// confirmed against the real API the same way surfaceLabels was), used
+// only to infer a likely surface for exactly the stretches ORS itself
+// reports surface code 0 (Unknown) for — see inferUnknownSurfaceRatios.
+// State Road/Road/Street/Cycleway are overwhelmingly paved in practice
+// when OSM has no explicit surface tag; Path/Track/Footway overwhelmingly
+// are not. Steps, ferries, construction and waytype's own Unknown are
+// deliberately excluded from both sets — none of those imply a surface a
+// bike actually rides on, so they leave the stretch genuinely unresolved
+// rather than guessed at.
+var pavedWaytypes = map[int]bool{1: true, 2: true, 3: true, 6: true}
+var unpavedWaytypes = map[int]bool{4: true, 5: true, 7: true}
+
+// extraInfoBlock is the shape ORS returns for every extra_info category
+// asked for — Values is per-segment ([startIndex, endIndex, code] triples
+// over the route's own coordinate array, used to line surface and waytype
+// up against each other), Summary is the same data pre-aggregated by ORS
+// itself across the whole route.
+type extraInfoBlock struct {
+	Values  [][3]float64 `json:"values"`
+	Summary []struct {
+		Value    float64 `json:"value"`
+		Distance float64 `json:"distance"`
+		Amount   float64 `json:"amount"`
+	} `json:"summary"`
+}
+
 type directionsResponse struct {
 	Features []struct {
 		Geometry struct {
@@ -396,16 +429,68 @@ type directionsResponse struct {
 		} `json:"geometry"`
 		Properties struct {
 			Extras struct {
-				Surface struct {
-					Summary []struct {
-						Value    float64 `json:"value"`
-						Distance float64 `json:"distance"`
-						Amount   float64 `json:"amount"`
-					} `json:"summary"`
-				} `json:"surface"`
+				Surface extraInfoBlock `json:"surface"`
+				Waytype extraInfoBlock `json:"waytype"`
 			} `json:"extras"`
 		} `json:"properties"`
 	} `json:"features"`
+}
+
+// waytypeAt returns the waytype code covering a given point index, from
+// ORS's own [startIndex, endIndex, code] triples — a linear scan, not a
+// binary search: a route builder result is at most a few hundred points,
+// nowhere near where that would matter.
+func waytypeAt(waytypeValues [][3]float64, index int) (code int, ok bool) {
+	for _, v := range waytypeValues {
+		if index >= int(v[0]) && index < int(v[1]) {
+			return int(v[2]), true
+		}
+	}
+	return 0, false
+}
+
+// inferUnknownSurfaceRatios answers "of the distance ORS itself reports as
+// surface-Unknown, what fraction is probably paved, and what fraction
+// probably isn't" — real, common OSM gap (see surfaceLabels' own comment),
+// not something to leave as a meaningless "Unknown" slice of the bar when
+// a second signal (waytype) is sitting right there unused. Walks only the
+// point-index ranges surface.Values itself marks as code 0, summing each
+// consecutive pair's real distance (gpx.DistanceM, the one distance
+// formula this app uses everywhere) and bucketing it by whichever waytype
+// segment covers that same index — confirmed live against the real API: a
+// 244m Unknown stretch on a real route fell entirely inside a single
+// Street-classified waytype segment. Returns fractions, not absolute
+// distances, so the caller can apply them to ORS's own authoritative
+// per-code total (summary's Distance) rather than trust a second,
+// independently-computed distance figure that could drift from it.
+// Zero waytype data (a self-hosted instance without it enabled) returns
+// 0, 0 — every caller's own fallback for that is to leave Unknown exactly
+// as ORS reported it, unchanged from before this inference existed.
+func inferUnknownSurfaceRatios(surfaceValues, waytypeValues [][3]float64, points []gpx.Point) (pavedFrac, unpavedFrac float64) {
+	if len(waytypeValues) == 0 {
+		return 0, 0
+	}
+	var pavedM, unpavedM, totalM float64
+	for _, sv := range surfaceValues {
+		if int(sv[2]) != 0 {
+			continue
+		}
+		start, end := int(sv[0]), int(sv[1])
+		for i := start; i < end && i+1 < len(points); i++ {
+			d := gpx.DistanceM(points[i], points[i+1])
+			totalM += d
+			switch code, ok := waytypeAt(waytypeValues, i); {
+			case ok && pavedWaytypes[code]:
+				pavedM += d
+			case ok && unpavedWaytypes[code]:
+				unpavedM += d
+			}
+		}
+	}
+	if totalM == 0 {
+		return 0, 0
+	}
+	return pavedM / totalM, unpavedM / totalM
 }
 
 func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile string) (Path, error) {
@@ -521,8 +606,35 @@ func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body di
 	// (or without the extra_info feature enabled at all) just means an
 	// empty breakdown, not a failed request.
 	summary := feature.Properties.Extras.Surface.Summary
-	surface := make([]SurfaceSummary, 0, len(summary))
+	pavedFrac, unpavedFrac := inferUnknownSurfaceRatios(
+		feature.Properties.Extras.Surface.Values,
+		feature.Properties.Extras.Waytype.Values,
+		points,
+	)
+	surface := make([]SurfaceSummary, 0, len(summary)+2)
 	for _, s := range summary {
+		// Split ORS's own Unknown total by the waytype-inferred ratios
+		// above, rather than showing it as one unexplained slice — see
+		// inferUnknownSurfaceRatios' own doc comment. pavedFrac/unpavedFrac
+		// are both 0 whenever there was nothing to infer from (no waytype
+		// data, or no Unknown distance in the first place), which falls
+		// through to the exact same single "Unknown" entry this produced
+		// before this inference existed.
+		if int(s.Value) == 0 && (pavedFrac > 0 || unpavedFrac > 0) {
+			pavedM := s.Distance * pavedFrac
+			unpavedM := s.Distance * unpavedFrac
+			unknownM := s.Distance - pavedM - unpavedM
+			if pavedM > 0 {
+				surface = append(surface, SurfaceSummary{Type: "Likely paved", DistanceM: pavedM, Fraction: (s.Amount / 100) * pavedFrac})
+			}
+			if unpavedM > 0 {
+				surface = append(surface, SurfaceSummary{Type: "Likely unpaved", DistanceM: unpavedM, Fraction: (s.Amount / 100) * unpavedFrac})
+			}
+			if unknownM > 1e-6 {
+				surface = append(surface, SurfaceSummary{Type: "Unknown", DistanceM: unknownM, Fraction: (s.Amount / 100) * (1 - pavedFrac - unpavedFrac)})
+			}
+			continue
+		}
 		label, known := surfaceLabels[int(s.Value)]
 		if !known {
 			// A future ORS release adding a code this table doesn't have

@@ -19,20 +19,6 @@ const tabItems = [
   { label: 'Suggest', value: 'suggest', icon: 'i-lucide-shuffle', slot: 'suggest' as const },
 ]
 
-// --- Road type ---
-// One selector shared by both tabs rather than a per-tab copy — it drives
-// the same routing.Client.Route/RoundTrip "profile" argument either way
-// (apps/api/internal/routing/routing.go's ValidProfiles), so a rider
-// choosing "mountain bike" expects it to bias the Draw tab's own snapping
-// too, not just the Suggest tab's loops.
-const ROAD_TYPE_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Regular bike', value: 'cycling-regular' },
-  { label: 'Road bike', value: 'cycling-road' },
-  { label: 'Mountain bike', value: 'cycling-mountain' },
-  { label: 'Electric bike', value: 'cycling-electric' },
-]
-const roadType = ref('cycling-regular')
-
 const mapRef = useTemplateRef<InstanceType<typeof RouteBuilderMap>>('map')
 
 function onMapError(message: string) {
@@ -114,6 +100,19 @@ function onDrawSaved() {
 }
 
 // --- Suggest tab ---
+
+// Bike type only matters for the route *generator* — the Draw tab already
+// snaps to whatever road the rider actually clicked, so there is nothing
+// for a road-type preference to bias there. Scoped to this tab alone
+// rather than shared with Draw (an earlier version of this control lived
+// above the map for both tabs).
+const ROAD_TYPE_OPTIONS: { label: string; value: string }[] = [
+  { label: 'Regular bike', value: 'cycling-regular' },
+  { label: 'Road bike', value: 'cycling-road' },
+  { label: 'Mountain bike', value: 'cycling-mountain' },
+  { label: 'Electric bike', value: 'cycling-electric' },
+]
+const roadType = ref('cycling-regular')
 
 // Remembers the last start point a rider picked, across visits — so
 // reopening the builder to plan another loop from the same place (home,
@@ -255,16 +254,11 @@ function onSuggestSaved() {
         </UButton>
       </div>
 
-      <UFormField label="Road type" class="max-w-56">
-        <USelect v-model="roadType" :items="ROAD_TYPE_OPTIONS" class="w-full" />
-      </UFormField>
-
       <div class="h-[32rem] overflow-hidden rounded-lg border border-default">
         <RouteBuilderMap
           ref="map"
           :pick-start="activeTab === 'suggest'"
           :initial-start="initialStart ?? undefined"
-          :profile="roadType"
           @update:preview="onPreview"
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"
@@ -339,6 +333,10 @@ function onSuggestSaved() {
               Click the map to place a starting point, pick a rough distance, and generate a few
               loop options to choose from.
             </p>
+
+            <UFormField label="Road type" class="max-w-56">
+              <USelect v-model="roadType" :items="ROAD_TYPE_OPTIONS" class="w-full" />
+            </UFormField>
 
             <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
               <UFormField label="Distance" hint="km" class="sm:flex-1">
