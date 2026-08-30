@@ -55,6 +55,12 @@ type stubRoutingClient struct {
 	// a rider's chosen bike type actually reaches the routing engine, not
 	// just that it passes request validation.
 	onProfile func(profile string)
+	// onHilliness, when set, is called with the hilliness int every
+	// RoundTrip call receives — the hilliness selector's own way of
+	// proving a rider's chosen fitness level actually reaches the routing
+	// engine. -1 means "unspecified" (server.go's own sentinel for an
+	// omitted request field), the same shape onProfile's "" already has.
+	onHilliness func(hilliness int)
 }
 
 func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile string) (routing.Path, error) {
@@ -64,7 +70,10 @@ func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile 
 	return routing.Path{Points: s.route, Surface: s.surface}, s.err
 }
 
-func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, profile string) (routing.Path, error) {
+func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, profile string, hilliness int) (routing.Path, error) {
+	if s.onHilliness != nil {
+		s.onHilliness(hilliness)
+	}
 	if s.onRoundTrip != nil {
 		s.onRoundTrip(seed)
 	}
@@ -480,6 +489,70 @@ func TestRouteBuilderSuggestForwardsChosenProfile(t *testing.T) {
 	}
 	if got != "cycling-road" {
 		t.Errorf("routing.Client.RoundTrip received profile %q, want %q", got, "cycling-road")
+	}
+}
+
+// The hilliness (fitness level) selector is only worth anything if what it
+// sends actually reaches the routing engine — same reasoning as
+// TestRouteBuilderSuggestForwardsChosenProfile above.
+func TestRouteBuilderSuggestForwardsChosenHilliness(t *testing.T) {
+	got := -99 // a value neither -1 (unspecified) nor 0-3 could ever be, so a missed call is obvious
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route:       []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		onHilliness: func(hilliness int) { got = hilliness },
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+		"hilliness":  0,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got != 0 {
+		t.Errorf("routing.Client.RoundTrip received hilliness %d, want the explicit 0 (Novice)", got)
+	}
+}
+
+// An omitted hilliness must reach RoundTrip as -1 ("unspecified") rather
+// than silently defaulting to 0 (Novice) at the JSON-decode boundary — a
+// *int field distinguishes "not sent" from "sent as 0" for exactly this
+// reason (see server.go's own comment on the request body's Hilliness field).
+func TestRouteBuilderSuggestOmittedHillinessIsUnspecified(t *testing.T) {
+	got := -99
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route:       []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		onHilliness: func(hilliness int) { got = hilliness },
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got != -1 {
+		t.Errorf("routing.Client.RoundTrip received hilliness %d, want -1 (unspecified) for an omitted field", got)
+	}
+}
+
+func TestRouteBuilderSuggestRejectsAnOutOfRangeHilliness(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+		"hilliness":  4,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an out-of-range hilliness", resp.StatusCode)
 	}
 }
 

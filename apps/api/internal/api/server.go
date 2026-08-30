@@ -2043,6 +2043,18 @@ func validRoutingProfile(profile string) bool {
 	return profile == "" || routing.ValidProfiles[profile]
 }
 
+// validHilliness reports whether hilliness is safe to forward to the
+// routing engine — nil (meaning "use the default fitness level") or within
+// ORS's own steepness_difficulty range (routing.MaxSteepnessDifficulty).
+// Same trust-boundary reasoning as validRoutingProfile above: confirmed
+// live that ORS itself rejects an out-of-range value, but that rejection
+// surfaces as a 500 from the routing engine, not a clean 400 — worth
+// catching here rather than passing an attacker- or bug-controlled int
+// straight through.
+func validHilliness(hilliness *int) bool {
+	return hilliness == nil || (*hilliness >= 0 && *hilliness <= routing.MaxSteepnessDifficulty)
+}
+
 // handleRouteBuilderPreview snaps a path through manually-placed waypoints
 // for the manual route builder's live preview — no persistence, no
 // elevation lookup (that happens once, at save time, via the existing
@@ -2248,6 +2260,13 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		Start      routeBuilderWaypoint `json:"start"`
 		DistanceKm float64              `json:"distanceKm"`
 		Profile    string               `json:"profile"`
+		// Hilliness is ORS's own steepness_difficulty fitness level (0-3) —
+		// a pointer so an omitted field ("no preference expressed") is
+		// distinguishable from an explicit 0 ("Novice," a real and much
+		// more steepness-avoidant setting). Suggest-only, the same as
+		// Profile — see routing.Client.RoundTrip's own doc comment for why
+		// the Draw tab's preview never takes this.
+		Hilliness *int `json:"hilliness"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -2263,6 +2282,16 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported profile"})
 		return
 	}
+	if !validHilliness(body.Hilliness) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("hilliness must be between 0 and %d", routing.MaxSteepnessDifficulty),
+		})
+		return
+	}
+	hilliness := -1 // "unspecified" — routing.Client.RoundTrip substitutes its own default
+	if body.Hilliness != nil {
+		hilliness = *body.Hilliness
+	}
 
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
 	base := suggestSeedBase()
@@ -2272,7 +2301,7 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	for attempt := 1; len(candidates) < suggestCandidateCount && attempt <= maxSuggestAttempts; attempt++ {
 		attempted++
 		seed := base + attempt
-		path, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile)
+		path, err := s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile, hilliness)
 		if err != nil {
 			// One bad seed doesn't sink the request — the same "one bad
 			// route never aborts a run" principle AGENTS.md states for the

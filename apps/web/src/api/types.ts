@@ -408,6 +408,12 @@ export interface RouteBuilderSuggestRequest {
   start: Waypoint
   distanceKm: number
   profile?: string
+  /** ORS's own steepness_difficulty fitness level, 0 (Novice) to 3 (Pro) —
+   *  a bias toward flatter or hillier terrain, not a target ascent figure;
+   *  OpenRouteService has no way to aim for a specific number of metres
+   *  climbed. Omitted (rather than 0) means "no preference" — the server
+   *  picks its own default. */
+  hilliness?: number
 }
 
 /** One round-trip loop candidate — same shape as RouteBuilderPreview, since

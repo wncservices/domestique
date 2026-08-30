@@ -114,6 +114,25 @@ const ROAD_TYPE_OPTIONS: { label: string; value: string }[] = [
 ]
 const roadType = ref('cycling-regular')
 
+// ORS has no way to target a specific number of metres climbed — its own
+// round_trip option has no such lever, only a "fitness level" that biases
+// the routing engine toward flatter or hillier terrain in general
+// (options.profile_params.weightings.steepness_difficulty, confirmed
+// against the real API: 0-3, and an out-of-range value 500s rather than a
+// clean 400 — see server.go's own validHilliness). Framed here as
+// hilliness, not fitness, since that's what a rider is actually choosing
+// between; "Moderate" matches routing.DefaultSteepnessDifficulty, the same
+// middle-of-the-scale value the server itself substitutes for a request
+// that omits this — not a claim about what ORS itself defaults to
+// internally, which isn't documented.
+const HILLINESS_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Flat', value: 0 },
+  { label: 'Moderate', value: 1 },
+  { label: 'Hilly', value: 2 },
+  { label: 'Very hilly', value: 3 },
+]
+const hilliness = ref(1)
+
 // Remembers the last start point a rider picked, across visits — so
 // reopening the builder to plan another loop from the same place (home,
 // most likely) doesn't mean clicking the map in the same spot again every
@@ -188,6 +207,7 @@ async function generate() {
       start: start.value,
       distanceKm: suggestDistanceKm.value,
       profile: roadType.value,
+      hilliness: hilliness.value,
     })
     candidates.value = result.candidates
   } catch (err) {
@@ -202,13 +222,13 @@ async function generate() {
   }
 }
 
-// Candidates already on screen were generated for whichever bike was
-// selected at the time — leaving them up after switching road type would
+// Candidates already on screen were generated for whichever bike/hilliness
+// was selected at the time — leaving them up after switching either would
 // show, say, a mountain-bike loop under a "Road bike" selector with no
 // indication it's now stale. Regenerating isn't automatic (Generate still
 // costs a real routing-engine round trip) but showing the old answer as if
 // it still applied would be worse.
-watch(roadType, () => {
+watch([roadType, hilliness], () => {
   candidates.value = []
   chosenIndex.value = null
   mapRef.value?.clearSuggestion()
@@ -334,9 +354,14 @@ function onSuggestSaved() {
               loop options to choose from.
             </p>
 
-            <UFormField label="Road type" class="max-w-56">
-              <USelect v-model="roadType" :items="ROAD_TYPE_OPTIONS" class="w-full" />
-            </UFormField>
+            <div class="flex flex-wrap gap-3">
+              <UFormField label="Road type" class="max-w-56">
+                <USelect v-model="roadType" :items="ROAD_TYPE_OPTIONS" class="w-full" />
+              </UFormField>
+              <UFormField label="Hilliness" class="max-w-56">
+                <USelect v-model="hilliness" :items="HILLINESS_OPTIONS" class="w-full" />
+              </UFormField>
+            </div>
 
             <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
               <UFormField label="Distance" hint="km" class="sm:flex-1">

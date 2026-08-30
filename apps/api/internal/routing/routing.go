@@ -70,6 +70,20 @@ var ValidProfiles = map[string]bool{
 	"cycling-electric": true,
 }
 
+// DefaultSteepnessDifficulty is ORS's own "Moderate" fitness level — used
+// whenever a caller's hilliness is negative ("unspecified"). Not 0
+// (Novice): that's a real, meaningfully more steepness-avoidant setting, so
+// a caller that hasn't expressed a preference should land in the middle of
+// the scale, not at either end of it.
+const DefaultSteepnessDifficulty = 1
+
+// MaxSteepnessDifficulty is ORS's own upper bound on
+// options.profile_params.weightings.steepness_difficulty — checked before
+// the value ever reaches the outbound request, the same reasoning
+// ValidProfiles' own comment gives for profile: this arrives as a plain
+// int on an HTTP request body with nothing upstream constraining it.
+const MaxSteepnessDifficulty = 3
+
 // EnvAPIKey is where the routing engine's API key comes from — never
 // domestique.yaml, the same rule as GARMIN_OAUTH_CONSUMER_KEY and
 // KOMOOT_EMAIL/PASSWORD. Even the public instance's free tier requires one.
@@ -128,8 +142,14 @@ type Client interface {
 	// ending at start. seed varies the loop's shape so a caller generating
 	// several candidates (the suggested and AI-native builders both call
 	// this three times) gets genuinely different ones, not the same loop
-	// three times over.
-	RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) (Path, error)
+	// three times over. hilliness is ORS's own steepness_difficulty fitness
+	// level (0-3, see DefaultSteepnessDifficulty) — a negative value means
+	// "unspecified, use the default," the same shape profile's own empty
+	// string takes. Route has no equivalent parameter: hilliness only
+	// biases which loop the *generator* proposes, and Route already snaps
+	// to whatever road a rider explicitly clicked, so there is nothing for
+	// a preference to bias there.
+	RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string, hilliness int) (Path, error)
 }
 
 // ORSClient calls OpenRouteService's directions API.
@@ -305,6 +325,13 @@ func cacheKey(profile string, body directionsRequest) string {
 			b.WriteString("|avoid:")
 			b.WriteString(strings.Join(opts.AvoidFeatures, ","))
 		}
+		if pp := opts.ProfileParams; pp != nil && pp.Weightings != nil {
+			// Two different hilliness preferences for the same start/
+			// distance/seed are two genuinely different requests — same
+			// reasoning as AvoidFeatures above, except this one does
+			// distinguish real requests today.
+			fmt.Fprintf(&b, "|steepness:%d", pp.Weightings.SteepnessDifficulty)
+		}
 	}
 	return b.String()
 }
@@ -339,6 +366,25 @@ type directionsOpts struct {
 	// accept; avoidFeatures below sticks to steps and fords, the two that
 	// are genuine obstacles rather than a legitimate route choice.
 	AvoidFeatures []string `json:"avoid_features,omitempty"`
+	// ProfileParams carries ORS's own steepness_difficulty weighting — the
+	// suggested builder's own "hilliness" preference (see RoundTrip's own
+	// doc comment). Route never sets this: only RoundTrip takes a hilliness
+	// argument at all.
+	ProfileParams *profileParams `json:"profile_params,omitempty"`
+}
+
+// profileParams/weightings mirror ORS's own nested
+// options.profile_params.weightings shape — confirmed against the real
+// API's own docs (steepness_difficulty is an integer 0-3, "cycling-*
+// profiles only," AGENTS.md's own note that this is the *only* cycling
+// weighting param ORS exposes — there is no equivalent for biasing toward
+// cycle paths specifically, only toward flatter or hillier terrain).
+type profileParams struct {
+	Weightings *weightings `json:"weightings,omitempty"`
+}
+
+type weightings struct {
+	SteepnessDifficulty int `json:"steepness_difficulty"`
 }
 
 // avoidFeatures is applied to every directions request this client makes —
@@ -510,9 +556,14 @@ func (c *ORSClient) Route(ctx context.Context, waypoints []LatLng, profile strin
 	return c.directions(ctx, profile, req)
 }
 
-func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string) (Path, error) {
+func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float64, seed int, profile string, hilliness int) (Path, error) {
 	if distanceM <= 0 {
 		return Path{}, fmt.Errorf("routing: distance must be positive, got %.0fm", distanceM)
+	}
+	if hilliness < 0 {
+		hilliness = DefaultSteepnessDifficulty
+	} else if hilliness > MaxSteepnessDifficulty {
+		return Path{}, fmt.Errorf("routing: hilliness must be between 0 and %d, got %d", MaxSteepnessDifficulty, hilliness)
 	}
 	req := directionsRequest{
 		Coordinates: [][2]float64{{start.Lon, start.Lat}},
@@ -523,6 +574,9 @@ func (c *ORSClient) RoundTrip(ctx context.Context, start LatLng, distanceM float
 				Seed:   seed,
 			},
 			AvoidFeatures: avoidFeatures,
+			ProfileParams: &profileParams{
+				Weightings: &weightings{SteepnessDifficulty: hilliness},
+			},
 		},
 		Elevation: true,
 		ExtraInfo: extraInfo,
