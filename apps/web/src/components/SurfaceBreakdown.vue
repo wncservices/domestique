@@ -35,12 +35,18 @@ const UNPAVED = new Set([
   'Grass',
 ])
 
+const CATEGORIES = [
+  { label: 'Paved', color: 'var(--app-accent-primary)' },
+  { label: 'Unpaved', color: 'var(--app-accent-ember)' },
+  { label: 'Other', color: 'var(--app-accent-violet)' },
+] as const
+
 function colorFor(type: string): string {
-  if (PAVED.has(type)) return 'var(--app-accent-primary)'
-  if (UNPAVED.has(type)) return 'var(--app-accent-ember)'
+  if (PAVED.has(type)) return CATEGORIES[0].color
+  if (UNPAVED.has(type)) return CATEGORIES[1].color
   // Ice, Unknown, and "Unrecognised (<code>)" for a surface code newer than
   // this app's own table — anything not clearly paved or unpaved.
-  return 'var(--app-accent-violet)'
+  return CATEGORIES[2].color
 }
 
 const segments = computed(() =>
@@ -50,6 +56,17 @@ const segments = computed(() =>
     percent: Math.round(s.fraction * 100),
   })),
 )
+
+// A short colour key, shown even in compact mode — the bar's colours meant
+// nothing on their own (a hover-only title tooltip doesn't even fire on
+// touch), and the full per-type/percentage text below is too long for the
+// Suggest tab's narrow candidate cards. Only the categories actually present
+// on this route, in a fixed order, so a fully-paved route doesn't show an
+// "Unpaved"/"Other" key it never uses.
+const presentCategories = computed(() => {
+  const colors = new Set(segments.value.map((s) => s.color))
+  return CATEGORIES.filter((c) => colors.has(c.color))
+})
 </script>
 
 <template>
@@ -67,5 +84,11 @@ const segments = computed(() =>
         {{ s.type }} {{ s.percent }}%<template v-if="i < segments.length - 1">, </template>
       </template>
     </p>
+    <div v-else class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+      <span v-for="c in presentCategories" :key="c.label" class="flex items-center gap-1">
+        <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: c.color }" />
+        {{ c.label }}
+      </span>
+    </div>
   </div>
 </template>
