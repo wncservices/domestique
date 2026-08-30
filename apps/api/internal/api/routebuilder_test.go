@@ -50,15 +50,26 @@ type stubRoutingClient struct {
 	// server.go's suggestSeeds actually generated, since it is unexported
 	// and this file is package api_test.
 	onRoundTrip func(seed int)
+	// onProfile, when set, is called with the profile string every Route or
+	// RoundTrip call receives — the road-type selector's own way of proving
+	// a rider's chosen bike type actually reaches the routing engine, not
+	// just that it passes request validation.
+	onProfile func(profile string)
 }
 
-func (s stubRoutingClient) Route(context.Context, []routing.LatLng, string) (routing.Path, error) {
+func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile string) (routing.Path, error) {
+	if s.onProfile != nil {
+		s.onProfile(profile)
+	}
 	return routing.Path{Points: s.route, Surface: s.surface}, s.err
 }
 
-func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, _ string) (routing.Path, error) {
+func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, profile string) (routing.Path, error) {
 	if s.onRoundTrip != nil {
 		s.onRoundTrip(seed)
+	}
+	if s.onProfile != nil {
+		s.onProfile(profile)
 	}
 	if s.callCount != nil {
 		n := int(s.callCount.Add(1))
@@ -231,6 +242,30 @@ func TestRouteBuilderPreviewIncludesSurfaceAndElevationProfile(t *testing.T) {
 	}
 	if out.ElevationProfile[0].DistanceM != 0 {
 		t.Errorf("elevationProfile[0].distanceM = %v, want 0 at the start", out.ElevationProfile[0].DistanceM)
+	}
+}
+
+// The road-type selector (apps/web/src/components/RouteBuilderPanel.vue)
+// is only worth anything if the profile it sends actually reaches the
+// routing engine — TestRouteBuilderPreviewRejectsAnUnsupportedProfile below
+// only proves an invalid one is rejected, not that a valid one is forwarded.
+func TestRouteBuilderPreviewForwardsChosenProfile(t *testing.T) {
+	var got string
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		onProfile: func(profile string) { got = profile },
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/preview", map[string]any{
+		"waypoints": []map[string]float64{{"lat": 50.85, "lon": 4.35}, {"lat": 50.87, "lon": 4.37}},
+		"profile":   "cycling-mountain",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got != "cycling-mountain" {
+		t.Errorf("routing.Client.Route received profile %q, want %q", got, "cycling-mountain")
 	}
 }
 
@@ -422,6 +457,29 @@ func TestRouteBuilderSuggestRejectsAnExcessiveDistance(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 for a wildly excessive distance", resp.StatusCode)
+	}
+}
+
+// Same reasoning as TestRouteBuilderPreviewForwardsChosenProfile, for the
+// Suggest tab's own RoundTrip call.
+func TestRouteBuilderSuggestForwardsChosenProfile(t *testing.T) {
+	var got string
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		onProfile: func(profile string) { got = profile },
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+		"profile":    "cycling-road",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got != "cycling-road" {
+		t.Errorf("routing.Client.RoundTrip received profile %q, want %q", got, "cycling-road")
 	}
 }
 
