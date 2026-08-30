@@ -61,6 +61,12 @@ type stubRoutingClient struct {
 	// engine. -1 means "unspecified" (server.go's own sentinel for an
 	// omitted request field), the same shape onProfile's "" already has.
 	onHilliness func(hilliness int)
+	// routeForCall, when set, overrides route per call (1-indexed, needs
+	// callCount set too) — TestRouteBuilderSuggestPicksBestFitByHilliness's
+	// own way of giving each of the 6 pool attempts a different ascent, to
+	// prove selectByHilliness actually picks by climbing rate rather than
+	// just returning whichever 3 calls happened to succeed first.
+	routeForCall map[int][]gpx.Point
 }
 
 func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile string) (routing.Path, error) {
@@ -80,13 +86,17 @@ func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ floa
 	if s.onProfile != nil {
 		s.onProfile(profile)
 	}
+	route := s.route
 	if s.callCount != nil {
 		n := int(s.callCount.Add(1))
 		if s.failCallNums[n] {
 			return routing.Path{}, errors.New("stub: this call is configured to fail")
 		}
+		if r, ok := s.routeForCall[n]; ok {
+			route = r
+		}
 	}
-	return routing.Path{Points: s.route, Surface: s.surface}, s.err
+	return routing.Path{Points: route, Surface: s.surface}, s.err
 }
 
 func newRouteBuilderHarness(t *testing.T, rt routing.Client) (client *http.Client, base string) {
@@ -556,6 +566,80 @@ func TestRouteBuilderSuggestRejectsAnOutOfRangeHilliness(t *testing.T) {
 	}
 }
 
+// rideWithAscent is a 3-point route with a fixed shape (so every candidate
+// built from it has the same distance) and a controlled total climb — the
+// end-to-end fixture for TestRouteBuilderSuggestPicksBestFitByHilliness
+// below, mirroring poolEntry's own reasoning in
+// suggestselection_test.go's unit tests of selectByHilliness directly.
+func rideWithAscent(ascentM float64) []gpx.Point {
+	return []gpx.Point{
+		{Lat: 50.85, Lon: 4.35, Ele: 100, HasEle: true},
+		{Lat: 50.86, Lon: 4.36, Ele: 100 + ascentM, HasEle: true},
+		{Lat: 50.87, Lon: 4.37, Ele: 100 + ascentM, HasEle: true},
+	}
+}
+
+// The exact regression case the "Flat gave more height metres than Hilly"
+// report described: 6 seeds succeed with a spread of real climbing
+// amounts, and the hilliness preference must pick the best-fitting 3 out
+// of that pool, not just the first 3 that happened to succeed (which, with
+// ORS's own round_trip loop length varying independently of the hilliness
+// weighting, was never reliably correlated with which setting a rider
+// chose — see selectByHilliness's own doc comment).
+func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
+	ascents := map[int]float64{1: 110, 2: 10, 3: 70, 4: 20, 5: 90, 6: 45}
+	routeForCall := make(map[int][]gpx.Point, len(ascents))
+	for call, a := range ascents {
+		routeForCall[call] = rideWithAscent(a)
+	}
+
+	suggest := func(t *testing.T, hilliness int) []float64 {
+		t.Helper()
+		client, base := newRouteBuilderHarness(t, stubRoutingClient{
+			callCount:    &atomic.Int32{},
+			routeForCall: routeForCall,
+		})
+		resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+			"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+			"distanceKm": 20,
+			"hilliness":  hilliness,
+		})
+		defer resp.Body.Close()
+		var out struct {
+			Candidates []struct {
+				AscentM float64 `json:"ascentM"`
+			} `json:"candidates"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Candidates) != 3 {
+			t.Fatalf("got %d candidates, want 3", len(out.Candidates))
+		}
+		got := make([]float64, len(out.Candidates))
+		for i, c := range out.Candidates {
+			got[i] = c.AscentM
+		}
+		return got
+	}
+
+	t.Run("flat picks the 3 lowest-climbing candidates", func(t *testing.T) {
+		for _, a := range suggest(t, 0) {
+			if a > 45 {
+				t.Errorf("candidate ascent = %v, want one of the 3 lowest (10, 20, 45)", a)
+			}
+		}
+	})
+
+	t.Run("very hilly picks the 3 highest-climbing candidates", func(t *testing.T) {
+		for _, a := range suggest(t, 3) {
+			if a < 70 {
+				t.Errorf("candidate ascent = %v, want one of the 3 highest (70, 90, 110)", a)
+			}
+		}
+	})
+}
+
 func TestRouteBuilderSuggestRejectsAnUnsupportedProfile(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
@@ -721,11 +805,21 @@ func TestSuggestSeedsVaryBetweenRequests(t *testing.T) {
 	seeds = recordSeeds()
 	doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", body).Body.Close()
 
-	if len(perRequest) != 2 || len(perRequest[0]) != 3 || len(perRequest[1]) != 3 {
-		t.Fatalf("recorded seeds = %v, want two requests of three seeds each", perRequest)
+	// server.go's own maxSuggestAttempts (6) — every attempt now always
+	// runs, to build a pool selectByHilliness picks the best 3 from, rather
+	// than stopping as soon as 3 succeed. See that function's own doc
+	// comment for why.
+	const wantSeedsPerRequest = 6
+	if len(perRequest) != 2 || len(perRequest[0]) != wantSeedsPerRequest || len(perRequest[1]) != wantSeedsPerRequest {
+		t.Fatalf("recorded seeds = %v, want two requests of %d seeds each", perRequest, wantSeedsPerRequest)
 	}
-	if perRequest[0][0] == perRequest[0][1] || perRequest[0][1] == perRequest[0][2] {
-		t.Errorf("seeds within one request = %v, want three distinct values", perRequest[0])
+	seen := map[int]bool{}
+	for _, s := range perRequest[0] {
+		if seen[s] {
+			t.Errorf("seeds within one request = %v, want every value distinct", perRequest[0])
+			break
+		}
+		seen[s] = true
 	}
 	if perRequest[0][0] == perRequest[1][0] {
 		t.Errorf("both requests picked the same base seed (%d) — suggestSeeds is not varying between requests", perRequest[0][0])
@@ -763,8 +857,17 @@ func TestRouteBuilderSuggestRetriesAFailedSeedToStillReachThreeCandidates(t *tes
 	if len(out.Candidates) != 3 {
 		t.Fatalf("got %d candidates, want 3 (the failed 2nd seed should have been retried)", len(out.Candidates))
 	}
-	if got := calls.Load(); got != 4 {
-		t.Errorf("routing engine was called %d times, want 4 (3 successes + the 1 retried failure)", got)
+	// server.go's own maxSuggestAttempts, unexported and this file is
+	// package api_test — kept as a literal, same as this file's other
+	// references to unexported server.go behaviour.
+	const wantAttempts = 6
+	if got := calls.Load(); got != wantAttempts {
+		// selectByHilliness picks the 3 best-fitting candidates out of a
+		// full pool now, not just the first 3 that succeed — every attempt
+		// in the budget runs regardless of early success, so a failed seed
+		// being "retried" no longer means the request stops early at 4
+		// calls; it means 5 (not 6) of the 6 attempts landed a usable path.
+		t.Errorf("routing engine was called %d times, want %d (the full attempt budget)", got, wantAttempts)
 	}
 }
 
