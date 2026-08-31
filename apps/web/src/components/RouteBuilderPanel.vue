@@ -119,7 +119,7 @@ const ROAD_TYPE_OPTIONS: { label: string; value: string }[] = [
   { label: 'Gravel bike', value: 'cycling-regular' },
   { label: 'Mountain bike', value: 'cycling-mountain' },
 ]
-const roadType = ref('cycling-regular')
+const roadType = ref('cycling-road')
 
 // ORS has no way to target a specific number of metres climbed — its own
 // round_trip option has no such lever, only a "fitness level" that biases
