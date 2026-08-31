@@ -293,7 +293,12 @@ function onSuggestSaved() {
         />
       </div>
 
-      <UTabs v-model="activeTab" :items="tabItems" class="w-full">
+      <UTabs
+        v-model="activeTab"
+        :items="tabItems"
+        class="w-full"
+        :ui="{ trigger: 'data-[state=inactive]:text-toned hover:data-[state=inactive]:text-highlighted' }"
+      >
         <template #draw>
           <div class="flex flex-col gap-4 pt-4">
             <p class="text-sm text-muted">
