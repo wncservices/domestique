@@ -192,8 +192,17 @@ func NeedsElevation(points []Point) bool {
 	return true
 }
 
-// ComputeStats derives the metrics providers ask for at create time.
+// ComputeStats derives the metrics providers ask for at create time. Every
+// real caller in this codebase already guarantees at least one point
+// before this runs (source.Library validates on upload, routing.ORSClient
+// refuses to return success below 2 coordinates), but points[0] below
+// would otherwise panic on a zero-value/empty slice rather than degrade —
+// a caller-contract violation should never take the whole process down
+// with it, so this returns zero-value stats instead.
 func ComputeStats(points []Point) model.RouteStats {
+	if len(points) == 0 {
+		return model.RouteStats{}
+	}
 	var distance, ascent float64
 	for i := 1; i < len(points); i++ {
 		distance += haversineM(points[i-1], points[i])

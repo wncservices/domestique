@@ -108,42 +108,49 @@ func TestSelectByHillinessReturnsWhateverThePoolHas(t *testing.T) {
 // notion of distance at all) would pick it for a "Very hilly" request even
 // though it missed the target by 27%. selectSuggestCandidates must exclude
 // it from consideration before hilliness ever gets a vote.
-func TestSelectSuggestCandidatesExcludesTheWorstDistanceOutlier(t *testing.T) {
+//
+// Requested explicitly: "if asking for a distance of 60 only return plus
+// and minus 5 km" — maxDistanceDeviation is 10%, so at an 80km target
+// (±8000m, 72000-88000 allowed) only 3 of these 6 entries actually
+// qualify; the other 3 (including the steepest) are hard-excluded, not
+// merely deprioritised.
+func TestSelectSuggestCandidatesExcludesOutOfToleranceEntries(t *testing.T) {
 	const targetM = 80000
 	pool := []suggestPoolEntry{
-		poolEntryDist(102100, 636), // +27.6% — the outlier: climbs the most per km, but wildly over
-		poolEntryDist(90000, 394),
-		poolEntryDist(89700, 369),
-		poolEntryDist(85000, 300),
-		poolEntryDist(81000, 250),
-		poolEntryDist(79000, 200),
+		poolEntryDist(102100, 636), // +27.6% — climbs the most per km, but wildly over tolerance
+		poolEntryDist(90000, 394),  // +12.5% — still outside the 10% band
+		poolEntryDist(89700, 369),  // +12.1% — same
+		poolEntryDist(85000, 300),  // +6.25% — within tolerance
+		poolEntryDist(81000, 250),  // +1.25% — within tolerance
+		poolEntryDist(79000, 200),  // -1.25% — within tolerance
 	}
 	got := selectSuggestCandidates(pool, targetM, routing.MaxSteepnessDifficulty, 3)
 	if len(got) != 3 {
-		t.Fatalf("got %d candidates, want 3", len(got))
+		t.Fatalf("got %d candidates, want 3 (only 3 of the 6 pool entries are within maxDistanceDeviation of 80km)", len(got))
 	}
 	for _, c := range got {
-		if c.DistanceM == 102100 {
-			t.Errorf("selected the 102.1km outlier (+27.6%% of the 80km target) — distance should have excluded it before hilliness ever ran")
+		if c.DistanceM != 85000 && c.DistanceM != 81000 && c.DistanceM != 79000 {
+			t.Errorf("selected distance %v, want one of the 3 within tolerance (79000, 81000, 85000)", c.DistanceM)
 		}
 	}
 }
 
-// A pool no bigger than distanceShortlistSize has nothing to narrow —
-// every candidate stays eligible, same result as calling selectByHilliness
-// directly.
-func TestSelectSuggestCandidatesSkipsNarrowingASmallPool(t *testing.T) {
+// A pool where nothing lands within tolerance must come back empty, not
+// padded with the least-bad option — handleRouteBuilderSuggest's own nil
+// lastErr guard depends on this being a real, distinguishable "found
+// nothing" case, not a fallback to "closest anyway."
+func TestSelectSuggestCandidatesReturnsEmptyWhenNoneWithinTolerance(t *testing.T) {
 	pool := []suggestPoolEntry{poolEntryDist(200000, 100), poolEntryDist(100, 50), poolEntryDist(50000, 10)}
 	got := selectSuggestCandidates(pool, 80000, 0, 3)
-	if len(got) != 3 {
-		t.Fatalf("got %d candidates, want all 3 (pool is not larger than distanceShortlistSize)", len(got))
+	if len(got) != 0 {
+		t.Fatalf("got %d candidates, want 0 (none of the pool is within maxDistanceDeviation of 80km)", len(got))
 	}
 }
 
 // targetDistanceM <= 0 shouldn't happen past handleRouteBuilderSuggest's
 // own validation, but this function doesn't assume its caller — it must
-// skip the narrowing rather than dividing by a non-positive target.
-func TestSelectSuggestCandidatesSkipsNarrowingWithoutATarget(t *testing.T) {
+// skip the tolerance filter rather than dividing by a non-positive target.
+func TestSelectSuggestCandidatesSkipsFilterWithoutATarget(t *testing.T) {
 	pool := []suggestPoolEntry{
 		poolEntryDist(200000, 100), poolEntryDist(100, 50), poolEntryDist(50000, 10),
 		poolEntryDist(300000, 5), poolEntryDist(400000, 1), poolEntryDist(500000, 1),
