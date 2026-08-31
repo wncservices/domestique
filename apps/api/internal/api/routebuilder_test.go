@@ -61,6 +61,11 @@ type stubRoutingClient struct {
 	// engine. -1 means "unspecified" (server.go's own sentinel for an
 	// omitted request field), the same shape onProfile's "" already has.
 	onHilliness func(hilliness int)
+	// onLength, when set, is called with the requestedLengthM every
+	// RoundTrip call receives — the calibration/refinement split's own way
+	// of proving the refinement round actually asks for a compensated
+	// length, not the rider's raw target repeated a second time.
+	onLength func(lengthM float64)
 	// routeForCall, when set, overrides route per call (1-indexed, needs
 	// callCount set too) — TestRouteBuilderSuggestPicksBestFitByHilliness's
 	// own way of giving each of the 6 pool attempts a different ascent, to
@@ -82,9 +87,12 @@ func (s stubRoutingClient) Route(_ context.Context, _ []routing.LatLng, profile 
 	return routing.Path{Points: s.route, Surface: s.surface}, s.err
 }
 
-func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ float64, seed int, profile string, hilliness int) (routing.Path, error) {
+func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, requestedLengthM float64, seed int, profile string, hilliness int) (routing.Path, error) {
 	if s.delay > 0 {
 		time.Sleep(s.delay)
+	}
+	if s.onLength != nil {
+		s.onLength(requestedLengthM)
 	}
 	if s.onHilliness != nil {
 		s.onHilliness(hilliness)
@@ -1045,6 +1053,57 @@ func TestRouteBuilderSuggestFailsWhenNothingIsWithinDistanceTolerance(t *testing
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d when nothing lands within the distance tolerance", resp.StatusCode, http.StatusBadGateway)
+	}
+}
+
+// TestRouteBuilderSuggestRefinementRoundCompensatesForMeasuredOvershoot
+// proves the two-round design end to end: found live (real ORS API, not
+// assumed — see the calibration/refinement comment on the RoundTrip calls
+// in handleRouteBuilderSuggest) that round_trip systematically overshoots
+// its requested length, so a calibration round's own measured ratio has to
+// actually reach the refinement round's request rather than just being
+// computed and discarded. stubRoutingClient's fixed route stands in for
+// "every calibration attempt comes back ~20% over the 20km target," which
+// is exactly the shape a real biased routing engine produces.
+func TestRouteBuilderSuggestRefinementRoundCompensatesForMeasuredOvershoot(t *testing.T) {
+	// suggestFixtureRoute's own points span ~20015m (its doc comment); this
+	// route's far point is pushed out by the same proportion (1.2x the
+	// latitude delta) so the fixed route it returns for every attempt reads
+	// as ~24km — a consistent ~20% overshoot of the 20km target below.
+	overshootRoute := []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 51.066, Lon: 4.35}}
+
+	var mu sync.Mutex
+	var lengths []float64
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		route: overshootRoute,
+		onLength: func(l float64) {
+			mu.Lock()
+			lengths = append(lengths, l)
+			mu.Unlock()
+		},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	resp.Body.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lengths) != 15 {
+		t.Fatalf("RoundTrip was called %d times, want 15 (5 calibration + 10 refinement)", len(lengths))
+	}
+	calibration, refinement := lengths[:5], lengths[5:]
+	for _, l := range calibration {
+		if l != 20000 {
+			t.Errorf("calibration round requested %v, want the raw 20000m target uncompensated", l)
+		}
+	}
+	for _, l := range refinement {
+		if l >= 20000 {
+			t.Errorf("refinement round requested %v, want less than the 20000m target given the measured ~20%% overshoot", l)
+		}
 	}
 }
 

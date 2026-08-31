@@ -2220,6 +2220,18 @@ func suggestSeedBase() int {
 // that maxSuggestAttempts=6 was.
 const maxSuggestAttempts = 15
 
+// suggestCalibrationAttempts is how many of maxSuggestAttempts spend the
+// raw requested distance, purely to measure ORS's own systematic overshoot
+// for this specific request (see the calibration/refinement comment on the
+// call site in handleRouteBuilderSuggest) before the remaining
+// maxSuggestAttempts-suggestCalibrationAttempts spend a compensated
+// length. 5, not fewer: a single sample could be a genuine outlier: not
+// enough to trust a correction on; 5, not more: every attempt spent here
+// still counts toward the final pool, so this isn't wasted, but the
+// refinement round (already compensated, so more likely to land in
+// tolerance) is where the actual candidates should mostly come from.
+const suggestCalibrationAttempts = 5
+
 // suggestCandidateCount is how many loop options "Generate 9 options"
 // promises — named rather than a repeated literal 9, since both the
 // selection step and its own shortfall log line need to agree on the
@@ -2303,45 +2315,54 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	}
 
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
+	targetM := body.DistanceKm * 1000
 	base := suggestSeedBase()
-	// Always spends the full attempt budget rather than stopping at 3
-	// successes — see selectByHilliness's own doc comment for why: a
-	// hilliness preference only actually shows up in what a rider sees if
-	// there's a real pool of candidates to choose the best-fitting 3 from,
-	// not just whichever 3 seeds happened to succeed first. Fired
-	// concurrently, not one after another: found live, one slow/flaky
-	// moment from ORS (three 20-second Client.Timeouts in the same
-	// request) turned a sequential loop into a rider-visible "stopped
-	// loading" — up to maxSuggestAttempts*requestTimeout in the worst
-	// case. Running all attempts at once bounds the whole request by the
-	// single slowest call instead of their sum, at the same total ORS
-	// load (six calls either way).
-	results := make([]struct {
-		path routing.Path
-		err  error
-	}, maxSuggestAttempts)
-	var wg sync.WaitGroup
-	for i := range results {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			seed := base + i + 1
-			results[i].path, results[i].err = s.Routing.RoundTrip(r.Context(), start, body.DistanceKm*1000, seed, body.Profile, hilliness)
-		}(i)
+
+	// Two rounds, not one flat batch of maxSuggestAttempts — found live
+	// (real ORS API, not assumed): round_trip systematically *overshoots*
+	// the requested length rather than missing it randomly in both
+	// directions (a 60km request averaged +13% over 15 seeds, every single
+	// one over, never under), and by how much varies with distance in a
+	// way no one fixed constant captures (a separate live sample at 15km
+	// averaged +33%). A calibration round at the raw target measures that
+	// bias fresh for this specific request, so the larger refinement round
+	// can ask ORS for a shorter length that actually lands near what the
+	// rider requested — confirmed live: this raised a real 60km request's
+	// hit rate from 3/15 to 13/15 candidates landing within
+	// maxDistanceDeviation. Both rounds are still fired concurrently
+	// within themselves — see fireRoundTripAttempts — so the two rounds
+	// together cost roughly two of PR #236's single-round latencies, not
+	// maxSuggestAttempts sequential ones.
+	calibrationSeeds := make([]int, suggestCalibrationAttempts)
+	for i := range calibrationSeeds {
+		calibrationSeeds[i] = base + i + 1
 	}
-	wg.Wait()
+	round1 := fireRoundTripAttempts(r.Context(), s.Routing, start, targetM, calibrationSeeds, body.Profile, hilliness)
+
+	refinedM := targetM
+	if ratio := averageOvershootRatio(round1, targetM); ratio > 0 {
+		refinedM = targetM / ratio
+	}
+
+	refinementSeeds := make([]int, maxSuggestAttempts-suggestCalibrationAttempts)
+	for i := range refinementSeeds {
+		refinementSeeds[i] = base + suggestCalibrationAttempts + i + 1
+	}
+	round2 := fireRoundTripAttempts(r.Context(), s.Routing, start, refinedM, refinementSeeds, body.Profile, hilliness)
+
+	allResults := append(round1, round2...)
 
 	var pool []suggestPoolEntry
 	var lastErr error
-	attempted := maxSuggestAttempts
-	for i, res := range results {
+	attempted := len(allResults)
+	for _, res := range allResults {
 		if res.err != nil {
 			// One bad seed doesn't sink the request — the same "one bad
 			// route never aborts a run" principle AGENTS.md states for the
 			// library as a whole. Still worth a Warn and the shared error
 			// metric, so an operator sees an engine that is intermittently
 			// flaky even on requests that otherwise succeed.
-			s.logger().Warn("route builder suggestion seed failed", "seed", base+i+1, "err", res.err, "by", rider)
+			s.logger().Warn("route builder suggestion seed failed", "seed", res.seed, "err", res.err, "by", rider)
 			recordRouteBuilderError(r.Context(), "suggest")
 			lastErr = res.err
 			continue
@@ -2358,7 +2379,9 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 			ascentPerKm: ascentPerKm(summary.AscentM, summary.DistanceM),
 		})
 	}
-	candidates := selectSuggestCandidates(pool, body.DistanceKm*1000, hilliness, suggestCandidateCount)
+	// Filtered against targetM — what the rider actually asked for — never
+	// refinedM, the internally-adjusted value only ever sent to ORS.
+	candidates := selectSuggestCandidates(pool, targetM, hilliness, suggestCandidateCount)
 	if len(candidates) == 0 {
 		if lastErr != nil {
 			// Unlike a partial failure above, the request itself fails
@@ -2393,6 +2416,71 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
+}
+
+// suggestAttemptResult is one RoundTrip outcome, kept with the seed that
+// produced it — fireRoundTripAttempts' own callers need the seed for their
+// failure log line, and results arrive out of order relative to the
+// goroutines that produced them without it.
+type suggestAttemptResult struct {
+	seed int
+	path routing.Path
+	err  error
+}
+
+// fireRoundTripAttempts issues one RoundTrip call per seed, all at the
+// same requestedLengthM, concurrently — same reasoning as PR #236's own
+// fix: bounds the round's wall-clock time by its single slowest call
+// rather than their sum. A round's own size is just len(seeds); the
+// calibration/refinement split lives in the caller.
+func fireRoundTripAttempts(ctx context.Context, client routing.Client, start routing.LatLng, requestedLengthM float64, seeds []int, profile string, hilliness int) []suggestAttemptResult {
+	results := make([]suggestAttemptResult, len(seeds))
+	var wg sync.WaitGroup
+	for i, seed := range seeds {
+		wg.Add(1)
+		go func(i, seed int) {
+			defer wg.Done()
+			path, err := client.RoundTrip(ctx, start, requestedLengthM, seed, profile, hilliness)
+			results[i] = suggestAttemptResult{seed: seed, path: path, err: err}
+		}(i, seed)
+	}
+	wg.Wait()
+	return results
+}
+
+// averageOvershootRatio is the empirical actual-distance/requested-distance
+// ratio across a round's successful attempts — ORS's own round_trip
+// algorithm systematically overshoots a requested length rather than
+// missing it randomly in both directions (confirmed live: a 60km request
+// averaged +13% over 15 seeds, every single one over, never under), and
+// that overshoot scales with distance in a way no single fixed constant
+// captures (a separate live sample at 15km averaged +33%) — hence
+// measuring it fresh per request from a real calibration round, rather
+// than hardcoding a correction. Returns 0 ("nothing to correct by") when
+// requestedLengthM isn't positive or nothing in results succeeded with a
+// positive distance — the caller's own fallback for either is to use the
+// unadjusted target, the same as before this existed.
+func averageOvershootRatio(results []suggestAttemptResult, requestedLengthM float64) float64 {
+	if requestedLengthM <= 0 {
+		return 0
+	}
+	var sum float64
+	var n int
+	for _, res := range results {
+		if res.err != nil {
+			continue
+		}
+		dist := gpx.ComputeStats(res.path.Points).DistanceM
+		if dist <= 0 {
+			continue
+		}
+		sum += dist / requestedLengthM
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return sum / float64(n)
 }
 
 // suggestPoolEntry is one successful RoundTrip result, kept around with its
