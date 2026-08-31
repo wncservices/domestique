@@ -381,7 +381,7 @@ function onSuggestSaved() {
               </UFormField>
               <!-- A narrow (mobile) viewport has no room for the distance
                    field and both buttons on one row — the whole row used to
-                   squeeze "Generate 9 options" onto two lines instead.
+                   squeeze "Generate options" onto two lines instead.
                    Stacking below sm keeps every control on its own
                    full-width line; this inner row keeps Generate and Clear
                    together rather than each getting a stacked line too. -->
@@ -392,7 +392,7 @@ function onSuggestSaved() {
                   :disabled="!canGenerate"
                   @click="generate"
                 >
-                  Generate 9 options
+                  Generate options
                 </UButton>
                 <UButton
                   v-if="start"
