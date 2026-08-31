@@ -108,6 +108,16 @@ func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, _ floa
 	return routing.Path{Points: route, Surface: s.surface}, s.err
 }
 
+// suggestFixtureRoute is the fixed stub route most suggest tests in this
+// file use — ~20.0km (confirmed: haversine(50.85,4.35 -> 51.03,4.35) =
+// 20015m), matching the "distanceKm": 20 most of those requests send. Has
+// to actually be close to that: selectSuggestCandidates now drops any
+// candidate whose distance misses the requested one by more than
+// maxDistanceDeviation, so a fixture route at some unrelated distance
+// would make every suggest response in this file come back empty
+// regardless of what's actually being tested.
+var suggestFixtureRoute = []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 51.03, Lon: 4.35}}
+
 func newRouteBuilderHarness(t *testing.T, rt routing.Client) (client *http.Client, base string) {
 	t.Helper()
 
@@ -280,7 +290,7 @@ func TestRouteBuilderPreviewIncludesSurfaceAndElevationProfile(t *testing.T) {
 func TestRouteBuilderPreviewForwardsChosenProfile(t *testing.T) {
 	var got string
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route:     suggestFixtureRoute,
 		onProfile: func(profile string) { got = profile },
 	})
 
@@ -299,7 +309,7 @@ func TestRouteBuilderPreviewForwardsChosenProfile(t *testing.T) {
 
 func TestRouteBuilderPreviewRejectsAnUnsupportedProfile(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/preview", map[string]any{
@@ -314,7 +324,7 @@ func TestRouteBuilderPreviewRejectsAnUnsupportedProfile(t *testing.T) {
 
 func TestRouteBuilderPreviewRejectsTooManyWaypoints(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 	})
 
 	// One more than the server's own maxRouteBuilderWaypoints (50).
@@ -357,7 +367,7 @@ func TestRouteBuilderPreviewIsRateLimited(t *testing.T) {
 		Accounts: acct,
 		Config:   &config.Config{},
 		Routing: stubRoutingClient{
-			route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+			route: suggestFixtureRoute,
 		},
 		RouteBuilderLimiter: ratelimit.New(1, time.Hour),
 	}
@@ -460,7 +470,7 @@ func TestRouteBuilderSuggestRequiresARoutingEngine(t *testing.T) {
 
 func TestRouteBuilderSuggestRejectsNonPositiveDistance(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -475,7 +485,7 @@ func TestRouteBuilderSuggestRejectsNonPositiveDistance(t *testing.T) {
 
 func TestRouteBuilderSuggestRejectsAnExcessiveDistance(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -499,7 +509,7 @@ func TestRouteBuilderSuggestForwardsChosenProfile(t *testing.T) {
 	// test sees the identical value.
 	var got atomic.Value
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:     []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route:     suggestFixtureRoute,
 		onProfile: func(profile string) { got.Store(profile) },
 	})
 
@@ -527,7 +537,7 @@ func TestRouteBuilderSuggestForwardsChosenHilliness(t *testing.T) {
 	var got atomic.Int32
 	got.Store(-99)
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:       []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route:       suggestFixtureRoute,
 		onHilliness: func(hilliness int) { got.Store(int32(hilliness)) },
 	})
 
@@ -553,7 +563,7 @@ func TestRouteBuilderSuggestOmittedHillinessIsUnspecified(t *testing.T) {
 	var got atomic.Int32
 	got.Store(-99)
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:       []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route:       suggestFixtureRoute,
 		onHilliness: func(hilliness int) { got.Store(int32(hilliness)) },
 	})
 
@@ -572,7 +582,7 @@ func TestRouteBuilderSuggestOmittedHillinessIsUnspecified(t *testing.T) {
 
 func TestRouteBuilderSuggestRejectsAnOutOfRangeHilliness(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -591,21 +601,25 @@ func TestRouteBuilderSuggestRejectsAnOutOfRangeHilliness(t *testing.T) {
 // end-to-end fixture for TestRouteBuilderSuggestPicksBestFitByHilliness
 // below, mirroring poolEntry's own reasoning in
 // suggestselection_test.go's unit tests of selectByHilliness directly.
+// rideWithAscent's own two hops are ~20.0km total — the same distance as
+// suggestFixtureRoute (both computed from the same 0.09°-latitude step),
+// so a pool built entirely from this stays within
+// selectSuggestCandidates' own maxDistanceDeviation of a "distanceKm": 20
+// request regardless of ascentM, which only changes the elevation, never
+// the path.
 func rideWithAscent(ascentM float64) []gpx.Point {
 	return []gpx.Point{
 		{Lat: 50.85, Lon: 4.35, Ele: 100, HasEle: true},
-		{Lat: 50.86, Lon: 4.36, Ele: 100 + ascentM, HasEle: true},
-		{Lat: 50.87, Lon: 4.37, Ele: 100 + ascentM, HasEle: true},
+		{Lat: 50.94, Lon: 4.35, Ele: 100 + ascentM, HasEle: true},
+		{Lat: 51.03, Lon: 4.35, Ele: 100 + ascentM, HasEle: true},
 	}
 }
 
 // rideWithAscentFarFromTarget is rideWithAscent's own shape stretched out
-// much longer, so selectSuggestCandidates' own distance-closeness
-// shortlist (see server.go's own comment on distanceShortlistSize) always
-// excludes it before hilliness selection ever runs — used to pin down
-// *which* pool entry the shortlist drops in
-// TestRouteBuilderSuggestPicksBestFitByHilliness below, rather than
-// leaving it to whichever entry happens to tie on distance.
+// much longer, so selectSuggestCandidates' own distance tolerance always
+// excludes it before hilliness selection ever runs — used to prove the
+// tolerance filter actually rejects a candidate that fits the hilliness
+// preference perfectly but landed nowhere near the requested distance.
 func rideWithAscentFarFromTarget(ascentM float64) []gpx.Point {
 	return []gpx.Point{
 		{Lat: 50.85, Lon: 4.35, Ele: 100, HasEle: true},
@@ -615,18 +629,17 @@ func rideWithAscentFarFromTarget(ascentM float64) []gpx.Point {
 }
 
 // The exact regression case the "Flat gave more height metres than Hilly"
-// report described: 6 seeds succeed with a spread of real climbing
-// amounts, and the hilliness preference must pick the best-fitting 3 out
-// of that pool, not just the first 3 that happened to succeed (which, with
-// ORS's own round_trip loop length varying independently of the hilliness
-// weighting, was never reliably correlated with which setting a rider
-// chose — see selectByHilliness's own doc comment). One entry on the
-// *other* side of the split is deliberately pushed far from the requested
-// distance in each subtest below — selectSuggestCandidates' own distance
-// shortlist (added after a later "asked for 80km, got 90-102km" report)
-// now drops one pool entry before hilliness ever gets a vote, and this
-// pins down which one, so that drop can never accidentally remove one of
-// the three entries a subtest's own assertion actually needs.
+// report described: several seeds succeed with a spread of real climbing
+// amounts, and the hilliness preference must pick the best-fitting
+// suggestCandidateCount out of that pool, not just the first few that
+// happened to succeed (which, with ORS's own round_trip loop length
+// varying independently of the hilliness weighting, was never reliably
+// correlated with which setting a rider chose — see selectByHilliness's
+// own doc comment). Each subtest's pool has one more in-tolerance entry
+// than suggestCandidateCount needs (10, not 9), so there is always exactly
+// one genuine exclusion to assert on — plus one entry pushed far from the
+// requested distance, proving selectSuggestCandidates' own tolerance filter
+// runs before hilliness ever gets a vote.
 func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 	suggest := func(t *testing.T, routeForCall map[int][]gpx.Point, hilliness int) []float64 {
 		t.Helper()
@@ -640,6 +653,9 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 			"hilliness":  hilliness,
 		})
 		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
 		var out struct {
 			Candidates []struct {
 				AscentM float64 `json:"ascentM"`
@@ -648,8 +664,8 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			t.Fatal(err)
 		}
-		if len(out.Candidates) != 3 {
-			t.Fatalf("got %d candidates, want 3", len(out.Candidates))
+		if len(out.Candidates) != 9 {
+			t.Fatalf("got %d candidates, want 9", len(out.Candidates))
 		}
 		got := make([]float64, len(out.Candidates))
 		for i, c := range out.Candidates {
@@ -658,38 +674,35 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 		return got
 	}
 
-	t.Run("flat picks the 3 lowest-climbing candidates", func(t *testing.T) {
-		// The highest-ascent entry (110, irrelevant to this assertion) is
-		// the one pushed far from the target distance.
-		routeForCall := map[int][]gpx.Point{
-			1: rideWithAscentFarFromTarget(110),
-			2: rideWithAscent(10),
-			3: rideWithAscent(70),
-			4: rideWithAscent(20),
-			5: rideWithAscent(90),
-			6: rideWithAscent(45),
+	t.Run("flat picks the 9 lowest-climbing candidates", func(t *testing.T) {
+		// 10 in-tolerance ascents (5..50 in steps of 5) — one more than
+		// suggestCandidateCount, so excluding the single highest (50) is a
+		// real, meaningful selection, not "the pool only had 9 anyway."
+		// The far-from-target entry (999, an ascent value neither cluster
+		// uses) proves the tolerance filter runs first — if it didn't,
+		// this call being the single steepest of the whole set would win
+		// a "very hilly" ranking outright.
+		routeForCall := map[int][]gpx.Point{1: rideWithAscentFarFromTarget(999)}
+		for i, ascent := range []float64{5, 10, 15, 20, 25, 30, 35, 40, 45, 50} {
+			routeForCall[i+2] = rideWithAscent(ascent)
 		}
 		for _, a := range suggest(t, routeForCall, 0) {
 			if a > 45 {
-				t.Errorf("candidate ascent = %v, want one of the 3 lowest (10, 20, 45)", a)
+				t.Errorf("candidate ascent = %v, want one of the 9 lowest (5-45), not the excluded 50", a)
 			}
 		}
 	})
 
-	t.Run("very hilly picks the 3 highest-climbing candidates", func(t *testing.T) {
-		// The lowest-ascent entry (10, irrelevant to this assertion) is
-		// the one pushed far from the target distance instead.
-		routeForCall := map[int][]gpx.Point{
-			1: rideWithAscent(110),
-			2: rideWithAscentFarFromTarget(10),
-			3: rideWithAscent(70),
-			4: rideWithAscent(20),
-			5: rideWithAscent(90),
-			6: rideWithAscent(45),
+	t.Run("very hilly picks the 9 highest-climbing candidates", func(t *testing.T) {
+		// Mirrors the flat subtest: 10 in-tolerance ascents, excluding the
+		// single lowest (60) is the real selection this time.
+		routeForCall := map[int][]gpx.Point{1: rideWithAscentFarFromTarget(1)}
+		for i, ascent := range []float64{60, 70, 80, 90, 100, 110, 120, 130, 140, 150} {
+			routeForCall[i+2] = rideWithAscent(ascent)
 		}
 		for _, a := range suggest(t, routeForCall, 3) {
 			if a < 70 {
-				t.Errorf("candidate ascent = %v, want one of the 3 highest (70, 90, 110)", a)
+				t.Errorf("candidate ascent = %v, want one of the 9 highest (70-150), not the excluded 60", a)
 			}
 		}
 	})
@@ -705,7 +718,7 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 func TestRouteBuilderSuggestFiresAttemptsConcurrently(t *testing.T) {
 	const delay = 200 * time.Millisecond
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 		delay: delay,
 	})
 
@@ -729,7 +742,7 @@ func TestRouteBuilderSuggestFiresAttemptsConcurrently(t *testing.T) {
 
 func TestRouteBuilderSuggestRejectsAnUnsupportedProfile(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
@@ -764,7 +777,7 @@ func TestRouteBuilderSuggestIsRateLimited(t *testing.T) {
 		Accounts: acct,
 		Config:   &config.Config{},
 		Routing: stubRoutingClient{
-			route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+			route: suggestFixtureRoute,
 		},
 		RouteBuilderLimiter: ratelimit.New(1, time.Hour),
 	}
@@ -789,7 +802,7 @@ func TestRouteBuilderSuggestIsRateLimited(t *testing.T) {
 	}
 }
 
-func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
+func TestRouteBuilderSuggestReturnsNineCandidates(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
 		route: []gpx.Point{
 			{Lat: 50.85, Lon: 4.35},
@@ -799,8 +812,11 @@ func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
 	})
 
 	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
-		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
-		"distanceKm": 20,
+		"start": map[string]float64{"lat": 50.85, "lon": 4.35},
+		// 3.58: haversine(50.85,4.35 -> 50.86,4.37 -> 50.85,4.35) — matches
+		// the fixed stub route's own real distance, within
+		// selectSuggestCandidates' own maxDistanceDeviation.
+		"distanceKm": 3.58,
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -816,8 +832,8 @@ func TestRouteBuilderSuggestReturnsThreeCandidates(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Candidates) != 3 {
-		t.Fatalf("got %d candidates, want 3", len(out.Candidates))
+	if len(out.Candidates) != 9 {
+		t.Fatalf("got %d candidates, want 9", len(out.Candidates))
 	}
 	for i, c := range out.Candidates {
 		if len(c.Points) != 3 || c.DistanceM <= 0 {
@@ -879,7 +895,7 @@ func TestSuggestSeedsVaryBetweenRequests(t *testing.T) {
 
 	seeds := recordSeeds()
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route: suggestFixtureRoute,
 		onRoundTrip: func(seed int) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -892,11 +908,11 @@ func TestSuggestSeedsVaryBetweenRequests(t *testing.T) {
 	seeds = recordSeeds()
 	doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", body).Body.Close()
 
-	// server.go's own maxSuggestAttempts (6) — every attempt now always
-	// runs, to build a pool selectByHilliness picks the best 3 from, rather
-	// than stopping as soon as 3 succeed. See that function's own doc
-	// comment for why.
-	const wantSeedsPerRequest = 6
+	// server.go's own maxSuggestAttempts (15) — every attempt now always
+	// runs, to build a pool selectSuggestCandidates picks the best-fitting
+	// suggestCandidateCount from, rather than stopping as soon as enough
+	// succeed. See that function's own doc comment for why.
+	const wantSeedsPerRequest = 15
 	if len(perRequest) != 2 || len(perRequest[0]) != wantSeedsPerRequest || len(perRequest[1]) != wantSeedsPerRequest {
 		t.Fatalf("recorded seeds = %v, want two requests of %d seeds each", perRequest, wantSeedsPerRequest)
 	}
@@ -918,10 +934,10 @@ func TestSuggestSeedsVaryBetweenRequests(t *testing.T) {
 // on a genuinely unroutable point (a real 404 for one seed in three, the
 // other two fine), which used to just mean 2 candidates shown instead of 3.
 // The retry budget (maxSuggestAttempts) means a rider still gets all 3.
-func TestRouteBuilderSuggestRetriesAFailedSeedToStillReachThreeCandidates(t *testing.T) {
+func TestRouteBuilderSuggestRetriesAFailedSeedToStillReachNineCandidates(t *testing.T) {
 	var calls atomic.Int32
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:        []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
+		route:        suggestFixtureRoute,
 		failCallNums: map[int]bool{2: true},
 		callCount:    &calls,
 	})
@@ -941,19 +957,20 @@ func TestRouteBuilderSuggestRetriesAFailedSeedToStillReachThreeCandidates(t *tes
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Candidates) != 3 {
-		t.Fatalf("got %d candidates, want 3 (the failed 2nd seed should have been retried)", len(out.Candidates))
+	if len(out.Candidates) != 9 {
+		t.Fatalf("got %d candidates, want 9 (the failed 2nd seed should have been retried)", len(out.Candidates))
 	}
 	// server.go's own maxSuggestAttempts, unexported and this file is
 	// package api_test — kept as a literal, same as this file's other
 	// references to unexported server.go behaviour.
-	const wantAttempts = 6
+	const wantAttempts = 15
 	if got := calls.Load(); got != wantAttempts {
-		// selectByHilliness picks the 3 best-fitting candidates out of a
-		// full pool now, not just the first 3 that succeed — every attempt
-		// in the budget runs regardless of early success, so a failed seed
-		// being "retried" no longer means the request stops early at 4
-		// calls; it means 5 (not 6) of the 6 attempts landed a usable path.
+		// selectSuggestCandidates picks the best-fitting candidates out of
+		// a full pool now, not just the first few that succeed — every
+		// attempt in the budget runs regardless of early success, so a
+		// failed seed being "retried" no longer means the request stops
+		// early; it means 14 (not 15) of the 15 attempts landed a usable
+		// path.
 		t.Errorf("routing engine was called %d times, want %d (the full attempt budget)", got, wantAttempts)
 	}
 }
@@ -964,8 +981,11 @@ func TestRouteBuilderSuggestRetriesAFailedSeedToStillReachThreeCandidates(t *tes
 // never aborts a run" shape, just fewer than 3.
 func TestRouteBuilderSuggestReturnsPartialWhenRetriesExhausted(t *testing.T) {
 	client, base := newRouteBuilderHarness(t, stubRoutingClient{
-		route:        []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.86, Lon: 4.36}},
-		failCallNums: map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true},
+		route: suggestFixtureRoute,
+		// 13 of the 15-attempt budget fail, leaving exactly 2 successes —
+		// fewer than suggestCandidateCount (9), so the request still
+		// returns whatever it found rather than erroring outright.
+		failCallNums: map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: true, 10: true, 11: true, 12: true, 13: true},
 		callCount:    &atomic.Int32{},
 	})
 
@@ -984,8 +1004,8 @@ func TestRouteBuilderSuggestReturnsPartialWhenRetriesExhausted(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Candidates) != 1 {
-		t.Fatalf("got %d candidates, want 1 (only the 6th and final attempt succeeded)", len(out.Candidates))
+	if len(out.Candidates) != 2 {
+		t.Fatalf("got %d candidates, want 2 (only the 14th and 15th attempts succeeded)", len(out.Candidates))
 	}
 }
 
@@ -1001,6 +1021,30 @@ func TestRouteBuilderSuggestFailsWhenEverySeedFails(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d when every seed fails", resp.StatusCode, http.StatusBadGateway)
+	}
+}
+
+// Every attempt routing the engine's own way — no errors at all — but none
+// of them land within maxDistanceDeviation of the requested distance. This
+// is a distinct failure mode from TestRouteBuilderSuggestFailsWhenEverySeedFails
+// above: lastErr is nil here (every RoundTrip call genuinely succeeded), so
+// naively calling lastErr.Error() in that same 502 path would panic — this
+// is the regression test for the dedicated nil check that avoids it.
+func TestRouteBuilderSuggestFailsWhenNothingIsWithinDistanceTolerance(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		// Half of suggestFixtureRoute's own ~20km — every attempt succeeds,
+		// but every one of them is 50% off a "distanceKm": 20 request,
+		// nowhere near maxDistanceDeviation (10%).
+		route: []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 50.94, Lon: 4.35}},
+	})
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d when nothing lands within the distance tolerance", resp.StatusCode, http.StatusBadGateway)
 	}
 }
 

@@ -196,7 +196,7 @@ function onStart(point: { lat: number; lon: number }) {
 
 /** Picking a candidate draws it on the real map too, not just its own small
  *  preview card — RouteCandidatePreview's inline SVG is a quick shape to
- *  compare three options side by side, but doesn't show where the loop
+ *  compare several options side by side, but doesn't show where the loop
  *  actually goes the way the interactive map does. */
 function chooseCandidate(index: number) {
   chosenIndex.value = index
@@ -376,7 +376,7 @@ function onSuggestSaved() {
               </UFormField>
               <!-- A narrow (mobile) viewport has no room for the distance
                    field and both buttons on one row — the whole row used to
-                   squeeze "Generate 3 options" onto two lines instead.
+                   squeeze "Generate 9 options" onto two lines instead.
                    Stacking below sm keeps every control on its own
                    full-width line; this inner row keeps Generate and Clear
                    together rather than each getting a stacked line too. -->
@@ -387,7 +387,7 @@ function onSuggestSaved() {
                   :disabled="!canGenerate"
                   @click="generate"
                 >
-                  Generate 3 options
+                  Generate 9 options
                 </UButton>
                 <UButton
                   v-if="start"
@@ -402,12 +402,19 @@ function onSuggestSaved() {
             </div>
             <p v-if="!start" class="text-sm text-muted">Place a starting point on the map first.</p>
 
+            <!-- The server already returns candidates ordered best-fitting
+                 first (selectSuggestCandidates ranks the whole pool before
+                 truncating) — this label makes that ordering visible
+                 rather than relying on a rider noticing grid position. -->
             <div v-if="candidates.length" class="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div
                 v-for="(candidate, index) in candidates"
                 :key="index"
                 class="flex flex-col gap-2"
               >
+                <span class="text-xs font-medium text-highlighted">
+                  {{ index === 0 ? 'Best match' : `#${index + 1} match` }}
+                </span>
                 <RouteCandidatePreview :points="candidate.points" />
                 <ElevationProfile v-if="candidate.elevationProfile.length" :points="candidate.elevationProfile" />
                 <SurfaceBreakdown v-if="candidate.surface.length" :surface="candidate.surface" compact />

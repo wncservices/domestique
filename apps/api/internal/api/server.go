@@ -2187,9 +2187,9 @@ func summarizePath(path routing.Path) pathSummary {
 }
 
 // suggestSeedBase returns a fresh random base for one suggest request — not
-// a fixed value, so pressing "Generate 3 options" again with the same start
+// a fixed value, so pressing "Generate 9 options" again with the same start
 // and distance shows genuinely different loops instead of the exact same
-// three every time (ORS's own round_trip algorithm is otherwise
+// ones every time (ORS's own round_trip algorithm is otherwise
 // deterministic per seed). Individual attempts use base+1, base+2, ... —
 // sequential offsets, not independently random values, so a single request
 // still gets distinct shapes without any collision-checking, and a retry
@@ -2207,16 +2207,24 @@ func suggestSeedBase() int {
 // a seed that lands its loop on a genuinely unroutable point, found live: a
 // real 404 "Unable to find a route for point (...)" for one seed in three,
 // the other two routing fine), now also the size of the pool
-// selectByHilliness picks 3 best-fit candidates from — see its own doc
-// comment for why a bigger pool is what makes "Flat" and "Hilly" actually
-// behave differently. Still bounds how many routing-engine calls one
-// request can spend, the same reasoning as before.
-const maxSuggestAttempts = 6
+// selectSuggestCandidates picks suggestCandidateCount best-fit candidates
+// from — see that function's own doc comment for why a bigger pool is what
+// makes a hilliness/distance preference actually show up in the result.
+// Bumped from 6 to 15 alongside suggestCandidateCount's own increase from 3
+// to 9: found live (an earlier real-API sample, 5 seeds in hilly terrain)
+// that a 10% distance tolerance passes as few as 1 in 5 attempts, so
+// reaching close to 9 in-tolerance results needs a meaningfully bigger pool
+// to draw from, not just a proportionally bigger one. Still bounds how many
+// routing-engine calls one request can spend, the same reasoning as
+// before — this is now ~2.5x the routing-engine load per Generate click
+// that maxSuggestAttempts=6 was.
+const maxSuggestAttempts = 15
 
-// suggestCandidateCount is how many loop options "Generate 3 options"
-// promises — named rather than a repeated literal 3, since both the retry
-// loop and its own shortfall log line need to agree on the target.
-const suggestCandidateCount = 3
+// suggestCandidateCount is how many loop options "Generate 9 options"
+// promises — named rather than a repeated literal 9, since both the
+// selection step and its own shortfall log line need to agree on the
+// target.
+const suggestCandidateCount = 9
 
 // maxSuggestDistanceKm bounds handleRouteBuilderSuggest's own distanceKm —
 // same reasoning as maxRouteBuilderWaypoints: nothing otherwise stopped a
@@ -2233,10 +2241,10 @@ type routeBuilderCandidate struct {
 }
 
 // handleRouteBuilderSuggest generates a handful of round-trip loop
-// candidates from one starting point — the suggested route builder. Three
-// separate routing-engine calls, not one call for three results: ORS's own
-// round_trip option answers one loop per request, seeded so three calls
-// vary rather than repeat.
+// candidates from one starting point — the suggested route builder.
+// Separate routing-engine calls, not one call for many results: ORS's own
+// round_trip option answers one loop per request, seeded so each call
+// varies rather than repeats.
 func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermUploadRoute) {
 		return
@@ -2352,20 +2360,35 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	}
 	candidates := selectSuggestCandidates(pool, body.DistanceKm*1000, hilliness, suggestCandidateCount)
 	if len(candidates) == 0 {
-		// Unlike a partial failure above, the request itself fails here —
-		// Error, not Warn, per the same "does the request still succeed"
-		// test AGENTS.md's own observability checklist uses.
-		s.logger().Error("route builder suggestion failed for every seed", "attempts", attempted, "err", lastErr, "by", rider)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastErr.Error()})
+		if lastErr != nil {
+			// Unlike a partial failure above, the request itself fails
+			// here — Error, not Warn, per the same "does the request still
+			// succeed" test AGENTS.md's own observability checklist uses.
+			s.logger().Error("route builder suggestion failed for every seed", "attempts", attempted, "err", lastErr, "by", rider)
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastErr.Error()})
+			return
+		}
+		// Every attempt routed fine — lastErr is nil, so this is not the
+		// branch above — but none landed within maxDistanceDeviation of the
+		// requested distance (see selectSuggestCandidates' own doc
+		// comment). A genuinely unlucky start point/distance combination in
+		// terrain the routing engine can't loop tightly, not a broken
+		// engine, but still a failed request: there is nothing to show.
+		s.logger().Error("route builder suggestion found nothing within the requested distance", "attempts", attempted, "by", rider)
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "could not find a loop close enough to the requested distance",
+		})
 		return
 	}
 	if len(candidates) < suggestCandidateCount {
-		// The retry budget ran out before reaching 3 — a genuinely unlucky
-		// start point (very little rideable loop nearby at this distance),
-		// not a routing engine that's down. Still Warn, not Error: the
-		// request itself succeeds and returns whatever it found, same
-		// "does the request still succeed" test as above.
-		s.logger().Warn("route builder suggestion returned fewer than requested after exhausting retries",
+		// Fewer than suggestCandidateCount survived either the attempt
+		// budget (some seeds failed outright) or the distance tolerance
+		// (some succeeded but missed the target too widely) — a genuinely
+		// unlucky start point/distance combination, not a routing engine
+		// that's down. Still Warn, not Error: the request itself succeeds
+		// and returns whatever it found, same "does the request still
+		// succeed" test as above.
+		s.logger().Warn("route builder suggestion returned fewer candidates than requested",
 			"got", len(candidates), "want", suggestCandidateCount, "attempts", attempted, "by", rider)
 	}
 
@@ -2373,9 +2396,9 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 }
 
 // suggestPoolEntry is one successful RoundTrip result, kept around with its
-// own climbing rate until selectByHilliness has picked the final 3 — see
-// that function's own doc comment for why raw AscentM alone isn't enough to
-// select by.
+// own climbing rate until selectSuggestCandidates/selectByHilliness have
+// picked the final suggestCandidateCount — see those functions' own doc
+// comments for why raw AscentM alone isn't enough to select by.
 type suggestPoolEntry struct {
 	candidate   routeBuilderCandidate
 	ascentPerKm float64
@@ -2460,39 +2483,44 @@ func selectByHilliness(pool []suggestPoolEntry, hilliness, n int) []routeBuilder
 	return candidates
 }
 
-// distanceShortlistSize is how many of the pool's closest-to-target
-// candidates selectSuggestCandidates keeps before ranking by hilliness —
-// n+2 (5 out of a full 6-attempt pool), so the worst one or two distance
-// outliers (round_trip's own loop length can land up to ~50% off the
-// requested distance, independently of anything this app controls) never
-// make the final 3 just because they happened to fit the hilliness
-// preference best, while still leaving selectByHilliness real choice to
-// work with rather than collapsing straight to "closest 3, no matter how
-// they climb."
-const distanceShortlistSize = suggestCandidateCount + 2
+// maxDistanceDeviation is how far a suggested loop's actual distance may
+// stray from what a rider asked for before it's dropped from consideration
+// entirely, rather than merely deprioritised — requested explicitly: "if
+// asking for a distance of 60 only return plus and minus 5 km" (5/60 ≈ 8%,
+// rounded up to a clean 10% so a request shorter or longer than that
+// example still gets a sensible relative cushion rather than an
+// unrealistically tight or loose absolute one). A percentage, not a flat
+// km figure, because a flat ±5km would be meaningless for a 2km loop
+// (accepting anything from 0 to 7km) and needlessly tight for a 300km one.
+//
+// Found live (an earlier real-API sample, 5 seeds in hilly terrain): only
+// 2 of 10 attempts landed within 10% of a 15km target, so this tolerance
+// is a real, sometimes-severe cut — expect handleRouteBuilderSuggest to
+// often return fewer than suggestCandidateCount, especially for a hilly
+// start point or a short requested distance. That is the tolerance working
+// as asked, not a bug: showing fewer honestly-close options beats padding
+// the list with ones that visibly miss the requested distance.
+const maxDistanceDeviation = 0.10
 
-// selectSuggestCandidates narrows pool to whichever candidates land
-// closest to the requested distance before handing off to
-// selectByHilliness — found live (a rider asking for 80km got 90-102km
-// loops back): selectByHilliness alone has no notion of distance at all,
-// so a candidate that missed the target by a wide margin could still win
-// purely on climbing-rate fit. targetDistanceM <= 0 (shouldn't happen past
-// handleRouteBuilderSuggest's own validation, but this function doesn't
-// assume its caller) skips the narrowing rather than dividing by it.
+// selectSuggestCandidates first drops every pool entry whose actual
+// distance missed the requested one by more than maxDistanceDeviation, then
+// ranks whatever survives by hilliness fit — found live (a rider asking
+// for 80km got 90-102km loops back): selectByHilliness alone has no notion
+// of distance at all, so a candidate that missed the target by a wide
+// margin could still win purely on climbing-rate fit. targetDistanceM <= 0
+// (shouldn't happen past handleRouteBuilderSuggest's own validation, but
+// this function doesn't assume its caller) skips the filter rather than
+// dividing by it.
 func selectSuggestCandidates(pool []suggestPoolEntry, targetDistanceM float64, hilliness, n int) []routeBuilderCandidate {
 	shortlist := pool
-	if targetDistanceM > 0 && len(pool) > distanceShortlistSize {
-		sorted := append([]suggestPoolEntry(nil), pool...)
-		// Stable, not just sorted: two pool entries can land on the exact
-		// same distance (confirmed by a test fixture that does exactly
-		// this), and an unstable sort would then drop an arbitrary one of
-		// them rather than a deterministic, reproducible one.
-		sort.SliceStable(sorted, func(i, j int) bool {
-			di := math.Abs(sorted[i].candidate.DistanceM - targetDistanceM)
-			dj := math.Abs(sorted[j].candidate.DistanceM - targetDistanceM)
-			return di < dj
-		})
-		shortlist = sorted[:distanceShortlistSize]
+	if targetDistanceM > 0 {
+		withinTolerance := make([]suggestPoolEntry, 0, len(pool))
+		for _, e := range pool {
+			if math.Abs(e.candidate.DistanceM-targetDistanceM) <= targetDistanceM*maxDistanceDeviation {
+				withinTolerance = append(withinTolerance, e)
+			}
+		}
+		shortlist = withinTolerance
 	}
 	return selectByHilliness(shortlist, hilliness, n)
 }
