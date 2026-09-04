@@ -85,6 +85,21 @@ const PREVIEW_DEBOUNCE_MS = 400
 let debounceHandle: ReturnType<typeof setTimeout> | null = null
 let requestSeq = 0
 
+// The Draw tab has no road-type control of its own (the Suggest tab's
+// Road/Gravel/Mountain picker only ever biases the *generator* — see
+// routing.Client.RoundTrip's own doc comment) — but leaving the snap
+// profile blank meant it fell through to ORS's "cycling-regular" default,
+// the same off-road-tolerant middle ground the Suggest tab reserves for its
+// "Gravel bike" choice. A rider clicking waypoints along a street is
+// routing on-road, so the snap between two clicks should default to
+// "cycling-road" — ORS's paved/road-preferring profile, the closest match
+// to preferring painted cycling lanes over gravel or singletrack — rather
+// than a profile that would just as happily route the gap onto a track.
+// ORS itself has no weighting that targets cycle lanes specifically, only
+// this profile-level paved-vs-unpaved bias — see routing.go's own
+// weightings doc comment for that limit stated plainly.
+const DRAW_SNAP_PROFILE = 'cycling-road'
+
 function lineFeature(points: [number, number][]) {
   return {
     type: 'FeatureCollection' as const,
@@ -156,7 +171,7 @@ async function requestPreview() {
   const seq = ++requestSeq
   emit('update:preview', null)
   try {
-    const preview = await api.routeBuilderPreview(waypoints)
+    const preview = await api.routeBuilderPreview(waypoints, DRAW_SNAP_PROFILE)
     // A slower earlier request resolving after a faster later one would
     // otherwise overwrite the up-to-date result with a stale one.
     if (seq !== requestSeq) return
