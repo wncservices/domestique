@@ -101,11 +101,14 @@ function onDrawSaved() {
 
 // --- Suggest tab ---
 
-// Bike type only matters for the route *generator* — the Draw tab already
-// snaps to whatever road the rider actually clicked, so there is nothing
-// for a road-type preference to bias there. Scoped to this tab alone
-// rather than shared with Draw (an earlier version of this control lived
-// above the map for both tabs).
+// This picker only exists for the route *generator* — the Draw tab has no
+// equivalent control (RouteBuilderMap.vue's own DRAW_SNAP_PROFILE fixes its
+// snap to "cycling-road" instead: on-road/cycling-lane-preferring by
+// default, since there's no freedom for a rider preference to bias between
+// two points they clicked themselves the way there is for a generated
+// loop's whole shape). Scoped to this tab alone rather than shared with
+// Draw (an earlier version of this control lived above the map for both
+// tabs).
 //
 // ORS has exactly four cycling profiles (routing.ValidProfiles) — there is
 // no "gravel" one. "Gravel bike" is mapped to cycling-regular (ORS's own

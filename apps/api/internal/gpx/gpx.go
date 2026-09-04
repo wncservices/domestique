@@ -236,6 +236,37 @@ func ComputeStats(points []Point) model.RouteStats {
 	}
 }
 
+// SmoothElevation returns each point's own elevation with the same
+// ascentThresholdM deadband ComputeStats sums ascent with, rather than the
+// raw per-point value — found live, from a route builder preview: a nearly
+// flat road (real elevation range of a few metres) whose DEM samples jitter
+// by a metre or two between closely-spaced points reported "0 m ascent"
+// (correctly, from that same threshold) right next to an elevation-profile
+// chart that auto-scaled to the raw jitter and read as a wall of violent
+// climbs — the number and the picture disagreeing about the same terrain.
+// Walking the same hysteresis ComputeStats already does and returning the
+// held value at each point, instead of only the summed total, keeps both
+// reads of "how much did this point really change" — the stat and the
+// chart — answering from one definition of noise instead of two. A point
+// with no elevation of its own (Point.HasEle's own "sparse profile" case)
+// carries the last confirmed value forward too, rather than a false zero.
+func SmoothElevation(points []Point) []float64 {
+	out := make([]float64, len(points))
+	var last float64
+	haveLast := false
+	for i, p := range points {
+		if p.HasEle {
+			if !haveLast {
+				last, haveLast = p.Ele, true
+			} else if delta := p.Ele - last; delta >= ascentThresholdM || delta <= -ascentThresholdM {
+				last = p.Ele
+			}
+		}
+		out[i] = last
+	}
+	return out
+}
+
 // ContentHash is a stable hash of what a provider would actually see.
 //
 // It deliberately excludes timestamps, extensions and whitespace, so

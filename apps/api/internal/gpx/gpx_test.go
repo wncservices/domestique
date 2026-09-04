@@ -205,6 +205,54 @@ func TestComputeStatsIgnoresElevationNoise(t *testing.T) {
 	}
 }
 
+func TestSmoothElevationHoldsThroughSubThresholdJitter(t *testing.T) {
+	// Same track TestComputeStatsIgnoresElevationNoise uses — a dead-flat
+	// road whose DEM samples jitter by a metre or two. ComputeStats already
+	// reports 0 m ascent for this; the chart fed from SmoothElevation must
+	// agree, not plot the raw 10/11.5/10.2/11.8 zigzag as real climbing.
+	points := []Point{
+		{Lat: 50, Lon: 3, Ele: 10, HasEle: true},
+		{Lat: 50.001, Lon: 3, Ele: 11.5, HasEle: true},
+		{Lat: 50.002, Lon: 3, Ele: 10.2, HasEle: true},
+		{Lat: 50.003, Lon: 3, Ele: 11.8, HasEle: true},
+	}
+	got := SmoothElevation(points)
+	for i, ele := range got {
+		if ele != 10 {
+			t.Errorf("smoothed[%d] = %.2f m, want 10 m (held at the first confirmed value)", i, ele)
+		}
+	}
+}
+
+func TestSmoothElevationTracksARealClimb(t *testing.T) {
+	// A genuine climb — each step past the threshold — must still show up,
+	// not get smoothed away along with the noise.
+	points := []Point{
+		{Lat: 50, Lon: 3, Ele: 100, HasEle: true},
+		{Lat: 50.001, Lon: 3, Ele: 110, HasEle: true},
+		{Lat: 50.002, Lon: 3, Ele: 120, HasEle: true},
+	}
+	got := SmoothElevation(points)
+	want := []float64{100, 110, 120}
+	for i, ele := range got {
+		if ele != want[i] {
+			t.Errorf("smoothed[%d] = %.2f m, want %.2f m", i, ele, want[i])
+		}
+	}
+}
+
+func TestSmoothElevationHoldsLastValueForPointsWithoutTheirOwn(t *testing.T) {
+	points := []Point{
+		{Lat: 50, Lon: 3, Ele: 50, HasEle: true},
+		{Lat: 50.001, Lon: 3}, // no elevation of its own
+		{Lat: 50.002, Lon: 3, Ele: 60, HasEle: true},
+	}
+	got := SmoothElevation(points)
+	if got[1] != 50 {
+		t.Errorf("smoothed[1] = %.2f m, want 50 m (last confirmed value carried forward)", got[1])
+	}
+}
+
 func TestNeedsElevation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -85,6 +85,21 @@ const PREVIEW_DEBOUNCE_MS = 400
 let debounceHandle: ReturnType<typeof setTimeout> | null = null
 let requestSeq = 0
 
+// The Draw tab has no road-type control of its own (the Suggest tab's
+// Road/Gravel/Mountain picker only ever biases the *generator* — see
+// routing.Client.RoundTrip's own doc comment) — but leaving the snap
+// profile blank meant it fell through to ORS's "cycling-regular" default,
+// the same off-road-tolerant middle ground the Suggest tab reserves for its
+// "Gravel bike" choice. A rider clicking waypoints along a street is
+// routing on-road, so the snap between two clicks should default to
+// "cycling-road" — ORS's paved/road-preferring profile, the closest match
+// to preferring painted cycling lanes over gravel or singletrack — rather
+// than a profile that would just as happily route the gap onto a track.
+// ORS itself has no weighting that targets cycle lanes specifically, only
+// this profile-level paved-vs-unpaved bias — see routing.go's own
+// weightings doc comment for that limit stated plainly.
+const DRAW_SNAP_PROFILE = 'cycling-road'
+
 function lineFeature(points: [number, number][]) {
   return {
     type: 'FeatureCollection' as const,
@@ -156,7 +171,7 @@ async function requestPreview() {
   const seq = ++requestSeq
   emit('update:preview', null)
   try {
-    const preview = await api.routeBuilderPreview(waypoints)
+    const preview = await api.routeBuilderPreview(waypoints, DRAW_SNAP_PROFILE)
     // A slower earlier request resolving after a faster later one would
     // otherwise overwrite the up-to-date result with a stale one.
     if (seq !== requestSeq) return
@@ -301,11 +316,16 @@ function flyTo(lat: number, lon: number, zoom = LOCATED_ZOOM) {
 
 defineExpose({ undoLast, clearAll, clearStart, closeLoop, showSuggestion, clearSuggestion, flyTo })
 
-// Hides the Draw tab's own lines and markers while pickStart is active —
+// Hides the Draw tab's own lines and markers while pickStart is active, and
+// symmetrically hides the Suggest tab's own startMarker while it isn't —
 // both sets of pins on screen at once (drawn waypoints *and* a start
-// marker) read as two unrelated things happening, when only one is. Drawn
-// state itself is untouched, just not shown; switching back to Draw
-// restores it exactly as it was.
+// marker) read as two unrelated things happening, when only one is, and
+// worse, a persisted default start (RouteBuilderPanel's localStorage pick)
+// shares the exact same "start" ember colour as the Draw tab's own first
+// waypoint, so leaving it up while drawing looked like the start marker had
+// duplicated itself rather than two unrelated features both being visible.
+// Drawn state itself is untouched, just not shown; switching tabs restores
+// each side exactly as it was.
 function setDrawVisible(visible: boolean) {
   if (!map) return
   const visibility = visible ? 'visible' : 'none'
@@ -313,6 +333,7 @@ function setDrawVisible(visible: boolean) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility)
   }
   for (const m of markers) m.getElement().style.display = visible ? '' : 'none'
+  if (startMarker) startMarker.getElement().style.display = visible ? 'none' : ''
 }
 
 watch(
