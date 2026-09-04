@@ -2160,6 +2160,13 @@ func summarizePath(path routing.Path) pathSummary {
 	// comment) — elevation is appended only for the ones that do, so a
 	// partial profile still charts correctly rather than plotting a false
 	// zero for the gaps.
+	//
+	// Smoothed through the same deadband AscentM below is computed with —
+	// see SmoothElevation's own doc comment: without it, the chart plots
+	// raw DEM jitter the ascent figure next to it has already dismissed as
+	// noise, so a flat road's own few metres of sensor wobble reads as a
+	// wall of climbs while the number says 0.
+	smoothed := gpx.SmoothElevation(points)
 	elevation := make([]elevationPointDTO, 0, len(points))
 	var distance float64
 	for i, p := range points {
@@ -2168,7 +2175,7 @@ func summarizePath(path routing.Path) pathSummary {
 			distance += gpx.DistanceM(points[i-1], p)
 		}
 		if p.HasEle {
-			elevation = append(elevation, elevationPointDTO{DistanceM: distance, EleM: p.Ele})
+			elevation = append(elevation, elevationPointDTO{DistanceM: distance, EleM: smoothed[i]})
 		}
 	}
 
