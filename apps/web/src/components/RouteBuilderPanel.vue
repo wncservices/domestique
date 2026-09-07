@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import { simplifyPath } from '@/utils/simplifyPath'
@@ -98,6 +99,83 @@ function clearDraw() {
 function onDrawSaved() {
   clearDraw()
   emit('built')
+}
+
+// --- Editing an already-saved route ---
+// RouteDetailModal.vue's "Edit route" reopens a saved route here rather
+// than the Draw tab only ever building something new — the same
+// loadWaypoints/simplifyPath machinery "Adapt" already uses on a generated
+// candidate, pointed at an existing route's own track instead. The route
+// arrives as a query param (?edit=<slug>), not component state, since this
+// is a fresh page load from RouteDetailModal's own router.push, not a
+// same-component transition.
+
+const routeQuery = useRoute()
+const router = useRouter()
+
+// Non-null exactly while editing an already-saved route rather than
+// drawing a new one — swaps the Draw tab's own RouteSaveForm (which always
+// creates a new route) for a plain "Save changes"/"Discard" pair, since an
+// edit changes this route's geometry in place and has no name/description/
+// tags/sport of its own to ask for.
+const editingSlug = ref<string | null>(null)
+const editingName = ref('')
+const savingEdit = ref(false)
+
+onMounted(async () => {
+  const slug = routeQuery.query.edit
+  if (typeof slug !== 'string' || !slug) return
+  // Consumed once — a reload of /build afterward should behave like the
+  // builder's own blank-slate default, not silently re-enter edit mode for
+  // whatever slug happened to still be in the address bar.
+  router.replace({ path: '/build' })
+
+  try {
+    const [track, library] = await Promise.all([api.track(slug), api.routes()])
+    const route = library.routes.find((r) => r.slug === slug)
+    if (!route) throw new Error('route not found')
+    editingSlug.value = slug
+    editingName.value = route.name
+    activeTab.value = 'draw'
+    const points = simplifyPath(track.points, MAX_ADAPT_WAYPOINTS)
+    mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
+  } catch (err) {
+    toast.add({
+      title: 'Could not open that route for editing',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  }
+})
+
+function cancelEdit() {
+  editingSlug.value = null
+  editingName.value = ''
+  clearDraw()
+}
+
+async function saveEdit() {
+  if (!editingSlug.value || !preview.value || preview.value.points.length < 2) return
+  savingEdit.value = true
+  try {
+    await api.updateRoutePoints(
+      editingSlug.value,
+      preview.value.points.map(([lat, lon]) => ({ lat, lon })),
+    )
+    toast.add({ title: 'Route updated', icon: 'i-lucide-check', color: 'success' })
+    cancelEdit()
+    emit('built')
+  } catch (err) {
+    toast.add({
+      title: 'Could not save changes',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    savingEdit.value = false
+  }
 }
 
 // --- Suggest tab ---
@@ -225,6 +303,13 @@ function adaptCandidate(index: number) {
   candidates.value = []
   chosenIndex.value = null
   mapRef.value?.clearSuggestion()
+  // A generated candidate has nothing to do with whatever route was being
+  // edited (if any) — loading it as this route's own "save changes" target
+  // would silently overwrite one route's path with an unrelated one's.
+  // Adapting always starts a fresh, ordinary (create-a-new-route) Draw
+  // session instead.
+  editingSlug.value = null
+  editingName.value = ''
   mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
   activeTab.value = 'draw'
 }
@@ -327,6 +412,14 @@ function onSuggestSaved() {
       >
         <template #draw>
           <div class="flex flex-col gap-4 pt-4">
+            <UAlert
+              v-if="editingSlug"
+              color="primary"
+              variant="subtle"
+              icon="i-lucide-route"
+              :title="`Editing “${editingName}”`"
+              description="Drag, add, or remove waypoints, then save — the route's name, description and tags are untouched."
+            />
             <p class="text-sm text-muted">
               Click the map to place waypoints — each one snaps to the nearest road. Drag a
               waypoint to move it, right-click one to remove it.
@@ -377,7 +470,21 @@ function onSuggestSaved() {
               <ElevationProfile v-if="preview.elevationProfile.length" :points="preview.elevationProfile" />
             </template>
 
+            <div v-if="editingSlug" class="flex justify-end gap-2">
+              <UButton color="neutral" variant="ghost" :disabled="savingEdit" @click="cancelEdit">
+                Discard changes
+              </UButton>
+              <UButton
+                icon="i-lucide-check"
+                :loading="savingEdit"
+                :disabled="!preview || preview.points.length < 2"
+                @click="saveEdit"
+              >
+                Save changes
+              </UButton>
+            </div>
             <RouteSaveForm
+              v-else
               ref="drawSaveForm"
               :points="preview?.points ?? []"
               @saved="onDrawSaved"

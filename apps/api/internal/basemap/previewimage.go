@@ -64,6 +64,16 @@ func (c *PreviewImageCache) Get(slug, theme, basemapUpdateID string) (imageData 
 	return imageData, true, nil
 }
 
+// Delete removes both themes' cached images for slug, if any — same
+// reasoning and same caller (api.handleUpdateRoutePoints) as
+// PreviewCache.Delete, kept as its own method rather than relying on that
+// one alone since this is a genuinely separate table or a rider would keep
+// seeing the pre-edit card image even once the JSON layers were fresh.
+func (c *PreviewImageCache) Delete(slug string) error {
+	_, err := c.db.Exec(c.dialect.Rebind(`DELETE FROM track_preview_images WHERE slug = ?`), slug)
+	return err
+}
+
 // Put upserts the cached image for slug+theme. A stale row (rendered against
 // an older basemap) is overwritten in place — same reasoning as
 // PreviewCache.Put, there is never a reason to keep more than the current
