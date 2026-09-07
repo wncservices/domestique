@@ -350,6 +350,30 @@ function clearAll() {
   schedulePreview()
 }
 
+/** Loads a fixed set of points as the Draw tab's own waypoints, replacing
+ *  whatever was there — how a chosen Suggest candidate becomes something a
+ *  rider can drag, add to, or right-click off, with the exact same tools
+ *  the Draw tab already has, rather than only ever being saved exactly as
+ *  generated. Callers are expected to have already reduced a full routed
+ *  path down to a sensible number of via-points (RouteBuilderPanel.vue's
+ *  own simplifyPath) — this just plants markers at whatever it's handed. */
+function loadWaypoints(points: { lat: number; lon: number }[]) {
+  if (!map || !maplibregl) return
+  for (const m of markers) m.remove()
+  markers = []
+  waypoints = points.map((p) => ({ ...p }))
+  for (let i = 0; i < waypoints.length; i++) addMarker(i)
+  emit('update:waypointCount', waypoints.length)
+  schedulePreview()
+
+  if (waypoints.length === 0) return
+  const bounds = waypoints.reduce(
+    (b, p) => b.extend([p.lon, p.lat]),
+    new maplibregl.LngLatBounds([waypoints[0].lon, waypoints[0].lat], [waypoints[0].lon, waypoints[0].lat]),
+  )
+  map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 300 })
+}
+
 /** Routes straight back to the start from wherever the last waypoint is —
  *  no new marker: the closing point sits exactly on top of the start pin,
  *  so a second marker there would only stack invisibly rather than add
@@ -391,7 +415,16 @@ function flyTo(lat: number, lon: number, zoom = LOCATED_ZOOM) {
   map?.flyTo({ center: [lon, lat], zoom })
 }
 
-defineExpose({ undoLast, clearAll, clearStart, closeLoop, showSuggestion, clearSuggestion, flyTo })
+defineExpose({
+  undoLast,
+  clearAll,
+  clearStart,
+  closeLoop,
+  showSuggestion,
+  clearSuggestion,
+  loadWaypoints,
+  flyTo,
+})
 
 // Hides the Draw tab's own lines and markers while pickStart is active, and
 // symmetrically hides the Suggest tab's own startMarker while it isn't —
