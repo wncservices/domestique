@@ -2,10 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@/color-mode'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
-import type { Map as MapLibreMap } from 'maplibre-gl'
+import { poiLabel } from '@/utils/poi'
+import type { Map as MapLibreMap, Marker } from 'maplibre-gl'
+import type { Poi } from '@/api/types'
 
 const props = defineProps<{
-  routes: { slug: string; points: [number, number][] }[]
+  routes: { slug: string; points: [number, number][]; pois?: Poi[] }[]
   selectedSlug?: string | null
 }>()
 
@@ -31,6 +33,32 @@ const START_LAYER_ID = 'routes-start'
 // a popup, say) still only pays that cost once, but each RouteMap instance
 // keeps its own reference for fitToRoutes() to use.
 let maplibregl: typeof import('maplibre-gl') | null = null
+
+// This route's own named waypoint markers — only ever drawn for a
+// single-route view (RouteDetailModal.vue): the library overview's own
+// multi-route map (LibraryPage.vue) would otherwise pile up every visible
+// route's markers on top of each other, which is noise, not information,
+// at that zoom level. DOM markers rather than a data-driven layer like the
+// route line itself, matching RouteBuilderMap.vue's own poi rendering —
+// fine at this scale (one route's worth of markers), and gets a
+// permanently-open label popup for free.
+let poiMarkers: Marker[] = []
+
+function syncPoiMarkers() {
+  if (!map || !maplibregl) return
+  for (const m of poiMarkers) m.remove()
+  poiMarkers = []
+  if (props.routes.length !== 1) return
+  const gl = maplibregl
+  const instance = map
+  const poiColor = resolved.value === 'dark' ? '#c4b5fd' : '#7c3aed'
+  for (const poi of props.routes[0].pois ?? []) {
+    const marker = new gl.Marker({ color: poiColor }).setLngLat([poi.lon, poi.lat]).addTo(instance)
+    marker.setPopup(new gl.Popup({ closeButton: false, closeOnClick: false, offset: 16 }).setText(poiLabel(poi)))
+    marker.togglePopup()
+    poiMarkers.push(marker)
+  }
+}
 
 function toFeatureCollection(routes: typeof props.routes) {
   return {
@@ -111,6 +139,7 @@ function addRouteLayers() {
   })
 
   fitToRoutes()
+  syncPoiMarkers()
 }
 
 async function init() {
@@ -143,6 +172,7 @@ onMounted(init)
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  for (const m of poiMarkers) m.remove()
   map?.remove()
   map = null
 })
@@ -158,7 +188,7 @@ onBeforeUnmount(() => {
 // app (a re-import creates a new route, it doesn't edit one in place), so
 // point count is enough without hashing coordinates.
 const routesSignature = computed(() =>
-  props.routes.map((r) => `${r.slug}:${r.points.length}`).join('|'),
+  props.routes.map((r) => `${r.slug}:${r.points.length}:${r.pois?.length ?? 0}`).join('|'),
 )
 
 watch(routesSignature, () => {
@@ -170,6 +200,7 @@ watch(routesSignature, () => {
   if (!source) return
   source.setData(toFeatureCollection(props.routes))
   fitToRoutes()
+  syncPoiMarkers()
 })
 
 watch(

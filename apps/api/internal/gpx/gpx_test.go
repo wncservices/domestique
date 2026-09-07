@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -145,7 +146,7 @@ func TestRenderRoundTripsThroughParsePoints(t *testing.T) {
 		{Lat: 50.8007, Lon: 2.8437, Ele: 139, HasEle: true},
 	}
 
-	raw, err := Render("Kemmelberg Loop", points)
+	raw, err := Render("Kemmelberg Loop", points, nil)
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
@@ -167,8 +168,74 @@ func TestRenderRoundTripsThroughParsePoints(t *testing.T) {
 	}
 }
 
+func TestRenderRoundTripsPoisThroughParsePois(t *testing.T) {
+	points := []Point{{Lat: 50.7920, Lon: 2.8180}, {Lat: 50.7982, Lon: 2.8344}}
+	pois := []Poi{
+		{Lat: 50.7950, Lon: 2.8200, Name: "Café Kemmel", Type: "food"},
+		{Lat: 50.7970, Lon: 2.8300, Name: "", Type: "viewpoint"},
+	}
+
+	raw, err := Render("Kemmelberg Loop", points, pois)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	got, err := ParsePois(raw)
+	if err != nil {
+		t.Fatalf("ParsePois: %v", err)
+	}
+	if len(got) != len(pois) {
+		t.Fatalf("got %d pois, want %d", len(got), len(pois))
+	}
+	for i, p := range got {
+		if p != pois[i] {
+			t.Errorf("poi %d = %+v, want %+v", i, p, pois[i])
+		}
+	}
+}
+
+func TestRenderWithNoPoisOmitsExtensions(t *testing.T) {
+	points := []Point{{Lat: 50, Lon: 3}, {Lat: 50.01, Lon: 3}}
+	raw, err := Render("No markers", points, nil)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(string(raw), "extensions") {
+		t.Errorf("expected no <extensions> block for a route with no pois, got:\n%s", raw)
+	}
+}
+
+// A rider's own POI markers must never be readable as third-party turn
+// cues — see Poi's own doc comment for why they're written into
+// <extensions> rather than a plain <wpt>, which is exactly what ParseCues
+// scans.
+func TestPoisAreInvisibleToParseCues(t *testing.T) {
+	points := []Point{{Lat: 50, Lon: 3}, {Lat: 50.01, Lon: 3}}
+	pois := []Poi{{Lat: 50.005, Lon: 3, Name: "Water stop", Type: "water"}}
+	raw, err := Render("Route with a marker", points, pois)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	cues, err := ParseCues(raw)
+	if err != nil {
+		t.Fatalf("ParseCues: %v", err)
+	}
+	if cues != nil {
+		t.Errorf("expected a rider's own POI to produce no turn cues, got %+v", cues)
+	}
+}
+
+func TestTrackETagChangesWithPoisEvenWhenPointsDoNot(t *testing.T) {
+	points := []Point{{Lat: 50, Lon: 3}, {Lat: 50.01, Lon: 3}}
+	before := TrackETag(points, nil)
+	after := TrackETag(points, []Poi{{Lat: 50.005, Lon: 3, Name: "Bench", Type: "rest"}})
+	if before == after {
+		t.Error("expected the ETag to change once a poi is added, got the same value")
+	}
+}
+
 func TestRenderRejectsTooFewPoints(t *testing.T) {
-	if _, err := Render("Too short", []Point{{Lat: 50, Lon: 3}}); err == nil {
+	if _, err := Render("Too short", []Point{{Lat: 50, Lon: 3}}, nil); err == nil {
 		t.Fatal("a single-point track rendered without error")
 	}
 }

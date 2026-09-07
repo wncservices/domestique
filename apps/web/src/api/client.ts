@@ -27,6 +27,7 @@ import type {
   InvitePersonRequest,
   LibraryResponse,
   Person,
+  Poi,
   PlanResponse,
   PushResponse,
   CreateRouteFromPointsRequest,
@@ -384,11 +385,11 @@ export const api = {
    *  are memoized by slug (see memoizeBySlug's own comment) — both are
    *  invalidated here so the very next read reflects the new path instead
    *  of whatever this tab happened to cache before the edit. */
-  updateRoutePoints: async (slug: string, points: Waypoint[]) => {
+  updateRoutePoints: async (slug: string, points: Waypoint[], pois: Poi[] = []) => {
     const route = await request<Route>(`/api/routes/${encodeSlug(slug)}/points`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ points }),
+      body: JSON.stringify({ points, pois }),
     })
     api.track.invalidate(slug)
     api.trackPreview.invalidate(slug)

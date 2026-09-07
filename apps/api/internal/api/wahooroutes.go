@@ -539,7 +539,7 @@ func downloadAndRenderWahooRoute(ctx context.Context, client WahooDownloader, to
 	if err != nil {
 		return nil, fmt.Errorf("reading the course file: %w", err)
 	}
-	rendered, err := gpx.Render(route.Name, points)
+	rendered, err := gpx.Render(route.Name, points, nil)
 	if err != nil {
 		return nil, fmt.Errorf("rendering the track: %w", err)
 	}

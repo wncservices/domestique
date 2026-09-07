@@ -85,6 +85,88 @@ func TestUpdateRoutePointsInvalidatesTheTrackCache(t *testing.T) {
 	}
 }
 
+// TestUpdateRoutePointsRoundTripsPois proves a saved route's own named
+// waypoint markers come back from handleTrack exactly as sent, and that
+// they don't perturb the track's own point count or geometry.
+func TestUpdateRoutePointsRoundTripsPois(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPut, "/api/routes/"+route.Slug+"/points", `{
+		"points": [{"lat": 50.90, "lon": 4.40}, {"lat": 50.91, "lon": 4.41}],
+		"pois": [{"lat": 50.905, "lon": 4.405, "name": "Café stop", "type": "food"}]
+	}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	trackResp := h.as("wilant", "cyclists", http.MethodGet, "/api/tracks/"+route.Slug, "")
+	if trackResp.StatusCode != http.StatusOK {
+		t.Fatalf("track: status = %d, want 200", trackResp.StatusCode)
+	}
+	var track struct {
+		Points [][2]float64 `json:"points"`
+		Pois   []struct {
+			Lat  float64 `json:"lat"`
+			Lon  float64 `json:"lon"`
+			Name string  `json:"name"`
+			Type string  `json:"type"`
+		} `json:"pois"`
+	}
+	if err := json.NewDecoder(trackResp.Body).Decode(&track); err != nil {
+		t.Fatal(err)
+	}
+	if len(track.Points) != 2 {
+		t.Errorf("pointCount = %d, want 2 — a poi must not be mistaken for a track point", len(track.Points))
+	}
+	if len(track.Pois) != 1 {
+		t.Fatalf("pois = %+v, want exactly 1", track.Pois)
+	}
+	got := track.Pois[0]
+	if got.Lat != 50.905 || got.Lon != 4.405 || got.Name != "Café stop" || got.Type != "food" {
+		t.Errorf("poi = %+v, want {50.905, 4.405, \"Café stop\", \"food\"}", got)
+	}
+}
+
+// TestUpdateRoutePointsRejectsUnknownPoiType proves the fixed marker-type
+// list is enforced server-side, not just offered as a frontend dropdown.
+func TestUpdateRoutePointsRejectsUnknownPoiType(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPut, "/api/routes/"+route.Slug+"/points", `{
+		"points": [{"lat": 50.90, "lon": 4.40}, {"lat": 50.91, "lon": 4.41}],
+		"pois": [{"lat": 50.905, "lon": 4.405, "name": "Mystery", "type": "made-up"}]
+	}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an unknown poi type", resp.StatusCode)
+	}
+}
+
+// TestUpdateRoutePointsRejectsTooManyPois proves maxRouteBuilderPois is
+// actually enforced, not just documented.
+func TestUpdateRoutePointsRejectsTooManyPois(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	route := h.seedRoute(t, "Hill Loop", "wilant")
+
+	pois := "["
+	for i := 0; i < 21; i++ {
+		if i > 0 {
+			pois += ","
+		}
+		pois += `{"lat": 50.90, "lon": 4.40, "name": "x", "type": "other"}`
+	}
+	pois += "]"
+
+	resp := h.as("wilant", "cyclists", http.MethodPut, "/api/routes/"+route.Slug+"/points", `{
+		"points": [{"lat": 50.90, "lon": 4.40}, {"lat": 50.91, "lon": 4.41}],
+		"pois": `+pois+`
+	}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for 21 pois (max 20)", resp.StatusCode)
+	}
+}
+
 // TestUpdateRoutePointsRejectsTooFewPoints proves a single-point "route" is
 // rejected the same way handleCreateRouteFromPoints already rejects one —
 // gpx.Render's own floor, not a check this handler duplicates.

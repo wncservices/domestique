@@ -4,12 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import { simplifyPath } from '@/utils/simplifyPath'
+import { POI_TYPES } from '@/utils/poi'
 import ElevationProfile from './ElevationProfile.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import RouteCandidatePreview from './RouteCandidatePreview.vue'
 import RouteSaveForm from './RouteSaveForm.vue'
 import SurfaceBreakdown from './SurfaceBreakdown.vue'
-import type { RouteBuilderCandidate, RouteBuilderPreview } from '@/api/types'
+import type { Poi, RouteBuilderCandidate, RouteBuilderPreview } from '@/api/types'
 
 const emit = defineEmits<{ built: [] }>()
 
@@ -91,9 +92,30 @@ function onPreview(next: RouteBuilderPreview | null) {
   preview.value = next
 }
 
+// Named waypoint markers — a rest stop, a water source, a viewpoint — the
+// Draw tab's own list, separate from the routed path itself (waypointCount/
+// preview above). This ref is the source of truth; RouteBuilderMap.vue only
+// ever renders it (see its own pois prop) and reports where a placement
+// click landed via poi:placed.
+const pois = ref<Poi[]>([])
+const POI_TYPE_OPTIONS = POI_TYPES.map((t) => ({ label: `${t.emoji} ${t.label}`, value: t.value }))
+
+function armPoiPlacement() {
+  mapRef.value?.armPoiPlacement()
+}
+
+function onPoiPlaced(point: { lat: number; lon: number }) {
+  pois.value.push({ lat: point.lat, lon: point.lon, name: '', type: 'other' })
+}
+
+function removePoi(index: number) {
+  pois.value.splice(index, 1)
+}
+
 function clearDraw() {
   mapRef.value?.clearAll()
   drawSaveForm.value?.reset()
+  pois.value = []
 }
 
 function onDrawSaved() {
@@ -139,6 +161,7 @@ onMounted(async () => {
     activeTab.value = 'draw'
     const points = simplifyPath(track.points, MAX_ADAPT_WAYPOINTS)
     mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
+    pois.value = track.pois.map((p) => ({ ...p }))
   } catch (err) {
     toast.add({
       title: 'Could not open that route for editing',
@@ -162,6 +185,7 @@ async function saveEdit() {
     await api.updateRoutePoints(
       editingSlug.value,
       preview.value.points.map(([lat, lon]) => ({ lat, lon })),
+      pois.value,
     )
     toast.add({ title: 'Route updated', icon: 'i-lucide-check', color: 'success' })
     cancelEdit()
@@ -310,6 +334,7 @@ function adaptCandidate(index: number) {
   // session instead.
   editingSlug.value = null
   editingName.value = ''
+  pois.value = []
   mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
   activeTab.value = 'draw'
 }
@@ -397,9 +422,11 @@ function onSuggestSaved() {
           ref="map"
           :pick-start="activeTab === 'suggest'"
           :initial-start="initialStart ?? undefined"
+          :pois="pois"
           @update:preview="onPreview"
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"
+          @poi:placed="onPoiPlaced"
           @error="onMapError"
         />
       </div>
@@ -449,6 +476,16 @@ function onSuggestSaved() {
                   color="neutral"
                   variant="ghost"
                   size="sm"
+                  icon="i-lucide-map-pin-plus"
+                  @click="armPoiPlacement"
+                >
+                  Add marker
+                </UButton>
+                <UButton
+                  v-if="waypointCount > 0"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
                   @click="clearDraw"
                 >
                   Clear
@@ -463,6 +500,26 @@ function onSuggestSaved() {
                 >
                   Undo
                 </UButton>
+              </div>
+            </div>
+
+            <!-- Named waypoint markers — a rest stop, a water source, a
+                 viewpoint — labelled here rather than on the map itself: a
+                 pin has no room for a text field, and this list is also
+                 the only way to remove or retype one, since the marker
+                 itself has no drag or right-click of its own. -->
+            <div v-if="pois.length" class="flex flex-col gap-2 rounded-lg bg-elevated/40 p-2">
+              <div v-for="(poi, index) in pois" :key="index" class="flex items-center gap-2">
+                <USelect v-model="poi.type" :items="POI_TYPE_OPTIONS" size="sm" class="w-40 shrink-0" />
+                <UInput v-model="poi.name" placeholder="Name this spot" size="sm" class="flex-1" />
+                <UButton
+                  icon="i-lucide-x"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Remove this marker"
+                  @click="removePoi(index)"
+                />
               </div>
             </div>
 
@@ -488,6 +545,7 @@ function onSuggestSaved() {
               v-else
               ref="drawSaveForm"
               :points="preview?.points ?? []"
+              :pois="pois"
               @saved="onDrawSaved"
             />
           </div>
