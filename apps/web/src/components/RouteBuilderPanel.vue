@@ -2,6 +2,7 @@
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import { simplifyPath } from '@/utils/simplifyPath'
 import ElevationProfile from './ElevationProfile.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import RouteCandidatePreview from './RouteCandidatePreview.vue'
@@ -204,6 +205,28 @@ function onStart(point: { lat: number; lon: number }) {
 function chooseCandidate(index: number) {
   chosenIndex.value = index
   mapRef.value?.showSuggestion(candidates.value[index].points)
+}
+
+// Below the server's own maxRouteBuilderWaypoints (50, server.go) — a rider
+// dragging waypoints wants a shape they can actually grab and see
+// individually, not fifty markers stacked along every gentle curve.
+const MAX_ADAPT_WAYPOINTS = 30
+
+/** Hands a generated candidate over to the Draw tab as ordinary, draggable
+ *  waypoints — "Use this one" saves a suggestion exactly as generated;
+ *  this is for a rider who likes the shape but wants to nudge a section
+ *  around a closed road or a bad surface first. The full routed path
+ *  (every snapped coordinate, easily hundreds for one loop) is reduced to
+ *  a manageable set of via-points first (simplifyPath) — loading all of it
+ *  as "waypoints" would just recreate the same shape as a wall of markers
+ *  nobody could individually grab, past the server's own cap besides. */
+function adaptCandidate(index: number) {
+  const points = simplifyPath(candidates.value[index].points, MAX_ADAPT_WAYPOINTS)
+  candidates.value = []
+  chosenIndex.value = null
+  mapRef.value?.clearSuggestion()
+  mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
+  activeTab.value = 'draw'
 }
 
 async function generate() {
@@ -426,18 +449,31 @@ function onSuggestSaved() {
                 <RouteCandidatePreview :points="candidate.points" />
                 <ElevationProfile v-if="candidate.elevationProfile.length" :points="candidate.elevationProfile" />
                 <SurfaceBreakdown v-if="candidate.surface.length" :surface="candidate.surface" compact />
-                <div class="flex items-center justify-between text-sm text-muted">
+                <div class="flex flex-col gap-2 text-sm text-muted">
                   <span>
                     {{ (candidate.distanceM / 1000).toFixed(1) }} km,
                     {{ Math.round(candidate.ascentM) }} m ascent
                   </span>
-                  <UButton
-                    size="sm"
-                    :variant="chosenIndex === index ? 'solid' : 'outline'"
-                    @click="chooseCandidate(index)"
-                  >
-                    {{ chosenIndex === index ? 'Selected' : 'Use this one' }}
-                  </UButton>
+                  <div class="flex gap-2">
+                    <UButton
+                      size="sm"
+                      color="neutral"
+                      variant="outline"
+                      icon="i-lucide-pencil"
+                      class="flex-1"
+                      @click="adaptCandidate(index)"
+                    >
+                      Adapt
+                    </UButton>
+                    <UButton
+                      size="sm"
+                      :variant="chosenIndex === index ? 'solid' : 'outline'"
+                      class="flex-1"
+                      @click="chooseCandidate(index)"
+                    >
+                      {{ chosenIndex === index ? 'Selected' : 'Use this one' }}
+                    </UButton>
+                  </div>
                 </div>
               </div>
             </div>
