@@ -3,8 +3,13 @@ import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import { applyColorMode, initColorMode } from './color-mode'
+import { initTelemetry } from './telemetry'
 import { prefetchMapLibreModules } from './utils/maplibre'
 import './styles.css'
+
+// Before anything else: catches errors/traces from router setup and mount
+// itself, not just from code that runs after this point.
+initTelemetry()
 
 // Each page answers a different question: what is in the library, how do I
 // put something in it, who am I connected to, and (admin-only) who has
