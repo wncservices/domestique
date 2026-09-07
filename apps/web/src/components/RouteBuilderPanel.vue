@@ -421,8 +421,9 @@ function onSuggestSaved() {
               description="Drag, add, or remove waypoints, then save — the route's name, description and tags are untouched."
             />
             <p class="text-sm text-muted">
-              Click the map to place waypoints — each one snaps to the nearest road. Drag a
-              waypoint to move it, right-click one to remove it.
+              Click the map to place waypoints — each one snaps to the nearest road. Click on the
+              route itself to insert one in between, drag a waypoint to move it, right-click one
+              to remove it.
             </p>
 
             <div class="flex items-center justify-between text-sm text-muted">
