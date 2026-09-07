@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { Account, Me, Route } from '@/api/types'
+import type { Account, Me, Poi, Route } from '@/api/types'
 import RouteMap from './RouteMap.vue'
+
+const router = useRouter()
 
 const props = defineProps<{
   open: boolean
@@ -67,6 +70,16 @@ function openEditInfo() {
   draftName.value = props.route.name
   draftDescription.value = props.route.description
   editingInfo.value = true
+}
+
+// Reopens this route's own path in the Draw tab (RouteBuilderPanel.vue's
+// own onMounted watches for ?edit=) rather than only ever letting a rider
+// change the name/description above — a fresh page navigation, not a
+// same-component transition, since /build is a different route entirely.
+function editRoute() {
+  if (!props.route) return
+  router.push({ path: '/build', query: { edit: props.route.slug } })
+  emit('update:open', false)
 }
 
 async function saveInfo() {
@@ -149,6 +162,7 @@ const syncRows = computed(() =>
 // ever fires once there's actually something to show, the same laziness
 // TrackPreview gets from its own IntersectionObserver for the card grid.
 const points = ref<[number, number][]>([])
+const pois = ref<Poi[]>([])
 const loadingTrack = ref(false)
 // Same failure signal TrackPreview.vue already shows ("track unavailable")
 // for the identical fetch on the card grid — this popup was silently
@@ -160,6 +174,7 @@ watch(
   () => (props.open ? props.route?.slug : null),
   async (slug) => {
     points.value = []
+    pois.value = []
     trackFailed.value = false
     editingInfo.value = false
     if (!slug) return
@@ -167,6 +182,7 @@ watch(
     try {
       const track = await api.track(slug)
       points.value = track.points
+      pois.value = track.pois
     } catch {
       points.value = []
       trackFailed.value = true
@@ -177,7 +193,7 @@ watch(
 )
 
 const mapRoutes = computed(() =>
-  props.route ? [{ slug: props.route.slug, points: points.value }] : [],
+  props.route ? [{ slug: props.route.slug, points: points.value, pois: pois.value }] : [],
 )
 </script>
 
@@ -299,21 +315,32 @@ const mapRoutes = computed(() =>
     </template>
     <template #footer>
       <div class="flex w-full justify-between gap-2">
-        <!-- external: see RouteCard.vue's identical button for why —
-             a same-origin path like /api/gpx/... otherwise reads as an
-             internal route to vue-router, which intercepts the click
-             before `download` ever gets a chance to fire. -->
-        <UButton
-          v-if="route"
-          :href="gpxUrl"
-          external
-          download
-          icon="i-lucide-download"
-          color="neutral"
-          variant="subtle"
-        >
-          Download GPX
-        </UButton>
+        <div class="flex gap-2">
+          <!-- external: see RouteCard.vue's identical button for why —
+               a same-origin path like /api/gpx/... otherwise reads as an
+               internal route to vue-router, which intercepts the click
+               before `download` ever gets a chance to fire. -->
+          <UButton
+            v-if="route"
+            :href="gpxUrl"
+            external
+            download
+            icon="i-lucide-download"
+            color="neutral"
+            variant="subtle"
+          >
+            Download GPX
+          </UButton>
+          <UButton
+            v-if="canEdit"
+            icon="i-lucide-route"
+            color="neutral"
+            variant="subtle"
+            @click="editRoute"
+          >
+            Edit route
+          </UButton>
+        </div>
         <UButton color="neutral" variant="ghost" @click="emit('update:open', false)">Close</UButton>
       </div>
     </template>

@@ -314,6 +314,7 @@ func (s *Server) Handler() http.Handler {
 	// generator in source/db.go), so the plain single-segment form loses
 	// nothing here.
 	mux.HandleFunc("POST /api/routes/{slug}/recalculate-elevation", s.handleRecalculateElevation)
+	mux.HandleFunc("PUT /api/routes/{slug}/points", s.handleUpdateRoutePoints)
 	mux.HandleFunc("DELETE /api/routes/{slug...}", s.handleDelete)
 
 	// Owner-side share management stays behind the ordinary gate — see
@@ -1308,21 +1309,42 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 	for _, p := range points {
 		coords = append(coords, [2]float64{p.Lat, p.Lon})
 	}
+	// Best-effort, same as the FIT-export path's own nativeCues lookup: a
+	// route with none (everything before this feature existed) is the
+	// ordinary case, not a failure worth aborting the whole request over.
+	pois, _ := s.Source.Pois(r.Context(), slug)
+	poiDTOs := make([]poiDTO, len(pois))
+	for i, p := range pois {
+		poiDTOs[i] = poiDTO{Lat: p.Lat, Lon: p.Lon, Name: p.Name, Type: p.Type}
+	}
 	// private, not public: mayView above already gates this per-rider (a
 	// route only visible to its owner or its crew must not be cached where
 	// another rider's browser — or a shared proxy — could serve it back).
-	// max-age=86400 matches handleTrackPreview's own reasoning: a route's
-	// points never change after import (a re-import creates a new route,
-	// it doesn't edit one in place), so the only thing that can ever make
-	// a cached response wrong is the route being deleted — a day-long
-	// staleness window on a 404 the rider would notice anyway is a
-	// cosmetic gap, not a correctness one. Every TrackPreview.vue card
-	// remounts from scratch on pagination (no per-card KeepAlive), so
-	// without this every page revisit re-fetched every visible card's full
-	// point list over the network for no reason tied to the data actually
-	// having changed.
-	w.Header().Set("Cache-Control", "private, max-age=86400")
-	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords})
+	//
+	// A route's points used to never change after creation (a re-import
+	// created a new route, it didn't edit one in place) — that's what let
+	// this sit behind a flat day-long max-age, the same as
+	// handleTrackPreview's own cosmetic-staleness reasoning. handleUpdateRoutePoints
+	// below broke that: a rider editing their own route expects the very
+	// next reload — anywhere, not just the tab they edited it from — to
+	// show the new path, not whatever was cached from up to a day earlier.
+	// no-cache (despite the name, still a real cache — it just forces
+	// revalidation on every use) plus an ETag keyed on the points
+	// themselves is what gets both: correctness the instant a real edit
+	// changes the hash, and the same bandwidth saving as before for the
+	// unchanged case, since a 304 costs nothing but headers. Every
+	// TrackPreview.vue card remounts from scratch on pagination (no
+	// per-card KeepAlive), so without this every page revisit would
+	// otherwise re-fetch every visible card's full point list regardless
+	// of whether anything actually changed.
+	etag := `"` + gpx.TrackETag(points, pois) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords, "pois": poiDTOs})
 }
 
 // errPreviewUnavailable marks previewLayers' "this deployment has no basemap
@@ -2028,6 +2050,60 @@ type routeBuilderWaypoint struct {
 	Lon float64 `json:"lon"`
 }
 
+// poiDTO is one named waypoint marker, both on the way in (a builder tab's
+// own list of markers a rider placed and labelled) and on the way out
+// (handleTrack's own response) — the same shape either direction, so one
+// type serves both rather than a near-duplicate per direction.
+type poiDTO struct {
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+	Name string  `json:"name"`
+	Type string  `json:"type"`
+}
+
+// validPoiTypes is the fixed set of marker types the Draw tab's own picker
+// offers (RouteBuilderPanel.vue's POI_TYPES) — checked here, at the trust
+// boundary, the same reasoning validRoutingProfile's own comment gives:
+// this arrives as a plain string on a request body with nothing upstream
+// constraining it.
+var validPoiTypes = map[string]bool{
+	"rest": true, "food": true, "water": true, "viewpoint": true,
+	"mechanic": true, "hazard": true, "other": true,
+}
+
+// maxRouteBuilderPois bounds how many named markers a single save can
+// carry — same reasoning as maxRouteBuilderWaypoints below: nothing
+// upstream otherwise limited this, and a route's own points already have a
+// much smaller realistic count than a waypoint list might.
+const maxRouteBuilderPois = 20
+
+// maxPoiNameLen bounds a single marker's name — a rider labels a spot on a
+// map, not writing a description; UpdateRequest's own Descript field is
+// where longer text belongs.
+const maxPoiNameLen = 100
+
+// poisFromRequest validates and converts a builder tab's own marker list
+// into what gpx.Render expects — shared by handleCreateRouteFromPoints and
+// handleUpdateRoutePoints so the two save paths can't drift on what a
+// valid marker looks like.
+func poisFromRequest(in []poiDTO) ([]gpx.Poi, error) {
+	if len(in) > maxRouteBuilderPois {
+		return nil, fmt.Errorf("too many waypoint markers (max %d)", maxRouteBuilderPois)
+	}
+	out := make([]gpx.Poi, len(in))
+	for i, p := range in {
+		name := strings.TrimSpace(p.Name)
+		if len(name) > maxPoiNameLen {
+			return nil, fmt.Errorf("waypoint marker name too long (max %d characters)", maxPoiNameLen)
+		}
+		if p.Type != "" && !validPoiTypes[p.Type] {
+			return nil, fmt.Errorf("unknown waypoint marker type %q", p.Type)
+		}
+		out[i] = gpx.Poi{Lat: p.Lat, Lon: p.Lon, Name: name, Type: p.Type}
+	}
+	return out, nil
+}
+
 // maxRouteBuilderWaypoints bounds a single preview request — manually
 // placing more than a few dozen waypoints has no realistic use, and each
 // one adds to what a single call asks the routing engine to resolve.
@@ -2617,7 +2693,162 @@ func selectSuggestCandidates(pool []suggestPoolEntry, targetDistanceM float64, h
 		}
 		shortlist = withinTolerance
 	}
+	// A candidate that mostly rides itself twice — out along a road, back
+	// the same way — is a valid loop by distance and ORS's own path cost,
+	// but a bad suggestion: nobody wants to hear the same road's traffic
+	// twice. Preferred whenever any low-backtrack candidate exists; if
+	// every survivor backtracks (a sparse road network near the start
+	// point, most likely), the shortlist is left alone rather than handing
+	// back nothing — see maxDistanceDeviation's own "fewer honestly close
+	// beats padding the list" reasoning, same trade-off here.
+	if lowBacktrack := filterLowBacktrack(shortlist); len(lowBacktrack) > 0 {
+		shortlist = lowBacktrack
+	}
 	return selectByHilliness(shortlist, hilliness, n)
+}
+
+// maxBacktrackFraction is how much of a loop's own distance may retrace a
+// street it already rode, in the opposite direction, before
+// filterLowBacktrack drops it — round_trip has no lever to ask ORS for a
+// loop that doesn't do this (routing.go's own package doc explains why:
+// there's no avoid_features or profile option that targets "don't reuse a
+// road," only the steps/fords avoidance every request already sets), so
+// this is a post-hoc filter over what came back rather than something the
+// routing-engine request itself can prevent. 0.15: a loop that's more than
+// an eighth-to-a-sixth "there and back" reads as a real out-and-back to a
+// rider looking at the map, not an incidental few dozen metres of overlap
+// near a junction.
+const maxBacktrackFraction = 0.15
+
+// filterLowBacktrack keeps only the pool entries whose backtrackFraction
+// is at or under maxBacktrackFraction — split out from selectSuggestCandidates
+// so the "if nothing survives, don't empty the shortlist" fallback there
+// reads as one decision rather than being buried in a loop.
+func filterLowBacktrack(pool []suggestPoolEntry) []suggestPoolEntry {
+	kept := make([]suggestPoolEntry, 0, len(pool))
+	for _, e := range pool {
+		if backtrackFraction(e.candidate.Points) <= maxBacktrackFraction {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
+// backtrackMatchDistanceM is how close two segments of a route's own path
+// must sit before they count as "the same street" rather than two
+// different, merely nearby ones — loose enough to absorb GPS/geometry
+// noise between two decodes of the same road (ORS doesn't return
+// byte-identical vertices for the same tarmac ridden twice), tight enough
+// to stay well under the smallest realistic separation between two
+// distinct parallel streets in a dense grid.
+const backtrackMatchDistanceM = 15.0
+
+// backtrackMinArcGapM is how far apart along the route's own cumulative
+// distance two segments must be before they're even compared — an
+// index-based gap would scale wrong across a sparse vs. GPS-dense
+// geometry; an arc-length one doesn't. Without this, a tight hairpin (a
+// real, single visit to one physical curve) would flag itself: two
+// samples a few metres apart along a sharp bend can easily point close to
+// opposite directions despite being the same curve, not a return visit.
+const backtrackMinArcGapM = 150.0
+
+// backtrackOppositeDotThreshold bounds how close to exactly opposite two
+// segments' directions must point to count as retracing rather than
+// merely converging — a normalized 2D dot product, so -1 is exactly
+// opposite and 0 is perpendicular. -0.7 corresponds to roughly 135°+ of
+// difference (allowing up to ~45° of noise from a straight reversal),
+// loose enough that a real road's own gentle curvature along the "out" and
+// "back" legs doesn't slip under a stricter threshold and go undetected.
+const backtrackOppositeDotThreshold = -0.7
+
+// backtrackFraction estimates how much of a route's own distance is spent
+// retracing a street it already rode, in the opposite direction — the
+// geometric signature of an out-and-back spur, as opposed to a loop that
+// merely passes near itself once where it closes back at the start. See
+// the three backtrack* constants above for what "close" and "opposite"
+// mean here, and selectSuggestCandidates for how the result is used.
+//
+// O(n²) in the number of points, but n is a single round-trip loop's own
+// geometry (at most a few hundred vertices for anything this app
+// generates) computed a handful of times per suggest request — trivial
+// next to the network round trips already dominating that request's
+// latency.
+func backtrackFraction(points [][2]float64) float64 {
+	n := len(points)
+	if n < 4 {
+		return 0
+	}
+
+	segLen := make([]float64, n-1)
+	cum := make([]float64, n)
+	dir := make([][2]float64, n-1)
+	for i := 0; i < n-1; i++ {
+		a := gpx.Point{Lat: points[i][0], Lon: points[i][1]}
+		b := gpx.Point{Lat: points[i+1][0], Lon: points[i+1][1]}
+		segLen[i] = gpx.DistanceM(a, b)
+		cum[i+1] = cum[i] + segLen[i]
+		dir[i] = segmentDirection(points[i], points[i+1])
+	}
+	total := cum[n-1]
+	if total <= 0 {
+		return 0
+	}
+
+	flagged := make([]bool, n-1)
+	for i := 0; i < n-1; i++ {
+		if dir[i] == ([2]float64{}) {
+			continue // zero-length segment (a duplicate vertex) — no direction to compare
+		}
+		for j := i + 1; j < n-1; j++ {
+			if cum[j]-cum[i+1] < backtrackMinArcGapM {
+				continue
+			}
+			if dir[j] == ([2]float64{}) {
+				continue
+			}
+			if dot2(dir[i], dir[j]) > backtrackOppositeDotThreshold {
+				continue
+			}
+			mi := midpoint(points[i], points[i+1])
+			mj := midpoint(points[j], points[j+1])
+			if gpx.DistanceM(gpx.Point{Lat: mi[0], Lon: mi[1]}, gpx.Point{Lat: mj[0], Lon: mj[1]}) <= backtrackMatchDistanceM {
+				flagged[i] = true
+				flagged[j] = true
+			}
+		}
+	}
+
+	var backtrack float64
+	for i, f := range flagged {
+		if f {
+			backtrack += segLen[i]
+		}
+	}
+	return backtrack / total
+}
+
+// segmentDirection is a's-to-b's normalized direction, in a local
+// equirectangular approximation (longitude scaled by cos(latitude)) rather
+// than true lat/lon degrees — needed so a dot product between two
+// segments actually reflects their real-world angle instead of being
+// skewed by longitude lines converging toward the poles. Returns the zero
+// vector for a zero-length segment (two identical points): backtrackFraction
+// treats that as "no direction to compare" rather than an arbitrary one.
+func segmentDirection(a, b [2]float64) [2]float64 {
+	latMid := (a[0] + b[0]) / 2 * math.Pi / 180
+	dLat := b[0] - a[0]
+	dLon := (b[1] - a[1]) * math.Cos(latMid)
+	length := math.Hypot(dLat, dLon)
+	if length == 0 {
+		return [2]float64{}
+	}
+	return [2]float64{dLat / length, dLon / length}
+}
+
+func dot2(a, b [2]float64) float64 { return a[0]*b[0] + a[1]*b[1] }
+
+func midpoint(a, b [2]float64) [2]float64 {
+	return [2]float64{(a[0] + b[0]) / 2, (a[1] + b[1]) / 2}
 }
 
 // maxGeocodeQueryLen bounds a location search's own query string — nothing
@@ -2707,6 +2938,7 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		Targets     *[]string              `json:"targets"`
 		Sport       string                 `json:"sport"`
 		Points      []routeBuilderWaypoint `json:"points"`
+		Pois        []poiDTO               `json:"pois"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxUploadBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -2719,11 +2951,17 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	pois, err := poisFromRequest(body.Pois)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	points := make([]gpx.Point, len(body.Points))
 	for i, p := range body.Points {
 		points[i] = gpx.Point{Lat: p.Lat, Lon: p.Lon}
 	}
-	raw, err := gpx.Render(body.Name, points)
+	raw, err := gpx.Render(body.Name, points, pois)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -2944,6 +3182,108 @@ func (s *Server) handleRecalculateElevation(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
 }
 
+// handleUpdateRoutePoints replaces an already-saved route's own path —
+// "Edit route" on RouteDetailModal.vue reopens it in the same Draw tab
+// build-from-points already uses (RouteBuilderMap.vue's loadWaypoints), and
+// this is where that edit actually lands, the same way
+// handleCreateRouteFromPoints is the one landing spot every route-builder
+// tab's *new* route lands at. A separate endpoint from handleUpdate's own
+// PATCH rather than one more field there: this replaces the route's whole
+// track, not a value on the row, the same distinction that already gives
+// RecalculateElevation its own action endpoint instead of a PATCH flag.
+//
+// gpx.Render needs a name for the GPX file's own embedded <trk><name> —
+// cosmetic only (source.DB.Update's own content-hash recompute reads the
+// route's real name back out of the row it already fetched, not this),
+// but an edited GPX naming itself "" would be a strange thing for a rider
+// to notice on a re-download.
+//
+// This is also the first place a route's points can change without the
+// slug changing — handleTrack's own ETag switch and both card-preview
+// caches (PreviewCache/PreviewImageCache, cleared below) exist specifically
+// because this handler broke the "a route's points never change after
+// creation" assumption every one of them used to rely on.
+func (s *Server) handleUpdateRoutePoints(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermEditOwn) {
+		return
+	}
+
+	slug := cleanSlug(r.PathValue("slug"))
+	if !s.mayEdit(w, r, slug) {
+		return
+	}
+
+	var body struct {
+		Points []routeBuilderWaypoint `json:"points"`
+		Pois   []poiDTO               `json:"pois"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxUploadBytes)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	name, err := s.routeNameFor(r.Context(), slug)
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+
+	pois, err := poisFromRequest(body.Pois)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	points := make([]gpx.Point, len(body.Points))
+	for i, p := range body.Points {
+		points[i] = gpx.Point{Lat: p.Lat, Lon: p.Lon}
+	}
+	raw, err := gpx.Render(name, points, pois)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	route, err := s.Source.Update(r.Context(), slug, source.UpdateRequest{GPX: raw})
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+
+	// Both card-preview caches assume a slug's points never change once
+	// created (see PreviewCache's own doc comment) — an edit is exactly the
+	// case that breaks that, so both are cleared here rather than left to
+	// serve the pre-edit path until an unrelated basemap rebuild happens to
+	// invalidate them too. Best-effort: the edit itself already succeeded
+	// (route is saved), so a cache that failed to clear is a stale card
+	// image for a while, not a failed request.
+	if s.PreviewCache != nil {
+		if err := s.PreviewCache.Delete(slug); err != nil {
+			s.logger().Warn("could not clear cached route preview after an edit", "slug", slug, "err", err)
+		}
+	}
+	if s.PreviewImageCache != nil {
+		if err := s.PreviewImageCache.Delete(slug); err != nil {
+			s.logger().Warn("could not clear cached route preview image after an edit", "slug", slug, "err", err)
+		}
+	}
+
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	linked, ok := s.linkedAccounts(r.Context(), w)
+	if !ok {
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	linked = ownAccountsOnly(identity, linked)
+
+	s.logger().Info("route path edited", "slug", slug, "by", identity.User)
+	s.autoSyncIfEnabled(identity.User)
+	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
+}
+
 // routeOwner looks up one route's current owner, the same list-and-match
 // mayEdit already does for its own ownership check — a second scan rather
 // than threading mayEdit's result through, since mayEdit answers a
@@ -2957,6 +3297,24 @@ func (s *Server) routeOwner(ctx context.Context, slug string) (string, error) {
 	for _, route := range routes {
 		if route.Slug == slug {
 			return route.Owner, nil
+		}
+	}
+	return "", source.ErrNotFound
+}
+
+// routeNameFor looks up one route's current display name — handleUpdateRoutePoints'
+// own use for gpx.Render's cosmetic <trk><name>, same list-and-match shape
+// as routeOwner just above for the same reason: a second scan rather than
+// threading a lookup already done elsewhere (mayEdit's own) through, since
+// that one answers a different question.
+func (s *Server) routeNameFor(ctx context.Context, slug string) (string, error) {
+	routes, _, err := s.Source.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, route := range routes {
+		if route.Slug == slug {
+			return route.Name, nil
 		}
 	}
 	return "", source.ErrNotFound
@@ -3228,6 +3586,23 @@ func (s *Server) spaHandler() http.Handler {
 		// path handled by the same fallback as any other unknown one.
 		info, statErr := fs.Stat(s.WebFS, clean)
 		missing := errors.Is(statErr, os.ErrNotExist) || (statErr == nil && info.IsDir())
+
+		// Vite names every file under assets/ after a hash of its own
+		// content (see vite.config.ts's rollupOptions), so the same URL
+		// never means two different things — safe to tell the browser to
+		// keep it forever rather than spend a round trip re-validating on
+		// every single page load. The HTML shells are the opposite: their
+		// whole job is to point at whichever hashed filenames the latest
+		// deploy produced, so caching one past a deploy would leave a
+		// rider's tab wired to assets that no longer exist. Without this,
+		// http.FileServer sends no Cache-Control at all, and a repeat
+		// visit re-fetches (or at best conditionally re-validates) every
+		// script and stylesheet instead of reading them off disk.
+		if !missing && strings.HasPrefix(clean, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 
 		// On the landing host every path that is not a real file is the
 		// logged-out page — not just "/". The app is a different host, and

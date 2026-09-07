@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import { simplifyPath } from '@/utils/simplifyPath'
+import { POI_TYPES } from '@/utils/poi'
 import ElevationProfile from './ElevationProfile.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import RouteCandidatePreview from './RouteCandidatePreview.vue'
 import RouteSaveForm from './RouteSaveForm.vue'
 import SurfaceBreakdown from './SurfaceBreakdown.vue'
-import type { RouteBuilderCandidate, RouteBuilderPreview } from '@/api/types'
+import type { Poi, RouteBuilderCandidate, RouteBuilderPreview } from '@/api/types'
 
 const emit = defineEmits<{ built: [] }>()
 
@@ -89,14 +92,114 @@ function onPreview(next: RouteBuilderPreview | null) {
   preview.value = next
 }
 
+// Named waypoint markers — a rest stop, a water source, a viewpoint — the
+// Draw tab's own list, separate from the routed path itself (waypointCount/
+// preview above). This ref is the source of truth; RouteBuilderMap.vue only
+// ever renders it (see its own pois prop) and reports where a placement
+// click landed via poi:placed.
+const pois = ref<Poi[]>([])
+const POI_TYPE_OPTIONS = POI_TYPES.map((t) => ({ label: `${t.emoji} ${t.label}`, value: t.value }))
+
+function armPoiPlacement() {
+  mapRef.value?.armPoiPlacement()
+}
+
+function onPoiPlaced(point: { lat: number; lon: number }) {
+  pois.value.push({ lat: point.lat, lon: point.lon, name: '', type: 'other' })
+}
+
+function removePoi(index: number) {
+  pois.value.splice(index, 1)
+}
+
 function clearDraw() {
   mapRef.value?.clearAll()
   drawSaveForm.value?.reset()
+  pois.value = []
 }
 
 function onDrawSaved() {
   clearDraw()
   emit('built')
+}
+
+// --- Editing an already-saved route ---
+// RouteDetailModal.vue's "Edit route" reopens a saved route here rather
+// than the Draw tab only ever building something new — the same
+// loadWaypoints/simplifyPath machinery "Adapt" already uses on a generated
+// candidate, pointed at an existing route's own track instead. The route
+// arrives as a query param (?edit=<slug>), not component state, since this
+// is a fresh page load from RouteDetailModal's own router.push, not a
+// same-component transition.
+
+const routeQuery = useRoute()
+const router = useRouter()
+
+// Non-null exactly while editing an already-saved route rather than
+// drawing a new one — swaps the Draw tab's own RouteSaveForm (which always
+// creates a new route) for a plain "Save changes"/"Discard" pair, since an
+// edit changes this route's geometry in place and has no name/description/
+// tags/sport of its own to ask for.
+const editingSlug = ref<string | null>(null)
+const editingName = ref('')
+const savingEdit = ref(false)
+
+onMounted(async () => {
+  const slug = routeQuery.query.edit
+  if (typeof slug !== 'string' || !slug) return
+  // Consumed once — a reload of /build afterward should behave like the
+  // builder's own blank-slate default, not silently re-enter edit mode for
+  // whatever slug happened to still be in the address bar.
+  router.replace({ path: '/build' })
+
+  try {
+    const [track, library] = await Promise.all([api.track(slug), api.routes()])
+    const route = library.routes.find((r) => r.slug === slug)
+    if (!route) throw new Error('route not found')
+    editingSlug.value = slug
+    editingName.value = route.name
+    activeTab.value = 'draw'
+    const points = simplifyPath(track.points, MAX_ADAPT_WAYPOINTS)
+    mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
+    pois.value = track.pois.map((p) => ({ ...p }))
+  } catch (err) {
+    toast.add({
+      title: 'Could not open that route for editing',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  }
+})
+
+function cancelEdit() {
+  editingSlug.value = null
+  editingName.value = ''
+  clearDraw()
+}
+
+async function saveEdit() {
+  if (!editingSlug.value || !preview.value || preview.value.points.length < 2) return
+  savingEdit.value = true
+  try {
+    await api.updateRoutePoints(
+      editingSlug.value,
+      preview.value.points.map(([lat, lon]) => ({ lat, lon })),
+      pois.value,
+    )
+    toast.add({ title: 'Route updated', icon: 'i-lucide-check', color: 'success' })
+    cancelEdit()
+    emit('built')
+  } catch (err) {
+    toast.add({
+      title: 'Could not save changes',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    savingEdit.value = false
+  }
 }
 
 // --- Suggest tab ---
@@ -206,6 +309,36 @@ function chooseCandidate(index: number) {
   mapRef.value?.showSuggestion(candidates.value[index].points)
 }
 
+// Below the server's own maxRouteBuilderWaypoints (50, server.go) — a rider
+// dragging waypoints wants a shape they can actually grab and see
+// individually, not fifty markers stacked along every gentle curve.
+const MAX_ADAPT_WAYPOINTS = 30
+
+/** Hands a generated candidate over to the Draw tab as ordinary, draggable
+ *  waypoints — "Use this one" saves a suggestion exactly as generated;
+ *  this is for a rider who likes the shape but wants to nudge a section
+ *  around a closed road or a bad surface first. The full routed path
+ *  (every snapped coordinate, easily hundreds for one loop) is reduced to
+ *  a manageable set of via-points first (simplifyPath) — loading all of it
+ *  as "waypoints" would just recreate the same shape as a wall of markers
+ *  nobody could individually grab, past the server's own cap besides. */
+function adaptCandidate(index: number) {
+  const points = simplifyPath(candidates.value[index].points, MAX_ADAPT_WAYPOINTS)
+  candidates.value = []
+  chosenIndex.value = null
+  mapRef.value?.clearSuggestion()
+  // A generated candidate has nothing to do with whatever route was being
+  // edited (if any) — loading it as this route's own "save changes" target
+  // would silently overwrite one route's path with an unrelated one's.
+  // Adapting always starts a fresh, ordinary (create-a-new-route) Draw
+  // session instead.
+  editingSlug.value = null
+  editingName.value = ''
+  pois.value = []
+  mapRef.value?.loadWaypoints(points.map(([lat, lon]) => ({ lat, lon })))
+  activeTab.value = 'draw'
+}
+
 async function generate() {
   if (!start.value || !canGenerate.value) return
   suggesting.value = true
@@ -289,9 +422,11 @@ function onSuggestSaved() {
           ref="map"
           :pick-start="activeTab === 'suggest'"
           :initial-start="initialStart ?? undefined"
+          :pois="pois"
           @update:preview="onPreview"
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"
+          @poi:placed="onPoiPlaced"
           @error="onMapError"
         />
       </div>
@@ -304,9 +439,18 @@ function onSuggestSaved() {
       >
         <template #draw>
           <div class="flex flex-col gap-4 pt-4">
+            <UAlert
+              v-if="editingSlug"
+              color="primary"
+              variant="subtle"
+              icon="i-lucide-route"
+              :title="`Editing “${editingName}”`"
+              description="Drag, add, or remove waypoints, then save — the route's name, description and tags are untouched."
+            />
             <p class="text-sm text-muted">
-              Click the map to place waypoints — each one snaps to the nearest road. Drag a
-              waypoint to move it, right-click one to remove it.
+              Click the map to place waypoints — each one snaps to the nearest road. Click on the
+              route itself to insert one in between, drag a waypoint to move it, right-click one
+              to remove it.
             </p>
 
             <div class="flex items-center justify-between text-sm text-muted">
@@ -326,6 +470,26 @@ function onSuggestSaved() {
                   @click="mapRef?.closeLoop()"
                 >
                   Route back to start
+                </UButton>
+                <UButton
+                  v-if="waypointCount >= 2"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-arrow-left-right"
+                  @click="mapRef?.reverseWaypoints()"
+                >
+                  Reverse
+                </UButton>
+                <UButton
+                  v-if="waypointCount > 0"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-map-pin-plus"
+                  @click="armPoiPlacement"
+                >
+                  Add marker
                 </UButton>
                 <UButton
                   v-if="waypointCount > 0"
@@ -349,14 +513,49 @@ function onSuggestSaved() {
               </div>
             </div>
 
+            <!-- Named waypoint markers — a rest stop, a water source, a
+                 viewpoint — labelled here rather than on the map itself: a
+                 pin has no room for a text field, and this list is also
+                 the only way to remove or retype one, since the marker
+                 itself has no drag or right-click of its own. -->
+            <div v-if="pois.length" class="flex flex-col gap-2 rounded-lg bg-elevated/40 p-2">
+              <div v-for="(poi, index) in pois" :key="index" class="flex items-center gap-2">
+                <USelect v-model="poi.type" :items="POI_TYPE_OPTIONS" size="sm" class="w-40 shrink-0" />
+                <UInput v-model="poi.name" placeholder="Name this spot" size="sm" class="flex-1" />
+                <UButton
+                  icon="i-lucide-x"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Remove this marker"
+                  @click="removePoi(index)"
+                />
+              </div>
+            </div>
+
             <template v-if="preview && preview.points.length >= 2">
               <SurfaceBreakdown v-if="preview.surface.length" :surface="preview.surface" />
               <ElevationProfile v-if="preview.elevationProfile.length" :points="preview.elevationProfile" />
             </template>
 
+            <div v-if="editingSlug" class="flex justify-end gap-2">
+              <UButton color="neutral" variant="ghost" :disabled="savingEdit" @click="cancelEdit">
+                Discard changes
+              </UButton>
+              <UButton
+                icon="i-lucide-check"
+                :loading="savingEdit"
+                :disabled="!preview || preview.points.length < 2"
+                @click="saveEdit"
+              >
+                Save changes
+              </UButton>
+            </div>
             <RouteSaveForm
+              v-else
               ref="drawSaveForm"
               :points="preview?.points ?? []"
+              :pois="pois"
               @saved="onDrawSaved"
             />
           </div>
@@ -426,18 +625,31 @@ function onSuggestSaved() {
                 <RouteCandidatePreview :points="candidate.points" />
                 <ElevationProfile v-if="candidate.elevationProfile.length" :points="candidate.elevationProfile" />
                 <SurfaceBreakdown v-if="candidate.surface.length" :surface="candidate.surface" compact />
-                <div class="flex items-center justify-between text-sm text-muted">
+                <div class="flex flex-col gap-2 text-sm text-muted">
                   <span>
                     {{ (candidate.distanceM / 1000).toFixed(1) }} km,
                     {{ Math.round(candidate.ascentM) }} m ascent
                   </span>
-                  <UButton
-                    size="sm"
-                    :variant="chosenIndex === index ? 'solid' : 'outline'"
-                    @click="chooseCandidate(index)"
-                  >
-                    {{ chosenIndex === index ? 'Selected' : 'Use this one' }}
-                  </UButton>
+                  <div class="flex gap-2">
+                    <UButton
+                      size="sm"
+                      color="neutral"
+                      variant="outline"
+                      icon="i-lucide-pencil"
+                      class="flex-1"
+                      @click="adaptCandidate(index)"
+                    >
+                      Adapt
+                    </UButton>
+                    <UButton
+                      size="sm"
+                      :variant="chosenIndex === index ? 'solid' : 'outline'"
+                      class="flex-1"
+                      @click="chooseCandidate(index)"
+                    >
+                      {{ chosenIndex === index ? 'Selected' : 'Use this one' }}
+                    </UButton>
+                  </div>
                 </div>
               </div>
             </div>

@@ -3,8 +3,11 @@ import { onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@/color-mode'
 import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
-import type { Map as MapLibreMap, Marker } from 'maplibre-gl'
-import type { RouteBuilderPreview } from '@/api/types'
+import { nearestRoadPoint } from '@/utils/roadSnap'
+import { closestPointOnSegment } from '@/utils/geometry'
+import { poiLabel } from '@/utils/poi'
+import type { Map as MapLibreMap, Marker, MapMouseEvent } from 'maplibre-gl'
+import type { Poi, RouteBuilderPreview } from '@/api/types'
 
 const props = defineProps<{
   /** Switches the map's click behaviour from "append a drawn waypoint" to
@@ -21,6 +24,10 @@ const props = defineProps<{
    *  live binding, since after that the marker's position is driven by
    *  clicks (setStartMarker), not by this prop changing. */
   initialStart?: { lat: number; lon: number }
+  /** The Draw tab's own named waypoint markers — the panel owns this array
+   *  (name/type live in its own editable list, not here); this component
+   *  only ever renders it and reports where a placement click landed. */
+  pois?: Poi[]
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +43,11 @@ const emit = defineEmits<{
   'update:waypointCount': [count: number]
   /** Fires only in pickStart mode, once per click. */
   'update:start': [point: { lat: number; lon: number }]
+  /** Fires once, the next time the map is clicked after armPoiPlacement()
+   *  — see its own doc comment. Unsnapped: a poi is informational (a café
+   *  just off the road is still exactly where it is), not something a bike
+   *  needs to actually ride through. */
+  'poi:placed': [point: { lat: number; lon: number }]
   error: [message: string]
 }>()
 
@@ -61,6 +73,11 @@ const SNAPPED_SOURCE_ID = 'builder-snapped'
 // setDrawVisible below), but a chosen suggestion is exactly what pickStart
 // mode is showing, so it stays visible regardless of tab.
 const SUGGESTED_SOURCE_ID = 'builder-suggested'
+// Where a click would actually land — see nearestRoadPoint's own doc
+// comment. Visible in both tabs, same reasoning as SUGGESTED_SOURCE_ID
+// above: it previews whatever a click is about to do right now, not
+// something scoped to Draw specifically.
+const HOVER_SOURCE_ID = 'builder-hover'
 
 // Waypoints the rider has placed, in order — the source of truth this
 // whole component draws from. markers are the DOM-side maplibregl.Marker
@@ -70,6 +87,13 @@ let markers: Marker[] = []
 // The suggested builder's own single start-point marker — independent of
 // waypoints/markers above, since pickStart mode never draws or snaps a path.
 let startMarker: Marker | null = null
+// Rendered from props.pois — see syncPoiMarkers. Index-for-index with
+// props.pois, same convention as markers/waypoints above.
+let poiMarkers: Marker[] = []
+// Armed by armPoiPlacement() for exactly the next map click — see its own
+// doc comment. A plain closure flag rather than a ref: nothing here needs
+// to react to it changing, only the click handler needs to read it once.
+let placingPoi = false
 // The last successful snap, kept around so a theme swap (which tears down
 // every custom source/layer) can redraw it immediately rather than leaving
 // the solid line blank until the next edit triggers a fresh request.
@@ -77,6 +101,17 @@ let lastSnappedPoints: [number, number][] = []
 // Same reasoning as lastSnappedPoints, for the suggested builder's own
 // chosen candidate — see showSuggestion/clearSuggestion below.
 let lastSuggestedPoints: [number, number][] = []
+
+// The road-snap hover preview is recomputed at most once per animation
+// frame, not once per mousemove event — a mouse can report far more
+// events than the map can usefully redraw for, and nearestRoadPoint does
+// real work (queryRenderedFeatures plus a projection per candidate
+// segment). lastMouseScreen always holds the latest raw position; the
+// pending frame reads whatever that is by the time it actually runs, so a
+// burst of moves between frames only ever costs the one query the frame
+// itself does.
+let lastMouseScreen: { x: number; y: number } | null = null
+let hoverFramePending = false
 
 // Debounces the routing-engine call so a rapid string of clicks (or a drag
 // still in motion) doesn't fire one request per pixel — only the settled
@@ -118,6 +153,31 @@ function lineFeature(points: [number, number][]) {
             },
           ],
   }
+}
+
+function pointFeature(point: { lng: number; lat: number } | null, insert = false) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: point
+      ? [
+          {
+            type: 'Feature' as const,
+            properties: { insert },
+            geometry: { type: 'Point' as const, coordinates: [point.lng, point.lat] },
+          },
+        ]
+      : [],
+  }
+}
+
+// insert marks the hover preview as sitting on an existing leg of the
+// route (see nearestWaypointSegment) — HOVER_SOURCE_ID's own layer paints
+// it a little larger for exactly this property, so a rider sees the
+// difference between "this click extends the route" and "this click
+// inserts a point into the middle of it" before they click, not after.
+function setHoverPreview(point: { lng: number; lat: number } | null, insert = false) {
+  const source = map?.getSource(HOVER_SOURCE_ID) as import('maplibre-gl').GeoJSONSource | undefined
+  source?.setData(pointFeature(point, insert))
 }
 
 function setDraftLine() {
@@ -205,12 +265,95 @@ function markerColor(isStart: boolean) {
   return resolved.value === 'dark' ? '#14cfab' : '#049483'
 }
 
+// A third, distinct colour for named waypoint markers — neither the route's
+// own ember/teal pins (those mark the path itself) nor anything else this
+// map already uses, so a poi reads at a glance as "information about this
+// route" rather than one more point the path routes through.
+function poiMarkerColor() {
+  return resolved.value === 'dark' ? '#c4b5fd' : '#7c3aed'
+}
+
+/** Keeps poiMarkers in lockstep with props.pois — the panel owns that array
+ *  (add via poi:placed, edit/remove via its own list), this only ever
+ *  renders it. Markers are rebuilt wholesale on an add/remove (matching
+ *  loadWaypoints' own approach) since that's the only case index alignment
+ *  can change; a same-length change (a rename, most likely) just updates
+ *  each marker's existing popup in place rather than tearing down and
+ *  recreating on every keystroke.
+ *
+ *  Unlike a route waypoint, a poi marker has no other on-map affordance (no
+ *  drag, no right-click-to-remove — the panel's own list owns editing and
+ *  removal), so its label popup is pinned permanently open rather than
+ *  shown on hover: it's the only way its name is visible at all. */
+function syncPoiMarkers() {
+  if (!map || !maplibregl) return
+  const gl = maplibregl
+  const instance = map
+  const pois = props.pois ?? []
+  if (poiMarkers.length !== pois.length) {
+    for (const m of poiMarkers) m.remove()
+    poiMarkers = pois.map((poi) => {
+      const marker = new gl.Marker({ color: poiMarkerColor() }).setLngLat([poi.lon, poi.lat]).addTo(instance)
+      marker.setPopup(new gl.Popup({ closeButton: false, closeOnClick: false, offset: 16 }).setText(poiLabel(poi)))
+      marker.togglePopup()
+      return marker
+    })
+    return
+  }
+  pois.forEach((poi, i) => {
+    const marker = poiMarkers[i]
+    marker.setLngLat([poi.lon, poi.lat])
+    marker.getPopup()?.setText(poiLabel(poi))
+  })
+}
+
+/** Keeps the hover-preview dot the same colour a click would actually
+ *  place right now — ember while picking a start point, teal for a Draw
+ *  waypoint — so the preview reads as "this is what clicking does," not a
+ *  fixed decoration. Called wherever the layer itself gets (re)created and
+ *  wherever pickStart or the theme could have changed which colour that is. */
+function updateHoverColor() {
+  if (map?.getLayer(HOVER_SOURCE_ID)) {
+    map.setPaintProperty(HOVER_SOURCE_ID, 'circle-color', markerColor(!!props.pickStart))
+  }
+}
+
+/** Recomputes the road-snap preview for whatever lastMouseScreen currently
+ *  is — always the latest position by the time this actually runs, since a
+ *  frame only fires once no matter how many mousemove events landed while
+ *  it was pending. */
+function updateHoverPreview() {
+  hoverFramePending = false
+  if (!map || !lastMouseScreen) return
+  const segment = !props.pickStart && nearestWaypointSegment(lastMouseScreen)
+  setHoverPreview(nearestRoadPoint(map, lastMouseScreen), !!segment && segment.distance <= INSERT_NEAR_LINE_PX)
+}
+
+function onMapMouseMove(e: MapMouseEvent) {
+  lastMouseScreen = { x: e.point.x, y: e.point.y }
+  if (hoverFramePending) return
+  hoverFramePending = true
+  requestAnimationFrame(updateHoverPreview)
+}
+
+function onMapMouseOut() {
+  lastMouseScreen = null
+  setHoverPreview(null)
+}
+
 function attachMarkerHandlers(marker: Marker) {
   marker.on('dragend', () => {
-    const { lng, lat } = marker.getLngLat()
     const i = markers.indexOf(marker)
     if (i === -1) return
-    waypoints[i] = { lat, lon: lng }
+    // Same snap a fresh click gets — a dropped drag is still a waypoint
+    // being placed, and leaving it wherever the pointer happened to be
+    // would let a rider drag a point straight back off the road network.
+    const dropped = marker.getLngLat()
+    const snapped = map
+      ? (nearestRoadPoint(map, map.project(dropped)) ?? { lng: dropped.lng, lat: dropped.lat })
+      : { lng: dropped.lng, lat: dropped.lat }
+    marker.setLngLat([snapped.lng, snapped.lat])
+    waypoints[i] = { lat: snapped.lat, lon: snapped.lng }
     schedulePreview()
   })
   // A right-click removes just that one waypoint — the map's own left-click
@@ -231,6 +374,34 @@ function addMarker(index: number) {
     .addTo(map)
   attachMarkerHandlers(marker)
   markers.splice(index, 0, marker)
+}
+
+// How close (in screen pixels) a click has to land to the drawn route
+// before it counts as "insert a waypoint here" instead of "extend the
+// route with one more, at the end" — generous enough for an ordinary
+// mouse click or a fingertip, tight enough that a click meant to extend
+// the route somewhere new nearby doesn't get mistaken for landing on it.
+const INSERT_NEAR_LINE_PX = 20
+
+/** Finds which straight-line segment of the *drawn* route (waypoint i to
+ *  waypoint i+1 — not the road-snapped preview, which can wander far from
+ *  a straight line between them) a screen point sits closest to, and how
+ *  close. The map's own click handler uses this to decide whether a click
+ *  means "insert a waypoint into the middle of what's already drawn"
+ *  rather than "append one at the end" — the same way grabbing a route's
+ *  own line in Strava/RideWithGPS/Komoot inserts a point where it was
+ *  grabbed, rather than only ever being able to extend a route from its
+ *  last point. */
+function nearestWaypointSegment(screenPoint: { x: number; y: number }): { index: number; distance: number } | null {
+  if (!map || waypoints.length < 2) return null
+  let best: { index: number; distSq: number } | null = null
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = map.project([waypoints[i].lon, waypoints[i].lat])
+    const b = map.project([waypoints[i + 1].lon, waypoints[i + 1].lat])
+    const hit = closestPointOnSegment(screenPoint, a, b)
+    if (!best || hit.distSq < best.distSq) best = { index: i, distSq: hit.distSq }
+  }
+  return best ? { index: best.index, distance: Math.sqrt(best.distSq) } : null
 }
 
 // maplibre-gl's Marker has no public way to change an existing pin's colour
@@ -273,6 +444,43 @@ function clearAll() {
   schedulePreview()
 }
 
+// Set by loadWaypoints when it's called before init()'s own async work
+// (loading maplibre-gl, resolving geolocation) has finished constructing
+// `map` — RouteBuilderPanel.vue's "Edit route" flow calls loadWaypoints the
+// moment it knows which route to edit, which can easily be before the map
+// underneath it exists at all, unlike the Suggest tab's "Adapt" button,
+// which a rider can only click once the map has long since been sitting on
+// screen. Applied once, right after init() finishes, then cleared.
+let pendingWaypoints: { lat: number; lon: number }[] | null = null
+
+/** Loads a fixed set of points as the Draw tab's own waypoints, replacing
+ *  whatever was there — how a chosen Suggest candidate (or an already-saved
+ *  route reopened for editing) becomes something a rider can drag, add to,
+ *  or right-click off, with the exact same tools the Draw tab already has,
+ *  rather than only ever being saved exactly as generated. Callers are
+ *  expected to have already reduced a full routed path down to a sensible
+ *  number of via-points (RouteBuilderPanel.vue's own simplifyPath) — this
+ *  just plants markers at whatever it's handed. */
+function loadWaypoints(points: { lat: number; lon: number }[]) {
+  if (!map || !maplibregl) {
+    pendingWaypoints = points
+    return
+  }
+  for (const m of markers) m.remove()
+  markers = []
+  waypoints = points.map((p) => ({ ...p }))
+  for (let i = 0; i < waypoints.length; i++) addMarker(i)
+  emit('update:waypointCount', waypoints.length)
+  schedulePreview()
+
+  if (waypoints.length === 0) return
+  const bounds = waypoints.reduce(
+    (b, p) => b.extend([p.lon, p.lat]),
+    new maplibregl.LngLatBounds([waypoints[0].lon, waypoints[0].lat], [waypoints[0].lon, waypoints[0].lat]),
+  )
+  map.fitBounds(bounds, { padding: 48, maxZoom: 16, duration: 300 })
+}
+
 /** Routes straight back to the start from wherever the last waypoint is —
  *  no new marker: the closing point sits exactly on top of the start pin,
  *  so a second marker there would only stack invisibly rather than add
@@ -293,6 +501,17 @@ function closeLoop() {
   schedulePreview()
 }
 
+/** Flips the waypoint order end-to-start — a rider who drew (or loaded) a
+ *  route one way and wants to ride it the other, without re-placing every
+ *  point. Goes through loadWaypoints rather than mutating `waypoints`/
+ *  `markers` in place so the rebuilt markers, bounds-fit and preview
+ *  request all stay in the one place that already knows how to do that
+ *  correctly. */
+function reverseWaypoints() {
+  if (waypoints.length < 2) return
+  loadWaypoints([...waypoints].reverse())
+}
+
 function setStartMarker(lat: number, lon: number) {
   if (!map || !maplibregl) return
   if (startMarker) {
@@ -307,6 +526,15 @@ function clearStart() {
   startMarker = null
 }
 
+/** Arms the next map click to place a named waypoint marker instead of
+ *  extending the drawn route — RouteBuilderPanel.vue's own "Add marker"
+ *  button calls this, then the click handler emits poi:placed and disarms
+ *  itself (see the click handler's own comment) rather than staying armed
+ *  for every click that follows. */
+function armPoiPlacement() {
+  placingPoi = true
+}
+
 /** Recentres on a resolved location — the route builder's own location
  *  search (RouteBuilderPanel.vue), for whenever geolocation was unavailable
  *  or declined, or a rider just wants to look somewhere else. */
@@ -314,7 +542,18 @@ function flyTo(lat: number, lon: number, zoom = LOCATED_ZOOM) {
   map?.flyTo({ center: [lon, lat], zoom })
 }
 
-defineExpose({ undoLast, clearAll, clearStart, closeLoop, showSuggestion, clearSuggestion, flyTo })
+defineExpose({
+  undoLast,
+  clearAll,
+  clearStart,
+  closeLoop,
+  armPoiPlacement,
+  reverseWaypoints,
+  showSuggestion,
+  clearSuggestion,
+  loadWaypoints,
+  flyTo,
+})
 
 // Hides the Draw tab's own lines and markers while pickStart is active, and
 // symmetrically hides the Suggest tab's own startMarker while it isn't —
@@ -333,12 +572,20 @@ function setDrawVisible(visible: boolean) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility)
   }
   for (const m of markers) m.getElement().style.display = visible ? '' : 'none'
+  for (const m of poiMarkers) m.getElement().style.display = visible ? '' : 'none'
   if (startMarker) startMarker.getElement().style.display = visible ? 'none' : ''
 }
 
 watch(
   () => props.pickStart,
-  (pickStart) => setDrawVisible(!pickStart),
+  (pickStart) => {
+    setDrawVisible(!pickStart)
+    updateHoverColor()
+    // A placement armed from the Draw tab must not be consumed by whatever
+    // the Suggest tab's own next click does instead — see armPoiPlacement's
+    // own doc comment.
+    if (pickStart) placingPoi = false
+  },
 )
 
 function addRouteBuilderLayers() {
@@ -369,6 +616,22 @@ function addRouteBuilderLayers() {
     // what pickStart mode is showing, so it stays on regardless of tab.
     paint: { 'line-color': markerColor(false), 'line-width': 4 },
   })
+  map.addSource(HOVER_SOURCE_ID, { type: 'geojson', data: pointFeature(null) })
+  map.addLayer({
+    id: HOVER_SOURCE_ID,
+    type: 'circle',
+    source: HOVER_SOURCE_ID,
+    paint: {
+      // Larger and more opaque where a click would insert into an
+      // existing leg rather than append at the end — see pointFeature's
+      // own "insert" property and nearestWaypointSegment's doc comment.
+      'circle-radius': ['case', ['get', 'insert'], 11, 8],
+      'circle-color': markerColor(!!props.pickStart),
+      'circle-opacity': ['case', ['get', 'insert'], 0.75, 0.5],
+      'circle-stroke-width': ['case', ['get', 'insert'], 3, 2],
+      'circle-stroke-color': resolved.value === 'dark' ? '#0a0a0a' : '#ffffff',
+    },
+  })
 
   // Redraw both lines from what's already known — a style swap (the theme
   // watcher below) tears down every custom source/layer, but the DOM
@@ -383,6 +646,7 @@ function addRouteBuilderLayers() {
   setSnappedLine(lastSnappedPoints)
   setSuggestedLine(lastSuggestedPoints)
   setDrawVisible(!props.pickStart)
+  updateHoverPreview()
 }
 
 // Brussels — no better default than "somewhere," but every deployment needs
@@ -458,22 +722,54 @@ async function init() {
   })
   map = instance
   if (props.initialStart) setStartMarker(props.initialStart.lat, props.initialStart.lon)
+  if (pendingWaypoints) {
+    const points = pendingWaypoints
+    pendingWaypoints = null
+    loadWaypoints(points)
+  }
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
   instance.on('load', addRouteBuilderLayers)
+  instance.on('mousemove', onMapMouseMove)
+  instance.on('mouseout', onMapMouseOut)
   instance.on('click', (e) => {
+    // The same snap the hover preview already showed for this exact spot —
+    // recomputed rather than reused, since a click fires its own 'click'
+    // point independent of whichever mousemove last updated the preview.
+    // Falling back to the raw click only when nothing routable rendered
+    // nearby at all (see nearestRoadPoint's own doc comment on why that's
+    // left unsnapped rather than snapped to something possibly kilometres
+    // away).
+    const snapped = nearestRoadPoint(instance, e.point) ?? { lng: e.lngLat.lng, lat: e.lngLat.lat }
     if (props.pickStart) {
-      setStartMarker(e.lngLat.lat, e.lngLat.lng)
-      emit('update:start', { lat: e.lngLat.lat, lon: e.lngLat.lng })
+      setStartMarker(snapped.lat, snapped.lng)
+      emit('update:start', { lat: snapped.lat, lon: snapped.lng })
       return
     }
-    waypoints.push({ lat: e.lngLat.lat, lon: e.lngLat.lng })
-    addMarker(waypoints.length - 1)
+    if (placingPoi) {
+      placingPoi = false
+      emit('poi:placed', { lat: e.lngLat.lat, lon: e.lngLat.lng })
+      return
+    }
+    // A click near an existing leg of the route inserts a new waypoint
+    // there instead of only ever being able to add one at the end — see
+    // nearestWaypointSegment's own doc comment.
+    const segment = nearestWaypointSegment(e.point)
+    if (segment && segment.distance <= INSERT_NEAR_LINE_PX) {
+      const index = segment.index + 1
+      waypoints.splice(index, 0, { lat: snapped.lat, lon: snapped.lng })
+      addMarker(index)
+    } else {
+      waypoints.push({ lat: snapped.lat, lon: snapped.lng })
+      addMarker(waypoints.length - 1)
+    }
     emit('update:waypointCount', waypoints.length)
     schedulePreview()
   })
 
   resizeObserver = new ResizeObserver(() => instance.resize())
   resizeObserver.observe(container.value)
+
+  syncPoiMarkers()
 }
 
 onMounted(init)
@@ -483,10 +779,15 @@ onBeforeUnmount(() => {
   if (debounceHandle) clearTimeout(debounceHandle)
   resizeObserver?.disconnect()
   for (const m of markers) m.remove()
+  for (const m of poiMarkers) m.remove()
   startMarker?.remove()
   map?.remove()
   map = null
 })
+
+// The panel is the source of truth for props.pois (add via poi:placed,
+// edit/remove via its own list) — this only ever mirrors it onto the map.
+watch(() => props.pois, syncPoiMarkers, { deep: true })
 
 watch(resolved, async (theme) => {
   if (!map) return

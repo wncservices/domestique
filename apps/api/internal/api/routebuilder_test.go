@@ -716,6 +716,89 @@ func TestRouteBuilderSuggestPicksBestFitByHilliness(t *testing.T) {
 	})
 }
 
+// rideWithBacktrackSpur is a straight out-and-back ~20km loop — 4 legs of
+// ~2.5km riding away from the start, then the identical coordinates ridden
+// back — the exact "same street twice" shape backtrackFraction exists to
+// catch. Distance matches suggestFixtureRoute-style tests' own 20km target
+// so it passes selectSuggestCandidates' distance filter on its own merits;
+// only the backtrack filter should be what excludes it.
+func rideWithBacktrackSpur() []gpx.Point {
+	const legs = 4
+	const stepDeg = 0.02246 // ~2.5km per leg of latitude at this location
+	points := make([]gpx.Point, 0, 2*legs+1)
+	for i := 0; i <= legs; i++ {
+		points = append(points, gpx.Point{Lat: 50.85 + float64(i)*stepDeg, Lon: 4.35})
+	}
+	for i := legs - 1; i >= 0; i-- {
+		points = append(points, gpx.Point{Lat: 50.85 + float64(i)*stepDeg, Lon: 4.35})
+	}
+	return points
+}
+
+// rideCleanLoop is a real loop of the same ~20km total distance as
+// rideWithBacktrackSpur above (a 5km-per-side square) — so a suggest
+// response choosing between the two candidates can't be explained by the
+// distance filter alone, only the backtrack one.
+func rideCleanLoop() []gpx.Point {
+	const dLat = 0.0449 // ~5km of latitude at this location
+	const dLon = 0.0712 // ~5km of longitude at this latitude
+	return []gpx.Point{
+		{Lat: 50.85, Lon: 4.35},
+		{Lat: 50.85 + dLat, Lon: 4.35},
+		{Lat: 50.85 + dLat, Lon: 4.35 + dLon},
+		{Lat: 50.85, Lon: 4.35 + dLon},
+		{Lat: 50.85, Lon: 4.35},
+	}
+}
+
+// The end-to-end regression for "don't ride the same street twice": when
+// every attempt but one comes back an out-and-back spur, the suggest
+// response must contain only the single real loop, not pad the result
+// with spurs just because they also matched the requested distance.
+// Exercises the real HTTP handler (not just selectSuggestCandidates
+// directly, as suggestselection_test.go's own unit tests do), proving the
+// filter is actually wired into handleRouteBuilderSuggest's own pipeline.
+func TestRouteBuilderSuggestExcludesBacktrackingCandidates(t *testing.T) {
+	routeForCall := map[int][]gpx.Point{}
+	for i := 1; i <= maxSuggestAttemptsForTest; i++ {
+		routeForCall[i] = rideWithBacktrackSpur()
+	}
+	routeForCall[maxSuggestAttemptsForTest] = rideCleanLoop() // exactly one real loop in the whole pool
+
+	client, base := newRouteBuilderHarness(t, stubRoutingClient{
+		callCount:    &atomic.Int32{},
+		routeForCall: routeForCall,
+	})
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routebuilder/suggest", map[string]any{
+		"start":      map[string]float64{"lat": 50.85, "lon": 4.35},
+		"distanceKm": 20,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var out struct {
+		Candidates []struct {
+			DistanceM float64 `json:"distanceM"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Candidates) != 1 {
+		t.Fatalf("got %d candidates, want exactly 1 (the single non-backtracking loop)", len(out.Candidates))
+	}
+}
+
+// maxSuggestAttemptsForTest mirrors server.go's own unexported
+// maxSuggestAttempts (15) — this file is package api_test, so it can't
+// reference the constant directly; kept as its own named value rather than
+// a bare 15 so the two out-and-back overrides above stay obviously tied to
+// "the last call of the whole pool," not a number that would silently stop
+// meaning that if maxSuggestAttempts ever changes.
+const maxSuggestAttemptsForTest = 15
+
 // Found live on preview.domestique.dev: a single slow/flaky moment from
 // ORS (three 20-second Client.Timeouts inside one request) made the whole
 // suggest request take up to maxSuggestAttempts*requestTimeout when the 6

@@ -1,5 +1,13 @@
 import type { StyleSpecification } from 'maplibre-gl'
 
+// package.json pins maplibre-gl to exactly 6.6.0, not a caret range — found
+// live: 6.7.0's rewritten text-shaping/grapheme-cluster code (PR #8237,
+// upstream maplibre-gl-js) threw "TypeError: t is not iterable" inside the
+// worker while shaping a basemap label, breaking the map entirely on the
+// Build Route page. 6.6.0 predates that rewrite, and upstream has active,
+// still-changing work in the same area (RTL/bidi support landing right
+// after 6.7.0 shipped) — worth re-floating the range once that settles and
+// a fixed release is out, not before.
 /**
  * The maplibre-gl/pmtiles/protomaps-themes-base module loading RouteMap.vue
  * and RouteBuilderMap.vue both need — pulled out here, a real ES module

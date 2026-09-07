@@ -27,6 +27,7 @@ import type {
   InvitePersonRequest,
   LibraryResponse,
   Person,
+  Poi,
   PlanResponse,
   PushResponse,
   CreateRouteFromPointsRequest,
@@ -116,9 +117,11 @@ export function encodeSlug(slug: string): string {
  * than each firing their own; a failed fetch is evicted rather than
  * cached, so a transient network error does not permanently poison a slug.
  */
-function memoizeBySlug<T>(fn: (slug: string) => Promise<T>): (slug: string) => Promise<T> {
+function memoizeBySlug<T>(
+  fn: (slug: string) => Promise<T>,
+): ((slug: string) => Promise<T>) & { invalidate: (slug: string) => void } {
   const cache = new Map<string, Promise<T>>()
-  return (slug: string) => {
+  const memoized = (slug: string) => {
     let promise = cache.get(slug)
     if (!promise) {
       promise = fn(slug)
@@ -127,6 +130,12 @@ function memoizeBySlug<T>(fn: (slug: string) => Promise<T>): (slug: string) => P
     }
     return promise
   }
+  // updateRoutePoints below is the one way a slug's cached result can go
+  // stale without the slug itself changing — everywhere else, a memoized
+  // success is correct for the rest of this tab's lifetime, which is the
+  // whole reason this cache never expired one on its own until now.
+  memoized.invalidate = (slug: string) => cache.delete(slug)
+  return memoized
 }
 
 export const api = {
@@ -367,6 +376,25 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     }),
+
+  /** Replaces an already-saved route's own path in place — "Edit route"
+   *  reopens it in the Draw tab (RouteDetailModal.vue), and this is where
+   *  that edit lands, the update-in-place counterpart to
+   *  createRouteFromPoints' create-a-new-one above. Name/description/tags
+   *  are untouched; this only ever changes the geometry. track/trackPreview
+   *  are memoized by slug (see memoizeBySlug's own comment) — both are
+   *  invalidated here so the very next read reflects the new path instead
+   *  of whatever this tab happened to cache before the edit. */
+  updateRoutePoints: async (slug: string, points: Waypoint[], pois: Poi[] = []) => {
+    const route = await request<Route>(`/api/routes/${encodeSlug(slug)}/points`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ points, pois }),
+    })
+    api.track.invalidate(slug)
+    api.trackPreview.invalidate(slug)
+    return route
+  },
 
   /** Resolves a place name to a location — the route builder's own search,
    *  offered when a rider's browser has no (or declined) geolocation. */
