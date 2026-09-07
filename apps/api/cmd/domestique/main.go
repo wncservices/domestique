@@ -1036,6 +1036,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Addr:              addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		// Bounds how long a keep-alive connection may sit idle between
+		// requests. Unset, it defaults to unlimited — harmless for a
+		// handful of riders, but nothing then reclaims a connection left
+		// open by a client that never closes it, so idle connections only
+		// ever accumulate. Long enough that a rider's tab left open
+		// between requests never has to renegotiate a fresh connection.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	// SIGTERM is what a pod restart actually sends. Without catching it, the

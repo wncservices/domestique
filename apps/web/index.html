@@ -6,6 +6,13 @@
     <link rel="alternate icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The one third party this app's own map ever talks to (see
+         utils/maplibre.ts's styleFromTheme): sprite and glyphs for
+         maplibre's basemap style, never route data. Opening the
+         connection here, before any map is even requested, means the
+         DNS lookup and TLS handshake are already done by the time a
+         rider opens a route's map or the route builder. -->
+    <link rel="preconnect" href="https://protomaps.github.io" crossorigin />
     <title>Domestique</title>
   </head>
   <body>
