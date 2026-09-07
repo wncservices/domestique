@@ -3587,6 +3587,23 @@ func (s *Server) spaHandler() http.Handler {
 		info, statErr := fs.Stat(s.WebFS, clean)
 		missing := errors.Is(statErr, os.ErrNotExist) || (statErr == nil && info.IsDir())
 
+		// Vite names every file under assets/ after a hash of its own
+		// content (see vite.config.ts's rollupOptions), so the same URL
+		// never means two different things — safe to tell the browser to
+		// keep it forever rather than spend a round trip re-validating on
+		// every single page load. The HTML shells are the opposite: their
+		// whole job is to point at whichever hashed filenames the latest
+		// deploy produced, so caching one past a deploy would leave a
+		// rider's tab wired to assets that no longer exist. Without this,
+		// http.FileServer sends no Cache-Control at all, and a repeat
+		// visit re-fetches (or at best conditionally re-validates) every
+		// script and stylesheet instead of reading them off disk.
+		if !missing && strings.HasPrefix(clean, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+
 		// On the landing host every path that is not a real file is the
 		// logged-out page — not just "/". The app is a different host, and
 		// serving its shell here put a UI on the one address that is meant to
