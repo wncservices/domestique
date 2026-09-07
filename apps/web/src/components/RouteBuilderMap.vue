@@ -4,6 +4,7 @@ import { useColorMode } from '@/color-mode'
 import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
 import { nearestRoadPoint } from '@/utils/roadSnap'
+import { closestPointOnSegment } from '@/utils/geometry'
 import type { Map as MapLibreMap, Marker, MapMouseEvent } from 'maplibre-gl'
 import type { RouteBuilderPreview } from '@/api/types'
 
@@ -137,14 +138,14 @@ function lineFeature(points: [number, number][]) {
   }
 }
 
-function pointFeature(point: { lng: number; lat: number } | null) {
+function pointFeature(point: { lng: number; lat: number } | null, insert = false) {
   return {
     type: 'FeatureCollection' as const,
     features: point
       ? [
           {
             type: 'Feature' as const,
-            properties: {},
+            properties: { insert },
             geometry: { type: 'Point' as const, coordinates: [point.lng, point.lat] },
           },
         ]
@@ -152,9 +153,14 @@ function pointFeature(point: { lng: number; lat: number } | null) {
   }
 }
 
-function setHoverPreview(point: { lng: number; lat: number } | null) {
+// insert marks the hover preview as sitting on an existing leg of the
+// route (see nearestWaypointSegment) — HOVER_SOURCE_ID's own layer paints
+// it a little larger for exactly this property, so a rider sees the
+// difference between "this click extends the route" and "this click
+// inserts a point into the middle of it" before they click, not after.
+function setHoverPreview(point: { lng: number; lat: number } | null, insert = false) {
   const source = map?.getSource(HOVER_SOURCE_ID) as import('maplibre-gl').GeoJSONSource | undefined
-  source?.setData(pointFeature(point))
+  source?.setData(pointFeature(point, insert))
 }
 
 function setDraftLine() {
@@ -260,7 +266,8 @@ function updateHoverColor() {
 function updateHoverPreview() {
   hoverFramePending = false
   if (!map || !lastMouseScreen) return
-  setHoverPreview(nearestRoadPoint(map, lastMouseScreen))
+  const segment = !props.pickStart && nearestWaypointSegment(lastMouseScreen)
+  setHoverPreview(nearestRoadPoint(map, lastMouseScreen), !!segment && segment.distance <= INSERT_NEAR_LINE_PX)
 }
 
 function onMapMouseMove(e: MapMouseEvent) {
@@ -308,6 +315,34 @@ function addMarker(index: number) {
     .addTo(map)
   attachMarkerHandlers(marker)
   markers.splice(index, 0, marker)
+}
+
+// How close (in screen pixels) a click has to land to the drawn route
+// before it counts as "insert a waypoint here" instead of "extend the
+// route with one more, at the end" — generous enough for an ordinary
+// mouse click or a fingertip, tight enough that a click meant to extend
+// the route somewhere new nearby doesn't get mistaken for landing on it.
+const INSERT_NEAR_LINE_PX = 20
+
+/** Finds which straight-line segment of the *drawn* route (waypoint i to
+ *  waypoint i+1 — not the road-snapped preview, which can wander far from
+ *  a straight line between them) a screen point sits closest to, and how
+ *  close. The map's own click handler uses this to decide whether a click
+ *  means "insert a waypoint into the middle of what's already drawn"
+ *  rather than "append one at the end" — the same way grabbing a route's
+ *  own line in Strava/RideWithGPS/Komoot inserts a point where it was
+ *  grabbed, rather than only ever being able to extend a route from its
+ *  last point. */
+function nearestWaypointSegment(screenPoint: { x: number; y: number }): { index: number; distance: number } | null {
+  if (!map || waypoints.length < 2) return null
+  let best: { index: number; distSq: number } | null = null
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = map.project([waypoints[i].lon, waypoints[i].lat])
+    const b = map.project([waypoints[i + 1].lon, waypoints[i + 1].lat])
+    const hit = closestPointOnSegment(screenPoint, a, b)
+    if (!best || hit.distSq < best.distSq) best = { index: i, distSq: hit.distSq }
+  }
+  return best ? { index: best.index, distance: Math.sqrt(best.distSq) } : null
 }
 
 // maplibre-gl's Marker has no public way to change an existing pin's colour
@@ -501,10 +536,13 @@ function addRouteBuilderLayers() {
     type: 'circle',
     source: HOVER_SOURCE_ID,
     paint: {
-      'circle-radius': 8,
+      // Larger and more opaque where a click would insert into an
+      // existing leg rather than append at the end — see pointFeature's
+      // own "insert" property and nearestWaypointSegment's doc comment.
+      'circle-radius': ['case', ['get', 'insert'], 11, 8],
       'circle-color': markerColor(!!props.pickStart),
-      'circle-opacity': 0.5,
-      'circle-stroke-width': 2,
+      'circle-opacity': ['case', ['get', 'insert'], 0.75, 0.5],
+      'circle-stroke-width': ['case', ['get', 'insert'], 3, 2],
       'circle-stroke-color': resolved.value === 'dark' ? '#0a0a0a' : '#ffffff',
     },
   })
@@ -522,7 +560,7 @@ function addRouteBuilderLayers() {
   setSnappedLine(lastSnappedPoints)
   setSuggestedLine(lastSuggestedPoints)
   setDrawVisible(!props.pickStart)
-  if (lastMouseScreen) setHoverPreview(nearestRoadPoint(map, lastMouseScreen))
+  updateHoverPreview()
 }
 
 // Brussels — no better default than "somewhere," but every deployment needs
@@ -621,8 +659,18 @@ async function init() {
       emit('update:start', { lat: snapped.lat, lon: snapped.lng })
       return
     }
-    waypoints.push({ lat: snapped.lat, lon: snapped.lng })
-    addMarker(waypoints.length - 1)
+    // A click near an existing leg of the route inserts a new waypoint
+    // there instead of only ever being able to add one at the end — see
+    // nearestWaypointSegment's own doc comment.
+    const segment = nearestWaypointSegment(e.point)
+    if (segment && segment.distance <= INSERT_NEAR_LINE_PX) {
+      const index = segment.index + 1
+      waypoints.splice(index, 0, { lat: snapped.lat, lon: snapped.lng })
+      addMarker(index)
+    } else {
+      waypoints.push({ lat: snapped.lat, lon: snapped.lng })
+      addMarker(waypoints.length - 1)
+    }
     emit('update:waypointCount', waypoints.length)
     schedulePreview()
   })

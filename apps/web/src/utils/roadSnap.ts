@@ -1,5 +1,6 @@
 import type { Map as MapLibreMap, MapGeoJSONFeature, PointLike } from 'maplibre-gl'
 import type { Geometry, Position } from 'geojson'
+import { closestPointOnSegment, type ScreenPoint, type SegmentHit } from './geometry'
 
 // The Protomaps/OpenMapTiles vector schema's own source-layer for anything
 // a bike can ride — protomaps-themes-base's base_layers.ts draws every
@@ -16,27 +17,6 @@ const EXCLUDED_KINDS = new Set(['rail'])
 // streets over, widened only if nothing at all rendered nearby, so an
 // isolated click still lands somewhere instead of refusing outright.
 const SEARCH_RADII_PX = [24, 64, 160]
-
-interface ScreenPoint {
-  x: number
-  y: number
-}
-
-interface Candidate {
-  point: ScreenPoint
-  distSq: number
-}
-
-function closestPointOnSegment(p: ScreenPoint, a: ScreenPoint, b: ScreenPoint): Candidate {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const lengthSq = dx * dx + dy * dy
-  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq))
-  const point = { x: a.x + t * dx, y: a.y + t * dy }
-  const ddx = p.x - point.x
-  const ddy = p.y - point.y
-  return { point, distSq: ddx * ddx + ddy * ddy }
-}
 
 function isRoadFeature(feature: MapGeoJSONFeature): boolean {
   return feature.sourceLayer === ROAD_SOURCE_LAYER && !EXCLUDED_KINDS.has(String(feature.properties?.kind))
@@ -72,7 +52,7 @@ export function nearestRoadPoint(
     ]
     const features = map.queryRenderedFeatures(box)
 
-    let best: Candidate | null = null
+    let best: SegmentHit | null = null
     for (const feature of features) {
       if (!isRoadFeature(feature) || !feature.geometry) continue
       for (const line of linesOf(feature.geometry)) {
