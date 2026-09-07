@@ -64,15 +64,22 @@ async function load(background: boolean): Promise<void> {
     config.value = appConfig
     me.value = identity
 
-    if (identity.permissions.includes('routes:read')) {
-      const [accountList, library, currentPlan] = await Promise.all([
-        api.accounts(),
-        api.routes(),
-        api.plan(),
-      ])
+    // Both gates below depend only on identity, already in hand — firing
+    // them together rather than one after the other saves a full round
+    // trip for anyone who holds both permissions (most admins), instead of
+    // making the crews fetch wait behind the unrelated library one.
+    const [library, crewList] = await Promise.all([
+      identity.permissions.includes('routes:read')
+        ? Promise.all([api.accounts(), api.routes(), api.plan()])
+        : null,
+      identity.permissions.includes('crews:manage') ? api.crews() : [],
+    ])
+
+    if (library) {
+      const [accountList, routeList, currentPlan] = library
       accounts.value = accountList
-      routes.value = library.routes
-      problems.value = library.problems
+      routes.value = routeList.routes
+      problems.value = routeList.problems
       plan.value = currentPlan
     } else {
       accounts.value = []
@@ -80,11 +87,7 @@ async function load(background: boolean): Promise<void> {
       problems.value = []
       plan.value = null
     }
-
-    // A separate gate from routes:read: a viewer can read the library
-    // without being able to manage crews (rider-level), so this cannot
-    // ride along inside the block above.
-    crews.value = identity.permissions.includes('crews:manage') ? await api.crews() : []
+    crews.value = crewList
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
