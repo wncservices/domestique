@@ -65,6 +65,20 @@ func (c *PreviewCache) Get(slug, basemapUpdateID string) (layersJSON string, fou
 	return layersJSON, true, nil
 }
 
+// Delete removes slug's cached preview, if any — for the one way a route's
+// points now *can* change without the basemap itself changing underneath
+// them (see this type's own doc comment): api.handleUpdateRoutePoints calls
+// this right after a successful edit, so the next card render recomputes
+// against the route's new path instead of serving the old one until some
+// unrelated basemap rebuild happens to invalidate it too. A route being
+// deleted instead leaves its row orphaned rather than calling this — a
+// slug is never reused, so an inert row for a slug nothing will ever
+// request again costs nothing worth a second write on the deletion path.
+func (c *PreviewCache) Delete(slug string) error {
+	_, err := c.db.Exec(c.dialect.Rebind(`DELETE FROM track_preview_cache WHERE slug = ?`), slug)
+	return err
+}
+
 // Put upserts the cached layers for slug. A stale row (computed against an
 // older basemap) is overwritten in place rather than kept alongside a new
 // one — there is never a reason to keep more than the current basemap's

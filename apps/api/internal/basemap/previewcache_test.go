@@ -91,3 +91,36 @@ func TestPreviewCachePutOverwritesPreviousEntry(t *testing.T) {
 		t.Fatal("expected the stale build-1 row to have been replaced, not kept alongside the new one")
 	}
 }
+
+// TestPreviewCacheDelete proves the one way besides a basemap rebuild that a
+// cached preview can now go stale: api.handleUpdateRoutePoints editing a
+// route's own path. Without a way to clear just that slug, an edited route
+// would keep showing its pre-edit preview until some unrelated basemap
+// rebuild happened to invalidate it too.
+func TestPreviewCacheDelete(t *testing.T) {
+	cache := newPreviewCache(t)
+	if err := cache.Put("kemmelberg-loop", "build-1", `{"v":1}`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cache.Delete("kemmelberg-loop"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, found, err := cache.Get("kemmelberg-loop", "build-1"); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("expected a miss after Delete")
+	}
+}
+
+// TestPreviewCacheDeleteOnAnUncachedSlugIsANoOp proves it is safe to call
+// Delete for a route that was never cached (or whose preview was already
+// cleared) — handleUpdateRoutePoints calls it unconditionally on every
+// edit, not only when it knows a cached entry exists.
+func TestPreviewCacheDeleteOnAnUncachedSlugIsANoOp(t *testing.T) {
+	cache := newPreviewCache(t)
+	if err := cache.Delete("never-cached"); err != nil {
+		t.Fatal(err)
+	}
+}

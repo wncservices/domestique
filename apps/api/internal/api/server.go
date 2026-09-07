@@ -314,6 +314,7 @@ func (s *Server) Handler() http.Handler {
 	// generator in source/db.go), so the plain single-segment form loses
 	// nothing here.
 	mux.HandleFunc("POST /api/routes/{slug}/recalculate-elevation", s.handleRecalculateElevation)
+	mux.HandleFunc("PUT /api/routes/{slug}/points", s.handleUpdateRoutePoints)
 	mux.HandleFunc("DELETE /api/routes/{slug...}", s.handleDelete)
 
 	// Owner-side share management stays behind the ordinary gate — see
@@ -1311,17 +1312,30 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 	// private, not public: mayView above already gates this per-rider (a
 	// route only visible to its owner or its crew must not be cached where
 	// another rider's browser — or a shared proxy — could serve it back).
-	// max-age=86400 matches handleTrackPreview's own reasoning: a route's
-	// points never change after import (a re-import creates a new route,
-	// it doesn't edit one in place), so the only thing that can ever make
-	// a cached response wrong is the route being deleted — a day-long
-	// staleness window on a 404 the rider would notice anyway is a
-	// cosmetic gap, not a correctness one. Every TrackPreview.vue card
-	// remounts from scratch on pagination (no per-card KeepAlive), so
-	// without this every page revisit re-fetched every visible card's full
-	// point list over the network for no reason tied to the data actually
-	// having changed.
-	w.Header().Set("Cache-Control", "private, max-age=86400")
+	//
+	// A route's points used to never change after creation (a re-import
+	// created a new route, it didn't edit one in place) — that's what let
+	// this sit behind a flat day-long max-age, the same as
+	// handleTrackPreview's own cosmetic-staleness reasoning. handleUpdateRoutePoints
+	// below broke that: a rider editing their own route expects the very
+	// next reload — anywhere, not just the tab they edited it from — to
+	// show the new path, not whatever was cached from up to a day earlier.
+	// no-cache (despite the name, still a real cache — it just forces
+	// revalidation on every use) plus an ETag keyed on the points
+	// themselves is what gets both: correctness the instant a real edit
+	// changes the hash, and the same bandwidth saving as before for the
+	// unchanged case, since a 304 costs nothing but headers. Every
+	// TrackPreview.vue card remounts from scratch on pagination (no
+	// per-card KeepAlive), so without this every page revisit would
+	// otherwise re-fetch every visible card's full point list regardless
+	// of whether anything actually changed.
+	etag := `"` + gpx.ContentHash(points, "", "") + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords})
 }
 
@@ -2944,6 +2958,101 @@ func (s *Server) handleRecalculateElevation(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
 }
 
+// handleUpdateRoutePoints replaces an already-saved route's own path —
+// "Edit route" on RouteDetailModal.vue reopens it in the same Draw tab
+// build-from-points already uses (RouteBuilderMap.vue's loadWaypoints), and
+// this is where that edit actually lands, the same way
+// handleCreateRouteFromPoints is the one landing spot every route-builder
+// tab's *new* route lands at. A separate endpoint from handleUpdate's own
+// PATCH rather than one more field there: this replaces the route's whole
+// track, not a value on the row, the same distinction that already gives
+// RecalculateElevation its own action endpoint instead of a PATCH flag.
+//
+// gpx.Render needs a name for the GPX file's own embedded <trk><name> —
+// cosmetic only (source.DB.Update's own content-hash recompute reads the
+// route's real name back out of the row it already fetched, not this),
+// but an edited GPX naming itself "" would be a strange thing for a rider
+// to notice on a re-download.
+//
+// This is also the first place a route's points can change without the
+// slug changing — handleTrack's own ETag switch and both card-preview
+// caches (PreviewCache/PreviewImageCache, cleared below) exist specifically
+// because this handler broke the "a route's points never change after
+// creation" assumption every one of them used to rely on.
+func (s *Server) handleUpdateRoutePoints(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermEditOwn) {
+		return
+	}
+
+	slug := cleanSlug(r.PathValue("slug"))
+	if !s.mayEdit(w, r, slug) {
+		return
+	}
+
+	var body struct {
+		Points []routeBuilderWaypoint `json:"points"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxUploadBytes)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	name, err := s.routeNameFor(r.Context(), slug)
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+
+	points := make([]gpx.Point, len(body.Points))
+	for i, p := range body.Points {
+		points[i] = gpx.Point{Lat: p.Lat, Lon: p.Lon}
+	}
+	raw, err := gpx.Render(name, points)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	route, err := s.Source.Update(r.Context(), slug, source.UpdateRequest{GPX: raw})
+	if err != nil {
+		s.failLookup(w, err)
+		return
+	}
+
+	// Both card-preview caches assume a slug's points never change once
+	// created (see PreviewCache's own doc comment) — an edit is exactly the
+	// case that breaks that, so both are cleared here rather than left to
+	// serve the pre-edit path until an unrelated basemap rebuild happens to
+	// invalidate them too. Best-effort: the edit itself already succeeded
+	// (route is saved), so a cache that failed to clear is a stale card
+	// image for a while, not a failed request.
+	if s.PreviewCache != nil {
+		if err := s.PreviewCache.Delete(slug); err != nil {
+			s.logger().Warn("could not clear cached route preview after an edit", "slug", slug, "err", err)
+		}
+	}
+	if s.PreviewImageCache != nil {
+		if err := s.PreviewImageCache.Delete(slug); err != nil {
+			s.logger().Warn("could not clear cached route preview image after an edit", "slug", slug, "err", err)
+		}
+	}
+
+	crews, ok := s.crewSnapshot(w, r)
+	if !ok {
+		return
+	}
+	linked, ok := s.linkedAccounts(r.Context(), w)
+	if !ok {
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	linked = ownAccountsOnly(identity, linked)
+
+	s.logger().Info("route path edited", "slug", slug, "by", identity.User)
+	s.autoSyncIfEnabled(identity.User)
+	writeJSON(w, http.StatusOK, s.toRouteDTO(r.Context(), route, linked, crews))
+}
+
 // routeOwner looks up one route's current owner, the same list-and-match
 // mayEdit already does for its own ownership check — a second scan rather
 // than threading mayEdit's result through, since mayEdit answers a
@@ -2957,6 +3066,24 @@ func (s *Server) routeOwner(ctx context.Context, slug string) (string, error) {
 	for _, route := range routes {
 		if route.Slug == slug {
 			return route.Owner, nil
+		}
+	}
+	return "", source.ErrNotFound
+}
+
+// routeNameFor looks up one route's current display name — handleUpdateRoutePoints'
+// own use for gpx.Render's cosmetic <trk><name>, same list-and-match shape
+// as routeOwner just above for the same reason: a second scan rather than
+// threading a lookup already done elsewhere (mayEdit's own) through, since
+// that one answers a different question.
+func (s *Server) routeNameFor(ctx context.Context, slug string) (string, error) {
+	routes, _, err := s.Source.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, route := range routes {
+		if route.Slug == slug {
+			return route.Name, nil
 		}
 	}
 	return "", source.ErrNotFound

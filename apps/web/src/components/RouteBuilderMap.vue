@@ -350,15 +350,28 @@ function clearAll() {
   schedulePreview()
 }
 
+// Set by loadWaypoints when it's called before init()'s own async work
+// (loading maplibre-gl, resolving geolocation) has finished constructing
+// `map` — RouteBuilderPanel.vue's "Edit route" flow calls loadWaypoints the
+// moment it knows which route to edit, which can easily be before the map
+// underneath it exists at all, unlike the Suggest tab's "Adapt" button,
+// which a rider can only click once the map has long since been sitting on
+// screen. Applied once, right after init() finishes, then cleared.
+let pendingWaypoints: { lat: number; lon: number }[] | null = null
+
 /** Loads a fixed set of points as the Draw tab's own waypoints, replacing
- *  whatever was there — how a chosen Suggest candidate becomes something a
- *  rider can drag, add to, or right-click off, with the exact same tools
- *  the Draw tab already has, rather than only ever being saved exactly as
- *  generated. Callers are expected to have already reduced a full routed
- *  path down to a sensible number of via-points (RouteBuilderPanel.vue's
- *  own simplifyPath) — this just plants markers at whatever it's handed. */
+ *  whatever was there — how a chosen Suggest candidate (or an already-saved
+ *  route reopened for editing) becomes something a rider can drag, add to,
+ *  or right-click off, with the exact same tools the Draw tab already has,
+ *  rather than only ever being saved exactly as generated. Callers are
+ *  expected to have already reduced a full routed path down to a sensible
+ *  number of via-points (RouteBuilderPanel.vue's own simplifyPath) — this
+ *  just plants markers at whatever it's handed. */
 function loadWaypoints(points: { lat: number; lon: number }[]) {
-  if (!map || !maplibregl) return
+  if (!map || !maplibregl) {
+    pendingWaypoints = points
+    return
+  }
   for (const m of markers) m.remove()
   markers = []
   waypoints = points.map((p) => ({ ...p }))
@@ -585,6 +598,11 @@ async function init() {
   })
   map = instance
   if (props.initialStart) setStartMarker(props.initialStart.lat, props.initialStart.lon)
+  if (pendingWaypoints) {
+    const points = pendingWaypoints
+    pendingWaypoints = null
+    loadWaypoints(points)
+  }
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
   instance.on('load', addRouteBuilderLayers)
   instance.on('mousemove', onMapMouseMove)
