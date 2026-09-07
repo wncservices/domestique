@@ -3,7 +3,8 @@ import { onBeforeUnmount, onMounted, useTemplateRef, watch } from 'vue'
 import { useColorMode } from '@/color-mode'
 import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
-import type { Map as MapLibreMap, Marker } from 'maplibre-gl'
+import { nearestRoadPoint } from '@/utils/roadSnap'
+import type { Map as MapLibreMap, Marker, MapMouseEvent } from 'maplibre-gl'
 import type { RouteBuilderPreview } from '@/api/types'
 
 const props = defineProps<{
@@ -61,6 +62,11 @@ const SNAPPED_SOURCE_ID = 'builder-snapped'
 // setDrawVisible below), but a chosen suggestion is exactly what pickStart
 // mode is showing, so it stays visible regardless of tab.
 const SUGGESTED_SOURCE_ID = 'builder-suggested'
+// Where a click would actually land — see nearestRoadPoint's own doc
+// comment. Visible in both tabs, same reasoning as SUGGESTED_SOURCE_ID
+// above: it previews whatever a click is about to do right now, not
+// something scoped to Draw specifically.
+const HOVER_SOURCE_ID = 'builder-hover'
 
 // Waypoints the rider has placed, in order — the source of truth this
 // whole component draws from. markers are the DOM-side maplibregl.Marker
@@ -77,6 +83,17 @@ let lastSnappedPoints: [number, number][] = []
 // Same reasoning as lastSnappedPoints, for the suggested builder's own
 // chosen candidate — see showSuggestion/clearSuggestion below.
 let lastSuggestedPoints: [number, number][] = []
+
+// The road-snap hover preview is recomputed at most once per animation
+// frame, not once per mousemove event — a mouse can report far more
+// events than the map can usefully redraw for, and nearestRoadPoint does
+// real work (queryRenderedFeatures plus a projection per candidate
+// segment). lastMouseScreen always holds the latest raw position; the
+// pending frame reads whatever that is by the time it actually runs, so a
+// burst of moves between frames only ever costs the one query the frame
+// itself does.
+let lastMouseScreen: { x: number; y: number } | null = null
+let hoverFramePending = false
 
 // Debounces the routing-engine call so a rapid string of clicks (or a drag
 // still in motion) doesn't fire one request per pixel — only the settled
@@ -118,6 +135,26 @@ function lineFeature(points: [number, number][]) {
             },
           ],
   }
+}
+
+function pointFeature(point: { lng: number; lat: number } | null) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: point
+      ? [
+          {
+            type: 'Feature' as const,
+            properties: {},
+            geometry: { type: 'Point' as const, coordinates: [point.lng, point.lat] },
+          },
+        ]
+      : [],
+  }
+}
+
+function setHoverPreview(point: { lng: number; lat: number } | null) {
+  const source = map?.getSource(HOVER_SOURCE_ID) as import('maplibre-gl').GeoJSONSource | undefined
+  source?.setData(pointFeature(point))
 }
 
 function setDraftLine() {
@@ -205,12 +242,52 @@ function markerColor(isStart: boolean) {
   return resolved.value === 'dark' ? '#14cfab' : '#049483'
 }
 
+/** Keeps the hover-preview dot the same colour a click would actually
+ *  place right now — ember while picking a start point, teal for a Draw
+ *  waypoint — so the preview reads as "this is what clicking does," not a
+ *  fixed decoration. Called wherever the layer itself gets (re)created and
+ *  wherever pickStart or the theme could have changed which colour that is. */
+function updateHoverColor() {
+  if (map?.getLayer(HOVER_SOURCE_ID)) {
+    map.setPaintProperty(HOVER_SOURCE_ID, 'circle-color', markerColor(!!props.pickStart))
+  }
+}
+
+/** Recomputes the road-snap preview for whatever lastMouseScreen currently
+ *  is — always the latest position by the time this actually runs, since a
+ *  frame only fires once no matter how many mousemove events landed while
+ *  it was pending. */
+function updateHoverPreview() {
+  hoverFramePending = false
+  if (!map || !lastMouseScreen) return
+  setHoverPreview(nearestRoadPoint(map, lastMouseScreen))
+}
+
+function onMapMouseMove(e: MapMouseEvent) {
+  lastMouseScreen = { x: e.point.x, y: e.point.y }
+  if (hoverFramePending) return
+  hoverFramePending = true
+  requestAnimationFrame(updateHoverPreview)
+}
+
+function onMapMouseOut() {
+  lastMouseScreen = null
+  setHoverPreview(null)
+}
+
 function attachMarkerHandlers(marker: Marker) {
   marker.on('dragend', () => {
-    const { lng, lat } = marker.getLngLat()
     const i = markers.indexOf(marker)
     if (i === -1) return
-    waypoints[i] = { lat, lon: lng }
+    // Same snap a fresh click gets — a dropped drag is still a waypoint
+    // being placed, and leaving it wherever the pointer happened to be
+    // would let a rider drag a point straight back off the road network.
+    const dropped = marker.getLngLat()
+    const snapped = map
+      ? (nearestRoadPoint(map, map.project(dropped)) ?? { lng: dropped.lng, lat: dropped.lat })
+      : { lng: dropped.lng, lat: dropped.lat }
+    marker.setLngLat([snapped.lng, snapped.lat])
+    waypoints[i] = { lat: snapped.lat, lon: snapped.lng }
     schedulePreview()
   })
   // A right-click removes just that one waypoint — the map's own left-click
@@ -338,7 +415,10 @@ function setDrawVisible(visible: boolean) {
 
 watch(
   () => props.pickStart,
-  (pickStart) => setDrawVisible(!pickStart),
+  (pickStart) => {
+    setDrawVisible(!pickStart)
+    updateHoverColor()
+  },
 )
 
 function addRouteBuilderLayers() {
@@ -369,6 +449,19 @@ function addRouteBuilderLayers() {
     // what pickStart mode is showing, so it stays on regardless of tab.
     paint: { 'line-color': markerColor(false), 'line-width': 4 },
   })
+  map.addSource(HOVER_SOURCE_ID, { type: 'geojson', data: pointFeature(null) })
+  map.addLayer({
+    id: HOVER_SOURCE_ID,
+    type: 'circle',
+    source: HOVER_SOURCE_ID,
+    paint: {
+      'circle-radius': 8,
+      'circle-color': markerColor(!!props.pickStart),
+      'circle-opacity': 0.5,
+      'circle-stroke-width': 2,
+      'circle-stroke-color': resolved.value === 'dark' ? '#0a0a0a' : '#ffffff',
+    },
+  })
 
   // Redraw both lines from what's already known — a style swap (the theme
   // watcher below) tears down every custom source/layer, but the DOM
@@ -383,6 +476,7 @@ function addRouteBuilderLayers() {
   setSnappedLine(lastSnappedPoints)
   setSuggestedLine(lastSuggestedPoints)
   setDrawVisible(!props.pickStart)
+  if (lastMouseScreen) setHoverPreview(nearestRoadPoint(map, lastMouseScreen))
 }
 
 // Brussels — no better default than "somewhere," but every deployment needs
@@ -460,13 +554,23 @@ async function init() {
   if (props.initialStart) setStartMarker(props.initialStart.lat, props.initialStart.lon)
   instance.addControl(new gl.NavigationControl({ showCompass: false }), 'top-right')
   instance.on('load', addRouteBuilderLayers)
+  instance.on('mousemove', onMapMouseMove)
+  instance.on('mouseout', onMapMouseOut)
   instance.on('click', (e) => {
+    // The same snap the hover preview already showed for this exact spot —
+    // recomputed rather than reused, since a click fires its own 'click'
+    // point independent of whichever mousemove last updated the preview.
+    // Falling back to the raw click only when nothing routable rendered
+    // nearby at all (see nearestRoadPoint's own doc comment on why that's
+    // left unsnapped rather than snapped to something possibly kilometres
+    // away).
+    const snapped = nearestRoadPoint(instance, e.point) ?? { lng: e.lngLat.lng, lat: e.lngLat.lat }
     if (props.pickStart) {
-      setStartMarker(e.lngLat.lat, e.lngLat.lng)
-      emit('update:start', { lat: e.lngLat.lat, lon: e.lngLat.lng })
+      setStartMarker(snapped.lat, snapped.lng)
+      emit('update:start', { lat: snapped.lat, lon: snapped.lng })
       return
     }
-    waypoints.push({ lat: e.lngLat.lat, lon: e.lngLat.lng })
+    waypoints.push({ lat: snapped.lat, lon: snapped.lng })
     addMarker(waypoints.length - 1)
     emit('update:waypointCount', waypoints.length)
     schedulePreview()
