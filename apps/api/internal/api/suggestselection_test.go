@@ -160,3 +160,95 @@ func TestSelectSuggestCandidatesSkipsFilterWithoutATarget(t *testing.T) {
 		t.Fatalf("got %d candidates, want 3", len(got))
 	}
 }
+
+// straightOutAndBack builds a path that rides straight out from
+// (startLat, startLon) for legs steps of stepDeg latitude each, then rides
+// straight back along the identical coordinates — the clearest possible
+// "same street, opposite direction" shape backtrackFraction exists to
+// catch.
+func straightOutAndBack(startLat, startLon float64, legs int, stepDeg float64) [][2]float64 {
+	points := make([][2]float64, 0, 2*legs+1)
+	for i := 0; i <= legs; i++ {
+		points = append(points, [2]float64{startLat + float64(i)*stepDeg, startLon})
+	}
+	for i := legs - 1; i >= 0; i-- {
+		points = append(points, [2]float64{startLat + float64(i)*stepDeg, startLon})
+	}
+	return points
+}
+
+// The clearest possible backtrack shape: ride straight out, turn around,
+// ride straight back on the identical coordinates. Only the two legs
+// immediately either side of the turnaround point escape being flagged
+// (backtrackMinArcGapM excludes them — see its own doc comment for why),
+// so with 4 legs each way this must land comfortably over half.
+func TestBacktrackFractionFlagsAStraightOutAndBackSpur(t *testing.T) {
+	points := straightOutAndBack(50.000, 4.000, 4, 0.001)
+	if got := backtrackFraction(points); got < 0.5 {
+		t.Errorf("backtrackFraction = %v, want at least 0.5 for a clear out-and-back spur", got)
+	}
+}
+
+// A real loop's opposite sides point in close to opposite directions too
+// (north vs. south, east vs. west) — the fraction must come out at 0
+// anyway, because those sides sit far apart geometrically. Distinguishes
+// "points the other way" from "is the same street" — the whole reason the
+// distance check exists alongside the direction one.
+func TestBacktrackFractionLoopIsNotFlagged(t *testing.T) {
+	points := [][2]float64{
+		{50.000, 4.000},
+		{50.001, 4.000},
+		{50.001, 4.001},
+		{50.000, 4.001},
+		{50.000, 4.000},
+	}
+	if got := backtrackFraction(points); got != 0 {
+		t.Errorf("backtrackFraction of a square loop = %v, want 0 (opposite sides are far apart, not the same street)", got)
+	}
+}
+
+func TestBacktrackFractionTooFewPointsToCompare(t *testing.T) {
+	if got := backtrackFraction([][2]float64{{50, 4}, {50.001, 4}}); got != 0 {
+		t.Errorf("backtrackFraction of a 2-point path = %v, want 0", got)
+	}
+	if got := backtrackFraction(nil); got != 0 {
+		t.Errorf("backtrackFraction(nil) = %v, want 0", got)
+	}
+}
+
+// If every surviving candidate backtracks (a sparse road network near the
+// start point, most likely), selectSuggestCandidates must still return
+// something — a rider seeing no suggestions at all is worse than one that
+// isn't a perfect loop. Mirrors maxDistanceDeviation's own "fewer honestly
+// close beats padding the list" trade-off, but in the opposite direction:
+// here, degrading gracefully beats an empty result.
+func TestSelectSuggestCandidatesFallsBackWhenEveryCandidateBacktracks(t *testing.T) {
+	spur := straightOutAndBack(50.000, 4.000, 4, 0.001)
+	pool := []suggestPoolEntry{
+		{candidate: routeBuilderCandidate{Points: spur, DistanceM: 888, AscentM: 10}, ascentPerKm: ascentPerKm(10, 888)},
+	}
+	got := selectSuggestCandidates(pool, 888, 1, 1)
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates, want 1 (a backtracking loop is still better than none)", len(got))
+	}
+}
+
+// When a low-backtrack candidate exists alongside a spur, it must win even
+// when hilliness alone would have favoured the spur — proves the backtrack
+// filter actually runs before hilliness gets a vote, not just that the
+// loop happens to also win some other way.
+func TestSelectSuggestCandidatesPrefersLowBacktrackOverHillinessFit(t *testing.T) {
+	spur := straightOutAndBack(50.000, 4.000, 4, 0.001)
+	loop := [][2]float64{
+		{50.000, 4.000}, {50.001, 4.000}, {50.001, 4.001}, {50.000, 4.001}, {50.000, 4.000},
+	}
+	pool := []suggestPoolEntry{
+		{candidate: routeBuilderCandidate{Points: spur, DistanceM: 1000, AscentM: 10}, ascentPerKm: 10},
+		{candidate: routeBuilderCandidate{Points: loop, DistanceM: 1000, AscentM: 50}, ascentPerKm: 50},
+	}
+	// Flat (0) would normally pick the lowest ascent-per-km — the spur.
+	got := selectSuggestCandidates(pool, 1000, 0, 2)
+	if len(got) != 1 || got[0].AscentM != 50 {
+		t.Fatalf("got %+v, want only the non-backtracking loop (ascent 50) even though Flat favours lower ascent", got)
+	}
+}

@@ -2631,7 +2631,162 @@ func selectSuggestCandidates(pool []suggestPoolEntry, targetDistanceM float64, h
 		}
 		shortlist = withinTolerance
 	}
+	// A candidate that mostly rides itself twice — out along a road, back
+	// the same way — is a valid loop by distance and ORS's own path cost,
+	// but a bad suggestion: nobody wants to hear the same road's traffic
+	// twice. Preferred whenever any low-backtrack candidate exists; if
+	// every survivor backtracks (a sparse road network near the start
+	// point, most likely), the shortlist is left alone rather than handing
+	// back nothing — see maxDistanceDeviation's own "fewer honestly close
+	// beats padding the list" reasoning, same trade-off here.
+	if lowBacktrack := filterLowBacktrack(shortlist); len(lowBacktrack) > 0 {
+		shortlist = lowBacktrack
+	}
 	return selectByHilliness(shortlist, hilliness, n)
+}
+
+// maxBacktrackFraction is how much of a loop's own distance may retrace a
+// street it already rode, in the opposite direction, before
+// filterLowBacktrack drops it — round_trip has no lever to ask ORS for a
+// loop that doesn't do this (routing.go's own package doc explains why:
+// there's no avoid_features or profile option that targets "don't reuse a
+// road," only the steps/fords avoidance every request already sets), so
+// this is a post-hoc filter over what came back rather than something the
+// routing-engine request itself can prevent. 0.15: a loop that's more than
+// an eighth-to-a-sixth "there and back" reads as a real out-and-back to a
+// rider looking at the map, not an incidental few dozen metres of overlap
+// near a junction.
+const maxBacktrackFraction = 0.15
+
+// filterLowBacktrack keeps only the pool entries whose backtrackFraction
+// is at or under maxBacktrackFraction — split out from selectSuggestCandidates
+// so the "if nothing survives, don't empty the shortlist" fallback there
+// reads as one decision rather than being buried in a loop.
+func filterLowBacktrack(pool []suggestPoolEntry) []suggestPoolEntry {
+	kept := make([]suggestPoolEntry, 0, len(pool))
+	for _, e := range pool {
+		if backtrackFraction(e.candidate.Points) <= maxBacktrackFraction {
+			kept = append(kept, e)
+		}
+	}
+	return kept
+}
+
+// backtrackMatchDistanceM is how close two segments of a route's own path
+// must sit before they count as "the same street" rather than two
+// different, merely nearby ones — loose enough to absorb GPS/geometry
+// noise between two decodes of the same road (ORS doesn't return
+// byte-identical vertices for the same tarmac ridden twice), tight enough
+// to stay well under the smallest realistic separation between two
+// distinct parallel streets in a dense grid.
+const backtrackMatchDistanceM = 15.0
+
+// backtrackMinArcGapM is how far apart along the route's own cumulative
+// distance two segments must be before they're even compared — an
+// index-based gap would scale wrong across a sparse vs. GPS-dense
+// geometry; an arc-length one doesn't. Without this, a tight hairpin (a
+// real, single visit to one physical curve) would flag itself: two
+// samples a few metres apart along a sharp bend can easily point close to
+// opposite directions despite being the same curve, not a return visit.
+const backtrackMinArcGapM = 150.0
+
+// backtrackOppositeDotThreshold bounds how close to exactly opposite two
+// segments' directions must point to count as retracing rather than
+// merely converging — a normalized 2D dot product, so -1 is exactly
+// opposite and 0 is perpendicular. -0.7 corresponds to roughly 135°+ of
+// difference (allowing up to ~45° of noise from a straight reversal),
+// loose enough that a real road's own gentle curvature along the "out" and
+// "back" legs doesn't slip under a stricter threshold and go undetected.
+const backtrackOppositeDotThreshold = -0.7
+
+// backtrackFraction estimates how much of a route's own distance is spent
+// retracing a street it already rode, in the opposite direction — the
+// geometric signature of an out-and-back spur, as opposed to a loop that
+// merely passes near itself once where it closes back at the start. See
+// the three backtrack* constants above for what "close" and "opposite"
+// mean here, and selectSuggestCandidates for how the result is used.
+//
+// O(n²) in the number of points, but n is a single round-trip loop's own
+// geometry (at most a few hundred vertices for anything this app
+// generates) computed a handful of times per suggest request — trivial
+// next to the network round trips already dominating that request's
+// latency.
+func backtrackFraction(points [][2]float64) float64 {
+	n := len(points)
+	if n < 4 {
+		return 0
+	}
+
+	segLen := make([]float64, n-1)
+	cum := make([]float64, n)
+	dir := make([][2]float64, n-1)
+	for i := 0; i < n-1; i++ {
+		a := gpx.Point{Lat: points[i][0], Lon: points[i][1]}
+		b := gpx.Point{Lat: points[i+1][0], Lon: points[i+1][1]}
+		segLen[i] = gpx.DistanceM(a, b)
+		cum[i+1] = cum[i] + segLen[i]
+		dir[i] = segmentDirection(points[i], points[i+1])
+	}
+	total := cum[n-1]
+	if total <= 0 {
+		return 0
+	}
+
+	flagged := make([]bool, n-1)
+	for i := 0; i < n-1; i++ {
+		if dir[i] == ([2]float64{}) {
+			continue // zero-length segment (a duplicate vertex) — no direction to compare
+		}
+		for j := i + 1; j < n-1; j++ {
+			if cum[j]-cum[i+1] < backtrackMinArcGapM {
+				continue
+			}
+			if dir[j] == ([2]float64{}) {
+				continue
+			}
+			if dot2(dir[i], dir[j]) > backtrackOppositeDotThreshold {
+				continue
+			}
+			mi := midpoint(points[i], points[i+1])
+			mj := midpoint(points[j], points[j+1])
+			if gpx.DistanceM(gpx.Point{Lat: mi[0], Lon: mi[1]}, gpx.Point{Lat: mj[0], Lon: mj[1]}) <= backtrackMatchDistanceM {
+				flagged[i] = true
+				flagged[j] = true
+			}
+		}
+	}
+
+	var backtrack float64
+	for i, f := range flagged {
+		if f {
+			backtrack += segLen[i]
+		}
+	}
+	return backtrack / total
+}
+
+// segmentDirection is a's-to-b's normalized direction, in a local
+// equirectangular approximation (longitude scaled by cos(latitude)) rather
+// than true lat/lon degrees — needed so a dot product between two
+// segments actually reflects their real-world angle instead of being
+// skewed by longitude lines converging toward the poles. Returns the zero
+// vector for a zero-length segment (two identical points): backtrackFraction
+// treats that as "no direction to compare" rather than an arbitrary one.
+func segmentDirection(a, b [2]float64) [2]float64 {
+	latMid := (a[0] + b[0]) / 2 * math.Pi / 180
+	dLat := b[0] - a[0]
+	dLon := (b[1] - a[1]) * math.Cos(latMid)
+	length := math.Hypot(dLat, dLon)
+	if length == 0 {
+		return [2]float64{}
+	}
+	return [2]float64{dLat / length, dLon / length}
+}
+
+func dot2(a, b [2]float64) float64 { return a[0]*b[0] + a[1]*b[1] }
+
+func midpoint(a, b [2]float64) [2]float64 {
+	return [2]float64{(a[0] + b[0]) / 2, (a[1] + b[1]) / 2}
 }
 
 // maxGeocodeQueryLen bounds a location search's own query string — nothing
