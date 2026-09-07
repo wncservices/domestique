@@ -445,6 +445,16 @@ function onSuggestSaved() {
                   Route back to start
                 </UButton>
                 <UButton
+                  v-if="waypointCount >= 2"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-arrow-left-right"
+                  @click="mapRef?.reverseWaypoints()"
+                >
+                  Reverse
+                </UButton>
+                <UButton
                   v-if="waypointCount > 0"
                   color="neutral"
                   variant="ghost"

@@ -442,6 +442,17 @@ function closeLoop() {
   schedulePreview()
 }
 
+/** Flips the waypoint order end-to-start — a rider who drew (or loaded) a
+ *  route one way and wants to ride it the other, without re-placing every
+ *  point. Goes through loadWaypoints rather than mutating `waypoints`/
+ *  `markers` in place so the rebuilt markers, bounds-fit and preview
+ *  request all stay in the one place that already knows how to do that
+ *  correctly. */
+function reverseWaypoints() {
+  if (waypoints.length < 2) return
+  loadWaypoints([...waypoints].reverse())
+}
+
 function setStartMarker(lat: number, lon: number) {
   if (!map || !maplibregl) return
   if (startMarker) {
@@ -468,6 +479,7 @@ defineExpose({
   clearAll,
   clearStart,
   closeLoop,
+  reverseWaypoints,
   showSuggestion,
   clearSuggestion,
   loadWaypoints,
