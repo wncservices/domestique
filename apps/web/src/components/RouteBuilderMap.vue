@@ -5,8 +5,9 @@ import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
 import { nearestRoadPoint } from '@/utils/roadSnap'
 import { closestPointOnSegment } from '@/utils/geometry'
+import { poiLabel } from '@/utils/poi'
 import type { Map as MapLibreMap, Marker, MapMouseEvent } from 'maplibre-gl'
-import type { RouteBuilderPreview } from '@/api/types'
+import type { Poi, RouteBuilderPreview } from '@/api/types'
 
 const props = defineProps<{
   /** Switches the map's click behaviour from "append a drawn waypoint" to
@@ -23,6 +24,10 @@ const props = defineProps<{
    *  live binding, since after that the marker's position is driven by
    *  clicks (setStartMarker), not by this prop changing. */
   initialStart?: { lat: number; lon: number }
+  /** The Draw tab's own named waypoint markers — the panel owns this array
+   *  (name/type live in its own editable list, not here); this component
+   *  only ever renders it and reports where a placement click landed. */
+  pois?: Poi[]
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +43,11 @@ const emit = defineEmits<{
   'update:waypointCount': [count: number]
   /** Fires only in pickStart mode, once per click. */
   'update:start': [point: { lat: number; lon: number }]
+  /** Fires once, the next time the map is clicked after armPoiPlacement()
+   *  — see its own doc comment. Unsnapped: a poi is informational (a café
+   *  just off the road is still exactly where it is), not something a bike
+   *  needs to actually ride through. */
+  'poi:placed': [point: { lat: number; lon: number }]
   error: [message: string]
 }>()
 
@@ -77,6 +87,13 @@ let markers: Marker[] = []
 // The suggested builder's own single start-point marker — independent of
 // waypoints/markers above, since pickStart mode never draws or snaps a path.
 let startMarker: Marker | null = null
+// Rendered from props.pois — see syncPoiMarkers. Index-for-index with
+// props.pois, same convention as markers/waypoints above.
+let poiMarkers: Marker[] = []
+// Armed by armPoiPlacement() for exactly the next map click — see its own
+// doc comment. A plain closure flag rather than a ref: nothing here needs
+// to react to it changing, only the click handler needs to read it once.
+let placingPoi = false
 // The last successful snap, kept around so a theme swap (which tears down
 // every custom source/layer) can redraw it immediately rather than leaving
 // the solid line blank until the next edit triggers a fresh request.
@@ -246,6 +263,48 @@ function markerColor(isStart: boolean) {
   // Matches RouteMap.vue's own per-theme route colour, so a regular
   // waypoint reads as "the same kind of thing" as a saved route's line.
   return resolved.value === 'dark' ? '#14cfab' : '#049483'
+}
+
+// A third, distinct colour for named waypoint markers — neither the route's
+// own ember/teal pins (those mark the path itself) nor anything else this
+// map already uses, so a poi reads at a glance as "information about this
+// route" rather than one more point the path routes through.
+function poiMarkerColor() {
+  return resolved.value === 'dark' ? '#c4b5fd' : '#7c3aed'
+}
+
+/** Keeps poiMarkers in lockstep with props.pois — the panel owns that array
+ *  (add via poi:placed, edit/remove via its own list), this only ever
+ *  renders it. Markers are rebuilt wholesale on an add/remove (matching
+ *  loadWaypoints' own approach) since that's the only case index alignment
+ *  can change; a same-length change (a rename, most likely) just updates
+ *  each marker's existing popup in place rather than tearing down and
+ *  recreating on every keystroke.
+ *
+ *  Unlike a route waypoint, a poi marker has no other on-map affordance (no
+ *  drag, no right-click-to-remove — the panel's own list owns editing and
+ *  removal), so its label popup is pinned permanently open rather than
+ *  shown on hover: it's the only way its name is visible at all. */
+function syncPoiMarkers() {
+  if (!map || !maplibregl) return
+  const gl = maplibregl
+  const instance = map
+  const pois = props.pois ?? []
+  if (poiMarkers.length !== pois.length) {
+    for (const m of poiMarkers) m.remove()
+    poiMarkers = pois.map((poi) => {
+      const marker = new gl.Marker({ color: poiMarkerColor() }).setLngLat([poi.lon, poi.lat]).addTo(instance)
+      marker.setPopup(new gl.Popup({ closeButton: false, closeOnClick: false, offset: 16 }).setText(poiLabel(poi)))
+      marker.togglePopup()
+      return marker
+    })
+    return
+  }
+  pois.forEach((poi, i) => {
+    const marker = poiMarkers[i]
+    marker.setLngLat([poi.lon, poi.lat])
+    marker.getPopup()?.setText(poiLabel(poi))
+  })
 }
 
 /** Keeps the hover-preview dot the same colour a click would actually
@@ -467,6 +526,15 @@ function clearStart() {
   startMarker = null
 }
 
+/** Arms the next map click to place a named waypoint marker instead of
+ *  extending the drawn route — RouteBuilderPanel.vue's own "Add marker"
+ *  button calls this, then the click handler emits poi:placed and disarms
+ *  itself (see the click handler's own comment) rather than staying armed
+ *  for every click that follows. */
+function armPoiPlacement() {
+  placingPoi = true
+}
+
 /** Recentres on a resolved location — the route builder's own location
  *  search (RouteBuilderPanel.vue), for whenever geolocation was unavailable
  *  or declined, or a rider just wants to look somewhere else. */
@@ -479,6 +547,7 @@ defineExpose({
   clearAll,
   clearStart,
   closeLoop,
+  armPoiPlacement,
   reverseWaypoints,
   showSuggestion,
   clearSuggestion,
@@ -503,6 +572,7 @@ function setDrawVisible(visible: boolean) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility)
   }
   for (const m of markers) m.getElement().style.display = visible ? '' : 'none'
+  for (const m of poiMarkers) m.getElement().style.display = visible ? '' : 'none'
   if (startMarker) startMarker.getElement().style.display = visible ? 'none' : ''
 }
 
@@ -511,6 +581,10 @@ watch(
   (pickStart) => {
     setDrawVisible(!pickStart)
     updateHoverColor()
+    // A placement armed from the Draw tab must not be consumed by whatever
+    // the Suggest tab's own next click does instead — see armPoiPlacement's
+    // own doc comment.
+    if (pickStart) placingPoi = false
   },
 )
 
@@ -671,6 +745,11 @@ async function init() {
       emit('update:start', { lat: snapped.lat, lon: snapped.lng })
       return
     }
+    if (placingPoi) {
+      placingPoi = false
+      emit('poi:placed', { lat: e.lngLat.lat, lon: e.lngLat.lng })
+      return
+    }
     // A click near an existing leg of the route inserts a new waypoint
     // there instead of only ever being able to add one at the end — see
     // nearestWaypointSegment's own doc comment.
@@ -689,6 +768,8 @@ async function init() {
 
   resizeObserver = new ResizeObserver(() => instance.resize())
   resizeObserver.observe(container.value)
+
+  syncPoiMarkers()
 }
 
 onMounted(init)
@@ -698,10 +779,15 @@ onBeforeUnmount(() => {
   if (debounceHandle) clearTimeout(debounceHandle)
   resizeObserver?.disconnect()
   for (const m of markers) m.remove()
+  for (const m of poiMarkers) m.remove()
   startMarker?.remove()
   map?.remove()
   map = null
 })
+
+// The panel is the source of truth for props.pois (add via poi:placed,
+// edit/remove via its own list) — this only ever mirrors it onto the map.
+watch(() => props.pois, syncPoiMarkers, { deep: true })
 
 watch(resolved, async (theme) => {
   if (!map) return

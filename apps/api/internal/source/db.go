@@ -256,6 +256,17 @@ func (d *DB) Cues(ctx context.Context, slug string) ([]gpx.Cue, error) {
 	return gpx.ParseCues(raw)
 }
 
+// Pois returns whatever named waypoint markers the route's own GPX
+// carries — see gpx.ParsePois. Nil, not an error, for the ordinary case of
+// a GPX with none.
+func (d *DB) Pois(ctx context.Context, slug string) ([]gpx.Poi, error) {
+	raw, err := d.GPX(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	return gpx.ParsePois(raw)
+}
+
 func (d *DB) GPX(ctx context.Context, slug string) ([]byte, error) {
 	var raw []byte
 	err := d.db.QueryRowContext(ctx, d.query(`SELECT gpx FROM routes WHERE slug = ?`), slug).Scan(&raw)

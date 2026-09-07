@@ -172,6 +172,62 @@ func ParseCues(raw []byte) ([]Cue, error) {
 	return cues, nil
 }
 
+// Poi is a rider-placed marker — a rest stop, a water source, a viewpoint —
+// distinct from both Point (the track's own geometry) and Cue (a
+// third-party planner's turn-by-turn instructions). Stored inside the GPX's
+// own <extensions> block (see renderExtensions/ParsePois) rather than as a
+// top-level <wpt> like Cue: a plain <wpt> is exactly what ParseCues already
+// scans for turn cues, and fitcourse.NativeTurns matches any <wpt> near the
+// route to a turn instruction — a rider's own "coffee stop" marker sitting
+// in that same list would risk surfacing as a bogus turn cue on a real
+// device. Extensions are GPX's own designated place for app-specific data
+// a generic reader is expected to ignore.
+type Poi struct {
+	Lat, Lon float64
+	Name     string
+	// Type is one of a small fixed set the API layer validates
+	// (api.validPoiTypes) — kept as a plain string here rather than a Go
+	// enum so this package doesn't need to know the rider-facing list.
+	Type string
+}
+
+// gpxPoiDoc reads only the <extensions><poi> shape Render writes — see
+// Poi's own doc comment for why this isn't folded into ParseCues instead.
+type gpxPoiDoc struct {
+	XMLName    xml.Name `xml:"gpx"`
+	Extensions struct {
+		Pois []gpxPoi `xml:"poi"`
+	} `xml:"extensions"`
+}
+
+type gpxPoi struct {
+	Lat  float64 `xml:"lat,attr"`
+	Lon  float64 `xml:"lon,attr"`
+	Name string  `xml:"name,attr"`
+	Type string  `xml:"type,attr"`
+}
+
+func (p gpxPoi) toPoi() Poi { return Poi(p) }
+
+// ParsePois extracts whatever named waypoint markers a route's own GPX
+// carries — nil, not an error, for the ordinary case of a GPX with none
+// (everything uploaded or imported from elsewhere, and everything this app
+// rendered before this feature existed).
+func ParsePois(raw []byte) ([]Poi, error) {
+	var doc gpxPoiDoc
+	if err := xml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("could not parse GPX: %w", err)
+	}
+	if len(doc.Extensions.Pois) == 0 {
+		return nil, nil
+	}
+	pois := make([]Poi, len(doc.Extensions.Pois))
+	for i, p := range doc.Extensions.Pois {
+		pois[i] = p.toPoi()
+	}
+	return pois, nil
+}
+
 // NeedsElevation reports whether points carries no usable elevation of its
 // own — either no point has any (HasEle false throughout, the ordinary
 // shape for a GPX that never had an <ele> tag at all), or, the shape that
@@ -296,6 +352,11 @@ type renderDoc struct {
 			Points []renderPoint `xml:"trkpt"`
 		} `xml:"trkseg"`
 	} `xml:"trk"`
+	// Extensions comes last — GPX 1.1's own schema order is metadata, wpt*,
+	// rte*, trk*, extensions?. Omitted entirely (not just empty) when there
+	// are no pois to write, so a route with none renders byte-identical to
+	// before this field existed.
+	Extensions *renderExtensions `xml:"extensions,omitempty"`
 }
 
 type renderPoint struct {
@@ -304,12 +365,25 @@ type renderPoint struct {
 	Ele *float64 `xml:"ele,omitempty"`
 }
 
+// renderExtensions is the write side of gpxPoiDoc — see Poi's own doc
+// comment for why rider-placed markers live here rather than as a <wpt>.
+type renderExtensions struct {
+	Pois []renderPoi `xml:"poi"`
+}
+
+type renderPoi struct {
+	Lat  float64 `xml:"lat,attr"`
+	Lon  float64 `xml:"lon,attr"`
+	Name string  `xml:"name,attr"`
+	Type string  `xml:"type,attr"`
+}
+
 // Render writes points as a minimal GPX 1.1 track — the reverse of
 // ParsePoints. For a track that did not start life as GPX (a FIT course
 // decoded via fitcourse.Decode, for instance) but still needs to become one
 // to reach source.CreateRequest.GPX, the one input every route in the
-// library is built from.
-func Render(name string, points []Point) ([]byte, error) {
+// library is built from. pois may be nil or empty — most callers have none.
+func Render(name string, points []Point, pois []Poi) ([]byte, error) {
 	if len(points) < 2 {
 		return nil, fmt.Errorf("gpx: need at least 2 points to render, got %d", len(points))
 	}
@@ -329,11 +403,36 @@ func Render(name string, points []Point) ([]byte, error) {
 		doc.Trk.Seg.Points = append(doc.Trk.Seg.Points, point)
 	}
 
+	if len(pois) > 0 {
+		ext := &renderExtensions{Pois: make([]renderPoi, len(pois))}
+		for i, p := range pois {
+			ext.Pois[i] = renderPoi(p)
+		}
+		doc.Extensions = ext
+	}
+
 	out, err := xml.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("gpx: render: %w", err)
 	}
 	return append([]byte(xml.Header), out...), nil
+}
+
+// TrackETag is a stable identifier for handleTrack's own HTTP caching —
+// distinct from ContentHash, which exists for cross-planner duplicate
+// detection and deliberately ignores anything a re-export wouldn't
+// preserve. This is keyed on exactly what handleTrack serves: point
+// geometry plus this app's own POI markers, so an edit to either — moving
+// the path or just renaming a marker — changes the ETag.
+func TrackETag(points []Point, pois []Poi) string {
+	h := sha256.New()
+	for _, p := range points {
+		fmt.Fprintf(h, "\x00%.*f,%.*f", hashPrecision, p.Lat, hashPrecision, p.Lon)
+	}
+	for _, p := range pois {
+		fmt.Fprintf(h, "\x01%.*f,%.*f,%s,%s", hashPrecision, p.Lat, hashPrecision, p.Lon, p.Name, p.Type)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 // DistanceM is the great-circle distance between two points, in metres.

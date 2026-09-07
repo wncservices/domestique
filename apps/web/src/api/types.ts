@@ -372,6 +372,21 @@ export interface Waypoint {
   lon: number
 }
 
+/** The fixed set of named-waypoint-marker types the Draw tab offers — kept
+ *  in sync by hand with the server's own validPoiTypes (server.go). */
+export type PoiType = 'rest' | 'food' | 'water' | 'viewpoint' | 'mechanic' | 'hazard' | 'other'
+
+/** A rider-placed marker — a rest stop, a water source, a viewpoint —
+ *  distinct from the route's own path (Waypoint above): a poi doesn't get
+ *  routed through, it's just labelled and shown alongside the track. See
+ *  RouteBuilderMap.vue and utils/poi.ts. */
+export interface Poi {
+  lat: number
+  lon: number
+  name: string
+  type: PoiType
+}
+
 /** One surface type's share of a route builder result's own distance —
  *  the "type of ground" figure, most-distance-first (already sorted
  *  server-side). See SurfaceBreakdown.vue. */
@@ -449,6 +464,7 @@ export interface CreateRouteFromPointsRequest {
   /** Omitted means 'cycling' — see Route.sport. */
   sport?: Sport
   points: Waypoint[]
+  pois?: Poi[]
 }
 
 /** A link to one route for someone outside this deployment entirely — see
@@ -532,6 +548,9 @@ export interface TrackResponse {
   slug: string
   /** [lat, lon] pairs in track order. */
   points: [number, number][]
+  /** This route's own named waypoint markers — empty for every route saved
+   *  before this feature existed. */
+  pois: Poi[]
 }
 
 /**

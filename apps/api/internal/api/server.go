@@ -1309,6 +1309,14 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 	for _, p := range points {
 		coords = append(coords, [2]float64{p.Lat, p.Lon})
 	}
+	// Best-effort, same as the FIT-export path's own nativeCues lookup: a
+	// route with none (everything before this feature existed) is the
+	// ordinary case, not a failure worth aborting the whole request over.
+	pois, _ := s.Source.Pois(r.Context(), slug)
+	poiDTOs := make([]poiDTO, len(pois))
+	for i, p := range pois {
+		poiDTOs[i] = poiDTO{Lat: p.Lat, Lon: p.Lon, Name: p.Name, Type: p.Type}
+	}
 	// private, not public: mayView above already gates this per-rider (a
 	// route only visible to its owner or its crew must not be cached where
 	// another rider's browser — or a shared proxy — could serve it back).
@@ -1329,14 +1337,14 @@ func (s *Server) handleTrack(w http.ResponseWriter, r *http.Request) {
 	// per-card KeepAlive), so without this every page revisit would
 	// otherwise re-fetch every visible card's full point list regardless
 	// of whether anything actually changed.
-	etag := `"` + gpx.ContentHash(points, "", "") + `"`
+	etag := `"` + gpx.TrackETag(points, pois) + `"`
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "private, no-cache")
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords})
+	writeJSON(w, http.StatusOK, map[string]any{"slug": slug, "points": coords, "pois": poiDTOs})
 }
 
 // errPreviewUnavailable marks previewLayers' "this deployment has no basemap
@@ -2042,6 +2050,60 @@ type routeBuilderWaypoint struct {
 	Lon float64 `json:"lon"`
 }
 
+// poiDTO is one named waypoint marker, both on the way in (a builder tab's
+// own list of markers a rider placed and labelled) and on the way out
+// (handleTrack's own response) — the same shape either direction, so one
+// type serves both rather than a near-duplicate per direction.
+type poiDTO struct {
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+	Name string  `json:"name"`
+	Type string  `json:"type"`
+}
+
+// validPoiTypes is the fixed set of marker types the Draw tab's own picker
+// offers (RouteBuilderPanel.vue's POI_TYPES) — checked here, at the trust
+// boundary, the same reasoning validRoutingProfile's own comment gives:
+// this arrives as a plain string on a request body with nothing upstream
+// constraining it.
+var validPoiTypes = map[string]bool{
+	"rest": true, "food": true, "water": true, "viewpoint": true,
+	"mechanic": true, "hazard": true, "other": true,
+}
+
+// maxRouteBuilderPois bounds how many named markers a single save can
+// carry — same reasoning as maxRouteBuilderWaypoints below: nothing
+// upstream otherwise limited this, and a route's own points already have a
+// much smaller realistic count than a waypoint list might.
+const maxRouteBuilderPois = 20
+
+// maxPoiNameLen bounds a single marker's name — a rider labels a spot on a
+// map, not writing a description; UpdateRequest's own Descript field is
+// where longer text belongs.
+const maxPoiNameLen = 100
+
+// poisFromRequest validates and converts a builder tab's own marker list
+// into what gpx.Render expects — shared by handleCreateRouteFromPoints and
+// handleUpdateRoutePoints so the two save paths can't drift on what a
+// valid marker looks like.
+func poisFromRequest(in []poiDTO) ([]gpx.Poi, error) {
+	if len(in) > maxRouteBuilderPois {
+		return nil, fmt.Errorf("too many waypoint markers (max %d)", maxRouteBuilderPois)
+	}
+	out := make([]gpx.Poi, len(in))
+	for i, p := range in {
+		name := strings.TrimSpace(p.Name)
+		if len(name) > maxPoiNameLen {
+			return nil, fmt.Errorf("waypoint marker name too long (max %d characters)", maxPoiNameLen)
+		}
+		if p.Type != "" && !validPoiTypes[p.Type] {
+			return nil, fmt.Errorf("unknown waypoint marker type %q", p.Type)
+		}
+		out[i] = gpx.Poi{Lat: p.Lat, Lon: p.Lon, Name: name, Type: p.Type}
+	}
+	return out, nil
+}
+
 // maxRouteBuilderWaypoints bounds a single preview request — manually
 // placing more than a few dozen waypoints has no realistic use, and each
 // one adds to what a single call asks the routing engine to resolve.
@@ -2721,6 +2783,7 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		Targets     *[]string              `json:"targets"`
 		Sport       string                 `json:"sport"`
 		Points      []routeBuilderWaypoint `json:"points"`
+		Pois        []poiDTO               `json:"pois"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxUploadBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -2733,11 +2796,17 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	pois, err := poisFromRequest(body.Pois)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	points := make([]gpx.Point, len(body.Points))
 	for i, p := range body.Points {
 		points[i] = gpx.Point{Lat: p.Lat, Lon: p.Lon}
 	}
-	raw, err := gpx.Render(body.Name, points)
+	raw, err := gpx.Render(body.Name, points, pois)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -2991,6 +3060,7 @@ func (s *Server) handleUpdateRoutePoints(w http.ResponseWriter, r *http.Request)
 
 	var body struct {
 		Points []routeBuilderWaypoint `json:"points"`
+		Pois   []poiDTO               `json:"pois"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxUploadBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -3003,11 +3073,17 @@ func (s *Server) handleUpdateRoutePoints(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	pois, err := poisFromRequest(body.Pois)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	points := make([]gpx.Point, len(body.Points))
 	for i, p := range body.Points {
 		points[i] = gpx.Point{Lat: p.Lat, Lon: p.Lon}
 	}
-	raw, err := gpx.Render(name, points)
+	raw, err := gpx.Render(name, points, pois)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

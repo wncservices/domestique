@@ -2,13 +2,16 @@
 import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { Sport } from '@/api/types'
+import type { Poi, Sport } from '@/api/types'
 
 /** The final "review and save" step every route-builder tab converges on —
  *  the manual builder's drawn path, a chosen suggestion, later a chosen AI
  *  candidate. Owns its own metadata fields and the save call itself; a
- *  parent only ever supplies the geometry. */
-const props = defineProps<{ points: [number, number][] }>()
+ *  parent only ever supplies the geometry. pois defaults to none — only the
+ *  Draw tab's own instance (RouteBuilderPanel.vue) has any to pass. */
+const props = withDefaults(defineProps<{ points: [number, number][]; pois?: Poi[] }>(), {
+  pois: () => [],
+})
 const emit = defineEmits<{ saved: [] }>()
 
 const toast = useToast()
@@ -56,6 +59,7 @@ async function submit() {
         .filter(Boolean),
       sport: sport.value,
       points: props.points.map(([lat, lon]) => ({ lat, lon })),
+      pois: props.pois,
     })
     toast.add({
       title: 'Route added',
