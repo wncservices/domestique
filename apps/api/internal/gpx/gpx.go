@@ -406,7 +406,7 @@ func Render(name string, points []Point, pois []Poi) ([]byte, error) {
 	if len(pois) > 0 {
 		ext := &renderExtensions{Pois: make([]renderPoi, len(pois))}
 		for i, p := range pois {
-			ext.Pois[i] = renderPoi{Lat: p.Lat, Lon: p.Lon, Name: p.Name, Type: p.Type}
+			ext.Pois[i] = renderPoi(p)
 		}
 		doc.Extensions = ext
 	}
