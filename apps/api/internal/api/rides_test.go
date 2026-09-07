@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 )
 
 type rideOut struct {
@@ -664,8 +665,19 @@ func TestUpcomingRidesSpansOwnCrewsOnly(t *testing.T) {
 	routeA := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewA})
 	routeB := h.seedRouteWithTargets(t, "Flat Loop", "stranger", []string{crewB})
 
-	h.mustScheduleRideAt(t, "wilant", crewA, routeA.Slug, "2026-09-05", "09:30")
-	h.mustScheduleRide(t, "stranger", crewB, routeB.Slug, "2026-09-06")
+	// Relative to time.Now(), not a hardcoded calendar date — the request
+	// below passes no ?from=, so handleListUpcomingRides defaults its own
+	// cutoff to the real "today" (rides.go's own time.Now().UTC() fallback).
+	// A fixed date eventually lands in the past regardless of any code here
+	// being wrong; found live, once it did. TestUpcomingRidesUsesThe-
+	// CallersOwnFrom further below pins its own from= instead and is safe
+	// from this by construction; TestUpcomingRidesOmitsPastRides uses
+	// 2020-01-01, which never stops being in the past.
+	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	dayAfter := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
+
+	h.mustScheduleRideAt(t, "wilant", crewA, routeA.Slug, tomorrow, "09:30")
+	h.mustScheduleRide(t, "stranger", crewB, routeB.Slug, dayAfter)
 
 	list := h.decodeUpcomingRides(t, h.as("friend", "cyclists", http.MethodGet, "/api/rides/upcoming", ""))
 	if len(list) != 1 {
