@@ -2724,10 +2724,33 @@ const maxBacktrackFraction = 0.15
 // is at or under maxBacktrackFraction — split out from selectSuggestCandidates
 // so the "if nothing survives, don't empty the shortlist" fallback there
 // reads as one decision rather than being buried in a loop.
+//
+// Each entry's backtrackFraction is independent, CPU-only work over a full
+// route geometry — found live to cost tens to a few hundred milliseconds
+// per candidate on a realistic ORS response (a few thousand points; see
+// backtrackFraction's own "trivial next to the network round trips"
+// comment, which held for the short geometries it was tested against but
+// not for a real 60-100km loop's actual point density). A sequential loop
+// here paid that once per shortlisted candidate, synchronously, stacking
+// on top of the network latency selectSuggestCandidates' caller already
+// spends — fanned out the same way fireRoundTripAttempts already
+// parallelizes the network calls themselves, so this filter's own cost is
+// bounded by its slowest single candidate rather than their sum.
 func filterLowBacktrack(pool []suggestPoolEntry) []suggestPoolEntry {
+	fractions := make([]float64, len(pool))
+	var wg sync.WaitGroup
+	for i, e := range pool {
+		wg.Add(1)
+		go func(i int, points [][2]float64) {
+			defer wg.Done()
+			fractions[i] = backtrackFraction(points)
+		}(i, e.candidate.Points)
+	}
+	wg.Wait()
+
 	kept := make([]suggestPoolEntry, 0, len(pool))
-	for _, e := range pool {
-		if backtrackFraction(e.candidate.Points) <= maxBacktrackFraction {
+	for i, e := range pool {
+		if fractions[i] <= maxBacktrackFraction {
 			kept = append(kept, e)
 		}
 	}
@@ -2768,11 +2791,14 @@ const backtrackOppositeDotThreshold = -0.7
 // the three backtrack* constants above for what "close" and "opposite"
 // mean here, and selectSuggestCandidates for how the result is used.
 //
-// O(n²) in the number of points, but n is a single round-trip loop's own
-// geometry (at most a few hundred vertices for anything this app
-// generates) computed a handful of times per suggest request — trivial
-// next to the network round trips already dominating that request's
-// latency.
+// O(n²) in the number of points — n is a single round-trip loop's own
+// geometry, which is not the few hundred vertices this was first written
+// against: ORS's directions response is unsimplified, so a realistic
+// 60-100km loop comes back with several thousand points, and at that size
+// this is measured in the tens to hundreds of milliseconds, not trivial
+// once it's paid once per shortlisted candidate. See filterLowBacktrack's
+// own comment for why that caller fans this out across candidates rather
+// than running it in a sequential loop.
 func backtrackFraction(points [][2]float64) float64 {
 	n := len(points)
 	if n < 4 {

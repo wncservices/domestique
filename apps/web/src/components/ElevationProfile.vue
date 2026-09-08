@@ -135,6 +135,14 @@ function updateScrub(clientX: number) {
   if (!svgRef.value || props.points.length < 2) return
   const rect = svgRef.value.getBoundingClientRect()
   if (rect.width === 0) return
+  // Maps linearly across the SVG's own rendered box — correct only because
+  // the template sets preserveAspectRatio="none". Without it, a panel
+  // wider than the WIDTH:HEIGHT viewBox ratio (true here: HEIGHT is a
+  // fixed 116px, width is the panel's own, usually wider than 320:116)
+  // letterboxes the chart into a narrower centered strip while
+  // getBoundingClientRect() still reports the full, unletterboxed box —
+  // so the cursor had to travel past the visible right edge of the chart
+  // to reach what the chart's own last point mapped to.
   const relX = ((clientX - rect.left) / rect.width) * WIDTH
 
   const xs = chart.value?.xs
@@ -187,6 +195,7 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
     <svg
       ref="svg"
       :viewBox="`0 0 ${WIDTH} ${HEIGHT}`"
+      preserveAspectRatio="none"
       class="w-full cursor-crosshair touch-none select-none"
       :style="{ height: `${HEIGHT}px` }"
       role="img"
