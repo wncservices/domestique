@@ -43,6 +43,18 @@ func Setup(ctx context.Context, serviceName, version string) (Shutdown, error) {
 		return noop, nil
 	}
 
+	// OTEL_SERVICE_NAME overrides the caller's serviceName, not the other
+	// way around: resource.Default() below already reads that env var on
+	// its own, but resource.Merge's "b wins" semantics (confirmed against
+	// its own doc comment) mean the explicit semconv.ServiceName(...) two
+	// lines down would always beat it silently otherwise. Lets one
+	// deployment (preview.domestique.dev's env, set in domestique-infra's
+	// values.yaml) distinguish itself from production's traces without a
+	// second call-site-specific parameter threading through main.go.
+	if v := os.Getenv("OTEL_SERVICE_NAME"); v != "" {
+		serviceName = v
+	}
+
 	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
 		semconv.ServiceName(serviceName),
 		semconv.ServiceVersion(version),
