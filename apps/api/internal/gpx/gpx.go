@@ -6,7 +6,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"math"
-	"os"
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -60,21 +59,6 @@ func (p gpxPoint) toPoint() Point {
 		}
 	}
 	return out
-}
-
-// ReadPoints flattens a GPX file on disk into a single ordered point list.
-func ReadPoints(path string) ([]Point, error) {
-	// #nosec G304 -- callers resolve and validate the path; the FS source
-	// refuses anything that escapes the library root.
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	points, err := ParsePoints(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return points, nil
 }
 
 // ParsePoints flattens GPX bytes into a single ordered point list.

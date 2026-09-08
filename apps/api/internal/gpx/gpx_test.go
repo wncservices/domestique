@@ -2,8 +2,6 @@ package gpx
 
 import (
 	"math"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,17 +14,8 @@ const twoPointGPX = `<?xml version="1.0"?>
   </trkseg></trk>
 </gpx>`
 
-func writeGPX(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "route.gpx")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
-
-func TestReadPointsAcceptsRouteElement(t *testing.T) {
-	path := writeGPX(t, `<?xml version="1.0"?>
+func TestParsePointsAcceptsRouteElement(t *testing.T) {
+	raw := []byte(`<?xml version="1.0"?>
 <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
   <rte>
     <rtept lat="50.0" lon="3.0"/>
@@ -34,9 +23,9 @@ func TestReadPointsAcceptsRouteElement(t *testing.T) {
   </rte>
 </gpx>`)
 
-	points, err := ReadPoints(path)
+	points, err := ParsePoints(raw)
 	if err != nil {
-		t.Fatalf("ReadPoints: %v", err)
+		t.Fatalf("ParsePoints: %v", err)
 	}
 	if len(points) != 2 {
 		t.Fatalf("got %d points, want 2", len(points))
@@ -128,13 +117,13 @@ func TestParseCuesRejectsGarbage(t *testing.T) {
 	}
 }
 
-func TestReadPointsRejectsTooFewPoints(t *testing.T) {
-	path := writeGPX(t, `<?xml version="1.0"?>
+func TestParsePointsRejectsTooFewPoints(t *testing.T) {
+	raw := []byte(`<?xml version="1.0"?>
 <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
   <trk><trkseg><trkpt lat="50.0" lon="3.0"/></trkseg></trk>
 </gpx>`)
 
-	if _, err := ReadPoints(path); err == nil {
+	if _, err := ParsePoints(raw); err == nil {
 		t.Fatal("expected an error for a single-point GPX")
 	}
 }
@@ -241,7 +230,7 @@ func TestRenderRejectsTooFewPoints(t *testing.T) {
 }
 
 func TestComputeStats(t *testing.T) {
-	points, err := ReadPoints(writeGPX(t, twoPointGPX))
+	points, err := ParsePoints([]byte(twoPointGPX))
 	if err != nil {
 		t.Fatal(err)
 	}
