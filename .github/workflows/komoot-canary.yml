@@ -18,15 +18,18 @@ on:
     - cron: "17 6 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   canary:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # GET v006/account/email/{email}/ with basic auth is exactly what
       # Login sends first — see internal/komoot/komoot.go. A bogus email and
@@ -85,7 +88,7 @@ jobs:
 
       - name: Open or update the flagging PR
         if: steps.canary.outputs.broken == 'true'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           add-paths: docs/komoot-status.md
           commit-message: "Komoot canary: login endpoint looks broken"
