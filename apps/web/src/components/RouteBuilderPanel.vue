@@ -460,18 +460,27 @@ function onSuggestSaved() {
             />
             <p class="text-sm text-muted">
               Click the map to place waypoints — each one snaps to the nearest road. Click on the
-              route itself to insert one in between, drag a waypoint to move it, right-click one
-              to remove it.
+              route itself to insert one in between, drag a waypoint to move it, click (or
+              right-click) one to remove it.
             </p>
 
-            <div class="flex items-center justify-between text-sm text-muted">
+            <!-- Stacked below sm rather than one row: five buttons plus the
+                 status text squeezed onto a single row had no room to
+                 shrink gracefully on a phone-width viewport — each button's
+                 own label wrapped onto two or three lines instead, reading
+                 as broken rather than compact. flex-wrap on the button row
+                 itself is the second half of the fix: even stacked below
+                 the status text, five buttons are still wider than a phone
+                 screen, so they wrap onto as many lines as needed instead
+                 of continuing to squeeze single-button text. -->
+            <div class="flex flex-col gap-2 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
               <span v-if="preview === null">Snapping to roads…</span>
               <span v-else-if="drawDistanceKm !== null && preview.points.length >= 2">
                 {{ drawDistanceKm }} km, {{ Math.round(preview.ascentM) }} m ascent,
                 {{ waypointCount }} waypoint{{ waypointCount === 1 ? '' : 's' }}
               </span>
               <span v-else>Place at least two waypoints to draw a path.</span>
-              <div class="flex gap-2">
+              <div class="flex flex-wrap gap-2">
                 <UButton
                   v-if="waypointCount >= 2"
                   color="neutral"

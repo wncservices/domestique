@@ -449,11 +449,22 @@ function attachMarkerHandlers(marker: Marker) {
     waypoints[i] = { lat: snapped.lat, lon: snapped.lng }
     schedulePreview()
   })
-  // A right-click removes just that one waypoint — the map's own left-click
-  // handler (below) only ever appends, so this is the one way to delete a
-  // waypoint that isn't the last one placed.
+  // Two ways to remove a waypoint that isn't the last one placed (Undo only
+  // ever pops the last): right-click, and — since a right-click has no
+  // touch equivalent at all, and a phone is exactly where "Undo the whole
+  // way back" is most painful — a plain click/tap on the marker itself,
+  // the same click-to-remove a named poi marker already has (see
+  // attachPoiMarkerHandlers). stopPropagation on both keeps the map's own
+  // click handler underneath from also reading the same gesture as "insert
+  // a waypoint here."
   marker.getElement().addEventListener('contextmenu', (e) => {
     e.preventDefault()
+    const i = markers.indexOf(marker)
+    if (i === -1) return
+    removeWaypointAt(i)
+  })
+  marker.getElement().addEventListener('click', (e) => {
+    e.stopPropagation()
     const i = markers.indexOf(marker)
     if (i === -1) return
     removeWaypointAt(i)
