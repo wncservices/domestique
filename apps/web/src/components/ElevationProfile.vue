@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import type { RouteBuilderElevationPoint } from '@/api/types'
 
 const props = defineProps<{
@@ -19,7 +19,19 @@ const emit = defineEmits<{
   hover: [distanceM: number | null]
 }>()
 
-const WIDTH = 320
+// The chart's own coordinate space is measured in real rendered CSS pixels,
+// not a fixed arbitrary unit count — WIDTH used to be a constant 320,
+// stretched non-uniformly (via preserveAspectRatio="none") onto whatever
+// real width Tailwind's `w-full` gave the SVG once it sat in the actual
+// app (typically 700-950px on a real card, versus this component's own
+// far narrower test harness) — a scale-x two-to-three times scale-y, which
+// stretched every circular element (a peak dot, the scrub dot) sideways
+// into a visible ellipse, and any vertical stroke (the scrub crosshair)
+// abnormally thick. Tracking the SVG's own real width (below) and using it
+// as WIDTH makes that scale 1:1 in both directions — nothing needs
+// stretching to fill the card, because the coordinate space already *is*
+// the card's own width.
+const WIDTH = ref(320)
 const HEIGHT = 116
 const PADDING_X = 4
 // Extra headroom above the line itself — where a peak's own "2.1 km · 162 m"
@@ -154,7 +166,7 @@ const chart = computed(() => {
   const maxEle = Math.max(...stepEles)
   const eleSpan = maxEle - minEle || 1e-9
 
-  const x = (d: number) => PADDING_X + (d / maxDistance) * (WIDTH - 2 * PADDING_X)
+  const x = (d: number) => PADDING_X + (d / maxDistance) * (WIDTH.value - 2 * PADDING_X)
   const y = (e: number) =>
     HEIGHT - PADDING_BOTTOM - ((e - minEle) / eleSpan) * (HEIGHT - PADDING_TOP - PADDING_BOTTOM)
 
@@ -194,7 +206,7 @@ const chart = computed(() => {
       rawPeaks.push({ distanceM: i * stepSize, eleM: stepEles[i], x: stepXs[i], y: stepYs[i] })
     }
   }
-  const minSeparation = WIDTH / 6
+  const minSeparation = WIDTH.value / 6
   const maxPeaks = 3
   const peaks: Peak[] = []
   for (const p of [...rawPeaks].sort((a, b) => b.eleM - a.eleM)) {
@@ -241,19 +253,39 @@ const chart = computed(() => {
 const svgRef = useTemplateRef<SVGSVGElement>('svg')
 const scrubIndex = ref<number | null>(null)
 
+// Keeps WIDTH matched to the SVG's own real rendered pixel width — see
+// WIDTH's own comment for why that matters beyond just this observer (it's
+// also what stops circular chart elements rendering as ellipses). A
+// ResizeObserver rather than a one-off measurement because the card this
+// chart sits in can change width after mount: a sidebar opening, a window
+// resize, a responsive breakpoint.
+let resizeObserver: ResizeObserver | null = null
+watch(
+  svgRef,
+  (svg) => {
+    resizeObserver?.disconnect()
+    resizeObserver = null
+    if (!svg) return
+    resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width
+      if (width) WIDTH.value = width
+    })
+    resizeObserver.observe(svg)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => resizeObserver?.disconnect())
+
 function updateScrub(clientX: number) {
   if (!svgRef.value || props.points.length < 2) return
   const rect = svgRef.value.getBoundingClientRect()
   if (rect.width === 0) return
-  // Maps linearly across the SVG's own rendered box — correct only because
-  // the template sets preserveAspectRatio="none". Without it, a panel
-  // wider than the WIDTH:HEIGHT viewBox ratio (true here: HEIGHT is a
-  // fixed 116px, width is the panel's own, usually wider than 320:116)
-  // letterboxes the chart into a narrower centered strip while
-  // getBoundingClientRect() still reports the full, unletterboxed box —
-  // so the cursor had to travel past the visible right edge of the chart
-  // to reach what the chart's own last point mapped to.
-  const relX = ((clientX - rect.left) / rect.width) * WIDTH
+  // Maps linearly across the SVG's own rendered box — exact now that WIDTH
+  // tracks the SVG's own real width (see WIDTH's own comment) rather than a
+  // fixed unit count scaled to fit; this ratio is kept anyway as a safety
+  // margin for the one frame between a resize and the observer above
+  // catching up, rather than assuming rect.width already equals WIDTH.
+  const relX = ((clientX - rect.left) / rect.width) * WIDTH.value
 
   const xs = chart.value?.xs
   if (!xs) return
@@ -326,13 +358,22 @@ const scrub = computed(() => {
 // clipping off the side.
 const TOOLTIP_HALF_WIDTH = 30
 const tooltipX = computed(() =>
-  scrub.value ? Math.min(Math.max(scrub.value.x, TOOLTIP_HALF_WIDTH), WIDTH - TOOLTIP_HALF_WIDTH) : 0,
+  scrub.value ? Math.min(Math.max(scrub.value.x, TOOLTIP_HALF_WIDTH), WIDTH.value - TOOLTIP_HALF_WIDTH) : 0,
 )
 const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) : 0))
 </script>
 
 <template>
   <div v-if="chart" class="flex flex-col gap-1">
+    <!-- preserveAspectRatio="none" below is now a safety net, not the
+         load-bearing thing it used to be: WIDTH tracks the SVG's own real
+         width (see WIDTH's own comment in the script), so the viewBox and
+         the actual rendered box normally already match 1:1 and this scales
+         by exactly 1 either way. It only does anything during the one
+         frame between a resize and the ResizeObserver catching up — and
+         "none" (stretch to fill) is the safer failure mode there than the
+         default (letterbox/pad), which would flash a visible gap at the
+         chart's edge instead. -->
     <svg
       ref="svg"
       :viewBox="`0 0 ${WIDTH} ${HEIGHT}`"
