@@ -128,6 +128,11 @@ function smoothElevations(pts: RouteBuilderElevationPoint[], radiusM: number): n
 // the data actually has.
 const MAX_SEGMENTS = 150
 
+// The minimum real metres of relief the y-axis ever autoscales to — see the
+// `eleSpan` computed below for why a floor (not just autoscale-to-fit)
+// matters here at all.
+const MIN_ELE_SPAN_M = 20
+
 // A route builder result's own elevation-over-distance profile — distinct
 // from RouteCandidatePreview's shape (a top-down line), this is a strip
 // chart: x is cumulative distance, y is height. Null below two points
@@ -164,7 +169,18 @@ const chart = computed(() => {
 
   const minEle = Math.min(...stepEles)
   const maxEle = Math.max(...stepEles)
-  const eleSpan = maxEle - minEle || 1e-9
+  // Floored, not just "or 1e-9": a route with almost no real elevation
+  // change (a flat towpath, a 3-4m rise over kilometres) would otherwise
+  // have the y-axis autoscale to fill the *entire* chart height with that
+  // tiny range — drawing a gentle roll as a dramatic full-height spike,
+  // with no way to tell "17m to 21m" apart from "170m to 210m" just by
+  // looking. The gradient % itself is unaffected either way (real
+  // rise/run, computed before any of this); only how tall the line is
+  // allowed to draw changes. MIN_ELE_SPAN_M is how many real metres of
+  // relief always fill the chart's full height at minimum — a small climb
+  // now only ever occupies its true proportion of a "real" range, never
+  // the whole thing.
+  const eleSpan = Math.max(maxEle - minEle, MIN_ELE_SPAN_M) || 1e-9
 
   const x = (d: number) => PADDING_X + (d / maxDistance) * (WIDTH.value - 2 * PADDING_X)
   const y = (e: number) =>
