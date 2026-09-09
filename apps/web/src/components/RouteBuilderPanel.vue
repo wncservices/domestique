@@ -436,6 +436,7 @@ function onSuggestSaved() {
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"
           @poi:placed="onPoiPlaced"
+          @poi:removed="removePoi"
           @hover:route="mapHoverDistanceM = $event"
           @error="onMapError"
         />
