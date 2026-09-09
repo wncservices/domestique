@@ -54,6 +54,11 @@ const emit = defineEmits<{
    *  just off the road is still exactly where it is), not something a bike
    *  needs to actually ride through. */
   'poi:placed': [point: { lat: number; lon: number }]
+  /** Fires when an existing named marker is clicked — click-to-remove,
+   *  the on-map mirror of the panel's own list "x" button. `index` is into
+   *  props.pois, same convention poiMarkers/props.pois already share
+   *  everywhere else in this file. */
+  'poi:removed': [index: number]
   /** Fires while hovering near the drawn (snapped) route on the map — the
    *  matching cumulative distance from the start, or null once the cursor
    *  moves away from the line. The panel forwards this to ElevationProfile
@@ -324,18 +329,39 @@ function poiMarkerColor() {
   return resolved.value === 'dark' ? '#c4b5fd' : '#7c3aed'
 }
 
+/** A poi marker's own click-to-remove — the on-map mirror of the panel's
+ *  list "x" button, so a rider doesn't have to scroll to the list just to
+ *  undo a marker placed in the wrong spot. Looks its own index up at click
+ *  time (not a closure-captured one) for the same reason
+ *  attachMarkerHandlers does for a waypoint's dragend/contextmenu: markers
+ *  are reused in place across a same-length update (see syncPoiMarkers), so
+ *  a captured index could point at the wrong poi by the time a click
+ *  actually lands. stopPropagation keeps the click from also reaching the
+ *  map's own click handler underneath, which would otherwise read it as
+ *  "extend the route here" (or, mid-placement, consume it as the very
+ *  placement this click was meant to remove). */
+function attachPoiMarkerHandlers(marker: Marker) {
+  marker.getElement().addEventListener('click', (e) => {
+    e.stopPropagation()
+    const i = poiMarkers.indexOf(marker)
+    if (i === -1) return
+    emit('poi:removed', i)
+  })
+}
+
 /** Keeps poiMarkers in lockstep with props.pois — the panel owns that array
- *  (add via poi:placed, edit/remove via its own list), this only ever
- *  renders it. Markers are rebuilt wholesale on an add/remove (matching
- *  loadWaypoints' own approach) since that's the only case index alignment
- *  can change; a same-length change (a rename, most likely) just updates
- *  each marker's existing popup in place rather than tearing down and
- *  recreating on every keystroke.
+ *  (add via poi:placed, rename/retype via its own list, remove via either
+ *  the list's "x" or clicking the marker itself — see
+ *  attachPoiMarkerHandlers), this only ever renders it. Markers are rebuilt
+ *  wholesale on an add/remove (matching loadWaypoints' own approach) since
+ *  that's the only case index alignment can change; a same-length change (a
+ *  rename, most likely) just updates each marker's existing popup in place
+ *  rather than tearing down and recreating on every keystroke.
  *
- *  Unlike a route waypoint, a poi marker has no other on-map affordance (no
- *  drag, no right-click-to-remove — the panel's own list owns editing and
- *  removal), so its label popup is pinned permanently open rather than
- *  shown on hover: it's the only way its name is visible at all. */
+ *  Unlike a route waypoint, a poi marker has no drag of its own (a rename
+ *  or type change is still list-only), so its label popup is pinned
+ *  permanently open rather than shown on hover: it's the only way its name
+ *  is visible at all. */
 function syncPoiMarkers() {
   if (!map || !maplibregl) return
   const gl = maplibregl
@@ -347,6 +373,7 @@ function syncPoiMarkers() {
       const marker = new gl.Marker({ color: poiMarkerColor() }).setLngLat([poi.lon, poi.lat]).addTo(instance)
       marker.setPopup(new gl.Popup({ closeButton: false, closeOnClick: false, offset: 16 }).setText(poiLabel(poi)))
       marker.togglePopup()
+      attachPoiMarkerHandlers(marker)
       return marker
     })
     return
