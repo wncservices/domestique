@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { buildMapStyle, loadMapLibreModules, styleFromTheme } from '@/utils/maplibre'
 import { nearestRoadPoint } from '@/utils/roadSnap'
 import { closestPointOnSegment } from '@/utils/geometry'
+import { cumulativeDistancesM, positionAtDistanceM } from '@/utils/routeCursor'
 import { poiLabel } from '@/utils/poi'
 import type { Map as MapLibreMap, Marker, MapMouseEvent } from 'maplibre-gl'
 import type { Poi, RouteBuilderPreview } from '@/api/types'
@@ -28,6 +29,11 @@ const props = defineProps<{
    *  (name/type live in its own editable list, not here); this component
    *  only ever renders it and reports where a placement click landed. */
   pois?: Poi[]
+  /** A cursor position driven by hovering the elevation chart instead of
+   *  this map — cumulative metres from the route's start. Shown as a marker
+   *  on the drawn route, but only while nothing is being hovered on the map
+   *  itself; see updateCursorMarker's own "self wins" comment. */
+  cursorDistanceM?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -48,6 +54,12 @@ const emit = defineEmits<{
    *  just off the road is still exactly where it is), not something a bike
    *  needs to actually ride through. */
   'poi:placed': [point: { lat: number; lon: number }]
+  /** Fires while hovering near the drawn (snapped) route on the map — the
+   *  matching cumulative distance from the start, or null once the cursor
+   *  moves away from the line. The panel forwards this to ElevationProfile
+   *  so hovering the route on the map highlights the matching point on the
+   *  height chart, the mirror of cursorDistanceM above. */
+  'hover:route': [distanceM: number | null]
   error: [message: string]
 }>()
 
@@ -78,6 +90,12 @@ const SUGGESTED_SOURCE_ID = 'builder-suggested'
 // above: it previews whatever a click is about to do right now, not
 // something scoped to Draw specifically.
 const HOVER_SOURCE_ID = 'builder-hover'
+// The elevation-profile sync marker — distinct from HOVER_SOURCE_ID (which
+// previews where a *click* would land) because this means something
+// different: "this is the point the height chart is currently pointing
+// at," driven either by hovering the route right here or by cursorDistanceM
+// from the chart itself. See updateCursorMarker.
+const CURSOR_SOURCE_ID = 'builder-cursor'
 
 // Waypoints the rider has placed, in order — the source of truth this
 // whole component draws from. markers are the DOM-side maplibregl.Marker
@@ -98,6 +116,16 @@ let placingPoi = false
 // every custom source/layer) can redraw it immediately rather than leaving
 // the solid line blank until the next edit triggers a fresh request.
 let lastSnappedPoints: [number, number][] = []
+// Cumulative distance (metres) at each of lastSnappedPoints, index-aligned
+// — recomputed alongside it in setSnappedLine. What lets a screen position
+// near the line become "X metres from the start" for the elevation chart,
+// and a distance from the chart become a lat/lon to drop a marker at.
+let snappedDistances: number[] = []
+// The route-position cursor driven by hovering *this* map, distinct from
+// props.cursorDistanceM (driven by hovering the elevation chart instead) —
+// null whenever the mouse isn't near the drawn route. Self-hover always
+// wins when both are present; see updateCursorMarker.
+let selfRouteDistanceM: number | null = null
 // Same reasoning as lastSnappedPoints, for the suggested builder's own
 // chosen candidate — see showSuggestion/clearSuggestion below.
 let lastSuggestedPoints: [number, number][] = []
@@ -187,10 +215,33 @@ function setDraftLine() {
 
 function setSnappedLine(points: [number, number][]) {
   lastSnappedPoints = points
+  snappedDistances = cumulativeDistancesM(points)
   const source = map?.getSource(SNAPPED_SOURCE_ID) as
     | import('maplibre-gl').GeoJSONSource
     | undefined
   source?.setData(lineFeature(points))
+  // The route itself just changed shape — whatever cursor was showing (ours
+  // or the chart's) is either stale or, worse, would now sit on a path that
+  // no longer exists at that distance.
+  updateCursorMarker()
+}
+
+/** Places (or hides) the elevation-sync marker — self-hover if the mouse is
+ *  currently near the drawn route, else props.cursorDistanceM from the
+ *  chart, else nothing. Self always wins: a chart position from a moment
+ *  ago shouldn't fight the cursor actually sitting on the map right now. */
+function updateCursorMarker() {
+  const source = map?.getSource(CURSOR_SOURCE_ID) as
+    | import('maplibre-gl').GeoJSONSource
+    | undefined
+  if (!source) return
+  const distanceM = selfRouteDistanceM ?? props.cursorDistanceM ?? null
+  if (distanceM == null || lastSnappedPoints.length < 2) {
+    source.setData(pointFeature(null))
+    return
+  }
+  const pos = positionAtDistanceM(lastSnappedPoints, snappedDistances, distanceM)
+  source.setData(pointFeature(pos ? { lng: pos[1], lat: pos[0] } : null))
 }
 
 function setSuggestedLine(points: [number, number][]) {
@@ -327,6 +378,16 @@ function updateHoverPreview() {
   if (!map || !lastMouseScreen) return
   const segment = !props.pickStart && nearestWaypointSegment(lastMouseScreen)
   setHoverPreview(nearestRoadPoint(map, lastMouseScreen), !!segment && segment.distance <= INSERT_NEAR_LINE_PX)
+
+  // The elevation-chart sync — only in Draw mode, same reasoning as the
+  // insert-segment check above: pickStart mode has drawn layers hidden
+  // (setDrawVisible), so there is no visible line to be "near" at all.
+  const distanceM = props.pickStart ? null : nearestRouteDistance(lastMouseScreen)
+  if (distanceM !== selfRouteDistanceM) {
+    selfRouteDistanceM = distanceM
+    emit('hover:route', distanceM)
+    updateCursorMarker()
+  }
 }
 
 function onMapMouseMove(e: MapMouseEvent) {
@@ -339,6 +400,11 @@ function onMapMouseMove(e: MapMouseEvent) {
 function onMapMouseOut() {
   lastMouseScreen = null
   setHoverPreview(null)
+  if (selfRouteDistanceM !== null) {
+    selfRouteDistanceM = null
+    emit('hover:route', null)
+    updateCursorMarker()
+  }
 }
 
 function attachMarkerHandlers(marker: Marker) {
@@ -402,6 +468,42 @@ function nearestWaypointSegment(screenPoint: { x: number; y: number }): { index:
     if (!best || hit.distSq < best.distSq) best = { index: i, distSq: hit.distSq }
   }
   return best ? { index: best.index, distance: Math.sqrt(best.distSq) } : null
+}
+
+/** Finds where along the *snapped* route (lastSnappedPoints — the real
+ *  routed path, not the straight lines between waypoints) a screen point
+ *  sits closest to, as a cumulative distance from the start — the map-side
+ *  half of the elevation-chart sync: hovering near the drawn line reports
+ *  the matching distance so the chart can highlight the same point. Returns
+ *  null once the cursor is further than INSERT_NEAR_LINE_PX from the line,
+ *  the same "close enough" threshold the click-to-insert affordance uses. */
+function nearestRouteDistance(screenPoint: { x: number; y: number }): number | null {
+  if (!map || lastSnappedPoints.length < 2) return null
+  let best: { distSq: number; distanceM: number } | null = null
+  for (let i = 0; i < lastSnappedPoints.length - 1; i++) {
+    const [lat1, lon1] = lastSnappedPoints[i]
+    const [lat2, lon2] = lastSnappedPoints[i + 1]
+    const a = map.project([lon1, lat1])
+    const b = map.project([lon2, lat2])
+    const hit = closestPointOnSegment(screenPoint, a, b)
+    if (!best || hit.distSq < best.distSq) {
+      // closestPointOnSegment doesn't return its own interpolation
+      // fraction, only the projected point — recomputed here (same
+      // formula) to interpolate the distance-along-route the projected
+      // point sits at, rather than widening that shared helper's return
+      // shape for its other two callers, which have no use for it.
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const lenSq = dx * dx + dy * dy
+      const t =
+        lenSq === 0
+          ? 0
+          : Math.max(0, Math.min(1, ((screenPoint.x - a.x) * dx + (screenPoint.y - a.y) * dy) / lenSq))
+      const distanceM = snappedDistances[i] + t * (snappedDistances[i + 1] - snappedDistances[i])
+      best = { distSq: hit.distSq, distanceM }
+    }
+  }
+  return best && Math.sqrt(best.distSq) <= INSERT_NEAR_LINE_PX ? best.distanceM : null
 }
 
 // maplibre-gl's Marker has no public way to change an existing pin's colour
@@ -576,6 +678,11 @@ function setDrawVisible(visible: boolean) {
   if (startMarker) startMarker.getElement().style.display = visible ? 'none' : ''
 }
 
+// Driven by hovering the elevation chart — see updateCursorMarker's own
+// "self wins" comment for why this is skipped while the map itself is
+// currently being hovered near the route.
+watch(() => props.cursorDistanceM, updateCursorMarker)
+
 watch(
   () => props.pickStart,
   (pickStart) => {
@@ -629,6 +736,22 @@ function addRouteBuilderLayers() {
       'circle-color': markerColor(!!props.pickStart),
       'circle-opacity': ['case', ['get', 'insert'], 0.75, 0.5],
       'circle-stroke-width': ['case', ['get', 'insert'], 3, 2],
+      'circle-stroke-color': resolved.value === 'dark' ? '#0a0a0a' : '#ffffff',
+    },
+  })
+  map.addSource(CURSOR_SOURCE_ID, { type: 'geojson', data: pointFeature(null) })
+  map.addLayer({
+    id: CURSOR_SOURCE_ID,
+    type: 'circle',
+    source: CURSOR_SOURCE_ID,
+    paint: {
+      // Deliberately distinct from HOVER_SOURCE_ID's soft, semi-transparent
+      // click preview — this one means "the elevation chart is pointing
+      // here right now," so it reads as a firm, always-solid marker rather
+      // than a hint of what a click would do.
+      'circle-radius': 6,
+      'circle-color': resolved.value === 'dark' ? '#ffffff' : '#0a0a0a',
+      'circle-stroke-width': 2,
       'circle-stroke-color': resolved.value === 'dark' ? '#0a0a0a' : '#ffffff',
     },
   })

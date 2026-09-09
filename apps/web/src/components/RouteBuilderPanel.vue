@@ -92,6 +92,14 @@ function onPreview(next: RouteBuilderPreview | null) {
   preview.value = next
 }
 
+// The elevation chart <-> map position sync: hovering one reports a
+// cumulative distance from the start, fed straight back to the other as
+// its own externally-driven cursor — see ElevationProfile's
+// externalDistanceM prop and RouteBuilderMap's cursorDistanceM prop for the
+// "local hover always wins" rule that keeps these from fighting each other.
+const mapHoverDistanceM = ref<number | null>(null)
+const chartHoverDistanceM = ref<number | null>(null)
+
 // Named waypoint markers — a rest stop, a water source, a viewpoint — the
 // Draw tab's own list, separate from the routed path itself (waypointCount/
 // preview above). This ref is the source of truth; RouteBuilderMap.vue only
@@ -423,10 +431,12 @@ function onSuggestSaved() {
           :pick-start="activeTab === 'suggest'"
           :initial-start="initialStart ?? undefined"
           :pois="pois"
+          :cursor-distance-m="chartHoverDistanceM"
           @update:preview="onPreview"
           @update:waypoint-count="waypointCount = $event"
           @update:start="onStart"
           @poi:placed="onPoiPlaced"
+          @hover:route="mapHoverDistanceM = $event"
           @error="onMapError"
         />
       </div>
@@ -535,7 +545,12 @@ function onSuggestSaved() {
 
             <template v-if="preview && preview.points.length >= 2">
               <SurfaceBreakdown v-if="preview.surface.length" :surface="preview.surface" />
-              <ElevationProfile v-if="preview.elevationProfile.length" :points="preview.elevationProfile" />
+              <ElevationProfile
+                v-if="preview.elevationProfile.length"
+                :points="preview.elevationProfile"
+                :external-distance-m="mapHoverDistanceM"
+                @hover="chartHoverDistanceM = $event"
+              />
             </template>
 
             <div v-if="editingSlug" class="flex justify-end gap-2">
