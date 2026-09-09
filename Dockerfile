@@ -26,7 +26,7 @@ RUN cd apps/api && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/domestique ./cmd/domestique
 
-FROM alpine:3.21
+FROM alpine:3.22
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 domestique
 WORKDIR /app
 COPY --from=api /out/domestique /usr/local/bin/domestique

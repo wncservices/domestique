@@ -18,5 +18,10 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY playwright.config.ts ./
 COPY tests ./tests
+RUN chown -R pwuser:pwuser /app
+
+# The base image's own non-root user — already the account its browsers and
+# their sandboxing are set up for, so this is not a chmod-and-hope situation.
+USER pwuser
 
 ENTRYPOINT ["npx", "playwright", "test"]
