@@ -2,7 +2,22 @@
 import { computed, ref, useTemplateRef } from 'vue'
 import type { RouteBuilderElevationPoint } from '@/api/types'
 
-const props = defineProps<{ points: RouteBuilderElevationPoint[] }>()
+const props = defineProps<{
+  points: RouteBuilderElevationPoint[]
+  /** An externally-driven scrub position (cumulative metres from the
+   *  start), shown when nothing is hovering this chart directly — how
+   *  hovering the route on the interactive map shows the matching point
+   *  here. Ignored while a local pointer hover is active; that always wins,
+   *  see activeIndex below. */
+  externalDistanceM?: number | null
+}>()
+
+const emit = defineEmits<{
+  /** Fires whenever this chart's own local pointer-driven scrub position
+   *  changes — null on pointer-leave. The map listens for this to place its
+   *  own matching marker; see RouteBuilderMap.vue's cursorDistanceM prop. */
+  hover: [distanceM: number | null]
+}>()
 
 const WIDTH = 320
 const HEIGHT = 116
@@ -45,6 +60,62 @@ function gradientColor(pct: number): string {
   return GRADIENT_BANDS[GRADIENT_BANDS.length - 1][1]
 }
 
+// Real elevation samples (SRTM/DEM lookups via the routing engine) carry
+// metre-scale jitter between adjacent points — noise the route's own content
+// hash already shrugs off (see model.Route's own doc comment on "sub-metre
+// jitter"). Coloured and drawn straight off raw adjacent-point deltas, that
+// jitter turns nearly every short up/down tick into its own gradient-
+// coloured segment: a chart that flickers between every colour in
+// GRADIENT_BANDS every few metres instead of reading as one climb — the
+// "extremely bad"-looking striped chart this was fixing.
+//
+// Smoothing the *value* alone is not enough, and neither is resampling onto
+// coarser steps alone: resampling without widening the smoothing radius to
+// match just point-samples the same noisy curve at fewer locations, which
+// aliases into something worse — a handful of tall, sharp zigzags instead
+// of many small ones. The radius has to grow to at least the resampled step
+// size (see the `chart` computed below) so each step's value is a genuine
+// average of everything between it and its neighbours, not a sample of a
+// curve that's still noisy at that scale.
+const MIN_SMOOTH_RADIUS_M = 30
+
+/** A centred moving average of eleM over `radiusM` on each side, windowed by
+ *  cumulative distance (not by point count, since samples along a route are
+ *  not evenly spaced) — a two-pointer sweep, O(n) since both pointers only
+ *  ever move forward. */
+function smoothElevations(pts: RouteBuilderElevationPoint[], radiusM: number): number[] {
+  const out = new Array<number>(pts.length)
+  let lo = 0
+  let hi = 0
+  let sum = pts[0]?.eleM ?? 0
+  for (let i = 0; i < pts.length; i++) {
+    while (hi + 1 < pts.length && pts[hi + 1].distanceM - pts[i].distanceM <= radiusM) {
+      hi++
+      sum += pts[hi].eleM
+    }
+    while (pts[i].distanceM - pts[lo].distanceM > radiusM) {
+      sum -= pts[lo].eleM
+      lo++
+    }
+    out[i] = sum / (hi - lo + 1)
+  }
+  return out
+}
+
+// Caps how many coloured segments the chart ever draws, regardless of how
+// many raw elevation samples came back — a route with a sample every few
+// metres would otherwise draw a segment every few metres too, each one
+// still a real width in the SVG even after smoothing the *value*, just a
+// less noisy one. Resampling onto at most this many evenly-spaced steps
+// widens the "run" each segment's gradient is measured over to something
+// past the length of any real point-to-point gap, which is what actually
+// stops the colour flickering (see MIN_SMOOTH_RADIUS_M's own comment above)
+// — and bounds the SVG to a sane element count no matter how a route was
+// generated. A short route with fewer raw samples than this is untouched:
+// stepCount below is capped at pts.length - 1, never upsampled past what
+// the data actually has.
+const MAX_SEGMENTS = 150
+
 // A route builder result's own elevation-over-distance profile — distinct
 // from RouteCandidatePreview's shape (a top-down line), this is a strip
 // chart: x is cumulative distance, y is height. Null below two points
@@ -55,36 +126,56 @@ const chart = computed(() => {
   const pts = props.points
   if (pts.length < 2) return null
 
-  const maxDistance = Math.max(...pts.map((p) => p.distanceM)) || 1e-9
-  const eles = pts.map((p) => p.eleM)
-  const minEle = Math.min(...eles)
-  const maxEle = Math.max(...eles)
+  const maxDistance = pts[pts.length - 1].distanceM || 1e-9
+
+  // The drawn curve: at most MAX_SEGMENTS evenly-spaced steps across the
+  // route's own distance, each an interpolation on a smoothed series below
+  // — see MAX_SEGMENTS' own comment for why resampling (not just smoothing
+  // the value) is what actually kills the flicker.
+  const stepCount = Math.max(1, Math.min(MAX_SEGMENTS, pts.length - 1))
+  const stepSize = maxDistance / stepCount
+  // The smoothing radius has to reach at least as far as the resampled step
+  // size, or a step's value is still just a point-sample of a curve that's
+  // noisy at that scale — see MIN_SMOOTH_RADIUS_M's own comment.
+  const smoothed = smoothElevations(pts, Math.max(MIN_SMOOTH_RADIUS_M, stepSize))
+  const stepEles = new Array<number>(stepCount + 1)
+  {
+    let idx = 0
+    for (let s = 0; s <= stepCount; s++) {
+      const target = stepSize * s
+      while (idx < pts.length - 2 && pts[idx + 1].distanceM < target) idx++
+      const span = pts[idx + 1].distanceM - pts[idx].distanceM || 1e-9
+      const t = Math.max(0, Math.min(1, (target - pts[idx].distanceM) / span))
+      stepEles[s] = smoothed[idx] + (smoothed[idx + 1] - smoothed[idx]) * t
+    }
+  }
+
+  const minEle = Math.min(...stepEles)
+  const maxEle = Math.max(...stepEles)
   const eleSpan = maxEle - minEle || 1e-9
 
   const x = (d: number) => PADDING_X + (d / maxDistance) * (WIDTH - 2 * PADDING_X)
   const y = (e: number) =>
     HEIGHT - PADDING_BOTTOM - ((e - minEle) / eleSpan) * (HEIGHT - PADDING_TOP - PADDING_BOTTOM)
 
-  const xs = pts.map((p) => x(p.distanceM))
-  const ys = pts.map((p) => y(p.eleM))
+  const stepXs = stepEles.map((_, i) => x(i * stepSize))
+  const stepYs = stepEles.map((e) => y(e))
 
-  // One coloured segment per consecutive point pair, rather than a single
-  // flat-coloured line — each segment's own colour comes from its local
-  // gradient (rise/run as a %), so the profile reads as a climb-severity
-  // map at a glance instead of a plain height squiggle. Both the stroke and
-  // its own patch of the area fill share the colour, so the fill reinforces
-  // the line rather than diluting it.
+  // One coloured segment per step, rather than a single flat-coloured line
+  // — each segment's own colour comes from its local gradient (rise/run as
+  // a %), so the profile reads as a climb-severity map at a glance instead
+  // of a plain height squiggle. Both the stroke and its own patch of the
+  // area fill share the colour, so the fill reinforces the line rather than
+  // diluting it.
   const segments: Segment[] = []
-  const gradients: number[] = []
-  for (let i = 0; i < pts.length - 1; i++) {
-    const runM = pts[i + 1].distanceM - pts[i].distanceM
-    const riseM = pts[i + 1].eleM - pts[i].eleM
-    const gradientPct = runM > 0 ? (riseM / runM) * 100 : 0
-    gradients.push(gradientPct)
-    const x1 = xs[i].toFixed(1)
-    const y1 = ys[i].toFixed(1)
-    const x2 = xs[i + 1].toFixed(1)
-    const y2 = ys[i + 1].toFixed(1)
+  const stepGradients: number[] = []
+  for (let i = 0; i < stepCount; i++) {
+    const gradientPct = ((stepEles[i + 1] - stepEles[i]) / stepSize) * 100
+    stepGradients.push(gradientPct)
+    const x1 = stepXs[i].toFixed(1)
+    const y1 = stepYs[i].toFixed(1)
+    const x2 = stepXs[i + 1].toFixed(1)
+    const y2 = stepYs[i + 1].toFixed(1)
     segments.push({
       lineD: `M${x1} ${y1} L${x2} ${y2}`,
       areaD: `M${x1} ${y1} L${x2} ${y2} L${x2} ${HEIGHT} L${x1} ${HEIGHT} Z`,
@@ -92,15 +183,15 @@ const chart = computed(() => {
     })
   }
 
-  // Peaks: interior local maxima (a point higher than both neighbours),
-  // most-prominent first, kept only if they sit far enough apart on the
-  // x-axis that their own distance/height labels won't collide — a route
-  // with a dozen small bumps still ends up with a handful of readable
-  // labels, not a wall of overlapping text.
+  // Peaks: interior local maxima on the *step* curve (a point higher than
+  // both step neighbours), most-prominent first, kept only if they sit far
+  // enough apart on the x-axis that their own distance/height labels won't
+  // collide — a route with a dozen small bumps still ends up with a handful
+  // of readable labels, not a wall of overlapping text.
   const rawPeaks: Peak[] = []
-  for (let i = 1; i < pts.length - 1; i++) {
-    if (pts[i].eleM > pts[i - 1].eleM && pts[i].eleM > pts[i + 1].eleM) {
-      rawPeaks.push({ distanceM: pts[i].distanceM, eleM: pts[i].eleM, x: xs[i], y: ys[i] })
+  for (let i = 1; i < stepCount; i++) {
+    if (stepEles[i] > stepEles[i - 1] && stepEles[i] > stepEles[i + 1]) {
+      rawPeaks.push({ distanceM: i * stepSize, eleM: stepEles[i], x: stepXs[i], y: stepYs[i] })
     }
   }
   const minSeparation = WIDTH / 6
@@ -111,11 +202,30 @@ const chart = computed(() => {
     if (peaks.every((accepted) => Math.abs(accepted.x - p.x) > minSeparation)) peaks.push(p)
   }
 
+  // Per-raw-sample x/y/gradient/elevation, for the scrub crosshair — x from
+  // each real sample's own distance, the rest interpolated off the step
+  // curve above (not the raw/only-smoothed value) so the scrub dot always
+  // sits exactly on the drawn line rather than a few pixels off it.
+  const xs = pts.map((p) => x(p.distanceM))
+  const ys: number[] = []
+  const eles: number[] = []
+  const gradients: number[] = []
+  for (const p of pts) {
+    const s = Math.max(0, Math.min(stepCount - 1e-9, p.distanceM / stepSize))
+    const i = Math.min(stepCount - 1, Math.floor(s))
+    const t = s - i
+    const ele = stepEles[i] + (stepEles[i + 1] - stepEles[i]) * t
+    ys.push(y(ele))
+    eles.push(ele)
+    gradients.push(stepGradients[i])
+  }
+
   return {
     segments,
     gradients,
     xs,
     ys,
+    eles,
     minEle: Math.round(minEle),
     maxEle: Math.round(maxEle),
     totalDistanceKm: (maxDistance / 1000).toFixed(1),
@@ -157,6 +267,7 @@ function updateScrub(clientX: number) {
     }
   }
   scrubIndex.value = nearest
+  emit('hover', props.points[nearest]?.distanceM ?? null)
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -167,17 +278,47 @@ function onPointerMove(e: PointerEvent) {
 }
 function onPointerLeave() {
   scrubIndex.value = null
+  emit('hover', null)
 }
+
+/** The nearest sample index to a given cumulative distance — same "closest
+ *  wins" search updateScrub does from a screen x, just from a distance
+ *  already in hand (externalDistanceM, driven by hovering the route on the
+ *  map instead of this chart). */
+function nearestIndexForDistance(distanceM: number): number {
+  const pts = props.points
+  let nearest = 0
+  let bestDistance = Infinity
+  for (let i = 0; i < pts.length; i++) {
+    const d = Math.abs(pts[i].distanceM - distanceM)
+    if (d < bestDistance) {
+      bestDistance = d
+      nearest = i
+    }
+  }
+  return nearest
+}
+
+// A local pointer hover always wins over externalDistanceM — otherwise
+// dragging across this chart while the map still reports a stale position
+// from a moment ago would fight the finger/cursor actually on screen here.
+const activeIndex = computed(() => {
+  if (scrubIndex.value !== null) return scrubIndex.value
+  if (props.externalDistanceM != null && props.points.length >= 2) {
+    return nearestIndexForDistance(props.externalDistanceM)
+  }
+  return null
+})
 
 const scrub = computed(() => {
   const c = chart.value
-  const i = scrubIndex.value
+  const i = activeIndex.value
   if (!c || i === null) return null
   const p = props.points[i]
   // The gradient of the road right after this point — or, at the very last
   // point, the segment just before it, since there's nothing after to read.
   const gradientPct = c.gradients[i] ?? c.gradients[i - 1] ?? 0
-  return { x: c.xs[i], y: c.ys[i], distanceM: p.distanceM, eleM: p.eleM, gradientPct }
+  return { x: c.xs[i], y: c.ys[i], distanceM: p.distanceM, eleM: c.eles[i], gradientPct }
 })
 
 // The tooltip pill's own position — clamped so it stays fully inside the
