@@ -346,6 +346,10 @@ function attachPoiMarkerHandlers(marker: Marker) {
     const i = poiMarkers.indexOf(marker)
     if (i === -1) return
     emit('poi:removed', i)
+    // See clearHoverPreview's own comment — stopPropagation above keeps
+    // this from ever reaching the map's own click handler, which is
+    // normally what clears the hover-preview dot after a touch tap.
+    clearHoverPreview()
   })
 }
 
@@ -424,7 +428,20 @@ function onMapMouseMove(e: MapMouseEvent) {
   requestAnimationFrame(updateHoverPreview)
 }
 
-function onMapMouseOut() {
+/** Hides the click-preview dot and the elevation-sync cursor, and forgets
+ *  the last known pointer position — what a real mouse leaving the map
+ *  already gets for free from the browser's own 'mouseout', but touch has
+ *  no equivalent "the pointer left" event at all: a tap fires a synthetic
+ *  'mousemove' (showing the preview at the tap location) followed by
+ *  'click', then nothing — no mouseout ever follows to clear it, so the dot
+ *  was left sitting there permanently after the finger lifted. Called from
+ *  onMapMouseOut (the real desktop case) and from every place a tap can end
+ *  a gesture without a normal map 'click' ever reaching this component's
+ *  own click handler below — a marker's own click-to-remove and dragend
+ *  both stopPropagation specifically so they *don't* also register as
+ *  "insert/append a waypoint here," which means they need this call
+ *  themselves rather than getting it for free. */
+function clearHoverPreview() {
   lastMouseScreen = null
   setHoverPreview(null)
   if (selfRouteDistanceM !== null) {
@@ -432,6 +449,10 @@ function onMapMouseOut() {
     emit('hover:route', null)
     updateCursorMarker()
   }
+}
+
+function onMapMouseOut() {
+  clearHoverPreview()
 }
 
 function attachMarkerHandlers(marker: Marker) {
@@ -448,6 +469,9 @@ function attachMarkerHandlers(marker: Marker) {
     marker.setLngLat([snapped.lng, snapped.lat])
     waypoints[i] = { lat: snapped.lat, lon: snapped.lng }
     schedulePreview()
+    // See clearHoverPreview's own comment — a touch-driven drag ends the
+    // same way a tap does, with no 'mouseout' to follow it.
+    clearHoverPreview()
   })
   // Two ways to remove a waypoint that isn't the last one placed (Undo only
   // ever pops the last): right-click, and — since a right-click has no
@@ -468,6 +492,7 @@ function attachMarkerHandlers(marker: Marker) {
     const i = markers.indexOf(marker)
     if (i === -1) return
     removeWaypointAt(i)
+    clearHoverPreview()
   })
 }
 
@@ -892,6 +917,12 @@ async function init() {
   instance.on('load', addRouteBuilderLayers)
   instance.on('mousemove', onMapMouseMove)
   instance.on('mouseout', onMapMouseOut)
+  // A touch gesture that doesn't end in a 'click' at all — a pan, a pinch
+  // zoom, a tap-and-hold that moved just enough not to register as a
+  // click — still needs the same cleanup a real mouseout gets for free;
+  // see clearHoverPreview's own comment.
+  instance.on('touchend', clearHoverPreview)
+  instance.on('touchcancel', clearHoverPreview)
   instance.on('click', (e) => {
     // The same snap the hover preview already showed for this exact spot —
     // recomputed rather than reused, since a click fires its own 'click'
@@ -901,14 +932,20 @@ async function init() {
     // left unsnapped rather than snapped to something possibly kilometres
     // away).
     const snapped = nearestRoadPoint(instance, e.point) ?? { lng: e.lngLat.lng, lat: e.lngLat.lat }
+    // Every branch below ends a gesture the same way lifting a finger off
+    // the map does — see clearHoverPreview's own comment on why that needs
+    // an explicit call here rather than waiting for a 'mouseout' that a
+    // touch tap will never produce.
     if (props.pickStart) {
       setStartMarker(snapped.lat, snapped.lng)
       emit('update:start', { lat: snapped.lat, lon: snapped.lng })
+      clearHoverPreview()
       return
     }
     if (placingPoi) {
       placingPoi = false
       emit('poi:placed', { lat: e.lngLat.lat, lon: e.lngLat.lng })
+      clearHoverPreview()
       return
     }
     // A click near an existing leg of the route inserts a new waypoint
@@ -925,6 +962,7 @@ async function init() {
     }
     emit('update:waypointCount', waypoints.length)
     schedulePreview()
+    clearHoverPreview()
   })
 
   resizeObserver = new ResizeObserver(() => instance.resize())
