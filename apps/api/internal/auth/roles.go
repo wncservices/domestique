@@ -87,6 +87,14 @@ const (
 	// a specific crew's membership) is a separate, per-crew check —
 	// Identity.CanEditRoute reused for it, same idiom as accounts.
 	PermManageCrews Permission = "crews:manage"
+	// PermManageTraining is setting a training goal, editing a rider's own
+	// fitness profile, and building or editing a structured workout — see
+	// internal/workout and docs/training-plan.md. Rider-level: this is a
+	// rider's own training data, not deployment configuration. Ownership
+	// (a goal or workout belongs to exactly the rider who created it, never
+	// shared the way a route can be) is Identity.CanEditRoute reused again,
+	// the same idiom PermManageCrews already uses for its own per-crew check.
+	PermManageTraining Permission = "training:manage"
 )
 
 // minimumRole is the least privileged role that holds each permission.
@@ -100,6 +108,7 @@ var minimumRole = map[Permission]Role{
 	PermWahooSync:      RoleRider,
 	PermManageAccounts: RoleRider,
 	PermManageCrews:    RoleRider,
+	PermManageTraining: RoleRider,
 	PermEditAny:        RoleAdmin,
 	PermManageSettings: RoleAdmin,
 	PermManagePeople:   RoleAdmin,
@@ -122,7 +131,7 @@ func (r Role) Permissions() []Permission {
 	for _, p := range []Permission{
 		PermReadRoutes, PermUploadRoute, PermEditOwn, PermEditAny, PermPush,
 		PermKomootSync, PermGarminSync, PermWahooSync, PermManageAccounts, PermManageCrews,
-		PermManageSettings, PermManagePeople,
+		PermManageTraining, PermManageSettings, PermManagePeople,
 	} {
 		if r.Can(p) {
 			out = append(out, p)

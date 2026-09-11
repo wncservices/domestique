@@ -49,6 +49,7 @@ import (
 	syncer "github.com/wncservices/domestique/apps/api/internal/sync"
 	"github.com/wncservices/domestique/apps/api/internal/targets"
 	"github.com/wncservices/domestique/apps/api/internal/wahoo"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // maxUploadBytes bounds a multipart upload before it is read into memory.
@@ -183,6 +184,13 @@ type Server struct {
 	// no-nil-degradation story as Crew, for the same reason: wired
 	// unconditionally in runServe.
 	Schedule *schedule.Store
+
+	// Training holds a rider's own goals, fitness profile and structured
+	// workouts — see internal/workout and docs/training-plan.md. Same
+	// no-nil-degradation story as Crew and Schedule: no external credential,
+	// only the database every deployment already has, wired unconditionally
+	// in runServe.
+	Training *workout.DB
 
 	// Shares holds share links to a single route — see internal/routeshare.
 	// Same no-nil-degradation story as Crew and Schedule: no external
@@ -394,6 +402,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/crews/{id}/rides/{rideId}", s.handleDeleteRide)
 	mux.HandleFunc("POST /api/crews/{id}/rides/{rideId}/sync", s.handleSyncRide)
 	mux.HandleFunc("GET /api/rides/upcoming", s.handleUpcomingRides)
+
+	mux.HandleFunc("GET /api/training/goals", s.handleListGoals)
+	mux.HandleFunc("POST /api/training/goals", s.handleCreateGoal)
+	mux.HandleFunc("PATCH /api/training/goals/{id}", s.handleUpdateGoal)
+	mux.HandleFunc("DELETE /api/training/goals/{id}", s.handleDeleteGoal)
+	mux.HandleFunc("GET /api/training/profile", s.handleGetRiderProfile)
+	mux.HandleFunc("PUT /api/training/profile", s.handleSaveRiderProfile)
+	mux.HandleFunc("GET /api/training/workouts", s.handleListWorkouts)
+	mux.HandleFunc("POST /api/training/workouts", s.handleCreateWorkout)
+	mux.HandleFunc("GET /api/training/workouts/{id}", s.handleGetWorkout)
+	mux.HandleFunc("PATCH /api/training/workouts/{id}", s.handleUpdateWorkout)
+	mux.HandleFunc("DELETE /api/training/workouts/{id}", s.handleDeleteWorkout)
+	mux.HandleFunc("GET /api/training/workouts/{id}/fit", s.handleDownloadWorkoutFIT)
 
 	// Not under /api: these are browser navigations (redirects, a form post
 	// from the SPA), not JSON calls, so they sit outside the /api/ 404

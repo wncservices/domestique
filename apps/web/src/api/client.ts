@@ -13,6 +13,9 @@ import type {
   GarminDuplicateGroup,
   GarminDevice,
   GeocodeResult,
+  Goal,
+  CreateGoalRequest,
+  UpdateGoalRequest,
   KomootImportResult,
   KomootConnection,
   KomootDuplicateGroup,
@@ -48,6 +51,10 @@ import type {
   TrackResponse,
   UploadRequest,
   Waypoint,
+  Workout,
+  CreateWorkoutRequest,
+  UpdateWorkoutRequest,
+  RiderProfile,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -614,4 +621,53 @@ export const api = {
       `/api/people/${encodeURIComponent(id)}${rider ? `?rider=${encodeURIComponent(rider)}` : ''}`,
       { method: 'DELETE' },
     ),
+
+  // ---------- Training (docs/training-plan.md) ----------
+
+  goals: () => request<Goal[]>('/api/training/goals'),
+  createGoal: (req: CreateGoalRequest) =>
+    request<Goal>('/api/training/goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  updateGoal: (id: string, req: UpdateGoalRequest) =>
+    request<Goal>(`/api/training/goals/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  deleteGoal: (id: string) =>
+    request<{ status: string }>(`/api/training/goals/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  riderProfile: () => request<RiderProfile>('/api/training/profile'),
+  saveRiderProfile: (req: RiderProfile) =>
+    request<RiderProfile>('/api/training/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+
+  workouts: () => request<Workout[]>('/api/training/workouts'),
+  workout: (id: string) => request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}`),
+  createWorkout: (req: CreateWorkoutRequest) =>
+    request<Workout>('/api/training/workouts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  updateWorkout: (id: string, req: UpdateWorkoutRequest) =>
+    request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
+  deleteWorkout: (id: string) =>
+    request<{ status: string }>(`/api/training/workouts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** The URL a plain link/download button points at — a structured FIT
+   *  workout file, the same "copy it onto a device over USB" role
+   *  api's route-FIT download plays; see internal/fitworkout's own doc
+   *  comment for why this is the proven path to a real device in this
+   *  phase rather than a provider push. */
+  workoutFitUrl: (id: string) => `/api/training/workouts/${encodeURIComponent(id)}/fit`,
 }
