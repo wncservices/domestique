@@ -1,3 +1,8 @@
+# compose.yaml already reads .env automatically (docker compose's own
+# behaviour); this makes the native recipes below (`api`, `demo`, `cli`, ...)
+# do the same, so one .env file configures either path the same way.
+set dotenv-load := true
+
 default:
     @just --list
 
