@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 
+	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/targets"
 )
@@ -43,6 +44,22 @@ type GarminConnector interface {
 	// DownloadGPX fetches one of those courses' tracks, to bring it into the
 	// library as a new route.
 	DownloadGPX(ctx context.Context, consumer GarminConsumer, session garmin.Session, courseID string) ([]byte, error)
+	// ListActivities lists a rider's own recently completed activities —
+	// the metrics-ingestion direction, alongside ListCourses' own
+	// sync-back for routes. See docs/training-plan.md's own account of
+	// why this needed its own client method (activitylist-service, not
+	// course-service) and its own research pass.
+	ListActivities(ctx context.Context, consumer GarminConsumer, session garmin.Session) ([]garmin.Activity, error)
+	// PushWorkout creates a structured workout on a connected account and
+	// returns Garmin's id for it — the workout-builder counterpart to
+	// Courses, and not folded into that same method: a course push goes
+	// through internal/targets' Target interface because internal/sync's
+	// diff engine drives it, while a workout push is a rider's own one-shot
+	// action with no diff engine behind it (see docs/training-plan.md's own
+	// "Structured workouts and the providers" for why this needed its own
+	// research and its own client method rather than reusing the FIT course
+	// path).
+	PushWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, name, sport string, steps []fitworkout.Step) (string, error)
 }
 
 // LiveGarmin is the real connector: it talks to Garmin.
@@ -137,4 +154,22 @@ func (l LiveGarmin) DownloadGPX(ctx context.Context, consumer GarminConsumer, se
 		return nil, err
 	}
 	return client.DownloadGPX(ctx, courseID)
+}
+
+// ListActivities lists a rider's own recently completed activities.
+func (l LiveGarmin) ListActivities(ctx context.Context, consumer GarminConsumer, session garmin.Session) ([]garmin.Activity, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return nil, err
+	}
+	return client.Activities(ctx, 0)
+}
+
+// PushWorkout creates a structured workout on a connected account.
+func (l LiveGarmin) PushWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, name, sport string, steps []fitworkout.Step) (string, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return "", err
+	}
+	return client.CreateWorkout(ctx, name, sport, steps)
 }

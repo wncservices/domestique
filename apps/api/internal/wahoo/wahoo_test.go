@@ -45,7 +45,7 @@ func TestAuthCodeURL(t *testing.T) {
 	if q.Get("state") != "the-state" {
 		t.Fatalf("state = %q", q.Get("state"))
 	}
-	if q.Get("scope") != "user_read routes_read routes_write" {
+	if q.Get("scope") != "user_read routes_read routes_write workouts_read" {
 		t.Fatalf("scope = %q", q.Get("scope"))
 	}
 	if q.Get("code_challenge") != "" || q.Get("code_challenge_method") != "" {

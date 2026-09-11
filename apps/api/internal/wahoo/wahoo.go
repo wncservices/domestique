@@ -44,7 +44,17 @@ const (
 	// scopes is fixed, not operator-configurable: exactly what this app
 	// functionally needs and what was registered with Wahoo. user_read is
 	// mandatory regardless — Wahoo 403s any token that lacks it.
-	scopes = "user_read routes_read routes_write"
+	//
+	// workouts_read is the metrics-ingestion scope ListWorkouts needs —
+	// confirmed as a real, separate scope from routes_read/routes_write
+	// (see docs/training-plan.md's own account of the research behind
+	// this), distinct from the further-gated "Plans" entitlement a
+	// planned-workout *push* would need and which this app does not have.
+	// Requesting it here is necessary but not sufficient: Wahoo's own
+	// per-app registration has to list it too, or every token this app
+	// requests keeps coming back without it regardless of what this
+	// constant asks for.
+	scopes = "user_read routes_read routes_write workouts_read"
 
 	defaultTimeout = 30 * time.Second
 )

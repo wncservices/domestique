@@ -60,7 +60,33 @@ CREATE TABLE IF NOT EXISTS workouts (
     updated_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS workouts_rider_idx ON workouts (rider);
-CREATE INDEX IF NOT EXISTS workouts_goal_idx ON workouts (goal_id);`, d.Blob)
+CREATE INDEX IF NOT EXISTS workouts_goal_idx ON workouts (goal_id);
+
+CREATE TABLE IF NOT EXISTS completed_sessions (
+    id                TEXT PRIMARY KEY,
+    rider             TEXT NOT NULL,
+    provider          TEXT NOT NULL,
+    external_id       TEXT NOT NULL,
+    sport             TEXT NOT NULL DEFAULT 'cycling',
+    date              TEXT NOT NULL,
+    duration_seconds  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    distance_m        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    avg_hr            INTEGER NOT NULL DEFAULT 0,
+    avg_power_watts   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    training_load     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    UNIQUE (provider, external_id)
+);
+CREATE INDEX IF NOT EXISTS completed_sessions_rider_idx ON completed_sessions (rider, date);
+
+CREATE TABLE IF NOT EXISTS fitness_snapshots (
+    rider      TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    ctl        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    atl        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    tsb        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    PRIMARY KEY (rider, date)
+);`, d.Blob)
 }
 
 // DB stores goals, rider profiles and workouts as rows. The one

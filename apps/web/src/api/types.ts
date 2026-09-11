@@ -811,3 +811,34 @@ export interface UpdateWorkoutRequest {
   description?: string
   steps?: WorkoutStep[]
 }
+
+// ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------
+
+export interface CompletedSession {
+  id: string
+  provider: string
+  sport: Sport
+  date: string
+  durationSeconds: number
+  distanceM?: number
+  avgHr?: number
+  avgPowerWatts?: number
+  trainingLoad: number
+}
+
+export interface FitnessSnapshot {
+  date: string
+  ctl: number
+  atl: number
+  tsb: number
+}
+
+export interface FitnessResponse {
+  snapshots: FitnessSnapshot[]
+  sessions: CompletedSession[]
+}
+
+export interface SyncMetricsResult {
+  synced: number
+  warnings?: string[]
+}
