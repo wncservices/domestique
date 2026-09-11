@@ -155,10 +155,14 @@ func Encode(steps []Step, opts Options) ([]byte, error) {
 		return nil, err
 	}
 
+	numSteps, err := toUint16(len(fitSteps), "step count")
+	if err != nil {
+		return nil, err
+	}
 	wkt.Workout = mesgdef.NewWorkout(nil).
 		SetWktName(name).
 		SetSport(sport).
-		SetNumValidSteps(uint16(len(fitSteps)))
+		SetNumValidSteps(numSteps)
 	wkt.WorkoutSteps = fitSteps
 
 	fitFile := wkt.ToFIT(nil)
@@ -168,6 +172,27 @@ func Encode(steps []Step, opts Options) ([]byte, error) {
 		return nil, fmt.Errorf("fitworkout: encode: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// toUint16 and toUint32 convert a step count, step index or repeat count —
+// all plain Go ints, and all ultimately traceable back to a rider-supplied
+// request via internal/workout.FITSteps — into the FIT profile's own
+// message_index/num_valid_steps (uint16) and duration_value/target_value
+// (uint32) fields. Nothing resembling a real workout gets remotely close to
+// either limit, but a request that did would otherwise silently wrap into a
+// corrupt file instead of failing loudly, which is what these guard against.
+func toUint16(n int, what string) (uint16, error) {
+	if n < 0 || n > math.MaxUint16 {
+		return 0, fmt.Errorf("fitworkout: %s (%d) is out of the FIT format's uint16 range", what, n)
+	}
+	return uint16(n), nil //#nosec G115 -- bounds-checked immediately above
+}
+
+func toUint32(n int, what string) (uint32, error) {
+	if n < 0 || uint64(n) > math.MaxUint32 {
+		return 0, fmt.Errorf("fitworkout: %s (%d) is out of the FIT format's uint32 range", what, n)
+	}
+	return uint32(n), nil //#nosec G115 -- bounds-checked immediately above
 }
 
 // flattenSteps turns the nested Step tree into FIT's flat
@@ -190,19 +215,31 @@ func appendSteps(out *[]*mesgdef.WorkoutStep, steps []Step) error {
 			if err := appendSteps(out, s.Steps); err != nil {
 				return err
 			}
+			index, err := toUint16(len(*out), "step index")
+			if err != nil {
+				return err
+			}
+			durationValue, err := toUint32(firstIndex, "repeat block start index")
+			if err != nil {
+				return err
+			}
+			targetValue, err := toUint32(s.Repeat, "repeat count")
+			if err != nil {
+				return err
+			}
 			repeatStep := mesgdef.NewWorkoutStep(nil).
-				SetMessageIndex(typedef.MessageIndex(len(*out))).
+				SetMessageIndex(typedef.MessageIndex(index)).
 				SetWktStepName(s.Name).
 				SetDurationType(typedef.WktStepDurationRepeatUntilStepsCmplt).
-				SetDurationValue(uint32(firstIndex)).
+				SetDurationValue(durationValue).
 				SetTargetType(typedef.WktStepTargetOpen).
-				SetTargetValue(uint32(s.Repeat)).
+				SetTargetValue(targetValue).
 				SetIntensity(typedef.IntensityActive)
 			*out = append(*out, repeatStep)
 			continue
 		}
 
-		step, err := encodeStep(s, typedef.MessageIndex(len(*out)))
+		step, err := encodeStep(s, len(*out))
 		if err != nil {
 			return err
 		}
@@ -211,9 +248,13 @@ func appendSteps(out *[]*mesgdef.WorkoutStep, steps []Step) error {
 	return nil
 }
 
-func encodeStep(s Step, index typedef.MessageIndex) (*mesgdef.WorkoutStep, error) {
+func encodeStep(s Step, index int) (*mesgdef.WorkoutStep, error) {
+	idx, err := toUint16(index, "step index")
+	if err != nil {
+		return nil, err
+	}
 	step := mesgdef.NewWorkoutStep(nil).
-		SetMessageIndex(index).
+		SetMessageIndex(typedef.MessageIndex(idx)).
 		SetWktStepName(s.Name).
 		SetIntensity(encodeIntensity(s.Intensity))
 

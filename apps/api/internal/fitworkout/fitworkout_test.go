@@ -2,6 +2,7 @@ package fitworkout
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/muktihari/fit/decoder"
@@ -284,5 +285,37 @@ func TestTrailingCRCIsCorrect(t *testing.T) {
 
 	if got != want {
 		t.Errorf("trailing CRC = %#04x, computed %#04x — a device would reject this file", got, want)
+	}
+}
+
+// A repeat count past uint32's range used to wrap silently (uint32(n) for an
+// n larger than the type holds), writing a corrupt target_value into the
+// file instead of failing. toUint32 in fitworkout.go is what turns that into
+// an error.
+func TestEncodeRejectsARepeatCountThatOverflowsTheFITTargetValueField(t *testing.T) {
+	steps := []Step{
+		{
+			Name:   "Huge repeat",
+			Repeat: math.MaxUint32 + 1,
+			Steps: []Step{
+				{Name: "On", Duration: DurationTime, Seconds: 60, Target: TargetOpen},
+			},
+		},
+	}
+	if _, err := Encode(steps, Options{}); err == nil {
+		t.Fatal("expected an error for a repeat count beyond the FIT format's uint32 range, got nil")
+	}
+}
+
+// Same reasoning, for the step count: message_index and num_valid_steps are
+// both uint16 fields, so a workout with more than 65535 flattened steps
+// needs to fail rather than silently wrap its own step indices.
+func TestEncodeRejectsAStepCountThatOverflowsTheFITMessageIndexField(t *testing.T) {
+	steps := make([]Step, math.MaxUint16+1)
+	for i := range steps {
+		steps[i] = Step{Name: "Step", Duration: DurationOpen, Target: TargetOpen}
+	}
+	if _, err := Encode(steps, Options{}); err == nil {
+		t.Fatal("expected an error for a step count beyond the FIT format's uint16 range, got nil")
 	}
 }
