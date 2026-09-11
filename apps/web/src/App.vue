@@ -18,6 +18,7 @@ const {
   canUpload,
   canManagePeople,
   canManageCrews,
+  canManageTraining,
   routingConfigured,
 } = useLibrary()
 const route = useRoute()
@@ -97,6 +98,7 @@ const links = computed(() =>
       ? { to: '/build', label: 'Build route', icon: 'i-lucide-pencil-ruler' }
       : null,
     canManageCrews.value ? { to: '/crews', label: 'Crews', icon: 'i-lucide-users-round' } : null,
+    canManageTraining.value ? { to: '/training', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
     canManagePeople.value ? { to: '/people', label: 'People', icon: 'i-lucide-users' } : null,
     { to: '/settings', label: 'Settings', icon: 'i-lucide-settings' },
   ].filter((link) => link !== null),

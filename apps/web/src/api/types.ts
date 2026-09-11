@@ -53,6 +53,7 @@ export type Permission =
   | 'accounts:manage'
   | 'people:manage'
   | 'crews:manage'
+  | 'training:manage'
   | 'settings:manage'
 
 export interface Me {
@@ -701,4 +702,112 @@ export interface KomootConnection {
   shared: boolean
   /** False when there is no encryption key: nothing could be stored, so nothing is offered. */
   canConnect: boolean
+}
+
+// ---------- Training (docs/training-plan.md, Phase A: manual builder) ----------
+//
+// A goal, rider profile or workout belongs to exactly the signed-in rider —
+// never shared, never admin-editable, unlike a route. See
+// internal/api/training.go's isOwnTraining for why: this is a rider's own
+// training and health-adjacent data, not a shared library item.
+
+export type GoalPriority = 'A' | 'B' | 'C'
+
+export interface Goal {
+  id: string
+  name: string
+  sport: Sport
+  eventDate?: string
+  priority: GoalPriority
+  targetDistanceM?: number
+  targetElevationM?: number
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateGoalRequest {
+  name: string
+  sport?: Sport
+  eventDate?: string
+  priority?: GoalPriority
+  targetDistanceM?: number
+  targetElevationM?: number
+  notes?: string
+}
+
+export interface UpdateGoalRequest {
+  name?: string
+  sport?: Sport
+  eventDate?: string
+  priority?: GoalPriority
+  targetDistanceM?: number
+  targetElevationM?: number
+  notes?: string
+}
+
+/** 0 (or absent) means unset for every numeric field here — never inferred
+ *  from a provider (docs/training-plan.md: neither Garmin nor Wahoo
+ *  reliably exposes FTP or threshold pace), always rider-entered. */
+export interface RiderProfile {
+  ftpWatts?: number
+  thresholdPaceSecPerKm?: number
+  maxHr?: number
+  restingHr?: number
+  /** Lowercase three-letter weekday abbreviations, e.g. ["tue","thu","sat","sun"]. */
+  availableDays?: string[]
+  hoursPerAvailableDay?: number
+  experienceLevel?: string
+  updatedAt?: string
+}
+
+export type StepDuration = 'time' | 'distance' | 'open'
+export type StepTarget = 'open' | 'power' | 'heart_rate' | 'pace' | 'cadence'
+export type StepIntensity = 'warmup' | 'active' | 'rest' | 'cooldown' | 'recovery' | 'interval' | 'other'
+
+/** One step of a structured workout, or a repeat block containing steps of
+ *  its own (`repeat` >= 2, with `steps` as what repeats) — see
+ *  internal/workout.WorkoutStep's own doc comment for how this nested shape
+ *  becomes FIT's flat step-list-plus-marker convention on export. */
+export interface WorkoutStep {
+  name: string
+  intensity?: StepIntensity
+  duration: StepDuration
+  seconds?: number
+  meters?: number
+  target: StepTarget
+  targetLow?: number
+  targetHigh?: number
+  repeat?: number
+  steps?: WorkoutStep[]
+}
+
+export interface Workout {
+  id: string
+  sport: Sport
+  name: string
+  goalId?: string
+  date?: string
+  description?: string
+  steps: WorkoutStep[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateWorkoutRequest {
+  sport?: Sport
+  name: string
+  goalId?: string
+  date?: string
+  description?: string
+  steps: WorkoutStep[]
+}
+
+export interface UpdateWorkoutRequest {
+  sport?: Sport
+  name?: string
+  goalId?: string
+  date?: string
+  description?: string
+  steps?: WorkoutStep[]
 }

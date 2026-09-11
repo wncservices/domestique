@@ -34,6 +34,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
+	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
@@ -54,6 +55,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/targets"
 	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 	"github.com/wncservices/domestique/apps/api/internal/wahoo"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 const usage = `Domestique — fetch-and-carry for cycling routes
@@ -68,6 +70,7 @@ commands:
   import        load a directory of .gpx files into the database
   komoot        list or import routes from a Komoot account
   fit           export a route as a Garmin FIT course
+  fit-workout   export a structured workout as a FIT workout file
   serve         run the HTTP API and the web UI
   rename-rider  move one rider's routes, accounts and sign-ins to a new identity
                 (see docs/rider-migration.md before running this for real;
@@ -98,6 +101,15 @@ fit:
   when it has any, otherwise a guess inferred from the track's shape — and
   climb category cues inferred from its elevation profile. The inferred
   ones are heuristics, so check them before trusting them on a ride.
+
+fit-workout:
+  domestique fit-workout <workout-id> [--out FILE]
+
+  Writes a structured workout — built in the web UI's training page — as a
+  FIT workout file, which can be copied onto a device over USB the same way
+  a FIT course can. See docs/training-plan.md: neither Garmin's nor Wahoo's
+  real push mechanism takes a client-supplied FIT workout file, so this
+  manual export is the proven path to a real device for now, not a stopgap.
 
 komoot:
   domestique komoot list             show the account's planned routes
@@ -144,7 +156,7 @@ func run(args []string) error {
 	var positional []string
 
 	switch cmd {
-	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "rename-rider", "keygen":
+	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "keygen":
 		// Go's flag package stops at the first positional argument, so
 		// `fit <slug> --cues` would silently ignore --cues. Parse in a loop,
 		// peeling off positionals, so flags and arguments can interleave in
@@ -214,6 +226,8 @@ func run(args []string) error {
 		return runKomoot(src, cfg, positional, *owner)
 	case "fit":
 		return runFIT(src, positional, *out, *cues)
+	case "fit-workout":
+		return runFITWorkout(src, positional, *out)
 	case "rename-rider":
 		return runRenameRider(src, positional, *dryRun, *replace)
 	}
@@ -305,6 +319,50 @@ func runFIT(src *source.DB, args []string, out string, cues bool) error {
 		fmt.Printf(", %d climb(s)", climbs)
 	}
 	fmt.Println(")")
+	return nil
+}
+
+// runFITWorkout writes a structured workout out as a FIT workout file.
+//
+// The same "prove the conversion end to end" role runFIT plays for a route:
+// no test can establish that a real head unit accepts the file, and — per
+// docs/training-plan.md's own findings — neither Garmin's nor Wahoo's real
+// push mechanism takes a client-supplied FIT workout file the way this
+// exports one, so a manual USB copy is not a stopgap here, it is the whole
+// story for this phase.
+func runFITWorkout(src *source.DB, args []string, out string) error {
+	if len(args) == 0 {
+		return errors.New("fit-workout needs a workout id (see the training page, or GET /api/training/workouts)")
+	}
+	id := args[0]
+
+	trainingStore, err := workout.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+	w, err := trainingStore.GetWorkout(context.Background(), id)
+	if err != nil {
+		return err
+	}
+
+	fitBytes, err := fitworkout.Encode(workout.FITSteps(w.Steps), fitworkout.Options{
+		Name:  w.Name,
+		Sport: fitworkout.SportFromString(string(w.Sport)),
+	})
+	if err != nil {
+		return err
+	}
+
+	if out == "" {
+		out = filepath.Base(strings.NewReplacer("/", "-", `\`, "-").Replace(id)) + ".fit"
+	}
+	// #nosec G703 -- --out is an operator-supplied path, the same as any
+	// shell redirect; an id-derived name is flattened above.
+	if err := os.WriteFile(out, fitBytes, 0o600); err != nil {
+		return err
+	}
+
+	fmt.Printf("wrote %s (%d bytes, %d step(s))\n", out, len(fitBytes), len(w.Steps))
 	return nil
 }
 
@@ -743,6 +801,14 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Crew and Schedule — a goal, rider
+	// profile or workout needs no external credential, only the database
+	// every deployment already has. See docs/training-plan.md.
+	trainingStore, err := workout.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	srv := &api.Server{
 		Source:    src,
 		Config:    cfg,
@@ -752,6 +818,7 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Schedule:  scheduleStore,
 		Blocklist: blocklistStore,
 		Shares:    sharesStore,
+		Training:  trainingStore,
 		Auth:      authenticator,
 		Log:       log,
 		// Pure in-memory, no external credential to be missing — wired
