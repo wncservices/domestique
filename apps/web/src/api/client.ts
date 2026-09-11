@@ -16,6 +16,7 @@ import type {
   Goal,
   CreateGoalRequest,
   UpdateGoalRequest,
+  PeriodizationPlan,
   KomootImportResult,
   KomootConnection,
   KomootDuplicateGroup,
@@ -639,6 +640,11 @@ export const api = {
     }),
   deleteGoal: (id: string) =>
     request<{ status: string }>(`/api/training/goals/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** Computed on the fly, nothing persisted — the periodized phase
+   *  structure (see internal/periodization) between today and the goal's
+   *  own event date, sized to the rider's own saved profile. */
+  goalPeriodization: (id: string) =>
+    request<PeriodizationPlan>(`/api/training/goals/${encodeURIComponent(id)}/periodization`),
 
   riderProfile: () => request<RiderProfile>('/api/training/profile'),
   saveRiderProfile: (req: RiderProfile) =>

@@ -407,6 +407,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/training/goals", s.handleCreateGoal)
 	mux.HandleFunc("PATCH /api/training/goals/{id}", s.handleUpdateGoal)
 	mux.HandleFunc("DELETE /api/training/goals/{id}", s.handleDeleteGoal)
+	mux.HandleFunc("GET /api/training/goals/{id}/periodization", s.handleGoalPeriodization)
 	mux.HandleFunc("GET /api/training/profile", s.handleGetRiderProfile)
 	mux.HandleFunc("PUT /api/training/profile", s.handleSaveRiderProfile)
 	mux.HandleFunc("GET /api/training/workouts", s.handleListWorkouts)
