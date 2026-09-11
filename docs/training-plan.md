@@ -142,17 +142,25 @@ through the library, and an independent header/CRC check) — a `workout` (`inte
 or similar, alongside `internal/fitcourse` rather than inside it, since the message types and
 validation rules genuinely differ) should follow the same two-track test shape.
 
+**Neither provider's real push mechanism turned out to be "upload a FIT file," the way courses
+are — confirmed by research before writing any push code, not assumed:**
+
 | Provider | Push mechanism | Status |
 |---|---|---|
-| **Wahoo** | Cloud API — documented, the same clean surface `internal/wahoo` already talks to for routes. Believed to have a workouts/plans resource (this is the mechanism TrainerRoad and TrainingPeaks use to push structured sessions to an ELEMNT) but **not yet confirmed against current API docs in this pass** — verify scope names and payload shape before Phase B below, the same way `routes_write` was confirmed before Phase 4 of the routes work. |
-| **Garmin** | The unofficial Connect web session `internal/garmin` already authenticates. Connect's own UI has a separate "Training → Workouts" surface from "Training → Courses" — almost certainly a sibling undocumented endpoint to the `course-service` one this app reverse-engineered already, at the same risk level `AGENTS.md` already documents for Garmin: "grey-area and breakable... acceptable for two personal accounts, not for anything shared more widely." Needs the same kind of exploratory work `internal/garmin`'s course push did, not assumed to exist until probed. |
+| **Wahoo** | `/v1/workouts` in the documented Cloud API is a **completed-activity** resource — it *receives* a finished session's summary (JSON/FIT/TCX), which is the metrics-pull path below, not a way to place a planned session on a device. Pushing a *planned* structured workout is a separate feature, "Plans" (`plans_read` scope, a Wahoo-proprietary `plan.json` format retrieved from `/v1/plans`, **not FIT**), gated behind its own partner entitlement requested from Wahoo directly — the same approval-lead-time risk `routes_write` already was, one level further in. **Do not build against this until that access is confirmed to exist and cover plan creation, not just read.** |
+| **Garmin** | The unofficial Connect session pushes a workout through `POST /workout-service/workout` — **Garmin's own JSON workout schema, not a client-supplied FIT file.** Confirmed against `cyberjunky/python-garminconnect`, an actively maintained reverse-engineered client: create/update/list/schedule endpoints all take JSON; Garmin renders FIT server-side itself (`GET /workout-service/workout/FIT/{id}`) only when asked to hand the device one. This means `internal/fitworkout`'s FIT encoding is **not** the payload Garmin push needs — a real Garmin push adapter needs its own JSON encoder, a new and different piece of work from the FIT package, discovered only by building against the real endpoint the way `course-service` was. |
 
-Both providers appear to support **scheduling** a workout onto a specific calendar date, not
-just uploading it — which is new for this app. `internal/schedule` today is explicit that
-"neither provider integration this app has today has a scheduling concept to place [a ride]
-on," written for routes/courses, which is true. A structured workout is different: Garmin
-Connect's training calendar and Wahoo's app both do have a per-day workout slot. Confirming
-exactly how to write to it is Phase B/C work, not assumed here.
+**What this changes for the plan:** `internal/fitworkout` is still worth building exactly as scoped in Phase A below — FIT is the portable, provider-agnostic format a rider can copy onto *any* head unit by hand (`domestique fit-workout <slug>`, the same manual-export role `domestique fit <slug>` already plays for courses), and it is the two-track-tested "genuinely hard" piece. But it is not, by itself, what either provider's real push endpoint consumes. Phase A is scoped to stop at that CLI export specifically so it does not accidentally assume a push path that does not exist. **Phase B's Garmin work is a JSON adapter, not a FIT one** — closer in shape to `internal/garmin`'s existing course-service integration (same session, same undocumented-JSON risk category) than to `internal/fitworkout`. **Phase B's Wahoo work cannot start until Wahoo's Plans entitlement is actually granted** — confirming that is now the long pole for Wahoo structured-workout push the same way `routes_write` approval was the long pole for Wahoo route push, so budget for it separately rather than assuming it lands alongside the metrics-read scope.
+
+Neither provider's push path was found to be a simple file upload, so **scheduling** a workout
+onto a specific calendar date is provider-specific too, not a shared mechanic: Garmin has its
+own `POST /workout-service/schedule/{workout_id}` and a calendar-service to read it back;
+Wahoo's Plans format ties a plan to a start time in its own JSON rather than through a generic
+schedule call. `internal/schedule` today is explicit that "neither provider integration this
+app has today has a scheduling concept to place [a ride] on," written for routes/courses, which
+stays true for them — but is no longer the right precedent to reason from here, since both
+providers do have *some* per-day workout slot, each shaped differently. Wiring either is Phase B
+work, not assumed in this document beyond noting the endpoint names above.
 
 ### Pulling metrics back
 
@@ -163,12 +171,23 @@ one:
   unofficial Connect session (`garmin.go`'s four-step handshake). The same bearer token that
   authorizes a course upload today authorizes Connect's activity-list and activity-detail
   endpoints — this is additive surface on an existing client and an existing stored session,
-  not a new credential or a new package.
-- **Wahoo** — the Cloud API's own documented `workouts_read`-style scope (today's `scopes`
-  constant in `internal/wahoo` is fixed at `"user_read routes_read routes_write"`, deliberately
-  minimal per that file's own comment); pulling completed workouts needs that scope added and
-  the app's existing Wahoo registration re-approved for it, the same approval gate that already
-  governs `routes_write` per `docs/plan.md`'s Phase 4 account.
+  not a new credential or a new package. Confirmed endpoint shapes (again against
+  `cyberjunky/python-garminconnect`, not an official doc — same caveat as everything else
+  unofficial this app already touches): `GET /activitylist-service/activities/search/activities`
+  for the list, `/activity-service/activity/{id}/details` for HR/power/pace/GPS streams,
+  `/metrics-service/metrics/trainingstatus/aggregated/{date}` and
+  `/metrics-service/metrics/maxmet/daily/{date}` for training status and VO2max.
+- **Wahoo** — the Cloud API's own documented scopes are genuinely separate from routes:
+  `workouts_read`/`workouts_write` for completed-activity summaries (today's `scopes` constant
+  in `internal/wahoo` is fixed at `"user_read routes_read routes_write"`, deliberately minimal
+  per that file's own comment) plus `offline_data` for the `workout_summary` webhook if push
+  notification of new activities is wanted later rather than polling. `/v1/workouts` is
+  confirmed to be the completed-summary resource specifically (see **Structured workouts and
+  the providers** above for why that is *not* the same resource a planned-workout push would
+  use) — pulling completed workouts needs `workouts_read` added and the app's existing Wahoo
+  registration re-approved for it, the same approval gate that already governs `routes_write`
+  per `docs/plan.md`'s Phase 4 account, but this scope at least does not appear to need the
+  further Plans-specific partner entitlement pushing a planned workout would.
 
 Neither provider reliably exposes FTP or threshold pace through account data — both TrainingPeaks
 and Humango still ask the rider to enter or periodically re-test these. `rider_profiles` should
@@ -259,25 +278,23 @@ equivalent, not an assumption that the same rules already cover it:
 
 | Phase | What | Depends on |
 |---|---|---|
-| A | Data model + manual workout builder. CRUD for `goals`/`rider_profiles`/`workouts`; hand-built step lists; FIT `workout` encoding (`internal/fitworkout`), tested the same two ways `fitcourse` is. **No AI, no metrics pull yet** — prove a hand-built structured workout actually lands on a real Garmin/Wahoo and executes correctly, the same "prove the conversion end to end" step `docs/plan.md` already calls out for courses. | Nothing new — confirms the FIT Workout push path before building intelligence on top of it |
-| B | Metrics ingestion. Extend `internal/garmin` and `internal/wahoo` to pull activities/completed workouts; `completed_sessions` and `fitness_snapshots` (CTL/ATL/TSB) land in the database. Confirm Wahoo's actual workouts-read scope and endpoint shape; probe Garmin's unofficial activity endpoints. | A (accounts and sign-in already exist; this is new read surface on them) |
-| C | Deterministic periodization engine. `periodization.Plan` + `scheduler.NextWorkouts`, unit-tested against fixed goals the way `sync.BuildPlan` is tested. A goal + profile produces a full plan; no adaptation yet. | A, B (needs a fitness snapshot to plan from) |
-| D | Adaptive replanning. `adapter.Reconcile` runs after new metrics land — via whatever scheduling primitive Phase 5's still-open reconcile job ends up using — and supersedes the plan when reality diverges from it. | B, C |
+| A | Data model + manual workout builder. CRUD for `goals`/`rider_profiles`/`workouts`; hand-built step lists; FIT `workout` encoding (`internal/fitworkout`), tested the same two ways `fitcourse` is, exported via CLI (`domestique fit-workout <slug>`, the same manual-proof role `domestique fit <slug>` plays for courses) for a rider to copy onto any device by hand. **No AI, no metrics pull, no provider push yet** — deliberately, since neither provider's real push mechanism turned out to be "upload this FIT file" (see **Structured workouts and the providers**), so Phase A stops at proving the encoding is correct rather than assuming a push path that isn't there. | Nothing new |
+| B | Two independent tracks, neither blocking the other: **(B1) metrics ingestion** — extend `internal/garmin` (activity-list/activity-detail/training-status endpoints, confirmed shapes above) and `internal/wahoo` (`workouts_read` scope, `/v1/workouts`) to pull completed sessions; `completed_sessions` and `fitness_snapshots` (CTL/ATL/TSB) land in the database. **(B2) provider workout push** — a Garmin JSON adapter against `/workout-service/workout` (new work, not a reuse of `internal/fitworkout`'s FIT encoder); Wahoo push stays blocked until its separate Plans partner entitlement is confirmed granted, tracked independently of the `workouts_read` scope B1 needs. | A (accounts, sign-in and the workout data model already exist; both tracks are new surface on them) |
+| C | Deterministic periodization engine. `periodization.Plan` + `scheduler.NextWorkouts`, unit-tested against fixed goals the way `sync.BuildPlan` is tested. A goal + profile produces a full plan; no adaptation yet. | A, B1 (needs a fitness snapshot to plan from; does not need B2) |
+| D | Adaptive replanning. `adapter.Reconcile` runs after new metrics land — via whatever scheduling primitive Phase 5's still-open reconcile job ends up using — and supersedes the plan when reality diverges from it. | B1, C |
 | E (stretch) | LLM-assisted plan narration and free-text profile edits, gated behind the deterministic engine from C/D so the model explains and adjusts constraints rather than invents the schedule itself. | C, D |
-
-Confirming Wahoo's structured-workout scope and probing Garmin's unofficial workout endpoint
-are both credible enough to fail or come back smaller than hoped that Phase A is deliberately
-scoped to not need either — the same lesson `docs/plan.md` already drew from Wahoo access being
-"the long pole and nothing else unblocks it" for routes.
 
 ## Open questions
 
-- **Wahoo workouts scope** — confirm against current Cloud API docs before Phase B; if it does
-  not exist or is gated separately from `routes_write`, that is its own approval-lead-time risk
-  the same way `routes_write` itself was.
-- **Garmin's workout endpoint** — unknown until probed; budget for it being a genuine
-  reverse-engineering effort, not a small extension, the same category of work
-  `course-service` was.
+- **Wahoo Plans partner entitlement** — confirmed to exist as a concept (`plans_read`, a
+  proprietary `plan.json` format) but not confirmed granted or requestable on the app's current
+  registration; request it from Wahoo directly before starting B2's Wahoo half, the same
+  approval-lead-time risk `routes_write` already was, one level further in since it appears to
+  be gated separately from the `workouts_read` scope B1 needs for metrics pull.
+- **Garmin's workout-push JSON schema** — the endpoint (`POST /workout-service/workout`) is
+  confirmed to exist via a maintained reverse-engineered client, but its exact JSON shape needs
+  discovering against the real endpoint the way `course-service` was, not assumed from a
+  third-party client's Python model classes. Budget it as a genuine reverse-engineering effort.
 - **How much history to keep** — `completed_sessions` going back further improves the fitness
   snapshot's accuracy but is also more sensitive data retained; worth a stated retention policy
   rather than "keep everything by default."
@@ -293,4 +310,6 @@ scoped to not need either — the same lesson `docs/plan.md` already drew from W
 - [TrainerRoad — Adaptive Training](https://www.trainerroad.com/adaptive-training/)
 - [Xert — the Signature fitness model](https://www.xertonline.com/science/)
 - [Wahoo Cloud API](https://cloud-api.wahooligan.com/) — same source already cited in `docs/plan.md`
+- [Wahoo Cloud API developer portal](https://developers.wahooligan.com/cloud) — scopes (`workouts_read`/`workouts_write`/`plans_read`/`offline_data`) and the Plans feature
 - [muktihari/fit](https://github.com/muktihari/fit) — the FIT SDK already vendored; `profile/mesgdef.Workout`/`WorkoutStep` confirmed present in this pass
+- [cyberjunky/python-garminconnect](https://github.com/cyberjunky/python-garminconnect) — actively maintained unofficial Garmin Connect client; source of the `workout-service`/`activitylist-service`/`metrics-service` endpoint shapes cited above. Unofficial and reverse-engineered, same caveat as this app's own `internal/garmin`.
