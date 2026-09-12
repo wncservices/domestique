@@ -2,12 +2,14 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -341,4 +343,58 @@ func readAll(t *testing.T, resp *http.Response) []byte {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func TestGoalPeriodization(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02") // 10 weeks out
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
+	g := decodeGoal(t, resp)
+
+	resp = h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save profile: status = %d", resp.StatusCode)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var plan struct {
+		GoalID string `json:"goalId"`
+		Weeks  []struct {
+			Number      int     `json:"number"`
+			Phase       string  `json:"phase"`
+			TargetHours float64 `json:"targetHours"`
+		} `json:"weeks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.GoalID != g.ID || len(plan.Weeks) == 0 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if last := plan.Weeks[len(plan.Weeks)-1]; last.Phase != "taper" {
+		t.Errorf("last phase = %q, want taper", last.Phase)
+	}
+
+	// A different rider cannot see this goal's plan either.
+	resp = h.as("other", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestGoalPeriodizationRejectsAGoalWithNoEventDate(t *testing.T) {
+	h := newTrainingHarness(t)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals", `{"name":"No Date"}`)
+	g := decodeGoal(t, resp)
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
 }

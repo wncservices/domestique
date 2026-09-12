@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -294,6 +296,67 @@ func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("goal deleted", "id", id, "by", identity.User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+type periodizationWeekDTO struct {
+	Number      int     `json:"number"`
+	StartDate   string  `json:"startDate"`
+	Phase       string  `json:"phase"`
+	Recovery    bool    `json:"recovery,omitempty"`
+	TargetHours float64 `json:"targetHours,omitempty"`
+}
+
+type periodizationPlanDTO struct {
+	GoalID string                 `json:"goalId"`
+	Weeks  []periodizationWeekDTO `json:"weeks"`
+}
+
+// handleGoalPeriodization computes — on the fly, nothing persisted — the
+// periodized phase structure (base/build/peak/taper, a weekly hours
+// target) between today and a goal's event date. See
+// internal/periodization's own doc comment for what this is and isn't:
+// phase/volume structure, not concrete daily workouts yet.
+func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+
+	id := r.PathValue("id")
+	g, err := s.Training.GetGoal(r.Context(), id)
+	if err != nil {
+		s.failTrainingLookup(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if !isOwnTraining(identity, g.Rider) {
+		s.forbidTraining(w, r)
+		return
+	}
+
+	profile, _, err := s.Training.GetProfile(r.Context(), identity.User)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	plan, err := periodization.BuildPlan(g, profile, time.Now())
+	if err != nil {
+		// ErrNoEventDate/ErrEventInThePast are the only errors BuildPlan
+		// returns — both are the rider's own data being unsuitable to plan
+		// from (no event date set, or it has already passed), not a server
+		// problem.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	dto := periodizationPlanDTO{GoalID: plan.GoalID, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks))}
+	for _, wk := range plan.Weeks {
+		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
+			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
+			Recovery: wk.Recovery, TargetHours: wk.TargetHours,
+		})
+	}
+	writeJSON(w, http.StatusOK, dto)
 }
 
 func (s *Server) failTrainingLookup(w http.ResponseWriter, err error) {
