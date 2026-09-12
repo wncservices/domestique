@@ -190,8 +190,15 @@ const workoutForm = ref<{ name: string; sport: Sport; date: string; goalId: stri
   freshWorkoutForm(),
 )
 
+// Reka UI's <SelectItem> forbids an empty-string value — it reserves '' to
+// mean "no selection, show the placeholder" — so "no goal" needs its own
+// sentinel rather than '', or the Goal select throws on mount and the whole
+// modal locks up (Close/Cancel stop responding, though the save itself still
+// goes through).
+const NO_GOAL = 'none'
+
 function freshWorkoutForm() {
-  return { name: '', sport: 'cycling' as Sport, date: '', goalId: '', description: '', steps: [] as WorkoutStep[] }
+  return { name: '', sport: 'cycling' as Sport, date: '', goalId: NO_GOAL, description: '', steps: [] as WorkoutStep[] }
 }
 
 function openCreateWorkout() {
@@ -206,14 +213,14 @@ async function openEditWorkout(w: Workout) {
     name: w.name,
     sport: w.sport,
     date: w.date ?? '',
-    goalId: w.goalId ?? '',
+    goalId: w.goalId ?? NO_GOAL,
     description: w.description ?? '',
     steps: w.steps,
   }
   workoutModalOpen.value = true
 }
 
-const goalOptions = computed(() => [{ value: '', label: 'No goal' }, ...goals.value.map((g) => ({ value: g.id, label: g.name }))])
+const goalOptions = computed(() => [{ value: NO_GOAL, label: 'No goal' }, ...goals.value.map((g) => ({ value: g.id, label: g.name }))])
 
 const savingWorkout = ref(false)
 
@@ -225,7 +232,7 @@ async function saveWorkout() {
       name: workoutForm.value.name.trim(),
       sport: workoutForm.value.sport,
       date: workoutForm.value.date || undefined,
-      goalId: workoutForm.value.goalId || undefined,
+      goalId: workoutForm.value.goalId === NO_GOAL ? undefined : workoutForm.value.goalId || undefined,
       description: workoutForm.value.description || undefined,
       steps: workoutForm.value.steps,
     }
