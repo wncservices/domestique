@@ -812,6 +812,37 @@ export interface UpdateWorkoutRequest {
   steps?: WorkoutStep[]
 }
 
+// ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------
+
+export interface CompletedSession {
+  id: string
+  provider: string
+  sport: Sport
+  date: string
+  durationSeconds: number
+  distanceM?: number
+  avgHr?: number
+  avgPowerWatts?: number
+  trainingLoad: number
+}
+
+export interface FitnessSnapshot {
+  date: string
+  ctl: number
+  atl: number
+  tsb: number
+}
+
+export interface FitnessResponse {
+  snapshots: FitnessSnapshot[]
+  sessions: CompletedSession[]
+}
+
+export interface SyncMetricsResult {
+  synced: number
+  warnings?: string[]
+}
+
 export type PeriodizationPhase = 'base' | 'build' | 'peak' | 'taper'
 
 /** One week of a periodized structure — see internal/periodization's own

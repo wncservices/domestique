@@ -602,3 +602,233 @@ func (s *Server) handleDownloadWorkoutFIT(w http.ResponseWriter, r *http.Request
 
 	writeFITAttachment(s.logger(), w, wk.ID, fitBytes)
 }
+
+// handlePushWorkoutToGarmin pushes a structured workout to the rider's own
+// connected Garmin account — the automatic counterpart to
+// handleDownloadWorkoutFIT's manual USB-copy path, now that
+// internal/garmin.CreateWorkout exists (Connect's own JSON schema, not the
+// FIT bytes the download endpoint produces — see that client's own doc
+// comment). One-shot: this always creates a new Garmin workout, it does not
+// yet track and update the one from a previous push for the same workout —
+// pushing again makes a second entry on the account rather than replacing
+// the first. Good enough for a first version; keeping them in sync on
+// every edit is real design work (where does the remote id live, what
+// happens if the rider deleted it on the Garmin side) left for later.
+func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+
+	id := r.PathValue("id")
+	wk, err := s.Training.GetWorkout(r.Context(), id)
+	if err != nil {
+		s.failTrainingLookup(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if !isOwnTraining(identity, wk.Rider) {
+		s.forbidTraining(w, r)
+		return
+	}
+
+	if s.Garmin == nil {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no Garmin connector configured",
+		})
+		return
+	}
+	_, session, ok := s.garminSessionFor(r)
+	if !ok {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "connect your Garmin account in Settings first",
+		})
+		return
+	}
+	consumer, _ := s.garminConsumer()
+
+	remoteID, err := s.Garmin.PushWorkout(r.Context(), consumer, session, wk.Name, string(wk.Sport), workout.FITSteps(wk.Steps))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", remoteID, "rider", identity.User)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "garminWorkoutId": remoteID})
+}
+
+// ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------
+
+type syncMetricsResultDTO struct {
+	Synced int `json:"synced"`
+	// Warnings names each provider that failed and why, without failing
+	// the whole sync — the same "one bad thing never aborts the rest"
+	// contract handleGarminCourseImport's own skipped map already keeps
+	// for course imports, applied here across providers instead of across
+	// individual items: a rider whose Wahoo token expired should still get
+	// their Garmin activities recorded.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// handleSyncTrainingMetrics pulls recently completed activities from
+// whichever of the rider's own Garmin/Wahoo accounts are connected,
+// records them as completed_sessions, and recomputes the rider's whole
+// CTL/ATL/TSB history from the result. A rider triggers this by hand today
+// (a "Sync now" button) — an automatic background version is exactly the
+// same scheduling need docs/plan.md's own still-open "scheduled reconcile"
+// item already flags for route push, worth building once rather than
+// twice when either gets picked up.
+func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+
+	rider := auth.FromContext(r.Context()).User
+	if rider == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "no rider in the session"})
+		return
+	}
+
+	profile, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	var warnings []string
+	synced := 0
+
+	if s.Garmin != nil {
+		if session, ok := s.garminSessionForRider(rider); ok {
+			consumer, _ := s.garminConsumer()
+			activities, err := s.Garmin.ListActivities(r.Context(), consumer, session)
+			if err != nil {
+				warnings = append(warnings, "garmin: "+err.Error())
+			} else {
+				for _, a := range activities {
+					if a.ID == "" || a.StartTime.IsZero() {
+						continue
+					}
+					load := workout.TrainingLoad(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile)
+					if _, err := s.Training.UpsertSession(r.Context(), workout.UpsertSessionRequest{
+						Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
+						Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
+						DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load,
+					}); err != nil {
+						warnings = append(warnings, "garmin: recording a session: "+err.Error())
+						continue
+					}
+					synced++
+				}
+			}
+		}
+	}
+
+	if s.Wahoo != nil {
+		token, err := s.wahooAccessToken(r.Context(), rider)
+		if err != nil {
+			warnings = append(warnings, "wahoo: "+err.Error())
+		} else {
+			workouts, err := s.Wahoo.ListWorkouts(r.Context(), token, 1, 30)
+			if err != nil {
+				warnings = append(warnings, "wahoo: "+err.Error())
+			} else {
+				for _, wk := range workouts {
+					if wk.ID == "" || wk.Starts.IsZero() {
+						continue
+					}
+					load := workout.TrainingLoad(wk.DurationSeconds, wk.AvgPowerWatts, wk.AvgHR, profile)
+					if _, err := s.Training.UpsertSession(r.Context(), workout.UpsertSessionRequest{
+						// Wahoo's completed-workout list does not carry a
+						// sport this pass decodes (see internal/wahoo's own
+						// doc comment) — cycling, the same "this is a
+						// cycling library" default AGENTS.md already states
+						// for Wahoo route push.
+						Rider: rider, Provider: "wahoo", ExternalID: wk.ID, Sport: "cycling",
+						Date: wk.Starts.Format("2006-01-02"), DurationSeconds: wk.DurationSeconds,
+						DistanceM: wk.DistanceM, AvgHR: wk.AvgHR, AvgPowerWatts: wk.AvgPowerWatts, TrainingLoad: load,
+					}); err != nil {
+						warnings = append(warnings, "wahoo: recording a session: "+err.Error())
+						continue
+					}
+					synced++
+				}
+			}
+		}
+	}
+
+	if synced > 0 {
+		if err := s.Training.RecomputeFitnessSnapshots(r.Context(), rider); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
+	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
+	writeJSON(w, http.StatusOK, syncMetricsResultDTO{Synced: synced, Warnings: warnings})
+}
+
+type completedSessionDTO struct {
+	ID              string  `json:"id"`
+	Provider        string  `json:"provider"`
+	Sport           string  `json:"sport"`
+	Date            string  `json:"date"`
+	DurationSeconds float64 `json:"durationSeconds"`
+	DistanceM       float64 `json:"distanceM,omitempty"`
+	AvgHR           int     `json:"avgHr,omitempty"`
+	AvgPowerWatts   float64 `json:"avgPowerWatts,omitempty"`
+	TrainingLoad    float64 `json:"trainingLoad"`
+}
+
+type fitnessSnapshotDTO struct {
+	Date string  `json:"date"`
+	CTL  float64 `json:"ctl"`
+	ATL  float64 `json:"atl"`
+	TSB  float64 `json:"tsb"`
+}
+
+type fitnessResponseDTO struct {
+	// Snapshots is the whole CTL/ATL/TSB history, oldest first — what a
+	// fitness chart plots directly.
+	Snapshots []fitnessSnapshotDTO `json:"snapshots"`
+	// Sessions is the underlying completed sessions the snapshots were
+	// computed from, most recent first — what a "recent activity" list
+	// shows below the chart.
+	Sessions []completedSessionDTO `json:"sessions"`
+}
+
+// handleGetFitness returns a rider's own recorded fitness history — reads
+// only, computed at sync time (handleSyncTrainingMetrics), not on every
+// request.
+func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+
+	snapshots, err := s.Training.ListFitnessSnapshots(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	sessions, err := s.Training.ListSessions(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	dto := fitnessResponseDTO{
+		Snapshots: make([]fitnessSnapshotDTO, 0, len(snapshots)),
+		Sessions:  make([]completedSessionDTO, 0, len(sessions)),
+	}
+	for _, snap := range snapshots {
+		dto.Snapshots = append(dto.Snapshots, fitnessSnapshotDTO{Date: snap.Date, CTL: snap.CTL, ATL: snap.ATL, TSB: snap.TSB})
+	}
+	for _, sess := range sessions {
+		dto.Sessions = append(dto.Sessions, completedSessionDTO{
+			ID: sess.ID, Provider: sess.Provider, Sport: sess.Sport, Date: sess.Date,
+			DurationSeconds: sess.DurationSeconds, DistanceM: sess.DistanceM,
+			AvgHR: sess.AvgHR, AvgPowerWatts: sess.AvgPowerWatts, TrainingLoad: sess.TrainingLoad,
+		})
+	}
+	writeJSON(w, http.StatusOK, dto)
+}

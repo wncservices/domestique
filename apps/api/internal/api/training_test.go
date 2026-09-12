@@ -345,6 +345,57 @@ func readAll(t *testing.T, resp *http.Response) []byte {
 	return body
 }
 
+// TestPushWorkoutToGarmin uses the fuller connectHarness (komootconnect_test.go)
+// rather than trainingHarness: pushing needs a real Garmin connection
+// wired through providerlink, which trainingHarness's smaller Server
+// literal does not set up.
+func TestPushWorkoutToGarmin(t *testing.T) {
+	h := newConnectHarness(t, true)
+	trainingStore, err := workout.UseDB(h.db.Conn(), h.db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.srv.Training = trainingStore
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/garmin/connection",
+		`{"email":"g@example.com","password":"pw"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("garmin connect: status = %d", resp.StatusCode)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts", exampleWorkoutBody)
+	w := decodeWorkoutOut(t, resp)
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts/"+w.ID+"/push/garmin", "")
+	if resp.StatusCode != http.StatusOK {
+		body := readAll(t, resp)
+		t.Fatalf("push: status = %d, body = %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Status          string `json:"status"`
+		GarminWorkoutID string `json:"garminWorkoutId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "pushed" || out.GarminWorkoutID == "" {
+		t.Errorf("response = %+v", out)
+	}
+
+	if h.garmin.pushedWorkoutName != "Threshold 6x3" {
+		t.Errorf("pushed name = %q", h.garmin.pushedWorkoutName)
+	}
+	if len(h.garmin.pushedWorkoutSteps) != 3 {
+		t.Errorf("pushed steps = %d, want 3", len(h.garmin.pushedWorkoutSteps))
+	}
+
+	// A different rider cannot push someone else's workout.
+	resp = h.as("other", "cyclists", http.MethodPost, "/api/training/workouts/"+w.ID+"/push/garmin", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
+	}
+}
+
 func TestGoalPeriodization(t *testing.T) {
 	h := newTrainingHarness(t)
 
@@ -385,6 +436,24 @@ func TestGoalPeriodization(t *testing.T) {
 	resp = h.as("other", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestPushWorkoutToGarminRequiresAConnection(t *testing.T) {
+	h := newConnectHarness(t, true)
+	trainingStore, err := workout.UseDB(h.db.Conn(), h.db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.srv.Training = trainingStore
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts", exampleWorkoutBody)
+	w := decodeWorkoutOut(t, resp)
+
+	// No Garmin connection made this time.
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts/"+w.ID+"/push/garmin", "")
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("status = %d, want 412", resp.StatusCode)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
@@ -63,6 +64,37 @@ type fakeGarmin struct {
 	// happen — safe without the lock that resumedSession needs.
 	gpxByID        map[string][]byte
 	downloadGPXErr error
+
+	// activities is what ListActivities hands back, and activitiesErr what
+	// it fails with.
+	activities    []garmin.Activity
+	activitiesErr error
+
+	// pushedWorkoutName/pushedWorkoutSteps record what PushWorkout was
+	// asked to send; pushedWorkoutID is what it hands back, and
+	// pushWorkoutErr, when set, is what it fails with instead.
+	pushedWorkoutName  string
+	pushedWorkoutSport string
+	pushedWorkoutSteps []fitworkout.Step
+	pushedWorkoutID    string
+	pushWorkoutErr     error
+}
+
+func (f *fakeGarmin) ListActivities(_ context.Context, _ api.GarminConsumer, session garmin.Session) ([]garmin.Activity, error) {
+	f.setResumedSession(session)
+	return f.activities, f.activitiesErr
+}
+
+func (f *fakeGarmin) PushWorkout(_ context.Context, _ api.GarminConsumer, session garmin.Session, name, sport string, steps []fitworkout.Step) (string, error) {
+	f.setResumedSession(session)
+	f.pushedWorkoutName, f.pushedWorkoutSport, f.pushedWorkoutSteps = name, sport, steps
+	if f.pushWorkoutErr != nil {
+		return "", f.pushWorkoutErr
+	}
+	if f.pushedWorkoutID == "" {
+		f.pushedWorkoutID = "garmin-workout-1"
+	}
+	return f.pushedWorkoutID, nil
 }
 
 func (f *fakeGarmin) setResumedSession(session garmin.Session) {

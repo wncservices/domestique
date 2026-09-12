@@ -56,6 +56,8 @@ import type {
   CreateWorkoutRequest,
   UpdateWorkoutRequest,
   RiderProfile,
+  FitnessResponse,
+  SyncMetricsResult,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -676,4 +678,25 @@ export const api = {
    *  comment for why this is the proven path to a real device in this
    *  phase rather than a provider push. */
   workoutFitUrl: (id: string) => `/api/training/workouts/${encodeURIComponent(id)}/fit`,
+  /** Pushes a structured workout straight to the rider's own connected
+   *  Garmin account — Connect's own JSON workout schema, not the FIT
+   *  bytes workoutFitUrl serves; see internal/garmin's own doc comment.
+   *  One-shot: always creates a new Garmin workout rather than updating
+   *  one from an earlier push. */
+  pushWorkoutToGarmin: (id: string) =>
+    request<{ status: string; garminWorkoutId: string }>(
+      `/api/training/workouts/${encodeURIComponent(id)}/push/garmin`,
+      { method: 'POST' },
+    ),
+
+  /** Pulls recently completed activities from whichever of the rider's own
+   *  Garmin/Wahoo accounts are connected and recomputes their fitness
+   *  history — see internal/api's own handleSyncTrainingMetrics. One
+   *  provider failing (not connected, a stale token) is reported in
+   *  `warnings` rather than failing the whole call. */
+  syncTrainingMetrics: () => request<SyncMetricsResult>('/api/training/sync', { method: 'POST' }),
+  /** The rider's own CTL/ATL/TSB history plus the completed sessions it
+   *  was computed from — read-only, reflects whatever syncTrainingMetrics
+   *  last recorded. */
+  fitness: () => request<FitnessResponse>('/api/training/fitness'),
 }

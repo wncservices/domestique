@@ -1,14 +1,19 @@
 <script setup lang="ts">
-// Phase A of docs/training-plan.md: a manual workout builder. No AI, no
-// metrics pull, no provider push yet — see that doc's "Structured workouts
-// and the providers" for why: neither Garmin's nor Wahoo's real push
-// mechanism takes a client-supplied FIT workout file the way this exports
-// one, so "download the .fit and copy it to a device over USB" is the
-// proven path for this phase, not a stopgap.
+// The workout builder, per docs/training-plan.md: a manual step editor
+// (Phase A), and metrics pulled back from Garmin/Wahoo to compute a
+// CTL/ATL/TSB fitness history (Phase B1) — plus pushing a built workout
+// straight to a connected Garmin account (Phase B2, Connect's own JSON
+// schema; see internal/garmin's own doc comment for why that is not the
+// same FIT bytes the download button below produces). Still no
+// AI-generated plan and no Wahoo structured-workout push — the latter
+// needs a further-gated partner entitlement this deployment does not
+// have; see the plan doc's own "Structured workouts and the providers".
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
+import { useLibrary } from '@/composables/useLibrary'
 import type {
+  FitnessResponse,
   Goal,
   GoalPriority,
   PeriodizationPhase,
@@ -18,9 +23,11 @@ import type {
   Workout,
   WorkoutStep,
 } from '@/api/types'
+import FitnessChart from '@/components/FitnessChart.vue'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 
 const toast = useToast()
+const { canSyncGarmin } = useLibrary()
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -308,6 +315,25 @@ async function deleteWorkout(w: Workout) {
   }
 }
 
+const pushingWorkout = ref('')
+
+async function pushWorkoutToGarmin(w: Workout) {
+  pushingWorkout.value = w.id
+  try {
+    await api.pushWorkoutToGarmin(w.id)
+    toast.add({ title: `Pushed ${w.name} to Garmin`, icon: 'i-lucide-watch', color: 'success' })
+  } catch (err) {
+    toast.add({
+      title: `Could not push ${w.name} to Garmin`,
+      description: errorMessage(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    pushingWorkout.value = ''
+  }
+}
+
 function stepCount(w: Workout): number {
   // Flat count including a repeat block's own children, so the summary line
   // reads like "5 steps" rather than "3" for a workout that's mostly one
@@ -317,10 +343,53 @@ function stepCount(w: Workout): number {
   return count(w.steps)
 }
 
+// --- fitness (docs/training-plan.md Phase B1) ---
+
+const fitness = ref<FitnessResponse | null>(null)
+const loadingFitness = ref(false)
+const syncingMetrics = ref(false)
+
+async function loadFitness() {
+  loadingFitness.value = true
+  try {
+    fitness.value = await api.fitness()
+  } catch (err) {
+    toast.add({ title: 'Could not load fitness history', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    loadingFitness.value = false
+  }
+}
+
+async function syncMetrics() {
+  syncingMetrics.value = true
+  try {
+    const result = await api.syncTrainingMetrics()
+    if (result.synced > 0) {
+      toast.add({ title: `Synced ${result.synced} session(s)`, icon: 'i-lucide-refresh-cw', color: 'success' })
+    } else if (!result.warnings?.length) {
+      toast.add({ title: 'Nothing new to sync', icon: 'i-lucide-refresh-cw', color: 'neutral' })
+    }
+    for (const warning of result.warnings ?? []) {
+      toast.add({ title: 'Sync warning', description: warning, icon: 'i-lucide-triangle-alert', color: 'warning' })
+    }
+    await loadFitness()
+  } catch (err) {
+    toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    syncingMetrics.value = false
+  }
+}
+
+// The chart only wants days with a real snapshot to plot against, and a
+// fresh deployment has none yet — showing an empty axis is worse than not
+// rendering the chart at all until there is something to show.
+const hasFitnessHistory = computed(() => (fitness.value?.snapshots.length ?? 0) > 0)
+
 onMounted(() => {
   loadGoals()
   loadProfile()
   loadWorkouts()
+  loadFitness()
 })
 </script>
 
@@ -331,8 +400,37 @@ onMounted(() => {
       variant="subtle"
       icon="i-lucide-info"
       title="Manual builder"
-      description="Build a workout by hand and download it as a FIT file to copy onto your Garmin or Wahoo over USB. Automatic push and AI-generated plans are not built yet — see docs/training-plan.md."
+      description="Build a workout by hand, then push it to a connected Garmin account or download it as a FIT file for any device over USB. Wahoo structured-workout push and AI-generated plans are not built yet — see docs/training-plan.md."
     />
+
+    <!-- Fitness -->
+    <UCard variant="outline">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Fitness</h2>
+          <UButton icon="i-lucide-refresh-cw" color="neutral" variant="outline" :loading="syncingMetrics" @click="syncMetrics">
+            Sync now
+          </UButton>
+        </div>
+      </template>
+
+      <p v-if="!loadingFitness && !hasFitnessHistory" class="text-muted text-sm">
+        No synced activity yet. Connect Garmin or Wahoo in Settings, then sync to build your CTL/ATL/TSB history.
+      </p>
+
+      <FitnessChart v-if="hasFitnessHistory" :snapshots="fitness!.snapshots" />
+
+      <div v-if="fitness && fitness.sessions.length > 0" class="mt-4 flex flex-col divide-y divide-default">
+        <div
+          v-for="sess in fitness.sessions.slice(0, 8)"
+          :key="sess.id"
+          class="flex items-center justify-between gap-3 py-2 text-sm first:pt-0"
+        >
+          <span class="text-muted">{{ sess.date }} · {{ sess.provider }} · {{ sess.sport }}</span>
+          <span>{{ Math.round(sess.durationSeconds / 60) }} min · load {{ sess.trainingLoad.toFixed(0) }}</span>
+        </div>
+      </div>
+    </UCard>
 
     <!-- Goals -->
     <UCard variant="outline">
@@ -521,6 +619,16 @@ onMounted(() => {
             </p>
           </div>
           <div class="flex items-center gap-1 shrink-0">
+            <UButton
+              v-if="canSyncGarmin"
+              icon="i-lucide-watch"
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              :loading="pushingWorkout === w.id"
+              title="Push to your connected Garmin account"
+              @click="pushWorkoutToGarmin(w)"
+            />
             <UButton
               icon="i-lucide-download"
               color="neutral"
