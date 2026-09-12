@@ -467,3 +467,116 @@ func TestGoalPeriodizationRejectsAGoalWithNoEventDate(t *testing.T) {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
+
+type scheduledWorkoutOut struct {
+	ID     string `json:"id"`
+	GoalID string `json:"goalId"`
+	Date   string `json:"date"`
+	Steps  []struct {
+		Name string `json:"name"`
+	} `json:"steps"`
+}
+
+type scheduledWorkoutsOut struct {
+	GoalID  string                `json:"goalId"`
+	Created []scheduledWorkoutOut `json:"created"`
+	Skipped int                   `json:"skipped"`
+}
+
+func decodeSchedule(t *testing.T, resp *http.Response) scheduledWorkoutsOut {
+	t.Helper()
+	var out scheduledWorkoutsOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestGoalSchedule drives internal/scheduler end to end through the API:
+// a goal and a rider's profile in, real persisted workout rows out, on the
+// right calendar dates, each with real steps a device could ride.
+func TestGoalSchedule(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
+	g := decodeGoal(t, resp)
+
+	resp = h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"],"ftpWatts":250}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save profile: status = %d", resp.StatusCode)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", "")
+	if resp.StatusCode != http.StatusOK {
+		body := readAll(t, resp)
+		t.Fatalf("schedule: status = %d, body = %s", resp.StatusCode, body)
+	}
+	out := decodeSchedule(t, resp)
+	if out.GoalID != g.ID {
+		t.Errorf("goalId = %q, want %q", out.GoalID, g.ID)
+	}
+	if len(out.Created) != 4 {
+		t.Fatalf("created = %d workouts, want 4 (one per available day)", len(out.Created))
+	}
+	for _, wk := range out.Created {
+		if wk.GoalID != g.ID || wk.Date == "" || len(wk.Steps) == 0 {
+			t.Errorf("created workout incomplete: %+v", wk)
+		}
+	}
+
+	// They are really persisted, not just returned.
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "")
+	var listed []scheduledWorkoutOut
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 4 {
+		t.Errorf("listed workouts = %d, want 4", len(listed))
+	}
+
+	// A different rider cannot schedule someone else's goal.
+	resp = h.as("other", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// Calling schedule twice must not double the workouts on the same dates —
+// this is the one safeguard handleGoalSchedule adds on top of the pure
+// scheduler.NextWorkouts function.
+func TestGoalScheduleIsIdempotentPerDate(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
+	g := decodeGoal(t, resp)
+
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+
+	first := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
+	if len(first.Created) == 0 {
+		t.Fatal("first schedule created nothing")
+	}
+
+	second := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
+	if len(second.Created) != 0 {
+		t.Errorf("second schedule created = %d, want 0 (every date already covered)", len(second.Created))
+	}
+	if second.Skipped != len(first.Created) {
+		t.Errorf("second schedule skipped = %d, want %d (one per date already scheduled)", second.Skipped, len(first.Created))
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "")
+	var listed []scheduledWorkoutOut
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != len(first.Created) {
+		t.Errorf("total workouts after two schedules = %d, want %d (no duplicates)", len(listed), len(first.Created))
+	}
+}

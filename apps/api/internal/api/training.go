@@ -11,6 +11,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -357,6 +358,90 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		})
 	}
 	writeJSON(w, http.StatusOK, dto)
+}
+
+type scheduledWorkoutsDTO struct {
+	GoalID  string       `json:"goalId"`
+	Created []workoutDTO `json:"created"`
+	Skipped int          `json:"skipped,omitempty"`
+}
+
+// handleGoalSchedule turns the plan week containing today into concrete,
+// dated workouts and persists them — internal/scheduler.NextWorkouts wired
+// to storage, the piece handleGoalPeriodization's own doc comment names as
+// still to come ("phase/volume structure, not concrete daily workouts
+// yet"). Safe to call more than once for the same week: a date that
+// already has a workout tagged with this goal is left alone rather than
+// duplicated, since nothing here understands *why* a workout might have
+// changed since it was generated — that is Phase D2's still-to-build
+// adapter.Reconcile, not this handler.
+func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+
+	id := r.PathValue("id")
+	g, err := s.Training.GetGoal(r.Context(), id)
+	if err != nil {
+		s.failTrainingLookup(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if !isOwnTraining(identity, g.Rider) {
+		s.forbidTraining(w, r)
+		return
+	}
+
+	profile, _, err := s.Training.GetProfile(r.Context(), identity.User)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	plan, err := periodization.BuildPlan(g, profile, time.Now())
+	if err != nil {
+		// ErrNoEventDate/ErrEventInThePast — see handleGoalPeriodization's
+		// own comment on why these are the rider's own data, not a server
+		// problem.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	requests, err := scheduler.NextWorkouts(plan, profile, identity.User, g.ID, g.Sport, time.Now())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	existing, err := s.Training.ListWorkouts(r.Context(), identity.User)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	alreadyScheduled := make(map[string]bool, len(existing))
+	for _, wk := range existing {
+		if wk.GoalID == g.ID {
+			alreadyScheduled[wk.Date] = true
+		}
+	}
+
+	created := make([]workoutDTO, 0, len(requests))
+	skipped := 0
+	for _, req := range requests {
+		if alreadyScheduled[req.Date] {
+			skipped++
+			continue
+		}
+		wk, err := s.Training.CreateWorkout(r.Context(), req)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		created = append(created, workoutDTOFrom(wk))
+	}
+
+	s.logger().Info("workouts scheduled", "goal", g.ID, "rider", identity.User, "created", len(created), "skipped", skipped)
+	writeJSON(w, http.StatusOK, scheduledWorkoutsDTO{GoalID: g.ID, Created: created, Skipped: skipped})
 }
 
 func (s *Server) failTrainingLookup(w http.ResponseWriter, err error) {
