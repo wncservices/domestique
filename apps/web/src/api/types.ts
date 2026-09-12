@@ -842,3 +842,20 @@ export interface SyncMetricsResult {
   synced: number
   warnings?: string[]
 }
+
+export type PeriodizationPhase = 'base' | 'build' | 'peak' | 'taper'
+
+/** One week of a periodized structure — see internal/periodization's own
+ *  doc comment: phase/volume shape only, not yet concrete daily workouts. */
+export interface PeriodizationWeek {
+  number: number
+  startDate: string
+  phase: PeriodizationPhase
+  recovery?: boolean
+  targetHours?: number
+}
+
+export interface PeriodizationPlan {
+  goalId: string
+  weeks: PeriodizationWeek[]
+}
