@@ -78,12 +78,23 @@ type Week struct {
 	// plan as phase/timing information only, prompting the rider to fill
 	// in their profile before it means anything as a volume target.
 	TargetHours float64
+	// Adjusted marks a week whose TargetHours was nudged away from this
+	// package's own ramp by internal/adapter.Reconcile, based on how much
+	// the rider actually trained in recent completed weeks. Always false
+	// coming straight out of BuildPlan — nothing in this package sets it —
+	// so a caller that never calls Reconcile never sees it true either.
+	Adjusted bool
 }
 
 // Plan is a full periodized structure for one goal.
 type Plan struct {
 	GoalID string
 	Weeks  []Week
+	// Adjustment is the compliance-based multiplier internal/adapter.Reconcile
+	// applied to this plan's still-upcoming weeks — 1 (BuildPlan's own
+	// default) means unadjusted, whether because Reconcile was never called
+	// or because it found recent training right on target.
+	Adjustment float64
 }
 
 // ErrNoEventDate is returned when the goal has no event date to plan
@@ -140,7 +151,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 		return Plan{}, fmt.Errorf("periodization: parse event date %q: %w", goal.EventDate, err)
 	}
 
-	start := mondayOf(today)
+	start := MondayOf(today)
 	if !event.After(start) {
 		return Plan{}, ErrEventInThePast
 	}
@@ -159,7 +170,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	lengths := allocateWeeks(totalWeeks)
 	order := []Phase{PhaseBase, PhaseBuild, PhasePeak, PhaseTaper}
 
-	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, totalWeeks)}
+	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, totalWeeks), Adjustment: 1}
 	weekNumber := 0
 	for _, phase := range order {
 		n := lengths[phase]
@@ -273,11 +284,14 @@ func weekFraction(phase Phase, indexInPhase, phaseLength int, recovery bool) flo
 	}
 }
 
-// mondayOf returns the Monday of the week containing t, at midnight —
+// MondayOf returns the Monday of the week containing t, at midnight —
 // periodization plans align to calendar weeks, the way a rider actually
 // reads a training calendar, rather than starting mid-week from whatever
-// day today happens to be.
-func mondayOf(t time.Time) time.Time {
+// day today happens to be. Exported so internal/adapter can bucket actual
+// training history into the same calendar weeks this package's own plan
+// is built on, rather than a second, independently-written copy of this
+// logic risking landing on a different week boundary.
+func MondayOf(t time.Time) time.Time {
 	t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 	daysSinceMonday := (int(t.Weekday()) + 6) % 7
 	return t.AddDate(0, 0, -daysSinceMonday)

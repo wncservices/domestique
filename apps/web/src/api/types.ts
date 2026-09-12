@@ -861,11 +861,22 @@ export interface PeriodizationWeek {
   phase: PeriodizationPhase
   recovery?: boolean
   targetHours?: number
+  /** Set when internal/adapter.Reconcile nudged this week's targetHours
+   *  away from periodization's own baseline ramp, based on recent actual
+   *  training — see PeriodizationPlan.adjustment. Never true for the
+   *  current week, or for a Peak/Taper week. */
+  adjusted?: boolean
 }
 
 export interface PeriodizationPlan {
   goalId: string
   weeks: PeriodizationWeek[]
+  /** The compliance-based multiplier applied to this plan's upcoming
+   *  Base/Build weeks — 1 (or absent) means unadjusted, whether because
+   *  there is no training history yet or because recent weeks were right
+   *  on target. Below 1 means recent weeks were undertrained relative to
+   *  what they asked for; above 1 means overtrained. */
+  adjustment?: number
 }
 
 /** POST /api/training/goals/{id}/schedule's response — see
