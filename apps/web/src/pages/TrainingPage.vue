@@ -237,6 +237,38 @@ async function saveProfile() {
   }
 }
 
+const buildingFTPTest = ref(false)
+const buildingMaxHRTest = ref(false)
+
+async function buildFTPTest() {
+  buildingFTPTest.value = true
+  try {
+    await api.buildFTPTest()
+    toast.add({ title: 'Built an FTP test workout', description: 'Find it in Workouts below.', icon: 'i-lucide-gauge' })
+    await loadWorkouts()
+  } catch (err) {
+    toast.add({ title: 'Could not build the FTP test', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    buildingFTPTest.value = false
+  }
+}
+
+// Defaults to cycling, same as the FTP test — a rider who wants the
+// running version can build it from the Workouts card's own sport picker
+// after the fact, the same way any other workout's sport is changed.
+async function buildMaxHRTest() {
+  buildingMaxHRTest.value = true
+  try {
+    await api.buildMaxHRTest('cycling')
+    toast.add({ title: 'Built a max heart rate test workout', description: 'Find it in Workouts below.', icon: 'i-lucide-heart-pulse' })
+    await loadWorkouts()
+  } catch (err) {
+    toast.add({ title: 'Could not build the max heart rate test', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    buildingMaxHRTest.value = false
+  }
+}
+
 // --- workouts ---
 
 const workouts = ref<Workout[]>([])
@@ -388,10 +420,18 @@ async function syncMetrics() {
     } else if (!result.warnings?.length) {
       toast.add({ title: 'Nothing new to sync', icon: 'i-lucide-refresh-cw', color: 'neutral' })
     }
+    if (result.estimatedFtpWatts) {
+      toast.add({
+        title: `Estimated your FTP at ${Math.round(result.estimatedFtpWatts)}W`,
+        description: 'From your synced rides — check your profile below and adjust if it looks off.',
+        icon: 'i-lucide-sparkles',
+      })
+    }
     for (const warning of result.warnings ?? []) {
       toast.add({ title: 'Sync warning', description: warning, icon: 'i-lucide-triangle-alert', color: 'warning' })
     }
     await loadFitness()
+    if (result.estimatedFtpWatts) await loadProfile()
   } catch (err) {
     toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -558,13 +598,25 @@ onMounted(() => {
         Used to suggest sensible workout targets. Nothing here is pulled from Garmin or Wahoo — enter it yourself.
       </p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <UFormField label="FTP (watts)">
+        <UFormField>
+          <template #label>
+            FTP (watts)
+            <UBadge v-if="profile.ftpEstimated" color="info" variant="subtle" size="sm" class="ml-1">estimated</UBadge>
+          </template>
           <UInput
             type="number"
             :model-value="profile.ftpWatts"
             class="w-full"
             @update:model-value="(v: string | number) => (profile.ftpWatts = Number(v))"
           />
+          <p v-if="!profile.ftpWatts" class="text-xs text-muted mt-1">
+            No FTP yet — sync your Garmin/Wahoo data above, or
+            <button type="button" class="underline" :disabled="buildingFTPTest" @click="buildFTPTest">build a 20-minute FTP test</button>.
+          </p>
+          <p v-else-if="profile.ftpEstimated" class="text-xs text-muted mt-1">
+            Estimated from your synced rides — edit and save to make it permanent, or
+            <button type="button" class="underline" :disabled="buildingFTPTest" @click="buildFTPTest">test it properly</button>.
+          </p>
         </UFormField>
         <UFormField label="Threshold pace (sec/km)">
           <UInput
@@ -581,6 +633,11 @@ onMounted(() => {
             class="w-full"
             @update:model-value="(v: string | number) => (profile.maxHr = Number(v))"
           />
+          <p v-if="!profile.maxHr" class="text-xs text-muted mt-1">
+            No max heart rate on file —
+            <button type="button" class="underline" :disabled="buildingMaxHRTest" @click="buildMaxHRTest">build a max HR test</button>.
+            This is never auto-estimated; a real test is the only accurate way to get it.
+          </p>
         </UFormField>
         <UFormField label="Resting heart rate (bpm)">
           <UInput

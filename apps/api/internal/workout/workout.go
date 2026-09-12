@@ -74,12 +74,26 @@ type Goal struct {
 type RiderProfile struct {
 	Rider string
 	// FTPWatts is a cyclist's functional threshold power. 0 means unset —
-	// never inferred from provider data (docs/training-plan.md is explicit
-	// that neither provider reliably exposes it), always rider-entered.
-	FTPWatts float64
+	// never inferred straight from provider data (docs/training-plan.md is
+	// explicit that neither provider reliably exposes it). It can, however,
+	// be auto-estimated from the rider's own completed sessions (see
+	// internal/fitnesstest.EstimateFTP) — FTPEstimated marks exactly that
+	// case, so the UI can label it as an estimate and a future sync can
+	// keep refining it, right up until the rider explicitly saves the
+	// profile themselves, which always clears the flag: a value the rider
+	// has looked at and confirmed is never silently touched again.
+	FTPWatts     float64
+	FTPEstimated bool
 	// ThresholdPaceSecPerKM is a runner's threshold pace. 0 means unset.
+	// Unlike FTPWatts, this is never auto-estimated today — see
+	// internal/fitnesstest's own doc comment for why a training run's pace
+	// is a much noisier fitness proxy than a ride's average power.
 	ThresholdPaceSecPerKM float64
-	// MaxHR and RestingHR are 0 when unset.
+	// MaxHR and RestingHR are 0 when unset. MaxHR is never auto-estimated,
+	// for a sharper reason than pace: this app only ever stores a
+	// session's *average* HR, and average is always at or below true max —
+	// see internal/fitnesstest's own doc comment. The only path to a
+	// number here beyond the rider typing one in is MaxHRTestWorkout.
 	MaxHR     int
 	RestingHR int
 	// AvailableDays is which weekdays the rider can train, lowercase

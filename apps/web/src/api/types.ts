@@ -751,6 +751,11 @@ export interface UpdateGoalRequest {
  *  reliably exposes FTP or threshold pace), always rider-entered. */
 export interface RiderProfile {
   ftpWatts?: number
+  /** True when ftpWatts came from internal/fitnesstest's auto-estimate
+   *  (see docs on POST /api/training/sync), not something the rider typed.
+   *  Saving the profile by hand always clears this, whatever value is in
+   *  the field at the time — see the API's own comment on why. */
+  ftpEstimated?: boolean
   thresholdPaceSecPerKm?: number
   maxHr?: number
   restingHr?: number
@@ -841,6 +846,9 @@ export interface FitnessResponse {
 export interface SyncMetricsResult {
   synced: number
   warnings?: string[]
+  /** Present only when this sync just produced a fresh FTP estimate and
+   *  saved it to the rider's profile. */
+  estimatedFtpWatts?: number
 }
 
 export type PeriodizationPhase = 'base' | 'build' | 'peak' | 'taper'
