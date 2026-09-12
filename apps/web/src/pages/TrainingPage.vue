@@ -16,6 +16,8 @@ import type {
   FitnessResponse,
   Goal,
   GoalPriority,
+  PeriodizationPhase,
+  PeriodizationPlan,
   RiderProfile,
   Sport,
   Workout,
@@ -125,6 +127,40 @@ async function saveGoal() {
 
 const deletingGoal = ref('')
 
+// --- periodization: one goal expanded at a time, fetched on demand ---
+
+const periodizationOpenFor = ref<string | null>(null)
+const periodizationPlan = ref<PeriodizationPlan | null>(null)
+const loadingPeriodization = ref('')
+
+async function togglePeriodization(g: Goal) {
+  if (periodizationOpenFor.value === g.id) {
+    periodizationOpenFor.value = null
+    return
+  }
+  periodizationOpenFor.value = g.id
+  periodizationPlan.value = null
+  loadingPeriodization.value = g.id
+  try {
+    periodizationPlan.value = await api.goalPeriodization(g.id)
+  } catch (err) {
+    toast.add({ title: 'Could not build a plan for this goal', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    periodizationOpenFor.value = null
+  } finally {
+    loadingPeriodization.value = ''
+  }
+}
+
+const phaseColors: Record<PeriodizationPhase, 'neutral' | 'info' | 'warning' | 'primary'> = {
+  base: 'neutral',
+  build: 'info',
+  peak: 'warning',
+  taper: 'primary',
+}
+function phaseColor(phase: PeriodizationPhase) {
+  return phaseColors[phase]
+}
+
 async function deleteGoal(g: Goal) {
   deletingGoal.value = g.id
   try {
@@ -204,8 +240,15 @@ const workoutForm = ref<{ name: string; sport: Sport; date: string; goalId: stri
   freshWorkoutForm(),
 )
 
+// Reka UI's <SelectItem> forbids an empty-string value — it reserves '' to
+// mean "no selection, show the placeholder" — so "no goal" needs its own
+// sentinel rather than '', or the Goal select throws on mount and the whole
+// modal locks up (Close/Cancel stop responding, though the save itself still
+// goes through).
+const NO_GOAL = 'none'
+
 function freshWorkoutForm() {
-  return { name: '', sport: 'cycling' as Sport, date: '', goalId: '', description: '', steps: [] as WorkoutStep[] }
+  return { name: '', sport: 'cycling' as Sport, date: '', goalId: NO_GOAL, description: '', steps: [] as WorkoutStep[] }
 }
 
 function openCreateWorkout() {
@@ -220,14 +263,14 @@ async function openEditWorkout(w: Workout) {
     name: w.name,
     sport: w.sport,
     date: w.date ?? '',
-    goalId: w.goalId ?? '',
+    goalId: w.goalId ?? NO_GOAL,
     description: w.description ?? '',
     steps: w.steps,
   }
   workoutModalOpen.value = true
 }
 
-const goalOptions = computed(() => [{ value: '', label: 'No goal' }, ...goals.value.map((g) => ({ value: g.id, label: g.name }))])
+const goalOptions = computed(() => [{ value: NO_GOAL, label: 'No goal' }, ...goals.value.map((g) => ({ value: g.id, label: g.name }))])
 
 const savingWorkout = ref(false)
 
@@ -239,7 +282,7 @@ async function saveWorkout() {
       name: workoutForm.value.name.trim(),
       sport: workoutForm.value.sport,
       date: workoutForm.value.date || undefined,
-      goalId: workoutForm.value.goalId || undefined,
+      goalId: workoutForm.value.goalId === NO_GOAL ? undefined : workoutForm.value.goalId || undefined,
       description: workoutForm.value.description || undefined,
       steps: workoutForm.value.steps,
     }
@@ -403,29 +446,73 @@ onMounted(() => {
       </p>
 
       <div class="flex flex-col divide-y divide-default">
-        <div v-for="g in goals" :key="g.id" class="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="font-medium">{{ g.name }}</span>
-              <UBadge color="neutral" variant="subtle" size="sm">{{ g.priority }}</UBadge>
+        <div v-for="g in goals" :key="g.id" class="py-3 first:pt-0 last:pb-0">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-medium">{{ g.name }}</span>
+                <UBadge color="neutral" variant="subtle" size="sm">{{ g.priority }}</UBadge>
+              </div>
+              <p class="text-sm text-muted">
+                {{ g.sport }}
+                <template v-if="g.eventDate">· {{ g.eventDate }}</template>
+                <template v-if="g.targetDistanceM">· {{ (g.targetDistanceM / 1000).toFixed(0) }} km</template>
+                <template v-if="g.targetElevationM">· {{ g.targetElevationM.toFixed(0) }} m climbing</template>
+              </p>
             </div>
-            <p class="text-sm text-muted">
-              {{ g.sport }}
-              <template v-if="g.eventDate">· {{ g.eventDate }}</template>
-              <template v-if="g.targetDistanceM">· {{ (g.targetDistanceM / 1000).toFixed(0) }} km</template>
-              <template v-if="g.targetElevationM">· {{ g.targetElevationM.toFixed(0) }} m climbing</template>
-            </p>
+            <div class="flex items-center gap-1 shrink-0">
+              <UButton
+                v-if="g.eventDate"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                :icon="periodizationOpenFor === g.id ? 'i-lucide-chevron-up' : 'i-lucide-calendar-range'"
+                :loading="loadingPeriodization === g.id"
+                @click="togglePeriodization(g)"
+              >
+                Plan
+              </UButton>
+              <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" size="sm" @click="openEditGoal(g)" />
+              <UButton
+                icon="i-lucide-trash-2"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                :loading="deletingGoal === g.id"
+                @click="deleteGoal(g)"
+              />
+            </div>
           </div>
-          <div class="flex items-center gap-1 shrink-0">
-            <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" size="sm" @click="openEditGoal(g)" />
-            <UButton
-              icon="i-lucide-trash-2"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :loading="deletingGoal === g.id"
-              @click="deleteGoal(g)"
-            />
+
+          <div v-if="periodizationOpenFor === g.id && periodizationPlan" class="mt-3 overflow-x-auto">
+            <p class="text-xs text-muted mb-2">
+              A periodized structure only — phases and a weekly hours target, not yet concrete sessions.
+              <template v-if="!(profile.hoursPerAvailableDay && profile.availableDays?.length)">
+                Fill in your fitness profile's hours and available days below for real hour targets.
+              </template>
+            </p>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-muted">
+                  <th class="pr-4 py-1">Week</th>
+                  <th class="pr-4 py-1">Starts</th>
+                  <th class="pr-4 py-1">Phase</th>
+                  <th class="pr-4 py-1">Target</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="w in periodizationPlan.weeks" :key="w.number" class="border-t border-default">
+                  <td class="pr-4 py-1">{{ w.number }}</td>
+                  <td class="pr-4 py-1">{{ w.startDate }}</td>
+                  <td class="pr-4 py-1">
+                    <UBadge :color="phaseColor(w.phase)" variant="subtle" size="sm">
+                      {{ w.phase }}{{ w.recovery ? ' · recovery' : '' }}
+                    </UBadge>
+                  </td>
+                  <td class="pr-4 py-1">{{ w.targetHours ? `${w.targetHours.toFixed(1)}h` : '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
