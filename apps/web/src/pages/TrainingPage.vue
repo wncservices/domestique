@@ -1,13 +1,17 @@
 <script setup lang="ts">
 // The workout builder, per docs/training-plan.md: a manual step editor
-// (Phase A), and metrics pulled back from Garmin/Wahoo to compute a
-// CTL/ATL/TSB fitness history (Phase B1) — plus pushing a built workout
-// straight to a connected Garmin account (Phase B2, Connect's own JSON
-// schema; see internal/garmin's own doc comment for why that is not the
-// same FIT bytes the download button below produces). Still no
-// AI-generated plan and no Wahoo structured-workout push — the latter
-// needs a further-gated partner entitlement this deployment does not
-// have; see the plan doc's own "Structured workouts and the providers".
+// (Phase A), metrics pulled back from Garmin/Wahoo to compute a
+// CTL/ATL/TSB fitness history (Phase B1), pushing a built workout straight
+// to a connected Garmin account (Phase B2, Connect's own JSON schema; see
+// internal/garmin's own doc comment for why that is not the same FIT
+// bytes the download button below produces), a deterministic periodized
+// plan that adapts to actual training history (Phases C/D, see
+// internal/periodization and internal/adapter), and an optional LLM layer
+// on top of that deterministic engine — plan explanations and free-text
+// profile suggestions (Phase E, internal/narration), never a replacement
+// for it. Still no Wahoo structured-workout push — it needs a
+// further-gated partner entitlement this deployment does not have; see
+// the plan doc's own "Structured workouts and the providers".
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
@@ -16,6 +20,7 @@ import type {
   FitnessResponse,
   Goal,
   GoalPriority,
+  Me,
   PeriodizationPhase,
   PeriodizationPlan,
   RiderProfile,
@@ -28,6 +33,12 @@ import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 
 const toast = useToast()
 const { canSyncGarmin } = useLibrary()
+
+// --- me: only fetched here for narrationEnabled, so the page can avoid
+// offering a button that would 412 — see meDTO's own doc comment on the
+// server for why this is the established shape for every optional
+// feature flag, not just auth. ---
+const me = ref<Me | null>(null)
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -170,6 +181,29 @@ async function scheduleGoal(g: Goal) {
   }
 }
 
+// --- plan explanation: Phase E's read-only half — see internal/narration ---
+
+const explainingGoal = ref('')
+const explanationFor = ref<string | null>(null)
+const explanationText = ref('')
+
+async function explainPlan(g: Goal) {
+  if (explanationFor.value === g.id) {
+    explanationFor.value = null
+    return
+  }
+  explainingGoal.value = g.id
+  try {
+    const result = await api.explainPlan(g.id)
+    explanationText.value = result.text
+    explanationFor.value = g.id
+  } catch (err) {
+    toast.add({ title: 'Could not explain this plan', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    explainingGoal.value = ''
+  }
+}
+
 const phaseColors: Record<PeriodizationPhase, 'neutral' | 'info' | 'warning' | 'primary'> = {
   base: 'neutral',
   build: 'info',
@@ -229,11 +263,41 @@ async function saveProfile() {
   savingProfile.value = true
   try {
     profile.value = await api.saveRiderProfile(profile.value)
+    proposalExplanation.value = ''
     toast.add({ title: 'Training profile saved', icon: 'i-lucide-user', color: 'success' })
   } catch (err) {
     toast.add({ title: 'Could not save your training profile', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     savingProfile.value = false
+  }
+}
+
+// --- free-text profile suggestion: Phase E's other half — see
+// internal/narration.ProposeProfileChange. Deliberately never saved on its
+// own: the response only fills the form fields above, and the rider still
+// has to press Save profile themselves, same as an FTP estimate never
+// applying itself. ---
+
+const profileNote = ref('')
+const proposingProfileChange = ref(false)
+const proposalExplanation = ref('')
+
+async function proposeProfileChange() {
+  if (!profileNote.value.trim()) return
+  proposingProfileChange.value = true
+  try {
+    const proposal = await api.proposeProfileChange(profileNote.value)
+    profile.value = {
+      ...profile.value,
+      availableDays: proposal.availableDays ?? profile.value.availableDays,
+      hoursPerAvailableDay: proposal.hoursPerAvailableDay ?? profile.value.hoursPerAvailableDay,
+    }
+    proposalExplanation.value = proposal.explanation ?? ''
+    toast.add({ title: 'Suggested a profile change', description: 'Review the fields below, then Save profile if this looks right.', icon: 'i-lucide-sparkles' })
+  } catch (err) {
+    toast.add({ title: 'Could not suggest a change', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    proposingProfileChange.value = false
   }
 }
 
@@ -445,6 +509,7 @@ async function syncMetrics() {
 const hasFitnessHistory = computed(() => (fitness.value?.snapshots.length ?? 0) > 0)
 
 onMounted(() => {
+  api.me().then((m) => { me.value = m }).catch(() => {})
   loadGoals()
   loadProfile()
   loadWorkouts()
@@ -459,7 +524,7 @@ onMounted(() => {
       variant="subtle"
       icon="i-lucide-info"
       title="Manual builder"
-      description="Build a workout by hand, then push it to a connected Garmin account or download it as a FIT file for any device over USB. Wahoo structured-workout push and AI-generated plans are not built yet — see docs/training-plan.md."
+      description="Build a workout by hand, then push it to a connected Garmin account or download it as a FIT file for any device over USB. Wahoo structured-workout push is not built yet — see docs/training-plan.md."
     />
 
     <!-- Fitness -->
@@ -581,18 +646,33 @@ onMounted(() => {
                 </tr>
               </tbody>
             </table>
-            <UButton
-              v-if="profile.hoursPerAvailableDay && profile.availableDays?.length"
-              class="mt-3"
-              color="primary"
-              variant="soft"
-              size="sm"
-              icon="i-lucide-calendar-plus"
-              :loading="schedulingGoal === g.id"
-              @click="scheduleGoal(g)"
-            >
-              Schedule this week's workouts
-            </UButton>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <UButton
+                v-if="profile.hoursPerAvailableDay && profile.availableDays?.length"
+                color="primary"
+                variant="soft"
+                size="sm"
+                icon="i-lucide-calendar-plus"
+                :loading="schedulingGoal === g.id"
+                @click="scheduleGoal(g)"
+              >
+                Schedule this week's workouts
+              </UButton>
+              <UButton
+                v-if="me?.narrationEnabled"
+                color="neutral"
+                variant="soft"
+                size="sm"
+                :icon="explanationFor === g.id ? 'i-lucide-chevron-up' : 'i-lucide-sparkles'"
+                :loading="explainingGoal === g.id"
+                @click="explainPlan(g)"
+              >
+                Explain this plan
+              </UButton>
+            </div>
+            <p v-if="explanationFor === g.id" class="mt-2 text-sm text-muted italic">
+              {{ explanationText }}
+            </p>
           </div>
         </div>
       </div>
@@ -688,6 +768,27 @@ onMounted(() => {
           </UButton>
         </div>
       </UFormField>
+      <div v-if="me?.narrationEnabled" class="mt-4 pt-4 border-t border-default">
+        <p class="text-sm font-medium mb-1">Tell us about an upcoming change</p>
+        <p class="text-xs text-muted mb-2">
+          e.g. "I'm traveling for work next week, only free on the weekend" — suggests changes to the fields
+          above for you to review. Nothing is saved until you press Save profile.
+        </p>
+        <div class="flex gap-2">
+          <UInput v-model="profileNote" class="w-full" placeholder="I'm traveling next week..." />
+          <UButton
+            icon="i-lucide-sparkles"
+            color="neutral"
+            variant="soft"
+            :loading="proposingProfileChange"
+            :disabled="!profileNote.trim()"
+            @click="proposeProfileChange"
+          >
+            Suggest changes
+          </UButton>
+        </div>
+        <p v-if="proposalExplanation" class="mt-2 text-sm text-muted italic">{{ proposalExplanation }}</p>
+      </div>
       <div class="mt-4">
         <UButton icon="i-lucide-save" :loading="savingProfile" @click="saveProfile">Save profile</UButton>
       </div>

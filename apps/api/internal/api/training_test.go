@@ -14,6 +14,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -28,6 +29,7 @@ type trainingHarness struct {
 	client *http.Client
 	base   string
 	store  *workout.DB
+	srv    *api.Server
 }
 
 func newTrainingHarness(t *testing.T) *trainingHarness {
@@ -56,7 +58,7 @@ func newTrainingHarness(t *testing.T) *trainingHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore}
+	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, srv: srv}
 }
 
 // seedSession records one completed session directly through the store —
@@ -597,6 +599,130 @@ func TestGoalPeriodizationRejectsAGoalWithNoEventDate(t *testing.T) {
 	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// fakeAnthropic stands in for the real Anthropic API — see
+// internal/narration's own test file for the lower-level client tests;
+// these exercise the wiring through the HTTP handlers instead.
+func fakeAnthropic(t *testing.T, text string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"content":[{"type":"text","text":%q}]}`, text)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestExplainPlanRequiresNarrationConfigured(t *testing.T) {
+	h := newTrainingHarness(t)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, time.Now().AddDate(0, 0, 70).Format("2006-01-02")))
+	g := decodeGoal(t, resp)
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/explain", "")
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("status = %d, want 412 (no ANTHROPIC_API_KEY configured)", resp.StatusCode)
+	}
+}
+
+func TestExplainPlanReturnsTheModelsTextAndIsOwnerOnly(t *testing.T) {
+	h := newTrainingHarness(t)
+	fake := fakeAnthropic(t, "This week starts your base phase — steady, easy miles.")
+	client := narration.New("test-key")
+	client.APIBase = fake.URL
+	h.srv.Narration = client
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, time.Now().AddDate(0, 0, 70).Format("2006-01-02")))
+	g := decodeGoal(t, resp)
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/explain", "")
+	if resp.StatusCode != http.StatusOK {
+		body := readAll(t, resp)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Text != "This week starts your base phase — steady, easy miles." {
+		t.Errorf("text = %q", out.Text)
+	}
+
+	resp = h.as("other", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/explain", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestProposeProfileChangeRequiresNarrationConfigured(t *testing.T) {
+	h := newTrainingHarness(t)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/profile/propose", `{"note":"traveling next week"}`)
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("status = %d, want 412 (no ANTHROPIC_API_KEY configured)", resp.StatusCode)
+	}
+}
+
+func TestProposeProfileChangeRequiresANote(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.srv.Narration = narration.New("test-key")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/profile/propose", `{"note":""}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestProposeProfileChangeNeverWritesTheStoredProfile is the important
+// safety property here: a proposal is a suggestion for the frontend to
+// show, never a write — only handleSaveRiderProfile may change what is
+// actually stored. See handleProposeProfileChange's own doc comment.
+func TestProposeProfileChangeNeverWritesTheStoredProfile(t *testing.T) {
+	h := newTrainingHarness(t)
+	fake := fakeAnthropic(t, `{"availableDays": ["sat", "sun"], "hoursPerAvailableDay": 4, "explanation": "Only weekends free while traveling."}`)
+	client := narration.New("test-key")
+	client.APIBase = fake.URL
+	h.srv.Narration = client
+
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/profile/propose",
+		`{"note":"I'm traveling for work next week, only free on the weekend"}`)
+	if resp.StatusCode != http.StatusOK {
+		body := readAll(t, resp)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	var proposal struct {
+		AvailableDays        []string `json:"availableDays"`
+		HoursPerAvailableDay float64  `json:"hoursPerAvailableDay"`
+		Explanation          string   `json:"explanation"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&proposal); err != nil {
+		t.Fatal(err)
+	}
+	if len(proposal.AvailableDays) != 2 || proposal.HoursPerAvailableDay != 4 || proposal.Explanation == "" {
+		t.Errorf("proposal = %+v", proposal)
+	}
+
+	// The stored profile must be exactly what was saved before — untouched
+	// by the proposal above.
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	var stored struct {
+		AvailableDays        []string `json:"availableDays"`
+		HoursPerAvailableDay float64  `json:"hoursPerAvailableDay"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.AvailableDays) != 4 || stored.HoursPerAvailableDay != 1.5 {
+		t.Errorf("stored profile changed: %+v", stored)
 	}
 }
 

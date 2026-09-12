@@ -17,6 +17,8 @@ import type {
   CreateGoalRequest,
   UpdateGoalRequest,
   PeriodizationPlan,
+  PlanExplanation,
+  ProfileChangeProposal,
   ScheduledWorkouts,
   KomootImportResult,
   KomootConnection,
@@ -653,6 +655,11 @@ export const api = {
    *  already covered for this goal is skipped rather than duplicated. */
   scheduleGoal: (id: string) =>
     request<ScheduledWorkouts>(`/api/training/goals/${encodeURIComponent(id)}/schedule`, { method: 'POST' }),
+  /** Asks internal/narration for a few plain-language sentences about this
+   *  same reconciled plan — 412 when the deployment has no
+   *  ANTHROPIC_API_KEY configured, 502 when the model call itself fails. */
+  explainPlan: (id: string) =>
+    request<PlanExplanation>(`/api/training/goals/${encodeURIComponent(id)}/explain`),
 
   riderProfile: () => request<RiderProfile>('/api/training/profile'),
   saveRiderProfile: (req: RiderProfile) =>
@@ -660,6 +667,15 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
+    }),
+  /** Turns a free-text note into a suggested profile edit — a proposal
+   *  only, never written server-side. Fill the response into the profile
+   *  form and let the rider Save it themselves, same as an FTP estimate. */
+  proposeProfileChange: (note: string) =>
+    request<ProfileChangeProposal>('/api/training/profile/propose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
     }),
 
   workouts: () => request<Workout[]>('/api/training/workouts'),
