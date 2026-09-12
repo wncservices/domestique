@@ -17,6 +17,7 @@ import type {
   CreateGoalRequest,
   UpdateGoalRequest,
   PeriodizationPlan,
+  ScheduledWorkouts,
   KomootImportResult,
   KomootConnection,
   KomootDuplicateGroup,
@@ -647,6 +648,11 @@ export const api = {
    *  own event date, sized to the rider's own saved profile. */
   goalPeriodization: (id: string) =>
     request<PeriodizationPlan>(`/api/training/goals/${encodeURIComponent(id)}/periodization`),
+  /** Turns the periodization plan's current week into concrete, dated
+   *  workouts and persists them — safe to call more than once, a date
+   *  already covered for this goal is skipped rather than duplicated. */
+  scheduleGoal: (id: string) =>
+    request<ScheduledWorkouts>(`/api/training/goals/${encodeURIComponent(id)}/schedule`, { method: 'POST' }),
 
   riderProfile: () => request<RiderProfile>('/api/training/profile'),
   saveRiderProfile: (req: RiderProfile) =>

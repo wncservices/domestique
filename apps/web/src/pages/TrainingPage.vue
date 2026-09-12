@@ -151,6 +151,25 @@ async function togglePeriodization(g: Goal) {
   }
 }
 
+const schedulingGoal = ref('')
+
+async function scheduleGoal(g: Goal) {
+  schedulingGoal.value = g.id
+  try {
+    const result = await api.scheduleGoal(g.id)
+    if (result.created.length > 0) {
+      toast.add({ title: `Scheduled ${result.created.length} workout${result.created.length === 1 ? '' : 's'} this week`, icon: 'i-lucide-calendar-check' })
+      await loadWorkouts()
+    } else {
+      toast.add({ title: 'This week is already scheduled', icon: 'i-lucide-calendar-check' })
+    }
+  } catch (err) {
+    toast.add({ title: 'Could not schedule this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    schedulingGoal.value = ''
+  }
+}
+
 const phaseColors: Record<PeriodizationPhase, 'neutral' | 'info' | 'warning' | 'primary'> = {
   base: 'neutral',
   build: 'info',
@@ -513,6 +532,18 @@ onMounted(() => {
                 </tr>
               </tbody>
             </table>
+            <UButton
+              v-if="profile.hoursPerAvailableDay && profile.availableDays?.length"
+              class="mt-3"
+              color="primary"
+              variant="soft"
+              size="sm"
+              icon="i-lucide-calendar-plus"
+              :loading="schedulingGoal === g.id"
+              @click="scheduleGoal(g)"
+            >
+              Schedule this week's workouts
+            </UButton>
           </div>
         </div>
       </div>

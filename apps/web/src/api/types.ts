@@ -859,3 +859,13 @@ export interface PeriodizationPlan {
   goalId: string
   weeks: PeriodizationWeek[]
 }
+
+/** POST /api/training/goals/{id}/schedule's response — see
+ *  internal/scheduler: the plan week containing today, turned into real
+ *  persisted Workout rows. skipped counts dates that already had a workout
+ *  for this goal and were left alone rather than duplicated. */
+export interface ScheduledWorkouts {
+  goalId: string
+  created: Workout[]
+  skipped?: number
+}
