@@ -25,7 +25,15 @@ const router = createRouter({
     { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
     { path: '/people', component: () => import('./pages/PeoplePage.vue') },
     { path: '/crews', component: () => import('./pages/CrewsPage.vue') },
-    { path: '/training', component: () => import('./pages/TrainingPage.vue') },
+    {
+      path: '/training',
+      component: () => import('./pages/TrainingPage.vue'),
+      children: [
+        { path: '', redirect: 'fitness' },
+        { path: 'fitness', component: () => import('./pages/TrainingFitnessPage.vue') },
+        { path: 'plan', component: () => import('./pages/TrainingPlanPage.vue') },
+      ],
+    },
     // Not part of "the app" the way the rest of these are — a share
     // recipient may hold no role in this deployment at all. See App.vue's
     // own isSharedRoutePage for why it renders outside the usual shell.

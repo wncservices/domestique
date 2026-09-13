@@ -104,6 +104,15 @@ const links = computed(() =>
   ].filter((link) => link !== null),
 )
 
+// Training is the one section with sub-routes of its own
+// (/training/fitness, /training/plan — see TrainingPage.vue's own doc
+// comment) — an exact match would leave the top-level "Training" link
+// unhighlighted on either of them, so a section link is active on its own
+// path or anything nested under it.
+function isActiveSection(to: string): boolean {
+  return route.path === to || route.path.startsWith(`${to}/`)
+}
+
 // /sso/callback redirects here with ?notice=... whenever the issuer denied
 // a login on purpose mid-provisioning (a linked identity, a brand-new
 // signup's roles just granted — see sso.go's own withNotice) rather than
@@ -244,8 +253,8 @@ onMounted(() => {
             :key="link.to"
             :to="link.to"
             :icon="link.icon"
-            :color="$route.path === link.to ? 'primary' : 'neutral'"
-            :variant="$route.path === link.to ? 'subtle' : 'ghost'"
+            :color="isActiveSection(link.to) ? 'primary' : 'neutral'"
+            :variant="isActiveSection(link.to) ? 'subtle' : 'ghost'"
             size="sm"
             :aria-label="link.label"
             :class="['shrink-0', link.to === '/settings' ? 'sm:ml-auto' : '']"
