@@ -249,3 +249,81 @@ func TestSyncTrainingMetricsWithNoConnectionsSyncsNothing(t *testing.T) {
 		t.Errorf("synced = %d, want 0", out.Synced)
 	}
 }
+
+// TestSyncEstimatesFTPFromAQualifyingSession drives internal/fitnesstest's
+// FTP estimate end to end: a rider with no FTP on file syncs a real
+// 20-minute qualifying effort and gets one, marked as an estimate.
+func TestSyncEstimatesFTPFromAQualifyingSession(t *testing.T) {
+	fake := &fakeGarmin{activities: []garmin.Activity{
+		{ID: "7001", Name: "20-min Test", Sport: "cycling", StartTime: time.Date(2026, 3, 4, 7, 0, 0, 0, time.UTC),
+			DurationSeconds: 20 * 60, AvgPowerWatts: 280},
+	}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		Synced            int     `json:"synced"`
+		EstimatedFTPWatts float64 `json:"estimatedFtpWatts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	wantFTP := 280 * 0.95
+	if out.Synced != 1 || out.EstimatedFTPWatts != wantFTP {
+		t.Fatalf("out = %+v, want synced=1 estimatedFtpWatts=%v", out, wantFTP)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	var profile struct {
+		FTPWatts     float64 `json:"ftpWatts"`
+		FTPEstimated bool    `json:"ftpEstimated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile.FTPWatts != wantFTP || !profile.FTPEstimated {
+		t.Errorf("profile = %+v, want ftpWatts=%v ftpEstimated=true", profile, wantFTP)
+	}
+}
+
+// TestSyncNeverOverwritesARiderConfirmedFTP is the safety property the
+// whole estimation feature depends on: once a rider has saved their own
+// FTP through the profile form, no sync — however good the data — may
+// silently change it.
+func TestSyncNeverOverwritesARiderConfirmedFTP(t *testing.T) {
+	fake := &fakeGarmin{activities: []garmin.Activity{
+		{ID: "7002", Name: "20-min Test", Sport: "cycling", StartTime: time.Date(2026, 3, 4, 7, 0, 0, 0, time.UTC),
+			DurationSeconds: 20 * 60, AvgPowerWatts: 400}, // would estimate to 380 — well above the rider's own number
+	}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"ftpWatts":250}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save profile: status = %d", resp.StatusCode)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		EstimatedFTPWatts float64 `json:"estimatedFtpWatts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.EstimatedFTPWatts != 0 {
+		t.Errorf("estimatedFtpWatts = %v, want 0 (a rider-confirmed FTP must not be touched)", out.EstimatedFTPWatts)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	var profile struct {
+		FTPWatts     float64 `json:"ftpWatts"`
+		FTPEstimated bool    `json:"ftpEstimated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile.FTPWatts != 250 || profile.FTPEstimated {
+		t.Errorf("profile = %+v, want the rider's own ftpWatts=250, ftpEstimated=false, untouched", profile)
+	}
+}

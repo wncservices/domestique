@@ -705,4 +705,18 @@ export const api = {
    *  was computed from — read-only, reflects whatever syncTrainingMetrics
    *  last recorded. */
   fitness: () => request<FitnessResponse>('/api/training/fitness'),
+  /** Builds and persists the classic 20-minute FTP test as an ordinary,
+   *  plannable workout — see internal/fitnesstest for why this is the
+   *  answer when there isn't enough synced data to estimate FTP from. */
+  buildFTPTest: () => request<Workout>('/api/training/tests/ftp', { method: 'POST' }),
+  /** Builds and persists a max-heart-rate field test workout. Unlike FTP,
+   *  max HR is never auto-estimated from synced data at all (see
+   *  internal/fitnesstest's own doc comment) — this is the only path to a
+   *  number here besides the rider typing one in. */
+  buildMaxHRTest: (sport: Sport) =>
+    request<Workout>('/api/training/tests/max-hr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sport }),
+    }),
 }

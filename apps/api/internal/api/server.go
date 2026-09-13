@@ -420,6 +420,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/training/workouts/{id}/push/garmin", s.handlePushWorkoutToGarmin)
 	mux.HandleFunc("POST /api/training/sync", s.handleSyncTrainingMetrics)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
+	mux.HandleFunc("POST /api/training/tests/ftp", s.handleBuildFTPTest)
+	mux.HandleFunc("POST /api/training/tests/max-hr", s.handleBuildMaxHRTest)
 
 	// Not under /api: these are browser navigations (redirects, a form post
 	// from the SPA), not JSON calls, so they sit outside the /api/ 404

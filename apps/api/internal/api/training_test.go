@@ -580,3 +580,55 @@ func TestGoalScheduleIsIdempotentPerDate(t *testing.T) {
 		t.Errorf("total workouts after two schedules = %d, want %d (no duplicates)", len(listed), len(first.Created))
 	}
 }
+
+func TestBuildFTPTestCreatesAPlannableCyclingWorkout(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/tests/ftp", "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	wk := decodeWorkoutOut(t, resp)
+	if wk.Name != "FTP Test (20-minute)" || len(wk.Steps) == 0 {
+		t.Errorf("workout = %+v", wk)
+	}
+
+	// It is a real, listed workout — not a one-off response only.
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "")
+	var listed []scheduledWorkoutOut
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Errorf("listed workouts = %d, want 1", len(listed))
+	}
+}
+
+func TestBuildMaxHRTestDefaultsToCyclingAndAcceptsRunning(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/tests/max-hr", "")
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var cycling struct {
+		Sport string `json:"sport"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&cycling); err != nil {
+		t.Fatal(err)
+	}
+	if cycling.Sport != "cycling" {
+		t.Errorf("default sport = %q, want cycling", cycling.Sport)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/tests/max-hr", `{"sport":"running"}`)
+	var running struct {
+		Sport string `json:"sport"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&running); err != nil {
+		t.Fatal(err)
+	}
+	if running.Sport != "running" {
+		t.Errorf("sport = %q, want running", running.Sport)
+	}
+}

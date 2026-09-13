@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
@@ -119,6 +120,7 @@ func goalDTOFrom(g workout.Goal) goalDTO {
 
 type riderProfileDTO struct {
 	FTPWatts              float64  `json:"ftpWatts,omitempty"`
+	FTPEstimated          bool     `json:"ftpEstimated,omitempty"`
 	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm,omitempty"`
 	MaxHR                 int      `json:"maxHr,omitempty"`
 	RestingHR             int      `json:"restingHr,omitempty"`
@@ -130,7 +132,7 @@ type riderProfileDTO struct {
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 	return riderProfileDTO{
-		FTPWatts: p.FTPWatts, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
+		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
 		MaxHR: p.MaxHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
 		UpdatedAt: p.UpdatedAt,
@@ -444,6 +446,61 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, scheduledWorkoutsDTO{GoalID: g.ID, Created: created, Skipped: skipped})
 }
 
+// handleBuildFTPTest and handleBuildMaxHRTest each create one ordinary,
+// plannable workout from internal/fitnesstest's fixed protocol — the "set
+// up a test" answer for a rider whose profile has no number to estimate
+// from (FTP) or that this app never attempts to estimate at all (max HR;
+// see fitnesstest's own doc comment for why). Deliberately no
+// already-exists check the way handleGoalSchedule has for a scheduled
+// date: this is an explicit, one-off rider action with no natural key to
+// dedupe against, the same as clicking "Build a workout" by hand — asking
+// for a second one is not a mistake to guard against.
+func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+	req := fitnesstest.FTPTestWorkout()
+	req.Rider = rider
+	wk, err := s.Training.CreateWorkout(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.logger().Info("ftp test workout built", "rider", rider, "id", wk.ID)
+	writeJSON(w, http.StatusCreated, workoutDTOFrom(wk))
+}
+
+func (s *Server) handleBuildMaxHRTest(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	var body struct {
+		Sport string `json:"sport"`
+	}
+	// A missing or invalid body just means "no sport stated" — this
+	// endpoint takes no other input, so decode errors fall back to the
+	// zero value rather than rejecting the request. model.Sport("")
+	// defaults sensibly wherever it flows next (see model.Sport's own
+	// zero-value handling elsewhere in this codebase).
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body)
+	sport := model.SportCycling
+	if body.Sport == string(model.SportRunning) {
+		sport = model.SportRunning
+	}
+
+	rider := auth.FromContext(r.Context()).User
+	req := fitnesstest.MaxHRTestWorkout(sport)
+	req.Rider = rider
+	wk, err := s.Training.CreateWorkout(r.Context(), req)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.logger().Info("max hr test workout built", "rider", rider, "id", wk.ID)
+	writeJSON(w, http.StatusCreated, workoutDTOFrom(wk))
+}
+
 func (s *Server) failTrainingLookup(w http.ResponseWriter, err error) {
 	if errors.Is(err, workout.ErrGoalNotFound) || errors.Is(err, workout.ErrWorkoutNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -483,6 +540,11 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 
 	rider := auth.FromContext(r.Context()).User
 	saved, err := s.Training.SaveProfile(r.Context(), workout.RiderProfile{
+		// FTPEstimated is deliberately not read from body: this is the
+		// manual save form, and a rider willing to click Save owns
+		// whatever number sits in the field, estimated or not — see
+		// RiderProfile.FTPEstimated's own doc comment on why that flag
+		// only ever means "not yet looked at and confirmed."
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
 		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
@@ -752,6 +814,11 @@ type syncMetricsResultDTO struct {
 	// individual items: a rider whose Wahoo token expired should still get
 	// their Garmin activities recorded.
 	Warnings []string `json:"warnings,omitempty"`
+	// EstimatedFTPWatts is set only when this sync just produced a fresh
+	// FTP estimate that got saved to the rider's profile — see
+	// internal/fitnesstest.EstimateFTP and the call site below for exactly
+	// when that happens.
+	EstimatedFTPWatts float64 `json:"estimatedFtpWatts,omitempty"`
 }
 
 // handleSyncTrainingMetrics pulls recently completed activities from
@@ -848,8 +915,36 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// Refresh the FTP estimate from whatever sessions are now on file —
+	// but only into a field the rider has never confirmed by hand: 0 (never
+	// set) or FTPEstimated (a previous estimate, safe to keep refining).
+	// See RiderProfile.FTPEstimated's own doc comment for why a
+	// rider-entered value is never touched here, synced or not.
+	var estimatedFTP float64
+	if synced > 0 && (profile.FTPWatts == 0 || profile.FTPEstimated) {
+		sessions, err := s.Training.ListSessions(r.Context(), rider)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if watts, ok := fitnesstest.EstimateFTP(sessions); ok && watts != profile.FTPWatts {
+			// GetProfile returns a zero-value RiderProfile (Rider == "")
+			// when the rider has never saved one yet — has to be set back
+			// before this save, or SaveProfile refuses it as ownerless.
+			profile.Rider = rider
+			profile.FTPWatts = watts
+			profile.FTPEstimated = true
+			if _, err := s.Training.SaveProfile(r.Context(), profile); err != nil {
+				s.fail(w, err)
+				return
+			}
+			estimatedFTP = watts
+			s.logger().Info("ftp estimated from synced sessions", "rider", rider, "watts", watts)
+		}
+	}
+
 	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
-	writeJSON(w, http.StatusOK, syncMetricsResultDTO{Synced: synced, Warnings: warnings})
+	writeJSON(w, http.StatusOK, syncMetricsResultDTO{Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP})
 }
 
 type completedSessionDTO struct {

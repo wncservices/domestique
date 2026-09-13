@@ -205,6 +205,35 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("ftp_estimated defaults false and round-trips", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				saved, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 250})
+				if err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if saved.FTPEstimated {
+					t.Error("expected FTPEstimated=false by default")
+				}
+
+				estimated, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 260, FTPEstimated: true})
+				if err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if !estimated.FTPEstimated {
+					t.Error("expected FTPEstimated=true to round-trip")
+				}
+
+				fetched, _, err := db.GetProfile(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("get profile: %v", err)
+				}
+				if !fetched.FTPEstimated || fetched.FTPWatts != 260 {
+					t.Errorf("fetched = %+v, want FTPWatts=260 FTPEstimated=true", fetched)
+				}
+			})
+
 			t.Run("workout create, read, update, delete with nested steps", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()
