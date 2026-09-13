@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
@@ -307,18 +308,22 @@ type periodizationWeekDTO struct {
 	Phase       string  `json:"phase"`
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
+	Adjusted    bool    `json:"adjusted,omitempty"`
 }
 
 type periodizationPlanDTO struct {
-	GoalID string                 `json:"goalId"`
-	Weeks  []periodizationWeekDTO `json:"weeks"`
+	GoalID     string                 `json:"goalId"`
+	Weeks      []periodizationWeekDTO `json:"weeks"`
+	Adjustment float64                `json:"adjustment,omitempty"`
 }
 
 // handleGoalPeriodization computes — on the fly, nothing persisted — the
 // periodized phase structure (base/build/peak/taper, a weekly hours
-// target) between today and a goal's event date. See
-// internal/periodization's own doc comment for what this is and isn't:
-// phase/volume structure, not concrete daily workouts yet.
+// target) between today and a goal's event date, then reconciles it
+// against the rider's own completed_sessions (internal/adapter.Reconcile —
+// Phase D's adaptive-replanning loop): a rider who has been training under
+// or over what recent weeks asked for gets upcoming weeks nudged to match,
+// not a plan that keeps repeating a target already proven unrealistic.
 func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -336,10 +341,37 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	profile, _, err := s.Training.GetProfile(r.Context(), identity.User)
+	plan, _, err := s.reconciledPeriodizationPlan(r, g, identity.User)
 	if err != nil {
+		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		s.fail(w, err)
 		return
+	}
+
+	dto := periodizationPlanDTO{GoalID: plan.GoalID, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment}
+	for _, wk := range plan.Weeks {
+		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
+			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
+			Recovery: wk.Recovery, TargetHours: wk.TargetHours, Adjusted: wk.Adjusted,
+		})
+	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
+// reconciledPeriodizationPlan is the one place both handleGoalPeriodization
+// (display) and handleGoalSchedule (turning this week into real workouts)
+// build a plan, so the hours a rider sees and the hours a schedule actually
+// asks for can never drift apart from computing this two different ways.
+// Also returns the profile it loaded along the way, since every caller
+// needs it again right after (scheduler.NextWorkouts, or the DTO's own
+// "fill in your profile" hint).
+func (s *Server) reconciledPeriodizationPlan(r *http.Request, g workout.Goal, rider string) (periodization.Plan, workout.RiderProfile, error) {
+	profile, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		return periodization.Plan{}, workout.RiderProfile{}, err
 	}
 
 	plan, err := periodization.BuildPlan(g, profile, time.Now())
@@ -347,19 +379,15 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		// ErrNoEventDate/ErrEventInThePast are the only errors BuildPlan
 		// returns — both are the rider's own data being unsuitable to plan
 		// from (no event date set, or it has already passed), not a server
-		// problem.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
+		// problem. Returned as-is; the caller decides the status code.
+		return periodization.Plan{}, profile, err
 	}
 
-	dto := periodizationPlanDTO{GoalID: plan.GoalID, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks))}
-	for _, wk := range plan.Weeks {
-		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
-			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
-			Recovery: wk.Recovery, TargetHours: wk.TargetHours,
-		})
+	sessions, err := s.Training.ListSessions(r.Context(), rider)
+	if err != nil {
+		return periodization.Plan{}, profile, err
 	}
-	writeJSON(w, http.StatusOK, dto)
+	return adapter.Reconcile(g, profile, plan, sessions, time.Now()), profile, nil
 }
 
 type scheduledWorkoutsDTO struct {
@@ -370,13 +398,14 @@ type scheduledWorkoutsDTO struct {
 
 // handleGoalSchedule turns the plan week containing today into concrete,
 // dated workouts and persists them — internal/scheduler.NextWorkouts wired
-// to storage, the piece handleGoalPeriodization's own doc comment names as
-// still to come ("phase/volume structure, not concrete daily workouts
-// yet"). Safe to call more than once for the same week: a date that
-// already has a workout tagged with this goal is left alone rather than
-// duplicated, since nothing here understands *why* a workout might have
-// changed since it was generated — that is Phase D2's still-to-build
-// adapter.Reconcile, not this handler.
+// to storage, on top of the same reconciled plan handleGoalPeriodization
+// shows a rider (see reconciledPeriodizationPlan's own comment on why one
+// helper builds it for both). Safe to call more than once for the same
+// week: a date that already has a workout tagged with this goal is left
+// alone rather than duplicated — reconciliation only ever changes weeks
+// that have not been scheduled yet (see adapter.Reconcile's own doc
+// comment), so there is no already-scheduled week here whose workouts it
+// would need to revise.
 func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -394,18 +423,16 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile, _, err := s.Training.GetProfile(r.Context(), identity.User)
+	plan, profile, err := s.reconciledPeriodizationPlan(r, g, identity.User)
 	if err != nil {
+		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
+			// ErrNoEventDate/ErrEventInThePast — see handleGoalPeriodization's
+			// own comment on why these are the rider's own data, not a server
+			// problem.
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		s.fail(w, err)
-		return
-	}
-
-	plan, err := periodization.BuildPlan(g, profile, time.Now())
-	if err != nil {
-		// ErrNoEventDate/ErrEventInThePast — see handleGoalPeriodization's
-		// own comment on why these are the rider's own data, not a server
-		// problem.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 

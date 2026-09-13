@@ -210,14 +210,14 @@ func TestShortPlansDegradeGracefully(t *testing.T) {
 
 func TestMondayOfAlignsToCalendarWeek(t *testing.T) {
 	// 2026-01-08 is a Thursday; the Monday of that week is 2026-01-05.
-	got := mondayOf(mustDate(t, "2026-01-08"))
+	got := MondayOf(mustDate(t, "2026-01-08"))
 	want := mustDate(t, "2026-01-05")
 	if !got.Equal(want) {
-		t.Errorf("mondayOf(Thursday) = %s, want %s", got.Format("2006-01-02"), want.Format("2006-01-02"))
+		t.Errorf("MondayOf(Thursday) = %s, want %s", got.Format("2006-01-02"), want.Format("2006-01-02"))
 	}
 	// A Monday maps to itself.
 	monday := mustDate(t, "2026-01-05")
-	if got := mondayOf(monday); !got.Equal(monday) {
-		t.Errorf("mondayOf(Monday) = %s, want itself", got.Format("2006-01-02"))
+	if got := MondayOf(monday); !got.Equal(monday) {
+		t.Errorf("MondayOf(Monday) = %s, want itself", got.Format("2006-01-02"))
 	}
 }

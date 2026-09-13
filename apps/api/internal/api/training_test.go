@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -25,6 +27,7 @@ type trainingHarness struct {
 	t      *testing.T
 	client *http.Client
 	base   string
+	store  *workout.DB
 }
 
 func newTrainingHarness(t *testing.T) *trainingHarness {
@@ -53,7 +56,23 @@ func newTrainingHarness(t *testing.T) *trainingHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &trainingHarness{t: t, client: server.Client(), base: server.URL}
+	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore}
+}
+
+// seedSession records one completed session directly through the store —
+// there is no API endpoint for backdating arbitrary training history, only
+// the real Garmin/Wahoo sync path (see metricsSyncHarness for exercising
+// that instead); reconciliation tests need dates precisely aligned to a
+// goal's own periodization weeks, which only direct storage access allows.
+func (h *trainingHarness) seedSession(rider, date string, hours float64) {
+	h.t.Helper()
+	_, err := h.store.UpsertSession(context.Background(), workout.UpsertSessionRequest{
+		Rider: rider, Provider: "garmin", ExternalID: date, Sport: "cycling",
+		Date: date, DurationSeconds: hours * 3600,
+	})
+	if err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func (h *trainingHarness) as(user, groups, method, path, body string) *http.Response {
@@ -437,6 +456,119 @@ func TestGoalPeriodization(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
 	}
+}
+
+// reconcileLookbackWeeks mirrors internal/adapter's own unexported
+// lookbackWeeks constant — duplicated here rather than exported purely for
+// a test, since this is the one place outside that package that needs it
+// (to seed sessions on the exact calendar weeks Reconcile will judge).
+const reconcileLookbackWeeks = 3
+
+// TestGoalPeriodizationReconcilesAgainstRecentTrainingHistory drives
+// internal/adapter.Reconcile end to end through the API: a rider who
+// trained far under what recent weeks asked for should see upcoming weeks
+// eased off, and the current week left exactly as periodization.BuildPlan
+// computed it.
+func TestGoalPeriodizationReconcilesAgainstRecentTrainingHistory(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	eventDate := time.Now().AddDate(0, 0, 300).Format("2006-01-02") // long enough for a real Base phase
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
+	g := decodeGoal(t, resp)
+
+	resp = h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1,"availableDays":["mon","wed","fri"]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save profile: status = %d", resp.StatusCode)
+	}
+
+	// A baseline read with no training history at all: no adjustment yet.
+	baseline := decodePeriodization(t, h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", ""))
+	if baseline.Adjustment != 0 && baseline.Adjustment != 1 {
+		t.Fatalf("baseline Adjustment = %v, want 1 (or omitted as 0) before any sessions exist", baseline.Adjustment)
+	}
+
+	// Reconstruct the same historical weeks internal/adapter.Reconcile will
+	// judge, and record a session on today (establishing a real data feed —
+	// see Reconcile's own doc comment on why zero sessions ever is treated
+	// differently from zero sessions in specific weeks) but nothing at all
+	// in those historical weeks: heavily undertrained.
+	goal := workout.Goal{EventDate: g.EventDate}
+	profile := workout.RiderProfile{HoursPerAvailableDay: 1, AvailableDays: []string{"mon", "wed", "fri"}}
+	pastAnchor := periodization.MondayOf(time.Now()).AddDate(0, 0, -7*reconcileLookbackWeeks)
+	histPlan, err := periodization.BuildPlan(goal, profile, pastAnchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(histPlan.Weeks) < reconcileLookbackWeeks {
+		t.Fatalf("historical plan too short: %d weeks", len(histPlan.Weeks))
+	}
+	h.seedSession("wilant", time.Now().Format("2006-01-02"), 0.5)
+
+	adjusted := decodePeriodization(t, h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", ""))
+	if adjusted.Adjustment >= 0.99 {
+		t.Fatalf("Adjustment = %v, want a real reduction after 3 untrained weeks", adjusted.Adjustment)
+	}
+	if adjusted.Weeks[0].Adjusted {
+		t.Error("current week: Adjusted = true, want false (reconciliation never touches the current week)")
+	}
+
+	foundAdjustedFuture := false
+	for i := 1; i < len(adjusted.Weeks); i++ {
+		w := adjusted.Weeks[i]
+		if w.Phase != "base" && w.Phase != "build" {
+			continue
+		}
+		if w.Adjusted {
+			foundAdjustedFuture = true
+			if base := baseline.Weeks[i]; w.TargetHours >= base.TargetHours {
+				t.Errorf("week %d: TargetHours = %v, want less than baseline %v", i+1, w.TargetHours, base.TargetHours)
+			}
+		}
+	}
+	if !foundAdjustedFuture {
+		t.Error("expected at least one future Base/Build week marked Adjusted")
+	}
+
+	// A different rider's plan is never affected by wilant's own history.
+	resp = h.as("other", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Other Race","eventDate":%q}`, eventDate))
+	otherGoal := decodeGoal(t, resp)
+	h.as("other", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1,"availableDays":["mon","wed","fri"]}`)
+	otherPlan := decodePeriodization(t, h.as("other", "cyclists", http.MethodGet, "/api/training/goals/"+otherGoal.ID+"/periodization", ""))
+	if otherPlan.Adjustment != 0 && otherPlan.Adjustment != 1 {
+		t.Errorf("other rider Adjustment = %v, want 1 (unaffected by wilant's own training)", otherPlan.Adjustment)
+	}
+}
+
+type periodizationWeekOut struct {
+	Number      int     `json:"number"`
+	StartDate   string  `json:"startDate"`
+	Phase       string  `json:"phase"`
+	Recovery    bool    `json:"recovery"`
+	TargetHours float64 `json:"targetHours"`
+	Adjusted    bool    `json:"adjusted"`
+}
+
+type periodizationPlanOut struct {
+	GoalID     string                 `json:"goalId"`
+	Weeks      []periodizationWeekOut `json:"weeks"`
+	Adjustment float64                `json:"adjustment"`
+}
+
+func decodePeriodization(t *testing.T, resp *http.Response) periodizationPlanOut {
+	t.Helper()
+	if resp.StatusCode != http.StatusOK {
+		body := readAll(t, resp)
+		t.Fatalf("periodization: status = %d, body = %s", resp.StatusCode, body)
+	}
+	var out periodizationPlanOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func TestPushWorkoutToGarminRequiresAConnection(t *testing.T) {

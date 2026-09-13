@@ -549,6 +549,12 @@ onMounted(() => {
               <template v-if="!(profile.hoursPerAvailableDay && profile.availableDays?.length)">
                 Fill in your fitness profile's hours and available days below for real hour targets.
               </template>
+              <template v-else-if="periodizationPlan.adjustment && periodizationPlan.adjustment < 0.99">
+                Upcoming weeks eased off to {{ Math.round(periodizationPlan.adjustment * 100) }}% of plan based on recent training.
+              </template>
+              <template v-else-if="periodizationPlan.adjustment && periodizationPlan.adjustment > 1.01">
+                Upcoming weeks raised to {{ Math.round(periodizationPlan.adjustment * 100) }}% of plan based on recent training.
+              </template>
             </p>
             <table class="w-full text-sm">
               <thead>
@@ -568,7 +574,10 @@ onMounted(() => {
                       {{ w.phase }}{{ w.recovery ? ' · recovery' : '' }}
                     </UBadge>
                   </td>
-                  <td class="pr-4 py-1">{{ w.targetHours ? `${w.targetHours.toFixed(1)}h` : '—' }}</td>
+                  <td class="pr-4 py-1">
+                    {{ w.targetHours ? `${w.targetHours.toFixed(1)}h` : '—' }}
+                    <UBadge v-if="w.adjusted" color="info" variant="subtle" size="sm" class="ml-1">adjusted</UBadge>
+                  </td>
                 </tr>
               </tbody>
             </table>
