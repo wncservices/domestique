@@ -853,6 +853,9 @@ export interface SyncMetricsResult {
   /** Present only when this sync just produced a fresh FTP estimate and
    *  saved it to the rider's profile. */
   estimatedFtpWatts?: number
+  /** Present only when this sync just filled in a previously-unset resting
+   *  heart rate from Garmin's wellness data. */
+  restingHrBpm?: number
 }
 
 export type PeriodizationPhase = 'base' | 'build' | 'peak' | 'taper'

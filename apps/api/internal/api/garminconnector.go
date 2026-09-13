@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
@@ -60,6 +61,12 @@ type GarminConnector interface {
 	// research and its own client method rather than reusing the FIT course
 	// path).
 	PushWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, name, sport string, steps []fitworkout.Step) (string, error)
+	// RestingHeartRate returns a rider's resting heart rate for one date
+	// from Connect's own wellness data — see garmin.Client.RestingHeartRate's
+	// own doc comment for why this is a real overnight measurement, not a
+	// workout's average HR, and why a zero result is a normal "no reading"
+	// rather than a failure.
+	RestingHeartRate(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (int, error)
 }
 
 // LiveGarmin is the real connector: it talks to Garmin.
@@ -172,4 +179,14 @@ func (l LiveGarmin) PushWorkout(ctx context.Context, consumer GarminConsumer, se
 		return "", err
 	}
 	return client.CreateWorkout(ctx, name, sport, steps)
+}
+
+// RestingHeartRate fetches one day's resting heart rate from a connected
+// account's wellness data.
+func (l LiveGarmin) RestingHeartRate(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (int, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return 0, err
+	}
+	return client.RestingHeartRate(ctx, date)
 }

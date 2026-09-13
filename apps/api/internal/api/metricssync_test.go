@@ -360,3 +360,112 @@ func TestSyncNeverOverwritesARiderConfirmedFTP(t *testing.T) {
 		t.Errorf("profile = %+v, want the rider's own ftpWatts=250, ftpEstimated=false, untouched", profile)
 	}
 }
+
+// TestSyncFillsInRestingHeartRateFromGarmin drives the wellness pull end to
+// end: a rider with no resting HR on file syncs, Garmin's wellness data has
+// one, and it lands in the profile and the response.
+func TestSyncFillsInRestingHeartRateFromGarmin(t *testing.T) {
+	fake := &fakeGarmin{restingHR: 47}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		RestingHRBpm int `json:"restingHrBpm"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.RestingHRBpm != 47 {
+		t.Fatalf("restingHrBpm = %d, want 47", out.RestingHRBpm)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	var profile struct {
+		RestingHR int `json:"restingHr"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile.RestingHR != 47 {
+		t.Errorf("profile restingHr = %d, want 47", profile.RestingHR)
+	}
+}
+
+// TestSyncNeverOverwritesARiderEnteredRestingHeartRate is the same safety
+// property TestSyncNeverOverwritesARiderConfirmedFTP checks for FTP, for
+// resting HR: once a rider has typed in their own number, a sync — however
+// fresh Garmin's wellness data — must not silently replace it.
+func TestSyncNeverOverwritesARiderEnteredRestingHeartRate(t *testing.T) {
+	fake := &fakeGarmin{restingHR: 47}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"restingHr":52}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save profile: status = %d", resp.StatusCode)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		RestingHRBpm int `json:"restingHrBpm"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.RestingHRBpm != 0 {
+		t.Errorf("restingHrBpm = %d, want 0 (a rider-entered resting HR must not be touched)", out.RestingHRBpm)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	var profile struct {
+		RestingHR int `json:"restingHr"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		t.Fatal(err)
+	}
+	if profile.RestingHR != 52 {
+		t.Errorf("profile restingHr = %d, want the rider's own 52, untouched", profile.RestingHR)
+	}
+}
+
+// TestSyncGarminRestingHeartRateFailureIsNotAWarning is the asymmetry this
+// feature deliberately avoids repeating: the wellness endpoint is an
+// undocumented, unverified-against-a-live-account best effort (see
+// garmin.Client.RestingHeartRate's own doc comment), so a lookup failure
+// must not surface as a "Sync warning" the way a real provider failure does
+// — that would be exactly the noise fixed for a rider with no Wahoo.
+func TestSyncGarminRestingHeartRateFailureIsNotAWarning(t *testing.T) {
+	fake := &fakeGarmin{
+		activities:   []garmin.Activity{{ID: "5003", StartTime: time.Date(2026, 3, 4, 7, 0, 0, 0, time.UTC), DurationSeconds: 1800}},
+		restingHRErr: fmt.Errorf("garmin: the daily summary request returned 404"),
+	}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	// Deliberately no h.seedWahooSession: this rider has no Wahoo connected
+	// either, which is its own already-fixed non-warning case — checking
+	// specifically for a resting-HR-shaped warning below, rather than
+	// asserting zero warnings overall, keeps this test's pass/fail
+	// independent of that separate fix.
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		Synced       int      `json:"synced"`
+		Warnings     []string `json:"warnings"`
+		RestingHRBpm int      `json:"restingHrBpm"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Synced != 1 {
+		t.Errorf("synced = %d, want 1 (the activity still recorded)", out.Synced)
+	}
+	if out.RestingHRBpm != 0 {
+		t.Errorf("restingHrBpm = %d, want 0", out.RestingHRBpm)
+	}
+	for _, warning := range out.Warnings {
+		if strings.Contains(warning, "resting") || strings.Contains(warning, "heart rate") || strings.Contains(warning, "wellness") {
+			t.Errorf("warnings = %v, want none mentioning resting heart rate — a failed best-effort lookup is not a sync failure", out.Warnings)
+		}
+	}
+}
