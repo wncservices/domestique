@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -1052,7 +1053,16 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 	if s.Wahoo != nil {
 		token, err := s.wahooAccessToken(r.Context(), rider)
 		if err != nil {
-			warnings = append(warnings, "wahoo: "+err.Error())
+			// A rider who has simply never connected Wahoo is not a sync
+			// failure — the same non-event garminSessionForRider's own `ok`
+			// return already treats it as for Garmin, above. Only a real
+			// problem (an expired refresh token, an unreadable stored
+			// session, a misconfigured deployment) is worth a warning; every
+			// "Sync now" click otherwise re-surfaces "has not connected
+			// Wahoo" forever for a rider who only uses Garmin.
+			if !errors.Is(err, providerlink.ErrNotFound) {
+				warnings = append(warnings, "wahoo: "+err.Error())
+			}
 		} else {
 			workouts, err := s.Wahoo.ListWorkouts(r.Context(), token, 1, 30)
 			if err != nil {
