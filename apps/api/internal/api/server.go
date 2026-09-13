@@ -35,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
@@ -192,6 +193,14 @@ type Server struct {
 	// in runServe.
 	Training *workout.DB
 
+	// Narration is Phase E of docs/training-plan.md — an LLM layer that
+	// explains a plan and proposes profile edits from free text, strictly
+	// on top of the deterministic engine, never in place of it (see
+	// internal/narration's own doc comment). Nil means ANTHROPIC_API_KEY is
+	// not set — the same "quietly unavailable" shape Wahoo/Garmin/Komoot
+	// already use for their own optional credentials.
+	Narration *narration.Client
+
 	// Shares holds share links to a single route — see internal/routeshare.
 	// Same no-nil-degradation story as Crew and Schedule: no external
 	// credential, only the database every deployment already has, wired
@@ -269,6 +278,14 @@ type Server struct {
 	// went over. rateLimitGeocodeGlobal always checks the same fixed key,
 	// deliberately not one per rider, so every caller shares one bucket.
 	GeocodeGlobalLimiter *ratelimit.Limiter
+
+	// NarrationLimiter throttles the plan-explanation and profile-proposal
+	// endpoints by rider — both proxy an authenticated request straight
+	// through to a real, per-token-billed LLM API, the same "unlimited,
+	// authenticated-only proxy against a third party" shape ConnectLimiter
+	// exists to close for Garmin/Komoot, here for a cost that scales with
+	// how much text is requested rather than a sign-in attempt.
+	NarrationLimiter *ratelimit.Limiter
 
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
@@ -409,8 +426,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/training/goals/{id}", s.handleDeleteGoal)
 	mux.HandleFunc("GET /api/training/goals/{id}/periodization", s.handleGoalPeriodization)
 	mux.HandleFunc("POST /api/training/goals/{id}/schedule", s.handleGoalSchedule)
+	mux.HandleFunc("GET /api/training/goals/{id}/explain", s.handleExplainPlan)
 	mux.HandleFunc("GET /api/training/profile", s.handleGetRiderProfile)
 	mux.HandleFunc("PUT /api/training/profile", s.handleSaveRiderProfile)
+	mux.HandleFunc("POST /api/training/profile/propose", s.handleProposeProfileChange)
 	mux.HandleFunc("GET /api/training/workouts", s.handleListWorkouts)
 	mux.HandleFunc("POST /api/training/workouts", s.handleCreateWorkout)
 	mux.HandleFunc("GET /api/training/workouts/{id}", s.handleGetWorkout)
@@ -730,6 +749,13 @@ type meDTO struct {
 	// — a Google-linked rider has no password here to change.
 	CanEditName       bool `json:"canEditName"`
 	CanChangePassword bool `json:"canChangePassword"`
+	// NarrationEnabled tells the training page whether to offer plan
+	// explanations and free-text profile suggestions at all — see
+	// internal/narration's own doc comment. False whenever the deployment
+	// has no ANTHROPIC_API_KEY configured, the same "let the frontend avoid
+	// offering a button that would 412" reasoning this DTO's own doc
+	// comment already states for every other feature flag here.
+	NarrationEnabled bool `json:"narrationEnabled"`
 }
 
 // handleMe tells the UI who it is talking to and what to show. Without it the
@@ -755,6 +781,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		LogoutURL:         s.authenticator().LogoutURL(),
 		CanEditName:       canEditName,
 		CanChangePassword: canEditName && id.Provider() == "auth0",
+		NarrationEnabled:  s.Narration != nil,
 	})
 }
 
@@ -3545,6 +3572,15 @@ func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool
 // budget than rateLimitRouteBuilder's.
 func (s *Server) rateLimitGeocode(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.GeocodeLimiter, rider, "too many location searches — wait a few minutes and try again")
+}
+
+// rateLimitNarration enforces NarrationLimiter for a rider's own
+// plan-explanation or profile-proposal calls — see that field's own doc
+// comment for why an LLM call gets the same "authenticated proxy to a
+// costed third party" treatment as Garmin/Komoot sign-in and route-builder
+// preview.
+func (s *Server) rateLimitNarration(w http.ResponseWriter, rider string) bool {
+	return rateLimit(w, s.NarrationLimiter, rider, "too many requests — wait a few minutes and try again")
 }
 
 // rateLimitGeocodeGlobal enforces GeocodeGlobalLimiter — see that field's

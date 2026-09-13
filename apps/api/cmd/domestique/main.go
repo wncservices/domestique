@@ -40,6 +40,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
@@ -850,6 +851,12 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// GeocodeGlobalLimiter's own doc comment for why this is a
 		// separate, shared budget from GeocodeLimiter's per-rider one.
 		GeocodeGlobalLimiter: ratelimit.New(50, time.Minute),
+		// LLM calls cost real money per request, same "authenticated proxy
+		// to a costed third party" shape as ConnectLimiter — a bit more
+		// generous than that one since reading a plan explanation or asking
+		// for a profile suggestion is an occasional action, not a sign-in
+		// retry loop.
+		NarrationLimiter: ratelimit.New(20, 15*time.Minute),
 	}
 
 	// No config toggle, no credential — geocoding.NominatimClient needs
@@ -1058,6 +1065,19 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	} else {
 		log.Info("no wahoo client credentials in the environment",
 			"hint", "set WAHOO_CLIENT_ID and WAHOO_CLIENT_SECRET to let riders connect Wahoo")
+	}
+
+	// Narration (docs/training-plan.md's Phase E) is entirely optional and
+	// additive — a deployment with no ANTHROPIC_API_KEY simply does not
+	// offer plan explanations or free-text profile proposals, the same
+	// "quietly unavailable" shape Wahoo just above uses for its own
+	// optional credential.
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		srv.Narration = narration.New(apiKey)
+		log.Info("narration enabled")
+	} else {
+		log.Info("no ANTHROPIC_API_KEY in the environment",
+			"hint", "set ANTHROPIC_API_KEY to enable plan explanations and profile suggestions")
 	}
 
 	if cfg.Komoot.Enabled {

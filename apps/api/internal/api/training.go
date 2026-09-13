@@ -473,6 +473,60 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, scheduledWorkoutsDTO{GoalID: g.ID, Created: created, Skipped: skipped})
 }
 
+// handleExplainPlan asks internal/narration for a plain-language summary
+// of a goal's reconciled periodization plan — Phase E of
+// docs/training-plan.md, layered on top of the exact same plan
+// handleGoalPeriodization already computes and shows as a table (via
+// reconciledPeriodizationPlan), never a second source of truth for it.
+func (s *Server) handleExplainPlan(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	if s.Narration == nil {
+		s.logger().Warn("plan explanation requested but no ANTHROPIC_API_KEY is configured")
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no narration configured",
+		})
+		return
+	}
+
+	id := r.PathValue("id")
+	g, err := s.Training.GetGoal(r.Context(), id)
+	if err != nil {
+		s.failTrainingLookup(w, err)
+		return
+	}
+	identity := auth.FromContext(r.Context())
+	if !isOwnTraining(identity, g.Rider) {
+		s.forbidTraining(w, r)
+		return
+	}
+	if !s.rateLimitNarration(w, identity.User) {
+		return
+	}
+
+	plan, _, err := s.reconciledPeriodizationPlan(r, g, identity.User)
+	if err != nil {
+		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+
+	text, err := s.Narration.ExplainPlan(r.Context(), g, plan)
+	if err != nil {
+		// Contained the same way Komoot's own undocumented-API failures are
+		// (see AGENTS.md's Komoot section): a third-party outage degrades
+		// this one optional feature, not the rest of the page.
+		s.logger().Warn("plan explanation failed", "goal", g.ID, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not reach the narration service"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"text": text})
+}
+
 // handleBuildFTPTest and handleBuildMaxHRTest each create one ordinary,
 // plannable workout from internal/fitnesstest's fixed protocol — the "set
 // up a test" answer for a rider whose profile has no number to estimate
@@ -583,6 +637,66 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 
 	s.logger().Info("rider profile saved", "rider", rider)
 	writeJSON(w, http.StatusOK, profileDTOFrom(saved))
+}
+
+type profileProposalDTO struct {
+	AvailableDays        []string `json:"availableDays,omitempty"`
+	HoursPerAvailableDay float64  `json:"hoursPerAvailableDay,omitempty"`
+	Explanation          string   `json:"explanation,omitempty"`
+}
+
+// handleProposeProfileChange turns a rider's free-text note (e.g. "I'm
+// traveling next week") into a suggested edit to their own profile —
+// Phase E's other half. Deliberately never writes the stored profile
+// itself: the response is a proposal for the frontend to fill into the
+// ordinary profile form, and only an explicit save through
+// handleSaveRiderProfile makes it real — the same "propose, never
+// silently apply" rule internal/fitnesstest's own FTP estimate follows,
+// and the same reason handleSaveRiderProfile itself never reads
+// FTPEstimated from the request body.
+func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	if s.Narration == nil {
+		s.logger().Warn("profile change proposal requested but no ANTHROPIC_API_KEY is configured")
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no narration configured",
+		})
+		return
+	}
+
+	var body struct {
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil || strings.TrimSpace(body.Note) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a note is required"})
+		return
+	}
+
+	rider := auth.FromContext(r.Context()).User
+	if !s.rateLimitNarration(w, rider) {
+		return
+	}
+
+	profile, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	proposal, err := s.Narration.ProposeProfileChange(r.Context(), body.Note, profile)
+	if err != nil {
+		s.logger().Warn("profile change proposal failed", "rider", rider, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not reach the narration service"})
+		return
+	}
+
+	s.logger().Info("profile change proposed", "rider", rider)
+	writeJSON(w, http.StatusOK, profileProposalDTO{
+		AvailableDays: proposal.AvailableDays, HoursPerAvailableDay: proposal.HoursPerAvailableDay,
+		Explanation: proposal.Explanation,
+	})
 }
 
 // ---------- Workouts ----------

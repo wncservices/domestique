@@ -83,6 +83,10 @@ export interface Me {
    *  (email+password) connection rather than a social one like Google,
    *  which has no password here to reset. */
   canChangePassword: boolean
+  /** Whether the training page may offer plan explanations and free-text
+   *  profile suggestions — false whenever the deployment has no
+   *  ANTHROPIC_API_KEY configured (see internal/narration). */
+  narrationEnabled: boolean
 }
 
 /** One MFA factor tied to the signed-in rider's own Auth0 account — gated
@@ -887,4 +891,23 @@ export interface ScheduledWorkouts {
   goalId: string
   created: Workout[]
   skipped?: number
+}
+
+/** GET /api/training/goals/{id}/explain's response — see
+ *  internal/narration.ExplainPlan. A plain-language summary of the same
+ *  reconciled plan the periodization table already shows; 412 instead of
+ *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
+export interface PlanExplanation {
+  text: string
+}
+
+/** POST /api/training/profile/propose's response — see
+ *  internal/narration.ProposeProfileChange. A *suggestion* only: nothing
+ *  server-side is written by this call. The frontend fills these values
+ *  into the profile form for the rider to review and Save themselves,
+ *  same as an FTP estimate never applying itself. */
+export interface ProfileChangeProposal {
+  availableDays?: string[]
+  hoursPerAvailableDay?: number
+  explanation?: string
 }
