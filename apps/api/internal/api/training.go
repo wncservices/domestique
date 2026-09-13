@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -341,7 +342,7 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	plan, _, err := s.reconciledPeriodizationPlan(r, g, identity.User)
+	plan, _, err := s.reconciledPeriodizationPlan(r.Context(), g, identity.User)
 	if err != nil {
 		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -361,15 +362,18 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, dto)
 }
 
-// reconciledPeriodizationPlan is the one place both handleGoalPeriodization
-// (display) and handleGoalSchedule (turning this week into real workouts)
-// build a plan, so the hours a rider sees and the hours a schedule actually
-// asks for can never drift apart from computing this two different ways.
-// Also returns the profile it loaded along the way, since every caller
-// needs it again right after (scheduler.NextWorkouts, or the DTO's own
-// "fill in your profile" hint).
-func (s *Server) reconciledPeriodizationPlan(r *http.Request, g workout.Goal, rider string) (periodization.Plan, workout.RiderProfile, error) {
-	profile, _, err := s.Training.GetProfile(r.Context(), rider)
+// reconciledPeriodizationPlan is the one place handleGoalPeriodization
+// (display), handleGoalSchedule (turning this week into real workouts, via
+// scheduleGoal) and AutoScheduleTick (the unattended weekly equivalent of
+// handleGoalSchedule — see autoschedule.go) all build a plan, so the hours
+// a rider sees and the hours a schedule actually asks for can never drift
+// apart from computing this two different ways. Takes a bare
+// context.Context rather than *http.Request so the background job can call
+// it too, with no request of its own to hold one. Also returns the profile
+// it loaded along the way, since every caller needs it again right after
+// (scheduler.NextWorkouts, or the DTO's own "fill in your profile" hint).
+func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal, rider string) (periodization.Plan, workout.RiderProfile, error) {
+	profile, _, err := s.Training.GetProfile(ctx, rider)
 	if err != nil {
 		return periodization.Plan{}, workout.RiderProfile{}, err
 	}
@@ -383,7 +387,7 @@ func (s *Server) reconciledPeriodizationPlan(r *http.Request, g workout.Goal, ri
 		return periodization.Plan{}, profile, err
 	}
 
-	sessions, err := s.Training.ListSessions(r.Context(), rider)
+	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
 		return periodization.Plan{}, profile, err
 	}
@@ -397,15 +401,9 @@ type scheduledWorkoutsDTO struct {
 }
 
 // handleGoalSchedule turns the plan week containing today into concrete,
-// dated workouts and persists them — internal/scheduler.NextWorkouts wired
-// to storage, on top of the same reconciled plan handleGoalPeriodization
-// shows a rider (see reconciledPeriodizationPlan's own comment on why one
-// helper builds it for both). Safe to call more than once for the same
-// week: a date that already has a workout tagged with this goal is left
-// alone rather than duplicated — reconciliation only ever changes weeks
-// that have not been scheduled yet (see adapter.Reconcile's own doc
-// comment), so there is no already-scheduled week here whose workouts it
-// would need to revise.
+// dated workouts and persists them — a thin HTTP wrapper around
+// scheduleGoal, which does the actual work and is shared with
+// AutoScheduleTick's unattended equivalent (see autoschedule.go).
 func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -423,7 +421,7 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, profile, err := s.reconciledPeriodizationPlan(r, g, identity.User)
+	created, skipped, err := s.scheduleGoal(r.Context(), g)
 	if err != nil {
 		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
 			// ErrNoEventDate/ErrEventInThePast — see handleGoalPeriodization's
@@ -436,16 +434,41 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requests, err := scheduler.NextWorkouts(plan, profile, identity.User, g.ID, g.Sport, time.Now())
+	dtos := make([]workoutDTO, 0, len(created))
+	for _, wk := range created {
+		dtos = append(dtos, workoutDTOFrom(wk))
+	}
+	s.logger().Info("workouts scheduled", "goal", g.ID, "rider", g.Rider, "created", len(dtos), "skipped", skipped)
+	writeJSON(w, http.StatusOK, scheduledWorkoutsDTO{GoalID: g.ID, Created: dtos, Skipped: skipped})
+}
+
+// scheduleGoal turns g's current plan week into concrete, dated workouts
+// and persists them — internal/scheduler.NextWorkouts wired to storage, on
+// top of the same reconciled plan handleGoalPeriodization shows a rider
+// (see reconciledPeriodizationPlan's own comment on why one helper builds
+// it for both). Safe to call more than once for the same week: a date
+// that already has a workout tagged with this goal is left alone rather
+// than duplicated — reconciliation only ever changes weeks that have not
+// been scheduled yet (see adapter.Reconcile's own doc comment), so there
+// is no already-scheduled week here whose workouts it would need to
+// revise. Shared by handleGoalSchedule (a rider's own "Schedule this
+// week's workouts" click) and AutoScheduleTick (the unattended weekly
+// equivalent, see autoschedule.go) — one implementation, so a rider gets
+// exactly the same workouts whichever path creates them.
+func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Workout, int, error) {
+	plan, profile, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, 0, err
 	}
 
-	existing, err := s.Training.ListWorkouts(r.Context(), identity.User)
+	requests, err := scheduler.NextWorkouts(plan, profile, g.Rider, g.ID, g.Sport, time.Now())
 	if err != nil {
-		s.fail(w, err)
-		return
+		return nil, 0, err
+	}
+
+	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
+	if err != nil {
+		return nil, 0, err
 	}
 	alreadyScheduled := make(map[string]bool, len(existing))
 	for _, wk := range existing {
@@ -454,23 +477,20 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created := make([]workoutDTO, 0, len(requests))
+	created := make([]workout.Workout, 0, len(requests))
 	skipped := 0
 	for _, req := range requests {
 		if alreadyScheduled[req.Date] {
 			skipped++
 			continue
 		}
-		wk, err := s.Training.CreateWorkout(r.Context(), req)
+		wk, err := s.Training.CreateWorkout(ctx, req)
 		if err != nil {
-			s.fail(w, err)
-			return
+			return created, skipped, err
 		}
-		created = append(created, workoutDTOFrom(wk))
+		created = append(created, wk)
 	}
-
-	s.logger().Info("workouts scheduled", "goal", g.ID, "rider", identity.User, "created", len(created), "skipped", skipped)
-	writeJSON(w, http.StatusOK, scheduledWorkoutsDTO{GoalID: g.ID, Created: created, Skipped: skipped})
+	return created, skipped, nil
 }
 
 // handleExplainPlan asks internal/narration for a plain-language summary
@@ -505,7 +525,7 @@ func (s *Server) handleExplainPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, _, err := s.reconciledPeriodizationPlan(r, g, identity.User)
+	plan, _, err := s.reconciledPeriodizationPlan(r.Context(), g, identity.User)
 	if err != nil {
 		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

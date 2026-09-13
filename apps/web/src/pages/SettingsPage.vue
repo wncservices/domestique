@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type {
+  AutoScheduleSetting,
   AutoSyncSetting,
   BasemapUpdate,
   GarminConnection,
@@ -250,6 +251,14 @@ async function loadConnection() {
 const autoSync = ref<AutoSyncSetting | null>(null)
 const togglingAutoSync = ref(false)
 
+// --- auto-schedule: same deployment-wide shape as auto-sync, for training
+// instead of routes — every rider's current plan week gets scheduled into
+// real workouts on its own, with nobody clicking "Schedule this week's
+// workouts" ---
+
+const autoSchedule = ref<AutoScheduleSetting | null>(null)
+const togglingAutoSchedule = ref(false)
+
 // --- basemap: the tiles component's map data, updated from a button
 // instead of the pmtiles extract + kubectl cp runbook ---
 
@@ -323,6 +332,44 @@ async function toggleAutoSync(enabled: boolean) {
   }
 }
 
+async function loadAutoSchedule() {
+  if (!canManageSettings.value) return
+  try {
+    autoSchedule.value = await api.autoSchedule()
+  } catch (err) {
+    toast.add({
+      title: 'Could not read the auto-schedule setting',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  }
+}
+
+async function toggleAutoSchedule(enabled: boolean) {
+  togglingAutoSchedule.value = true
+  try {
+    autoSchedule.value = await api.setAutoSchedule(enabled)
+    toast.add({
+      title: enabled ? 'Auto-schedule turned on' : 'Auto-schedule turned off',
+      description: enabled
+        ? "Every rider's current plan week will be scheduled into real workouts on its own from now on."
+        : 'Riders will need to click "Schedule this week\'s workouts" themselves again.',
+      icon: 'i-lucide-check',
+      color: 'success',
+    })
+  } catch (err) {
+    toast.add({
+      title: 'Could not change auto-schedule',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    togglingAutoSchedule.value = false
+  }
+}
+
 async function loadGarmin() {
   if (!canManageAccounts.value) return
   try {
@@ -367,6 +414,7 @@ onMounted(async () => {
     loadWahoo(),
     loadMfa(),
     loadAutoSync(),
+    loadAutoSchedule(),
     pollBasemapWhileRunning(),
   ])
 })
@@ -521,6 +569,32 @@ onMounted(async () => {
       </label>
       <p v-if="autoSync.updatedBy" class="mt-2 text-xs text-dimmed">
         Last changed by {{ autoSync.updatedBy }}.
+      </p>
+    </UCard>
+
+    <UCard v-if="autoSchedule?.canManage" variant="outline">
+      <template #header>
+        <h2 class="flex items-center gap-2 font-medium text-highlighted">
+          <UIcon name="i-lucide-calendar-clock" />
+          Auto-schedule
+        </h2>
+        <p class="text-sm text-muted">
+          Whether every rider's current training-plan week gets scheduled into real workouts on
+          its own — for every rider with a goal and a filled-in fitness profile, without anyone
+          visiting the Training page and clicking "Schedule this week's workouts".
+        </p>
+      </template>
+
+      <label class="flex w-fit items-center gap-2 text-sm text-toned">
+        <USwitch
+          :model-value="autoSchedule.enabled"
+          :loading="togglingAutoSchedule"
+          @update:model-value="toggleAutoSchedule"
+        />
+        {{ autoSchedule.enabled ? 'On' : 'Off' }}
+      </label>
+      <p v-if="autoSchedule.updatedBy" class="mt-2 text-xs text-dimmed">
+        Last changed by {{ autoSchedule.updatedBy }}.
       </p>
     </UCard>
 

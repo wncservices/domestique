@@ -384,6 +384,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/settings/auto-sync", s.handleAutoSync)
 	mux.HandleFunc("PUT /api/settings/auto-sync", s.handleSetAutoSync)
+	mux.HandleFunc("GET /api/settings/auto-schedule", s.handleAutoSchedule)
+	mux.HandleFunc("PUT /api/settings/auto-schedule", s.handleSetAutoSchedule)
 
 	mux.HandleFunc("GET /api/settings/basemap", s.handleBasemap)
 	mux.HandleFunc("POST /api/settings/basemap/update", s.handleBasemapUpdate)

@@ -160,6 +160,42 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("ListGoalsWithEventDate spans every rider and skips goals with no event date", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				_, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Someday Race"})
+				if err != nil {
+					t.Fatalf("create no-date goal: %v", err)
+				}
+				dated1, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Local Century", EventDate: "2026-11-01"})
+				if err != nil {
+					t.Fatalf("create wilant's dated goal: %v", err)
+				}
+				dated2, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "other", Name: "Gran Fondo", EventDate: "2026-08-01"})
+				if err != nil {
+					t.Fatalf("create other's dated goal: %v", err)
+				}
+
+				all, err := db.ListGoalsWithEventDate(ctx)
+				if err != nil {
+					t.Fatalf("ListGoalsWithEventDate: %v", err)
+				}
+				ids := map[string]bool{}
+				for _, g := range all {
+					if g.EventDate == "" {
+						t.Errorf("goal %q has no event date, should have been filtered out", g.ID)
+					}
+					ids[g.ID] = true
+				}
+				if !ids[dated1.ID] || !ids[dated2.ID] {
+					t.Errorf("ids = %v, want both %q and %q (across both riders)", ids, dated1.ID, dated2.ID)
+				}
+				if len(all) != 2 {
+					t.Errorf("len(all) = %d, want 2 (the no-date goal excluded)", len(all))
+				}
+			})
+
 			t.Run("rider profile is get-or-empty then upsert", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()

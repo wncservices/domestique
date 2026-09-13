@@ -176,6 +176,40 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 	return goals, rows.Err()
 }
 
+// ListGoalsWithEventDate returns every goal, across every rider, that has
+// an event date set — the input the automated weekly scheduler (see
+// api.AutoScheduleTick) needs: a goal with no event date can never build a
+// periodization.Plan in the first place (periodization.ErrNoEventDate), so
+// filtering here rather than in the caller keeps that once-obvious fact in
+// one place instead of every caller re-deriving it.
+func (d *DB) ListGoalsWithEventDate(ctx context.Context) ([]Goal, error) {
+	rows, err := d.db.QueryContext(ctx, d.query(`
+        SELECT id, rider, name, sport, event_date, priority,
+               target_distance_m, target_elevation_m, notes, created_at, updated_at
+        FROM goals WHERE event_date <> '' ORDER BY event_date, name`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var goals []Goal
+	for rows.Next() {
+		var (
+			g        Goal
+			sport    string
+			priority string
+		)
+		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			return nil, err
+		}
+		g.Sport = model.Sport(sport)
+		g.Priority = Priority(priority)
+		goals = append(goals, g)
+	}
+	return goals, rows.Err()
+}
+
 func (d *DB) GetGoal(ctx context.Context, id string) (Goal, error) {
 	var (
 		g        Goal
