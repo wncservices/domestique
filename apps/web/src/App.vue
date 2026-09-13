@@ -98,7 +98,10 @@ const links = computed(() =>
       ? { to: '/build', label: 'Build route', icon: 'i-lucide-pencil-ruler' }
       : null,
     canManageCrews.value ? { to: '/crews', label: 'Crews', icon: 'i-lucide-users-round' } : null,
-    canManageTraining.value ? { to: '/training', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
+    // Straight to the Fitness sub-page rather than the bare /training that
+    // redirects there — isActiveSection below still matches this link on
+    // either sub-page, so it does not change what "active" means.
+    canManageTraining.value ? { to: '/training/fitness', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
     canManagePeople.value ? { to: '/people', label: 'People', icon: 'i-lucide-users' } : null,
     { to: '/settings', label: 'Settings', icon: 'i-lucide-settings' },
   ].filter((link) => link !== null),
@@ -106,11 +109,14 @@ const links = computed(() =>
 
 // Training is the one section with sub-routes of its own
 // (/training/fitness, /training/plan — see TrainingPage.vue's own doc
-// comment) — an exact match would leave the top-level "Training" link
-// unhighlighted on either of them, so a section link is active on its own
-// path or anything nested under it.
+// comment), sharing this single nav entry — an exact match against its
+// `to` would leave "Training" unhighlighted on whichever sub-page the link
+// itself does not point at. Every other link still wants an exact match:
+// Library's `to` is '/', and a prefix check there would make it "active"
+// on literally every route.
 function isActiveSection(to: string): boolean {
-  return route.path === to || route.path.startsWith(`${to}/`)
+  if (to.startsWith('/training/')) return route.path.startsWith('/training/')
+  return route.path === to
 }
 
 // /sso/callback redirects here with ?notice=... whenever the issuer denied
