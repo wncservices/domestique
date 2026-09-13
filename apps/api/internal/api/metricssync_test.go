@@ -250,6 +250,39 @@ func TestSyncTrainingMetricsWithNoConnectionsSyncsNothing(t *testing.T) {
 	}
 }
 
+// TestSyncTrainingMetricsRiderWithNoWahooGetsNoWarning is the asymmetry bug
+// this test guards: garminSessionForRider already treats "not connected" as
+// a quiet no-op (its own `ok` return), but wahooAccessToken returns a real
+// error for the same case, and handleSyncTrainingMetrics used to turn any
+// Wahoo error — including "has not connected Wahoo" — into a warning. A
+// rider who simply never linked Wahoo would get that warning on every single
+// "Sync now" click, forever, which reads as a broken deployment rather than
+// the normal state it actually is.
+func TestSyncTrainingMetricsRiderWithNoWahooGetsNoWarning(t *testing.T) {
+	fake := &fakeGarmin{activities: []garmin.Activity{
+		{ID: "5002", Name: "Endurance Ride", Sport: "cycling", StartTime: time.Date(2026, 3, 4, 7, 0, 0, 0, time.UTC),
+			DurationSeconds: 3600, DistanceM: 30000, AvgHR: 140, AvgPowerWatts: 200},
+	}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	// Deliberately no h.seedWahooSession("wilant") — this rider only uses Garmin.
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		Synced   int      `json:"synced"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Synced != 1 {
+		t.Errorf("synced = %d, want 1 (garmin alone)", out.Synced)
+	}
+	if len(out.Warnings) != 0 {
+		t.Errorf("warnings = %v, want none — not connecting Wahoo is not a sync failure", out.Warnings)
+	}
+}
+
 // TestSyncEstimatesFTPFromAQualifyingSession drives internal/fitnesstest's
 // FTP estimate end to end: a rider with no FTP on file syncs a real
 // 20-minute qualifying effort and gets one, marked as an estimate.
