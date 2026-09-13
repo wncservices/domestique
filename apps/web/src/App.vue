@@ -98,11 +98,26 @@ const links = computed(() =>
       ? { to: '/build', label: 'Build route', icon: 'i-lucide-pencil-ruler' }
       : null,
     canManageCrews.value ? { to: '/crews', label: 'Crews', icon: 'i-lucide-users-round' } : null,
-    canManageTraining.value ? { to: '/training', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
+    // Straight to the Fitness sub-page rather than the bare /training that
+    // redirects there — isActiveSection below still matches this link on
+    // either sub-page, so it does not change what "active" means.
+    canManageTraining.value ? { to: '/training/fitness', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
     canManagePeople.value ? { to: '/people', label: 'People', icon: 'i-lucide-users' } : null,
     { to: '/settings', label: 'Settings', icon: 'i-lucide-settings' },
   ].filter((link) => link !== null),
 )
+
+// Training is the one section with sub-routes of its own
+// (/training/fitness, /training/plan — see TrainingPage.vue's own doc
+// comment), sharing this single nav entry — an exact match against its
+// `to` would leave "Training" unhighlighted on whichever sub-page the link
+// itself does not point at. Every other link still wants an exact match:
+// Library's `to` is '/', and a prefix check there would make it "active"
+// on literally every route.
+function isActiveSection(to: string): boolean {
+  if (to.startsWith('/training/')) return route.path.startsWith('/training/')
+  return route.path === to
+}
 
 // /sso/callback redirects here with ?notice=... whenever the issuer denied
 // a login on purpose mid-provisioning (a linked identity, a brand-new
@@ -244,8 +259,8 @@ onMounted(() => {
             :key="link.to"
             :to="link.to"
             :icon="link.icon"
-            :color="$route.path === link.to ? 'primary' : 'neutral'"
-            :variant="$route.path === link.to ? 'subtle' : 'ghost'"
+            :color="isActiveSection(link.to) ? 'primary' : 'neutral'"
+            :variant="isActiveSection(link.to) ? 'subtle' : 'ghost'"
             size="sm"
             :aria-label="link.label"
             :class="['shrink-0', link.to === '/settings' ? 'sm:ml-auto' : '']"
