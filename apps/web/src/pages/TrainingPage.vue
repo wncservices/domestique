@@ -491,11 +491,18 @@ async function syncMetrics() {
         icon: 'i-lucide-sparkles',
       })
     }
+    if (result.restingHrBpm) {
+      toast.add({
+        title: `Synced your resting heart rate: ${result.restingHrBpm} bpm`,
+        description: 'From Garmin — check your profile below and adjust if it looks off.',
+        icon: 'i-lucide-heart-pulse',
+      })
+    }
     for (const warning of result.warnings ?? []) {
       toast.add({ title: 'Sync warning', description: warning, icon: 'i-lucide-triangle-alert', color: 'warning' })
     }
     await loadFitness()
-    if (result.estimatedFtpWatts) await loadProfile()
+    if (result.estimatedFtpWatts || result.restingHrBpm) await loadProfile()
   } catch (err) {
     toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {

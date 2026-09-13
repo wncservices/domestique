@@ -78,6 +78,12 @@ type fakeGarmin struct {
 	pushedWorkoutSteps []fitworkout.Step
 	pushedWorkoutID    string
 	pushWorkoutErr     error
+
+	// restingHR is what RestingHeartRate hands back for every date asked
+	// (a plain int rather than a map — no test here needs to vary it by
+	// date), and restingHRErr what it fails with instead.
+	restingHR    int
+	restingHRErr error
 }
 
 func (f *fakeGarmin) ListActivities(_ context.Context, _ api.GarminConsumer, session garmin.Session) ([]garmin.Activity, error) {
@@ -95,6 +101,11 @@ func (f *fakeGarmin) PushWorkout(_ context.Context, _ api.GarminConsumer, sessio
 		f.pushedWorkoutID = "garmin-workout-1"
 	}
 	return f.pushedWorkoutID, nil
+}
+
+func (f *fakeGarmin) RestingHeartRate(_ context.Context, _ api.GarminConsumer, session garmin.Session, _ time.Time) (int, error) {
+	f.setResumedSession(session)
+	return f.restingHR, f.restingHRErr
 }
 
 func (f *fakeGarmin) setResumedSession(session garmin.Session) {

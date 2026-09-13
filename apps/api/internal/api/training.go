@@ -960,6 +960,11 @@ type syncMetricsResultDTO struct {
 	// internal/fitnesstest.EstimateFTP and the call site below for exactly
 	// when that happens.
 	EstimatedFTPWatts float64 `json:"estimatedFtpWatts,omitempty"`
+	// RestingHRBpm is set only when this sync just filled in a
+	// previously-unset resting heart rate from Garmin's wellness data —
+	// see the call site below for why it is never used to overwrite a
+	// value the rider entered themselves.
+	RestingHRBpm int `json:"restingHrBpm,omitempty"`
 }
 
 // handleSyncTrainingMetrics pulls recently completed activities from
@@ -989,6 +994,7 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 
 	var warnings []string
 	synced := 0
+	var restingHR int
 
 	if s.Garmin != nil {
 		if session, ok := s.garminSessionForRider(rider); ok {
@@ -1011,6 +1017,33 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 						continue
 					}
 					synced++
+				}
+			}
+
+			// Resting HR is a direct overnight measurement, not something
+			// computed from ride data the way FTP is — only worth asking
+			// for at all when the rider has not already typed one in (see
+			// the SaveProfile call below for why that value is never
+			// overwritten once set). A small run of recent dates, since a
+			// day with no reading — the watch was not worn to bed — is
+			// normal and not a reason to give up after one try.
+			//
+			// Deliberately silent on failure rather than a warning: this
+			// hits an undocumented Connect endpoint with no coverage
+			// against a live account (see garmin.Client.RestingHeartRate's
+			// own doc comment), and it is an optional enhancement to an
+			// otherwise-successful sync — exactly the "the action did not
+			// happen, but nothing is broken" case AGENTS.md's own
+			// Observability checklist calls a Warn, not something that
+			// should read as a sync failure to the rider.
+			if profile.RestingHR == 0 {
+				for daysAgo := 0; daysAgo < 3 && restingHR == 0; daysAgo++ {
+					bpm, err := s.Garmin.RestingHeartRate(r.Context(), consumer, session, time.Now().AddDate(0, 0, -daysAgo))
+					if err != nil {
+						s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
+						break
+					}
+					restingHR = bpm
 				}
 			}
 		}
@@ -1056,12 +1089,29 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// Both of these fold into one SaveProfile call below rather than two —
+	// a first sync on a fresh profile can legitimately produce both a new
+	// FTP estimate and a first resting HR reading at once, and there is no
+	// reason to write the profile twice for that.
+	//
+	// GetProfile returns a zero-value RiderProfile (Rider == "") when the
+	// rider has never saved one yet — has to be set back before either
+	// mutation, or SaveProfile refuses it as ownerless.
+	var estimatedFTP float64
+	profileChanged := false
+
+	if profile.RestingHR == 0 && restingHR > 0 {
+		profile.Rider = rider
+		profile.RestingHR = restingHR
+		profileChanged = true
+		s.logger().Info("resting heart rate synced from garmin", "rider", rider, "bpm", restingHR)
+	}
+
 	// Refresh the FTP estimate from whatever sessions are now on file —
 	// but only into a field the rider has never confirmed by hand: 0 (never
 	// set) or FTPEstimated (a previous estimate, safe to keep refining).
 	// See RiderProfile.FTPEstimated's own doc comment for why a
 	// rider-entered value is never touched here, synced or not.
-	var estimatedFTP float64
 	if synced > 0 && (profile.FTPWatts == 0 || profile.FTPEstimated) {
 		sessions, err := s.Training.ListSessions(r.Context(), rider)
 		if err != nil {
@@ -1069,23 +1119,24 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if watts, ok := fitnesstest.EstimateFTP(sessions); ok && watts != profile.FTPWatts {
-			// GetProfile returns a zero-value RiderProfile (Rider == "")
-			// when the rider has never saved one yet — has to be set back
-			// before this save, or SaveProfile refuses it as ownerless.
 			profile.Rider = rider
 			profile.FTPWatts = watts
 			profile.FTPEstimated = true
-			if _, err := s.Training.SaveProfile(r.Context(), profile); err != nil {
-				s.fail(w, err)
-				return
-			}
+			profileChanged = true
 			estimatedFTP = watts
 			s.logger().Info("ftp estimated from synced sessions", "rider", rider, "watts", watts)
 		}
 	}
 
+	if profileChanged {
+		if _, err := s.Training.SaveProfile(r.Context(), profile); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
 	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
-	writeJSON(w, http.StatusOK, syncMetricsResultDTO{Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP})
+	writeJSON(w, http.StatusOK, syncMetricsResultDTO{Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR})
 }
 
 type completedSessionDTO struct {
