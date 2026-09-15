@@ -2,6 +2,7 @@ import type {
   Account,
   AppConfig,
   AssignableRole,
+  AutoScheduleSetting,
   AutoSyncSetting,
   BasemapUpdate,
   Crew,
@@ -252,6 +253,14 @@ export const api = {
   autoSync: () => request<AutoSyncSetting>('/api/settings/auto-sync'),
   setAutoSync: (enabled: boolean) =>
     request<AutoSyncSetting>('/api/settings/auto-sync', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+
+  autoSchedule: () => request<AutoScheduleSetting>('/api/settings/auto-schedule'),
+  setAutoSchedule: (enabled: boolean) =>
+    request<AutoScheduleSetting>('/api/settings/auto-schedule', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),

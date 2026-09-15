@@ -1152,6 +1152,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// of auto-sync, same shutdown signal as the HTTP server above.
 	go srv.RunAutoImportLoop(ctx)
 
+	// Schedules every rider's current plan week into real workout rows, if
+	// auto-schedule is on — the unattended equivalent of a rider clicking
+	// "Schedule this week's workouts" themselves, same shutdown signal.
+	go srv.RunAutoScheduleLoop(ctx)
+
 	log.Info("listening", "addr", addr, "library", src.Describe(),
 		"auth", authenticator.Mode())
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

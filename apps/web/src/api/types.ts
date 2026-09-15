@@ -587,6 +587,17 @@ export interface AutoSyncSetting {
   updatedAt?: string
 }
 
+/** Whether every rider's current plan week gets scheduled into real
+ *  workout rows on its own, with nobody clicking "Schedule this week's
+ *  workouts" — deployment-wide, not per-rider, same shape as
+ *  AutoSyncSetting. */
+export interface AutoScheduleSetting {
+  enabled: boolean
+  canManage: boolean
+  updatedBy?: string
+  updatedAt?: string
+}
+
 /** The tiles component's basemap.pmtiles — an admin-triggered Kubernetes Job
  *  that replaces the pmtiles extract + kubectl cp runbook with a button. */
 export interface BasemapUpdate {
