@@ -191,5 +191,9 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 				s.logger().Info("auto-scheduled workouts", "goal", g.ID, "rider", g.Rider, "created", len(created), "skipped", skipped)
 			}
 		}
+
+		// Last, so what was just scheduled goes onto the watch in the same
+		// pass rather than half an hour later.
+		s.autoPushWorkouts(ctx)
 	})
 }

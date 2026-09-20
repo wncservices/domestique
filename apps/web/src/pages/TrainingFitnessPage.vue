@@ -10,8 +10,10 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { FitnessResponse, Me, RiderProfile } from '@/api/types'
 import FitnessChart from '@/components/FitnessChart.vue'
+import { useLibrary } from '@/composables/useLibrary'
 
 const toast = useToast()
+const { canSyncGarmin } = useLibrary()
 
 // --- me: only fetched here for narrationEnabled, so the free-text
 // suggestion box can avoid offering a button that would 412 — see meDTO's
@@ -362,6 +364,19 @@ onMounted(() => {
           </UButton>
         </div>
       </UFormField>
+      <div v-if="canSyncGarmin" class="mt-4 pt-4 border-t border-default">
+        <label class="flex items-start gap-3 text-sm">
+          <USwitch v-model="profile.autoPushWorkouts" class="mt-0.5" />
+          <span>
+            <span class="font-medium">Send my workouts to Garmin automatically</span>
+            <span class="block text-xs text-muted">
+              Each planned workout lands on your Garmin calendar for its day, and is updated or removed when the plan
+              changes — nothing to press. Needs your Garmin account connected in Settings, and takes effect when you
+              press Save profile.
+            </span>
+          </span>
+        </label>
+      </div>
       <div v-if="me?.narrationEnabled" class="mt-4 pt-4 border-t border-default">
         <p class="text-sm font-medium mb-1">Tell us about an upcoming change</p>
         <p class="text-xs text-muted mb-2">
