@@ -382,7 +382,7 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 		return periodization.Plan{}, workout.RiderProfile{}, err
 	}
 
-	plan, err := periodization.BuildPlan(g, profile, time.Now())
+	plan, err := periodization.Build(g, profile, time.Now())
 	if err != nil {
 		// ErrNoEventDate/ErrEventInThePast are the only errors BuildPlan
 		// returns — both are the rider's own data being unsuitable to plan
@@ -474,9 +474,15 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Wo
 	if err != nil {
 		return nil, 0, err
 	}
+	// A date is taken if *any* goal has already put a workout on it, not
+	// just this one: a rider with a race on the calendar and a general
+	// fitness goal must not get two sessions on the same Tuesday. Whichever
+	// goal schedules a day first keeps it, and AutoScheduleTick visits dated
+	// goals first (see workout.DB.ListAllGoals). A workout the rider built by
+	// hand carries no goal and blocks nothing.
 	alreadyScheduled := make(map[string]bool, len(existing))
 	for _, wk := range existing {
-		if wk.GoalID == g.ID {
+		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
 		}
 	}
@@ -719,6 +725,61 @@ func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Reque
 	s.logger().Info("profile change proposed", "rider", rider)
 	writeJSON(w, http.StatusOK, profileProposalDTO{
 		AvailableDays: proposal.AvailableDays, HoursPerAvailableDay: proposal.HoursPerAvailableDay,
+		Explanation: proposal.Explanation,
+	})
+}
+
+type goalProposalDTO struct {
+	Name             string  `json:"name"`
+	Sport            string  `json:"sport"`
+	EventDate        string  `json:"eventDate,omitempty"`
+	Priority         string  `json:"priority"`
+	TargetDistanceM  float64 `json:"targetDistanceM,omitempty"`
+	TargetElevationM float64 `json:"targetElevationM,omitempty"`
+	Explanation      string  `json:"explanation,omitempty"`
+}
+
+// handleProposeGoal turns a rider's own sentence about an event ("gran fondo,
+// 180km, mid June") into a suggested goal. Like handleProposeProfileChange it
+// never writes anything: the response pre-fills the ordinary goal form, and
+// only an explicit save through handleCreateGoal makes it real — so the
+// server-side ownership and validation rules stay in exactly one place.
+func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	if s.Narration == nil {
+		s.logger().Warn("goal proposal requested but no ANTHROPIC_API_KEY is configured")
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment has no narration configured",
+		})
+		return
+	}
+
+	var body struct {
+		Note string `json:"note"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil || strings.TrimSpace(body.Note) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a note is required"})
+		return
+	}
+
+	rider := auth.FromContext(r.Context()).User
+	if !s.rateLimitNarration(w, rider) {
+		return
+	}
+
+	proposal, err := s.Narration.ProposeGoal(r.Context(), body.Note, time.Now())
+	if err != nil {
+		s.logger().Warn("goal proposal failed", "rider", rider, "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not turn that into a goal — try rephrasing it, or fill the form in by hand"})
+		return
+	}
+
+	s.logger().Info("goal proposed", "rider", rider)
+	writeJSON(w, http.StatusOK, goalProposalDTO{
+		Name: proposal.Name, Sport: proposal.Sport, EventDate: proposal.EventDate, Priority: proposal.Priority,
+		TargetDistanceM: proposal.TargetDistanceM, TargetElevationM: proposal.TargetElevationM,
 		Explanation: proposal.Explanation,
 	})
 }

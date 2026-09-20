@@ -160,39 +160,34 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
-			t.Run("ListGoalsWithEventDate spans every rider and skips goals with no event date", func(t *testing.T) {
+			t.Run("ListAllGoals spans every rider and puts undated goals last", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()
 
-				_, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Someday Race"})
+				undated, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
 				if err != nil {
 					t.Fatalf("create no-date goal: %v", err)
 				}
-				dated1, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Local Century", EventDate: "2026-11-01"})
+				later, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Local Century", EventDate: "2026-11-01"})
 				if err != nil {
 					t.Fatalf("create wilant's dated goal: %v", err)
 				}
-				dated2, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "other", Name: "Gran Fondo", EventDate: "2026-08-01"})
+				sooner, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "other", Name: "Gran Fondo", EventDate: "2026-08-01"})
 				if err != nil {
 					t.Fatalf("create other's dated goal: %v", err)
 				}
 
-				all, err := db.ListGoalsWithEventDate(ctx)
+				all, err := db.ListAllGoals(ctx)
 				if err != nil {
-					t.Fatalf("ListGoalsWithEventDate: %v", err)
+					t.Fatalf("ListAllGoals: %v", err)
 				}
-				ids := map[string]bool{}
+				var order []string
 				for _, g := range all {
-					if g.EventDate == "" {
-						t.Errorf("goal %q has no event date, should have been filtered out", g.ID)
-					}
-					ids[g.ID] = true
+					order = append(order, g.ID)
 				}
-				if !ids[dated1.ID] || !ids[dated2.ID] {
-					t.Errorf("ids = %v, want both %q and %q (across both riders)", ids, dated1.ID, dated2.ID)
-				}
-				if len(all) != 2 {
-					t.Errorf("len(all) = %d, want 2 (the no-date goal excluded)", len(all))
+				want := []string{sooner.ID, later.ID, undated.ID}
+				if len(order) != 3 || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
+					t.Errorf("order = %v, want %v — nearest event first, undated last", order, want)
 				}
 			})
 

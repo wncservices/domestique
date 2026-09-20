@@ -221,3 +221,68 @@ func TestMondayOfAlignsToCalendarWeek(t *testing.T) {
 		t.Errorf("MondayOf(Monday) = %s, want itself", got.Format("2006-01-02"))
 	}
 }
+
+// A Wednesday, deliberately mid-week: rolling plans align to the Monday.
+var today = time.Date(2026, 3, 18, 12, 0, 0, 0, time.UTC)
+
+func TestBuildRollingPlanIsTwelveBaseWeeksWithARecoveryEveryFourth(t *testing.T) {
+	profile := workout.RiderProfile{AvailableDays: []string{"tue", "thu", "sat"}, HoursPerAvailableDay: 2}
+	plan := BuildRollingPlan(workout.Goal{ID: "g"}, profile, today)
+
+	if len(plan.Weeks) != rollingWeeks {
+		t.Fatalf("weeks = %d, want %d", len(plan.Weeks), rollingWeeks)
+	}
+	recoveries := 0
+	for i, wk := range plan.Weeks {
+		if wk.Phase != PhaseBase {
+			t.Errorf("week %d phase = %s, want base — there is nothing to peak for", i+1, wk.Phase)
+		}
+		if wk.TargetHours <= 0 {
+			t.Errorf("week %d has no hours", i+1)
+		}
+		if wk.Recovery {
+			recoveries++
+		}
+	}
+	if recoveries != 3 {
+		t.Errorf("recovery weeks = %d over 12, want 3", recoveries)
+	}
+}
+
+// The property that makes a rolling plan usable at all: it is rebuilt from
+// "today" on every request, so a given calendar week must be the same
+// position in the 3:1 cycle whichever week it is built from — or recovery
+// would never arrive, because every plan would open at week one.
+func TestBuildRollingPlanAgreesWithItselfFromOneWeekLater(t *testing.T) {
+	profile := workout.RiderProfile{AvailableDays: []string{"sat"}, HoursPerAvailableDay: 3}
+	now := BuildRollingPlan(workout.Goal{}, profile, today)
+	later := BuildRollingPlan(workout.Goal{}, profile, today.AddDate(0, 0, 7))
+
+	for i := 0; i < rollingWeeks-1; i++ {
+		a, b := now.Weeks[i+1], later.Weeks[i]
+		if a.StartDate != b.StartDate || a.Recovery != b.Recovery || a.TargetHours != b.TargetHours {
+			t.Errorf("week %s: %+v vs %+v — a rolling plan must not move under the rider", a.StartDate, a, b)
+		}
+	}
+}
+
+func TestBuildRollingPlanWithNoProfileIsTimingOnly(t *testing.T) {
+	plan := BuildRollingPlan(workout.Goal{}, workout.RiderProfile{}, today)
+	for _, wk := range plan.Weeks {
+		if wk.TargetHours != 0 {
+			t.Fatalf("hours = %v, want 0 with no profile", wk.TargetHours)
+		}
+	}
+}
+
+func TestBuildDispatchesOnEventDate(t *testing.T) {
+	profile := workout.RiderProfile{AvailableDays: []string{"sat"}, HoursPerAvailableDay: 2}
+
+	dateless, err := Build(workout.Goal{}, profile, today)
+	if err != nil || len(dateless.Weeks) != rollingWeeks {
+		t.Errorf("no event date: %d weeks, err %v — want a rolling plan, not ErrNoEventDate", len(dateless.Weeks), err)
+	}
+	if _, err := Build(workout.Goal{EventDate: "2025-01-01"}, profile, today); err != ErrEventInThePast {
+		t.Errorf("past event: err = %v, want ErrEventInThePast — a dated goal is still a dated goal", err)
+	}
+}

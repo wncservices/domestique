@@ -9,6 +9,8 @@
 //   - ProposeProfileChange turns a free-text note ("I'm traveling next
 //     week") into a suggested edit to exactly the two fields a plan reads
 //     to size a week: available days and hours per available day.
+//   - ProposeGoal turns a sentence ("gran fondo, 180km, 2400m of climbing,
+//     mid June") into the fields of the goal form.
 //
 // Neither method writes anything. A narration is displayed; a proposal is
 // handed back to the rider's own profile form for them to review and save
@@ -113,6 +115,29 @@ func (c *Client) ProposeProfileChange(ctx context.Context, note string, profile 
 		return ProfileChangeProposal{}, err
 	}
 	return parseProfileProposal(text, profile)
+}
+
+// GoalProposal is a suggested goal, shaped like the goal form and handed
+// back to it for the rider to review and save. Never stored by this package.
+type GoalProposal struct {
+	Name             string
+	Sport            string
+	EventDate        string
+	Priority         string
+	TargetDistanceM  float64
+	TargetElevationM float64
+	Explanation      string
+}
+
+// ProposeGoal turns a free-text description of an event into a GoalProposal.
+// today anchors relative dates ("mid June", "in ten weeks") — the model has
+// no clock, and guessing the year would put half of them in the past.
+func (c *Client) ProposeGoal(ctx context.Context, note string, today time.Time) (GoalProposal, error) {
+	text, err := c.complete(ctx, proposeGoalPrompt(note, today), 300)
+	if err != nil {
+		return GoalProposal{}, err
+	}
+	return parseGoalProposal(text, today)
 }
 
 type messageRequest struct {
@@ -259,6 +284,16 @@ func proposeProfilePrompt(note string, profile workout.RiderProfile) string {
 	return sb.String()
 }
 
+func proposeGoalPrompt(note string, today time.Time) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Today is %s.\n\n", today.Format("2006-01-02"))
+	fmt.Fprintf(&sb, "A rider described an event they want to train for: %q\n\n", note)
+	sb.WriteString("Reply with ONLY a JSON object (no other text, no markdown fences) with these exact fields:\n")
+	sb.WriteString(`{"name": "Gran Fondo", "sport": "cycling", "eventDate": "2026-06-14", "priority": "A", "targetDistanceKm": 180, "targetElevationM": 2400, "explanation": "one short sentence"}`)
+	sb.WriteString("\n\nRules: sport is exactly \"cycling\" or \"running\". eventDate is YYYY-MM-DD and must be in the future relative to today; use an empty string if the note gives no date or only one you cannot place — never invent one. priority is \"A\" (peak for it), \"B\" or \"C\"; use \"B\" unless the note says how much it matters. Use 0 for a distance or elevation the note does not state. Do not invent numbers the note does not contain.")
+	return sb.String()
+}
+
 var validDays = map[string]bool{"mon": true, "tue": true, "wed": true, "thu": true, "fri": true, "sat": true, "sun": true}
 
 // maxSaneHoursPerDay bounds what a proposal may claim regardless of what
@@ -274,11 +309,7 @@ const maxSaneHoursPerDay = 12.0
 // the same sanity bounds this package's callers would want checked before
 // ever showing it to a rider.
 func parseProfileProposal(text string, profile workout.RiderProfile) (ProfileChangeProposal, error) {
-	text = strings.TrimSpace(text)
-	text = strings.TrimPrefix(text, "```json")
-	text = strings.TrimPrefix(text, "```")
-	text = strings.TrimSuffix(text, "```")
-	text = strings.TrimSpace(text)
+	text = stripFences(text)
 
 	var raw struct {
 		AvailableDays        []string `json:"availableDays"`
@@ -306,4 +337,71 @@ func parseProfileProposal(text string, profile workout.RiderProfile) (ProfileCha
 		proposal.HoursPerAvailableDay = profile.HoursPerAvailableDay
 	}
 	return proposal, nil
+}
+
+// stripFences removes the markdown fence a model often wraps JSON in despite
+// being told not to.
+func stripFences(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(text, "```")
+	return strings.TrimSpace(text)
+}
+
+// Bounds on what a goal proposal may claim, whatever the model returns:
+// past these it is a mistake, not a big ambition, and pre-filling a form
+// with it would be worse than leaving the field empty.
+const (
+	maxSaneDistanceKm  = 3000.0
+	maxSaneElevationM  = 60000.0
+	maxSaneGoalNameLen = 80
+)
+
+// parseGoalProposal decodes and validates the model's reply. Anything
+// unusable degrades to an empty field for the rider to fill in — except a
+// missing name, which is an error, since a proposal with nothing in it
+// would be a form that silently did nothing.
+func parseGoalProposal(text string, today time.Time) (GoalProposal, error) {
+	var raw struct {
+		Name             string  `json:"name"`
+		Sport            string  `json:"sport"`
+		EventDate        string  `json:"eventDate"`
+		Priority         string  `json:"priority"`
+		TargetDistanceKm float64 `json:"targetDistanceKm"`
+		TargetElevationM float64 `json:"targetElevationM"`
+		Explanation      string  `json:"explanation"`
+	}
+	if err := json.Unmarshal([]byte(stripFences(text)), &raw); err != nil {
+		return GoalProposal{}, fmt.Errorf("narration: model did not return valid JSON: %w", err)
+	}
+
+	name := strings.TrimSpace(raw.Name)
+	if name == "" {
+		return GoalProposal{}, errors.New("narration: model proposed a goal with no name")
+	}
+	if len(name) > maxSaneGoalNameLen {
+		name = strings.TrimSpace(name[:maxSaneGoalNameLen])
+	}
+
+	p := GoalProposal{Name: name, Sport: "cycling", Priority: "B", Explanation: raw.Explanation}
+	if strings.EqualFold(strings.TrimSpace(raw.Sport), "running") {
+		p.Sport = "running"
+	}
+	switch strings.ToUpper(strings.TrimSpace(raw.Priority)) {
+	case "A", "B", "C":
+		p.Priority = strings.ToUpper(strings.TrimSpace(raw.Priority))
+	}
+	// A date the model has placed in the past is a year-guessing mistake, and
+	// a plan cannot be built toward it anyway (periodization.ErrEventInThePast).
+	if d, err := time.Parse("2006-01-02", strings.TrimSpace(raw.EventDate)); err == nil && d.After(today) {
+		p.EventDate = d.Format("2006-01-02")
+	}
+	if raw.TargetDistanceKm > 0 && raw.TargetDistanceKm <= maxSaneDistanceKm {
+		p.TargetDistanceM = raw.TargetDistanceKm * 1000
+	}
+	if raw.TargetElevationM > 0 && raw.TargetElevationM <= maxSaneElevationM {
+		p.TargetElevationM = raw.TargetElevationM
+	}
+	return p, nil
 }

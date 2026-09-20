@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -177,5 +178,58 @@ func TestCompleteReturnsAnErrorForANonOKResponse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "401") {
 		t.Errorf("err = %v, want it to mention the 401 status", err)
+	}
+}
+
+var goalToday = time.Date(2026, 3, 18, 0, 0, 0, 0, time.UTC)
+
+func TestProposeGoalParsesAWellFormedProposal(t *testing.T) {
+	server, lastRequest := fakeAnthropic(t, `{"name":"Gran Fondo","sport":"cycling","eventDate":"2026-06-14","priority":"A","targetDistanceKm":180,"targetElevationM":2400,"explanation":"A mid-June century."}`)
+	client := New("test-key")
+	client.APIBase = server.URL
+
+	p, err := client.ProposeGoal(context.Background(), "gran fondo, 180km, 2400m of climbing, mid June", goalToday)
+	if err != nil {
+		t.Fatalf("ProposeGoal: %v", err)
+	}
+	if p.Name != "Gran Fondo" || p.Sport != "cycling" || p.EventDate != "2026-06-14" || p.Priority != "A" ||
+		p.TargetDistanceM != 180000 || p.TargetElevationM != 2400 {
+		t.Errorf("proposal = %+v", p)
+	}
+	// The model has no clock: today must be in the prompt or relative dates
+	// are guesses.
+	if !strings.Contains(*lastRequest, "2026-03-18") {
+		t.Errorf("prompt does not carry today's date:\n%s", *lastRequest)
+	}
+}
+
+func TestProposeGoalDropsWhatItCannotTrust(t *testing.T) {
+	server, _ := fakeAnthropic(t, "```json\n"+`{"name":"Mystery Ride","sport":"swimming","eventDate":"2024-06-14","priority":"Z","targetDistanceKm":99999,"targetElevationM":-5}`+"\n```")
+	client := New("test-key")
+	client.APIBase = server.URL
+
+	p, err := client.ProposeGoal(context.Background(), "something", goalToday)
+	if err != nil {
+		t.Fatalf("ProposeGoal: %v", err)
+	}
+	if p.Sport != "cycling" || p.Priority != "B" {
+		t.Errorf("sport/priority = %q/%q, want the safe defaults", p.Sport, p.Priority)
+	}
+	if p.EventDate != "" {
+		t.Errorf("eventDate = %q, want empty: a date in the past is a year-guessing mistake", p.EventDate)
+	}
+	if p.TargetDistanceM != 0 || p.TargetElevationM != 0 {
+		t.Errorf("targets = %v/%v, want none: both were implausible", p.TargetDistanceM, p.TargetElevationM)
+	}
+}
+
+func TestProposeGoalRejectsAProposalWithNoNameOrNoJSON(t *testing.T) {
+	for _, reply := range []string{`{"name":"  "}`, "sorry, I can't help with that"} {
+		server, _ := fakeAnthropic(t, reply)
+		client := New("test-key")
+		client.APIBase = server.URL
+		if _, err := client.ProposeGoal(context.Background(), "x", goalToday); err == nil {
+			t.Errorf("reply %q: want an error", reply)
+		}
 	}
 }

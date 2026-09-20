@@ -61,6 +61,7 @@ import type {
   UpdateWorkoutRequest,
   RiderProfile,
   FitnessResponse,
+  GoalProposal,
   SyncMetricsResult,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
@@ -680,6 +681,13 @@ export const api = {
   /** Turns a free-text note into a suggested profile edit — a proposal
    *  only, never written server-side. Fill the response into the profile
    *  form and let the rider Save it themselves, same as an FTP estimate. */
+  proposeGoal: (note: string) =>
+    request<GoalProposal>('/api/training/goals/propose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note }),
+    }),
+
   proposeProfileChange: (note: string) =>
     request<ProfileChangeProposal>('/api/training/profile/propose', {
       method: 'POST',

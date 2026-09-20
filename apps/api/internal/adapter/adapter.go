@@ -126,7 +126,7 @@ func complianceFactor(goal workout.Goal, profile workout.RiderProfile, sessions 
 	actualHoursByWeek := bucketActualHours(sessions)
 
 	pastAnchor := currentWeekStart.AddDate(0, 0, -7*lookbackWeeks)
-	histPlan, err := periodization.BuildPlan(goal, profile, pastAnchor)
+	histPlan, err := periodization.Build(goal, profile, pastAnchor)
 	if err != nil || len(histPlan.Weeks) < lookbackWeeks {
 		return 1
 	}

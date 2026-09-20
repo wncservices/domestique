@@ -591,14 +591,25 @@ func TestPushWorkoutToGarminRequiresAConnection(t *testing.T) {
 	}
 }
 
-func TestGoalPeriodizationRejectsAGoalWithNoEventDate(t *testing.T) {
+func TestGoalPeriodizationOfAGoalWithNoEventDateIsARollingPlan(t *testing.T) {
 	h := newTrainingHarness(t)
-	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals", `{"name":"No Date"}`)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals", `{"name":"Stay Fit"}`)
 	g := decodeGoal(t, resp)
 
 	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 — a goal with no date is general fitness, not an error", resp.StatusCode)
+	}
+	var plan struct {
+		Weeks []struct {
+			Phase string `json:"phase"`
+		} `json:"weeks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Weeks) != 12 || plan.Weeks[0].Phase != "base" {
+		t.Errorf("plan = %+v, want 12 base weeks", plan.Weeks)
 	}
 }
 
@@ -888,5 +899,51 @@ func TestBuildMaxHRTestDefaultsToCyclingAndAcceptsRunning(t *testing.T) {
 	}
 	if running.Sport != "running" {
 		t.Errorf("sport = %q, want running", running.Sport)
+	}
+}
+
+func TestProposeGoalRequiresNarrationConfigured(t *testing.T) {
+	h := newTrainingHarness(t)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/propose", `{"note":"gran fondo in june"}`)
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("status = %d, want 412 (no ANTHROPIC_API_KEY configured)", resp.StatusCode)
+	}
+}
+
+// A proposal pre-fills the goal form and is never a write — only
+// handleCreateGoal makes a goal real, so ownership stays decided in one place.
+func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
+	h := newTrainingHarness(t)
+	future := time.Now().AddDate(0, 3, 0).Format("2006-01-02")
+	fake := fakeAnthropic(t, fmt.Sprintf(
+		`{"name":"Gran Fondo","sport":"cycling","eventDate":%q,"priority":"A","targetDistanceKm":180,"targetElevationM":2400,"explanation":"ok"}`, future))
+	client := narration.New("test-key")
+	client.APIBase = fake.URL
+	h.srv.Narration = client
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/propose",
+		`{"note":"gran fondo, 180km, 2400m of climbing"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, readAll(t, resp))
+	}
+	var p struct {
+		Name            string  `json:"name"`
+		EventDate       string  `json:"eventDate"`
+		TargetDistanceM float64 `json:"targetDistanceM"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "Gran Fondo" || p.EventDate != future || p.TargetDistanceM != 180000 {
+		t.Errorf("proposal = %+v", p)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals", "")
+	var goals []any
+	if err := json.NewDecoder(resp.Body).Decode(&goals); err != nil {
+		t.Fatal(err)
+	}
+	if len(goals) != 0 {
+		t.Errorf("goals = %v, want none — a proposal must not create anything", goals)
 	}
 }

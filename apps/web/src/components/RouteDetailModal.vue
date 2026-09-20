@@ -82,6 +82,16 @@ function editRoute() {
   emit('update:open', false)
 }
 
+// Hands this route to the Plan page's goal form as a starting point — the
+// distance and climbing are already known here, so a rider training for a
+// route they have in the library should not retype either. Only the slug
+// travels in the URL; the Plan page reads the rest from the library itself.
+function trainForRoute() {
+  if (!props.route) return
+  router.push({ path: '/training/plan', query: { goalFromRoute: props.route.slug } })
+  emit('update:open', false)
+}
+
 async function saveInfo() {
   if (!props.route || !draftName.value.trim()) return
   savingInfo.value = true
@@ -330,6 +340,15 @@ const mapRoutes = computed(() =>
             variant="subtle"
           >
             Download GPX
+          </UButton>
+          <UButton
+            v-if="route && me?.permissions.includes('training:manage')"
+            icon="i-lucide-flag"
+            color="neutral"
+            variant="subtle"
+            @click="trainForRoute"
+          >
+            Train for this route
           </UButton>
           <UButton
             v-if="canEdit"

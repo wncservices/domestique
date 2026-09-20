@@ -183,17 +183,18 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 	return goals, rows.Err()
 }
 
-// ListGoalsWithEventDate returns every goal, across every rider, that has
-// an event date set — the input the automated weekly scheduler (see
-// api.AutoScheduleTick) needs: a goal with no event date can never build a
-// periodization.Plan in the first place (periodization.ErrNoEventDate), so
-// filtering here rather than in the caller keeps that once-obvious fact in
-// one place instead of every caller re-deriving it.
-func (d *DB) ListGoalsWithEventDate(ctx context.Context) ([]Goal, error) {
+// ListAllGoals returns every goal, across every rider — the input the
+// automated weekly scheduler (see api.AutoScheduleTick) needs. Dated goals
+// come first, soonest event first, and goals with no date (general fitness,
+// see periodization.BuildRollingPlan) last: when a rider has both, the
+// scheduler must reach the one with a real deadline before the one that
+// merely fills the gaps, because whichever schedules a given day first
+// claims it.
+func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
                target_distance_m, target_elevation_m, notes, created_at, updated_at
-        FROM goals WHERE event_date <> '' ORDER BY event_date, name`))
+        FROM goals ORDER BY (event_date = ''), event_date, name`))
 	if err != nil {
 		return nil, err
 	}

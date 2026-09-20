@@ -928,6 +928,16 @@ export interface PlanExplanation {
  *  server-side is written by this call. The frontend fills these values
  *  into the profile form for the rider to review and Save themselves,
  *  same as an FTP estimate never applying itself. */
+export interface GoalProposal {
+  name: string
+  sport: Sport
+  eventDate?: string
+  priority: GoalPriority
+  targetDistanceM?: number
+  targetElevationM?: number
+  explanation?: string
+}
+
 export interface ProfileChangeProposal {
   availableDays?: string[]
   hoursPerAvailableDay?: number
