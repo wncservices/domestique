@@ -62,6 +62,10 @@ type Server struct {
 	// background sync ticks — see biometricsCache. Zero value is ready to use.
 	biometrics biometricsCache
 
+	// Clock, when set, replaces time.Now for the parts of training that
+	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
+	Clock func() time.Time
+
 	Source   source.Library
 	Config   *config.Config
 	Store    state.Store

@@ -358,3 +358,22 @@ func ContentHash(w Workout) string {
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }
+
+// PlannedSeconds is how long a step list is meant to take — time steps only,
+// repeat blocks multiplied out. Distance-based and open steps contribute
+// nothing, since there is no honest number of seconds to give them; a
+// workout made of nothing else reports 0 and callers treat that as
+// "unknown", not "instant".
+func PlannedSeconds(steps []WorkoutStep) float64 {
+	var total float64
+	for _, s := range steps {
+		if s.Repeat >= 2 {
+			total += float64(s.Repeat) * PlannedSeconds(s.Steps)
+			continue
+		}
+		if s.Duration == DurationTime {
+			total += s.Seconds
+		}
+	}
+	return total
+}

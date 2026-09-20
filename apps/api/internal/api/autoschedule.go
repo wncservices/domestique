@@ -192,8 +192,10 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 			}
 		}
 
-		// Last, so what was just scheduled goes onto the watch in the same
-		// pass rather than half an hour later.
+		// After scheduling, so this week exists to be adapted, and before
+		// the push, so an adjustment reaches the rider's watch in the same
+		// pass that makes it rather than half an hour later.
+		s.AdaptWorkouts(ctx)
 		s.autoPushWorkouts(ctx)
 	})
 }
