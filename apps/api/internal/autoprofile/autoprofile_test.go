@@ -81,9 +81,7 @@ func TestInferSizesHoursFromTheBestWeeksNotTheAverage(t *testing.T) {
 	// Eight quiet 1h weeks and four big 4h weeks, one day a week: the plan's
 	// peak should be built from what the rider can do, not the mean.
 	sessions := weekly(8, 1, time.Saturday)
-	for _, s := range weekly(12, 3, time.Sunday)[:4] {
-		sessions = append(sessions, s)
-	}
+	sessions = append(sessions, weekly(12, 3, time.Sunday)[:4]...)
 	got, ok := Infer(sessions, today)
 	if !ok {
 		t.Fatal("want an inference")
