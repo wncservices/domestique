@@ -1,9 +1,54 @@
 # Workout builder and adaptive training plans — design and plan
 
-Domestique carries routes to head units. This is the design for a second thing it could
-carry: **structured workouts**, generated from a goal (a race, a target date) and a rider's
-own fitness data, and adapted as the rider actually trains. Nothing here is built yet — this
-is the plan, in the same shape as `docs/plan.md`, so it can be picked apart before code exists.
+Domestique carries routes to head units. This is the design for a second thing it carries:
+**structured workouts**, generated from a goal (a race, a target date) and a rider's own
+fitness data, and adapted as the rider actually trains. The rest of this document is the
+original plan, kept as the reasoning record; the section below says what became of it.
+
+## Status
+
+Phases A–E below are built, and a further layer — **automation**, so a rider connects a
+device and workouts appear — sits on top. Where the code lives:
+
+| What | Where |
+|---|---|
+| Data model, manual builder, FIT export | `internal/workout`, `internal/fitworkout` |
+| Metrics pull (Garmin, Wahoo), CTL/ATL/TSB | `internal/garmin/activities.go`, `internal/wahoo/workouts.go`, `internal/workout/metrics*.go` |
+| Periodization (event plans and rolling plans) | `internal/periodization` |
+| Weekly session scheduling | `internal/scheduler` |
+| Weekly compliance adjustment + per-session adaptation | `internal/adapter` (`Reconcile`, `AdaptSessions`) |
+| Narration, free-text profile and goal suggestions | `internal/narration` |
+| Profile auto-fill (Garmin biometrics + inferred pattern) | `internal/autoprofile`, `internal/garmin/biometrics.go` |
+| Garmin workout push, calendar placement, push tracking | `internal/garmin/workout.go`, `schedule.go`; `internal/api/workoutpush.go` |
+
+**How it runs unattended.** One loop (`RunAutoScheduleLoop`, every 30 minutes, behind the
+admin's `auto_schedule` flag, under one advisory lock) does, in order: sync every connected
+rider's Garmin/Wahoo history and auto-fill their profile → schedule every goal's current week
+→ adapt the week to what actually happened → put opted-in riders' next two weeks on their
+Garmin calendar. Each step is idempotent, which is what makes running it every half hour safe.
+
+Rules that hold across the automation, and are easy to break:
+
+- **Auto-filled values are estimates, and the rider always wins.** `autoprofile.Apply` writes a
+  profile field only when it is unset or already an estimate; saving the profile form clears the
+  estimate flags, which is what "the rider confirmed it" means.
+- **Only what the scheduler made is ever adapted.** A generated workout carries
+  `scheduler.GeneratedDescription`; a rider's own sessions are theirs. An adjusted workout carries
+  `scheduler.AdjustedMarker` plus the reason, which both explains it in the UI and stops it being
+  adjusted twice. A moved workout's description records `moved from <date>`, which scheduling reads
+  so the vacated day is not planned again.
+- **A goal with no event date is a supported goal** (general fitness): `periodization.Build`
+  gives it a rolling 12-week plan, with recovery weeks counted from a fixed anchor Monday so they
+  actually arrive. Two goals for one rider share a week; whichever schedules a day first keeps it,
+  and dated goals go first.
+- **Pushing to a watch is opt-in per rider** (`rider_profiles.auto_push_workouts`), not a
+  deployment setting. Push state lives in `workout_pushes`; without it every push made a duplicate.
+- **The biometric and calendar endpoints are unofficial and unverified against a live account**
+  (`garmin.Client.Biometrics`, `ScheduleWorkout`). They fail closed: a missing suggestion, never a
+  wrong value.
+
+Still open: Wahoo structured-workout push (needs the Plans entitlement, see below), regenerating
+an already-scheduled workout's targets when FTP changes mid-week, and any coach/crew view.
 
 ## What this is, in one paragraph
 
