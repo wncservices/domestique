@@ -579,9 +579,10 @@ onMounted(async () => {
           Auto-schedule
         </h2>
         <p class="text-sm text-muted">
-          Whether every rider's current training-plan week gets scheduled into real workouts on
-          its own — for every rider with a goal and a filled-in fitness profile, without anyone
-          visiting the Training page and clicking "Schedule this week's workouts".
+          Whether training runs on its own: every rider's completed Garmin/Wahoo sessions are
+          synced in the background, and their current plan week is scheduled into real workouts
+          — for every rider with a goal and a filled-in fitness profile, without anyone visiting
+          the Training page to click "Sync now" or "Schedule this week's workouts".
         </p>
       </template>
 
