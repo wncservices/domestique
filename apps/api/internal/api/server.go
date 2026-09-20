@@ -58,6 +58,10 @@ const maxUploadBytes = 20 << 20 // 20 MiB
 
 // Server holds the request-scoped dependencies.
 type Server struct {
+	// biometrics remembers each rider's last Garmin biometrics read between
+	// background sync ticks — see biometricsCache. Zero value is ready to use.
+	biometrics biometricsCache
+
 	Source   source.Library
 	Config   *config.Config
 	Store    state.Store

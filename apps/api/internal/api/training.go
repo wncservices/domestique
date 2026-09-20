@@ -129,7 +129,11 @@ type riderProfileDTO struct {
 	AvailableDays         []string `json:"availableDays,omitempty"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay,omitempty"`
 	ExperienceLevel       string   `json:"experienceLevel,omitempty"`
-	UpdatedAt             string   `json:"updatedAt,omitempty"`
+	// Estimated names the fields above (other than FTP, which has its own
+	// flag) that were filled in automatically and not yet confirmed by the
+	// rider. Output only — handleSaveRiderProfile never reads it back.
+	Estimated []string `json:"estimated,omitempty"`
+	UpdatedAt string   `json:"updatedAt,omitempty"`
 }
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
@@ -137,7 +141,7 @@ func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
 		MaxHR: p.MaxHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
-		UpdatedAt: p.UpdatedAt,
+		Estimated: p.Estimated, UpdatedAt: p.UpdatedAt,
 	}
 }
 
@@ -641,11 +645,11 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 
 	rider := auth.FromContext(r.Context()).User
 	saved, err := s.Training.SaveProfile(r.Context(), workout.RiderProfile{
-		// FTPEstimated is deliberately not read from body: this is the
-		// manual save form, and a rider willing to click Save owns
-		// whatever number sits in the field, estimated or not — see
-		// RiderProfile.FTPEstimated's own doc comment on why that flag
-		// only ever means "not yet looked at and confirmed."
+		// FTPEstimated and Estimated are deliberately not read from body:
+		// this is the manual save form, and a rider willing to click Save
+		// owns whatever number sits in each field, estimated or not — see
+		// RiderProfile.FTPEstimated's own doc comment on why those only
+		// ever mean "not yet looked at and confirmed."
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
 		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,

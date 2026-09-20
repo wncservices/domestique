@@ -778,6 +778,12 @@ export interface RiderProfile {
   availableDays?: string[]
   hoursPerAvailableDay?: number
   experienceLevel?: string
+  /** Fields (other than FTP, which has ftpEstimated) that were filled in
+   *  automatically — from Garmin's own biometrics or the rider's recent
+   *  training — and not yet confirmed. Names match internal/workout's Field*
+   *  constants: max_hr, threshold_pace, resting_hr, available_days,
+   *  hours_per_available_day, experience_level. Output only. */
+  estimated?: string[]
   updatedAt?: string
 }
 
@@ -867,6 +873,8 @@ export interface SyncMetricsResult {
   /** Present only when this sync just filled in a previously-unset resting
    *  heart rate from Garmin's wellness data. */
   restingHrBpm?: number
+  /** Every profile field this sync filled in or refreshed on its own. */
+  autoFilled?: string[]
 }
 
 export type PeriodizationPhase = 'base' | 'build' | 'peak' | 'taper'

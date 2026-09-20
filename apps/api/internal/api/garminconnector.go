@@ -67,6 +67,12 @@ type GarminConnector interface {
 	// workout's average HR, and why a zero result is a normal "no reading"
 	// rather than a failure.
 	RestingHeartRate(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (int, error)
+	// Biometrics reads the rider's max heart rate, running threshold pace and
+	// cycling FTP as Connect holds them — what lets the fitness profile be
+	// filled in without asking. Best-effort per field: see
+	// garmin.Client.Biometrics for why a partial result comes back alongside
+	// an error.
+	Biometrics(ctx context.Context, consumer GarminConsumer, session garmin.Session, now time.Time) (garmin.Biometrics, error)
 }
 
 // LiveGarmin is the real connector: it talks to Garmin.
@@ -189,4 +195,13 @@ func (l LiveGarmin) RestingHeartRate(ctx context.Context, consumer GarminConsume
 		return 0, err
 	}
 	return client.RestingHeartRate(ctx, date)
+}
+
+// Biometrics fetches the rider's physiology numbers from a connected account.
+func (l LiveGarmin) Biometrics(ctx context.Context, consumer GarminConsumer, session garmin.Session, now time.Time) (garmin.Biometrics, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return garmin.Biometrics{}, err
+	}
+	return client.Biometrics(ctx, now)
 }

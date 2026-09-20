@@ -84,6 +84,14 @@ type fakeGarmin struct {
 	// date), and restingHRErr what it fails with instead.
 	restingHR    int
 	restingHRErr error
+
+	// biometrics is what Biometrics hands back, biometricsErr what it fails
+	// with alongside it (a partial result plus an error is a real shape —
+	// see garmin.Client.Biometrics), and biometricsCalls how often it was
+	// asked, for tests that care whether a tick reached Garmin at all.
+	biometrics      garmin.Biometrics
+	biometricsErr   error
+	biometricsCalls int
 }
 
 func (f *fakeGarmin) ListActivities(_ context.Context, _ api.GarminConsumer, session garmin.Session) ([]garmin.Activity, error) {
@@ -106,6 +114,14 @@ func (f *fakeGarmin) PushWorkout(_ context.Context, _ api.GarminConsumer, sessio
 func (f *fakeGarmin) RestingHeartRate(_ context.Context, _ api.GarminConsumer, session garmin.Session, _ time.Time) (int, error) {
 	f.setResumedSession(session)
 	return f.restingHR, f.restingHRErr
+}
+
+func (f *fakeGarmin) Biometrics(_ context.Context, _ api.GarminConsumer, session garmin.Session, _ time.Time) (garmin.Biometrics, error) {
+	f.setResumedSession(session)
+	f.mu.Lock()
+	f.biometricsCalls++
+	f.mu.Unlock()
+	return f.biometrics, f.biometricsErr
 }
 
 func (f *fakeGarmin) setResumedSession(session garmin.Session) {

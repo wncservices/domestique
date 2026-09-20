@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS rider_profiles (
     rider                      TEXT PRIMARY KEY,
     ftp_watts                  DOUBLE PRECISION NOT NULL DEFAULT 0,
     ftp_estimated              %[2]s NOT NULL DEFAULT FALSE,
+    estimated_fields           TEXT NOT NULL DEFAULT '',
     threshold_pace_sec_per_km  DOUBLE PRECISION NOT NULL DEFAULT 0,
     max_hr                     INTEGER NOT NULL DEFAULT 0,
     resting_hr                 INTEGER NOT NULL DEFAULT 0,
@@ -124,24 +125,30 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	return store, nil
 }
 
-// addEstimatedColumns adds ftp_estimated to a rider_profiles table that
-// predates it — CREATE TABLE IF NOT EXISTS above is a no-op against a
-// table that already exists, so a genuinely new column needs its own step,
-// the same pattern internal/crew's addAutoShareColumn already uses for
-// exactly this. Defaulting to FALSE is correct for every pre-existing row:
-// any FTP already on file before this column existed was rider-entered
-// through the only form that existed, never auto-estimated.
+// addEstimatedColumns adds the columns recording which profile values were
+// filled in automatically to a rider_profiles table that predates them —
+// CREATE TABLE IF NOT EXISTS above is a no-op against a table that already
+// exists, so a genuinely new column needs its own step, the same pattern
+// internal/crew's addAutoShareColumn already uses for exactly this.
+// Defaulting to "not estimated" is correct for every pre-existing row: any
+// value already on file before these columns existed was rider-entered
+// through the only form that existed.
 func (d *DB) addEstimatedColumns() error {
-	_, err := d.db.Exec(fmt.Sprintf(
-		`ALTER TABLE rider_profiles ADD COLUMN ftp_estimated %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean))
-	if err == nil {
-		return nil
+	for _, stmt := range []string{
+		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN ftp_estimated %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
+		`ALTER TABLE rider_profiles ADD COLUMN estimated_fields TEXT NOT NULL DEFAULT ''`,
+	} {
+		_, err := d.db.Exec(stmt)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			continue
+		}
+		return err
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
-		return nil
-	}
-	return err
+	return nil
 }
 
 func (d *DB) query(q string) string { return d.dialect.Rebind(q) }
@@ -330,15 +337,16 @@ func (d *DB) DeleteGoal(ctx context.Context, id string) error {
 
 func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, error) {
 	var (
-		p    RiderProfile
-		days string
+		p         RiderProfile
+		days      string
+		estimated string
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, resting_hr,
-               available_days, hours_per_available_day, experience_level, updated_at
+               available_days, hours_per_available_day, experience_level, estimated_fields, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
 		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.RestingHR,
-		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &p.UpdatedAt)
+		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
@@ -346,6 +354,7 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 		return RiderProfile{}, false, err
 	}
 	p.AvailableDays = splitList(days)
+	p.Estimated = splitList(estimated)
 	return p, true, nil
 }
 
@@ -367,16 +376,18 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	// already rely on.
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr,
-                    resting_hr, available_days, hours_per_available_day, experience_level, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET
             ftp_watts = excluded.ftp_watts, ftp_estimated = excluded.ftp_estimated,
             threshold_pace_sec_per_km = excluded.threshold_pace_sec_per_km,
             max_hr = excluded.max_hr, resting_hr = excluded.resting_hr,
             available_days = excluded.available_days, hours_per_available_day = excluded.hours_per_available_day,
-            experience_level = excluded.experience_level, updated_at = excluded.updated_at`),
+            experience_level = excluded.experience_level, estimated_fields = excluded.estimated_fields,
+            updated_at = excluded.updated_at`),
 		profile.Rider, profile.FTPWatts, profile.FTPEstimated, profile.ThresholdPaceSecPerKM, profile.MaxHR, profile.RestingHR,
-		joinList(profile.AvailableDays), profile.HoursPerAvailableDay, profile.ExperienceLevel, profile.UpdatedAt)
+		joinList(profile.AvailableDays), profile.HoursPerAvailableDay, profile.ExperienceLevel,
+		joinList(profile.Estimated), profile.UpdatedAt)
 	if err != nil {
 		return RiderProfile{}, err
 	}

@@ -49,6 +49,18 @@ async function loadProfile() {
   }
 }
 
+// Fields the server filled in on its own (Garmin's biometrics, or the pattern
+// in the rider's recent training) and the rider has not yet confirmed — see
+// RiderProfile.estimated. Saving clears them all, which is the confirmation.
+function isEstimated(field: string): boolean {
+  return (profile.value.estimated ?? []).includes(field)
+}
+
+// The two fields scheduling cannot work without: with no available days or no
+// hours per day, a plan has nothing to size or place workouts against, and
+// no workouts appear. This is what the one-click setup below is for.
+const needsSetup = computed(() => !(profile.value.availableDays ?? []).length || !profile.value.hoursPerAvailableDay)
+
 function toggleDay(day: string) {
   const days = new Set(profile.value.availableDays ?? [])
   if (days.has(day)) days.delete(day)
@@ -158,25 +170,18 @@ async function syncMetrics() {
     } else if (!result.warnings?.length) {
       toast.add({ title: 'Nothing new to sync', icon: 'i-lucide-refresh-cw', color: 'neutral' })
     }
-    if (result.estimatedFtpWatts) {
+    if (result.autoFilled?.length) {
       toast.add({
-        title: `Estimated your FTP at ${Math.round(result.estimatedFtpWatts)}W`,
-        description: 'From your synced rides — check your profile below and adjust if it looks off.',
+        title: `Filled in ${result.autoFilled.length} profile field${result.autoFilled.length === 1 ? '' : 's'}`,
+        description: 'From your Garmin account and recent training — check your profile below and press Save to confirm.',
         icon: 'i-lucide-sparkles',
-      })
-    }
-    if (result.restingHrBpm) {
-      toast.add({
-        title: `Synced your resting heart rate: ${result.restingHrBpm} bpm`,
-        description: 'From Garmin — check your profile below and adjust if it looks off.',
-        icon: 'i-lucide-heart-pulse',
       })
     }
     for (const warning of result.warnings ?? []) {
       toast.add({ title: 'Sync warning', description: warning, icon: 'i-lucide-triangle-alert', color: 'warning' })
     }
     await loadFitness()
-    if (result.estimatedFtpWatts || result.restingHrBpm) await loadProfile()
+    if (result.autoFilled?.length) await loadProfile()
   } catch (err) {
     toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -233,8 +238,20 @@ onMounted(() => {
         <h2 class="text-lg font-semibold">Your fitness profile</h2>
       </template>
       <p class="text-sm text-muted mb-4">
-        Used to suggest sensible workout targets. Nothing here is pulled from Garmin or Wahoo — enter it yourself.
+        Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can
+        tell us is filled in for you and marked <UBadge color="info" variant="subtle" size="sm">auto-filled</UBadge> —
+        check it, and press Save to confirm. Anything you type yourself is never overwritten.
       </p>
+      <UAlert
+        v-if="needsSetup"
+        class="mb-4"
+        color="info"
+        variant="subtle"
+        icon="i-lucide-wand-sparkles"
+        title="Set this up from your devices"
+        description="Your plan needs your available days and hours per day before it can schedule anything. If you have Garmin or Wahoo connected, we can work them out from your recent training."
+        :actions="[{ label: 'Set up from my devices', icon: 'i-lucide-refresh-cw', loading: syncingMetrics, onClick: syncMetrics }]"
+      />
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UFormField>
           <template #label>
@@ -256,7 +273,11 @@ onMounted(() => {
             <button type="button" class="underline" :disabled="buildingFTPTest" @click="buildFTPTest">test it properly</button>.
           </p>
         </UFormField>
-        <UFormField label="Threshold pace (sec/km)">
+        <UFormField>
+          <template #label>
+            Threshold pace (sec/km)
+            <UBadge v-if="isEstimated('threshold_pace')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          </template>
           <UInput
             type="number"
             :model-value="profile.thresholdPaceSecPerKm"
@@ -264,7 +285,11 @@ onMounted(() => {
             @update:model-value="(v: string | number) => (profile.thresholdPaceSecPerKm = Number(v))"
           />
         </UFormField>
-        <UFormField label="Max heart rate (bpm)">
+        <UFormField>
+          <template #label>
+            Max heart rate (bpm)
+            <UBadge v-if="isEstimated('max_hr')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          </template>
           <UInput
             type="number"
             :model-value="profile.maxHr"
@@ -272,12 +297,16 @@ onMounted(() => {
             @update:model-value="(v: string | number) => (profile.maxHr = Number(v))"
           />
           <p v-if="!profile.maxHr" class="text-xs text-muted mt-1">
-            No max heart rate on file —
+            No max heart rate on file — sync to read it from Garmin, or
             <button type="button" class="underline" :disabled="buildingMaxHRTest" @click="buildMaxHRTest">build a max HR test</button>.
-            This is never auto-estimated; a real test is the only accurate way to get it.
+            Garmin's figure is often an age-based default, so a real test is the accurate way to get it.
           </p>
         </UFormField>
-        <UFormField label="Resting heart rate (bpm)">
+        <UFormField>
+          <template #label>
+            Resting heart rate (bpm)
+            <UBadge v-if="isEstimated('resting_hr')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          </template>
           <UInput
             type="number"
             :model-value="profile.restingHr"
@@ -289,7 +318,11 @@ onMounted(() => {
             from your watch's own wellness reading, or enter one yourself.
           </p>
         </UFormField>
-        <UFormField label="Hours per available day">
+        <UFormField>
+          <template #label>
+            Hours per available day
+            <UBadge v-if="isEstimated('hours_per_available_day')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          </template>
           <UInput
             type="number"
             step="0.5"
@@ -298,7 +331,11 @@ onMounted(() => {
             @update:model-value="(v: string | number) => (profile.hoursPerAvailableDay = Number(v))"
           />
         </UFormField>
-        <UFormField label="Experience level">
+        <UFormField>
+          <template #label>
+            Experience level
+            <UBadge v-if="isEstimated('experience_level')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          </template>
           <UInput
             :model-value="profile.experienceLevel"
             placeholder="beginner / intermediate / advanced"
@@ -307,7 +344,11 @@ onMounted(() => {
           />
         </UFormField>
       </div>
-      <UFormField label="Available days" class="mt-4">
+      <UFormField class="mt-4">
+        <template #label>
+          Available days
+          <UBadge v-if="isEstimated('available_days')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+        </template>
         <div class="flex gap-2 flex-wrap">
           <UButton
             v-for="d in weekdays"
