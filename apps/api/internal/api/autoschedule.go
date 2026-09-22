@@ -10,9 +10,10 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 )
 
-// FlagAutoSchedule is settings.Store's flag name for automated weekly
-// workout scheduling — see FlagAutoSync's own doc comment for why this
-// lives in the plain flags table rather than the encrypted settings one.
+// FlagAutoSchedule is settings.Store's flag name for automated training: pull
+// every connected rider's completed sessions, then schedule their plan week.
+// See FlagAutoSync's own doc comment for why this lives in the plain flags
+// table rather than the encrypted settings one.
 // Off by default, the same reasoning FlagAutoSync's own default carries:
 // a rider who has not yet filled in a fitness profile or reviewed their
 // goal's plan should not find workouts appearing on their calendar before
@@ -155,6 +156,13 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 	}
 
 	withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
+		// History first, so the week below is planned from what the rider
+		// has actually just trained, not from whenever they last clicked
+		// "Sync now" — see autoSyncTrainingMetrics. Runs for every connected
+		// rider, goal or not: the FTP and resting-HR estimates it fills in
+		// are useful before anyone has set a goal.
+		s.autoSyncTrainingMetrics(ctx)
+
 		goals, err := s.Training.ListGoalsWithEventDate(ctx)
 		if err != nil {
 			s.logger().Error("auto-schedule: listing goals failed", "err", err)

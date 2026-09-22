@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
+	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/wahoo"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -30,6 +32,8 @@ type metricsSyncHarness struct {
 	client     *http.Client
 	base       string
 	links      *providerlink.Store
+	settings   *settings.Store
+	srv        *api.Server
 	wahooFake  *httptest.Server
 	wahooCalls []string
 }
@@ -60,6 +64,11 @@ func newMetricsSyncHarness(t *testing.T, garminConnector *fakeGarmin) *metricsSy
 		t.Fatal(err)
 	}
 
+	appSettings, err := settings.UseDB(db.Conn(), db.DSN(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	authenticator, err := auth.New(auth.Config{
 		Mode:  auth.ModeProxy,
 		Roles: auth.RoleMapping{Admin: []string{"admins"}, Rider: []string{"cyclists"}},
@@ -68,7 +77,7 @@ func newMetricsSyncHarness(t *testing.T, garminConnector *fakeGarmin) *metricsSy
 		t.Fatal(err)
 	}
 
-	h := &metricsSyncHarness{t: t, links: links}
+	h := &metricsSyncHarness{t: t, links: links, settings: appSettings}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/workouts", func(w http.ResponseWriter, r *http.Request) {
 		h.wahooCalls = append(h.wahooCalls, r.Header.Get("Authorization"))
@@ -89,9 +98,11 @@ func newMetricsSyncHarness(t *testing.T, garminConnector *fakeGarmin) *metricsSy
 		Auth:     authenticator,
 		Links:    links,
 		Training: trainingStore,
+		Settings: appSettings,
 		Garmin:   garminConnector,
 		Wahoo:    wahooClient,
 	}
+	h.srv = srv
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
@@ -467,5 +478,77 @@ func TestSyncGarminRestingHeartRateFailureIsNotAWarning(t *testing.T) {
 		if strings.Contains(warning, "resting") || strings.Contains(warning, "heart rate") || strings.Contains(warning, "wellness") {
 			t.Errorf("warnings = %v, want none mentioning resting heart rate — a failed best-effort lookup is not a sync failure", out.Warnings)
 		}
+	}
+}
+
+func TestAutoScheduleTickSyncsEveryConnectedRidersMetrics(t *testing.T) {
+	fake := &fakeGarmin{activities: []garmin.Activity{
+		{ID: "5001", Sport: "cycling", StartTime: time.Date(2026, 3, 4, 7, 0, 0, 0, time.UTC),
+			DurationSeconds: 5400, DistanceM: 45000, AvgHR: 150, AvgPowerWatts: 230},
+	}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.seedWahooSession("other")
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nobody clicks "Sync now": one tick pulls history for a rider connected
+	// only to Garmin and for one connected only to Wahoo.
+	h.srv.AutoScheduleTick(context.Background())
+
+	for _, rider := range []string{"wilant", "other"} {
+		resp := h.as(rider, "cyclists", http.MethodGet, "/api/training/fitness", "")
+		var fit struct {
+			Sessions []struct {
+				Provider string `json:"provider"`
+			} `json:"sessions"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&fit); err != nil {
+			t.Fatal(err)
+		}
+		if len(fit.Sessions) != 1 {
+			t.Errorf("%s: sessions = %d, want 1 after a background tick", rider, len(fit.Sessions))
+		}
+	}
+}
+
+func TestAutoScheduleTickOffTouchesNoProvider(t *testing.T) {
+	fake := &fakeGarmin{}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.seedWahooSession("wilant")
+
+	// Flag off (the default): a disabled deployment must make zero
+	// third-party calls, not merely ignore what it fetched.
+	h.srv.AutoScheduleTick(context.Background())
+
+	if len(h.wahooCalls) != 0 {
+		t.Errorf("wahoo calls = %v, want none while auto-schedule is off", h.wahooCalls)
+	}
+}
+
+func TestAutoScheduleTickOneRidersProviderFailingDoesNotStopTheRest(t *testing.T) {
+	fake := &fakeGarmin{activitiesErr: fmt.Errorf("garmin: the session was refused")}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.seedWahooSession("wilant")
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AutoScheduleTick(context.Background())
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	var fit struct {
+		Sessions []struct {
+			Provider string `json:"provider"`
+		} `json:"sessions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&fit); err != nil {
+		t.Fatal(err)
+	}
+	if len(fit.Sessions) != 1 || fit.Sessions[0].Provider != "wahoo" {
+		t.Errorf("sessions = %+v, want the one Wahoo session despite Garmin failing", fit.Sessions)
 	}
 }
