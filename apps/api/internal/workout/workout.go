@@ -84,6 +84,15 @@ type RiderProfile struct {
 	// has looked at and confirmed is never silently touched again.
 	FTPWatts     float64
 	FTPEstimated bool
+	// Estimated names every *other* field that was filled in automatically
+	// rather than typed by the rider (Field* constants below) — from
+	// Garmin's own biometrics, or inferred from the rider's completed
+	// sessions. Same contract FTPEstimated has: an estimated value is safe
+	// for a later sync to keep refining, and saving the profile through the
+	// form always clears the list, because a value the rider has looked at
+	// and confirmed is never silently touched again. A field that is not
+	// listed here and is not zero was entered by the rider.
+	Estimated []string
 	// ThresholdPaceSecPerKM is a runner's threshold pace. 0 means unset.
 	// Unlike FTPWatts, this is never auto-estimated today — see
 	// internal/fitnesstest's own doc comment for why a training run's pace
@@ -104,6 +113,34 @@ type RiderProfile struct {
 	HoursPerAvailableDay float64
 	ExperienceLevel      string
 	UpdatedAt            string
+}
+
+// Names a field can appear under in RiderProfile.Estimated. FTP has its own
+// FTPEstimated flag from before this list existed and is not repeated here.
+const (
+	FieldMaxHR                = "max_hr"
+	FieldThresholdPace        = "threshold_pace"
+	FieldRestingHR            = "resting_hr"
+	FieldAvailableDays        = "available_days"
+	FieldHoursPerAvailableDay = "hours_per_available_day"
+	FieldExperienceLevel      = "experience_level"
+)
+
+// IsEstimated reports whether field was filled in automatically.
+func (p RiderProfile) IsEstimated(field string) bool {
+	for _, f := range p.Estimated {
+		if f == field {
+			return true
+		}
+	}
+	return false
+}
+
+// MarkEstimated records field as automatically filled, once.
+func (p *RiderProfile) MarkEstimated(field string) {
+	if !p.IsEstimated(field) {
+		p.Estimated = append(p.Estimated, field)
+	}
 }
 
 // Intensity labels what a step is for — Garmin's own FIT Workout profile

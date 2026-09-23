@@ -270,6 +270,40 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("estimated fields round-trip and a rider save clears them", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				p := RiderProfile{Rider: "wilant", MaxHR: 190}
+				p.MarkEstimated(FieldMaxHR)
+				p.MarkEstimated(FieldAvailableDays)
+				p.MarkEstimated(FieldMaxHR) // idempotent
+				if _, err := db.SaveProfile(ctx, p); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+
+				fetched, _, err := db.GetProfile(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("get profile: %v", err)
+				}
+				if len(fetched.Estimated) != 2 || !fetched.IsEstimated(FieldMaxHR) || !fetched.IsEstimated(FieldAvailableDays) {
+					t.Errorf("estimated = %v, want max_hr and available_days once each", fetched.Estimated)
+				}
+				if fetched.IsEstimated(FieldRestingHR) {
+					t.Error("resting_hr was never marked")
+				}
+
+				// A save that carries no list — what the rider's form does —
+				// confirms every value.
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", MaxHR: 190}); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				fetched, _, _ = db.GetProfile(ctx, "wilant")
+				if len(fetched.Estimated) != 0 {
+					t.Errorf("estimated = %v, want none after a rider save", fetched.Estimated)
+				}
+			})
+
 			t.Run("workout create, read, update, delete with nested steps", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()

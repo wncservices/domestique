@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/autoprofile"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
+	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -31,6 +35,10 @@ type syncMetricsResultDTO struct {
 	// see the call site below for why it is never used to overwrite a
 	// value the rider entered themselves.
 	RestingHRBpm int `json:"restingHrBpm,omitempty"`
+	// AutoFilled names every profile field this sync filled in or refreshed
+	// on its own — from Garmin's biometrics or the rider's own history — so
+	// the UI can tell them what changed and ask them to check it.
+	AutoFilled []string `json:"autoFilled,omitempty"`
 }
 
 // handleSyncTrainingMetrics is a rider's own "Sync now" click — a thin HTTP
@@ -49,7 +57,7 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	result, err := s.syncRiderMetrics(r.Context(), rider)
+	result, err := s.syncRiderMetrics(r.Context(), rider, true)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -57,74 +65,162 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
+// biometricsRefreshEvery bounds how often the background loop asks Garmin for
+// a rider's biometrics and resting heart rate. Both change over weeks, not
+// hours, and both are undocumented endpoints: asking every half-hour tick for
+// every rider would be the sort of steady traffic that gets an unofficial
+// client noticed, for numbers that would come back identical.
+const biometricsRefreshEvery = 24 * time.Hour
+
+type cachedBiometrics struct {
+	at         time.Time
+	biometrics garmin.Biometrics
+	restingHR  int
+}
+
+// biometricsCache remembers each rider's last Garmin biometrics read, so the
+// ticks between refreshes still know what Garmin said. That matters beyond
+// saving calls: the profile merge below prefers Garmin's own FTP over the
+// one estimated from sessions, and a tick that skipped the fetch and forgot
+// the answer would let the estimate quietly overwrite it. In-memory only —
+// a restart costs one extra read per rider, nothing more.
+type biometricsCache struct {
+	mu sync.Mutex
+	m  map[string]cachedBiometrics
+}
+
+func (c *biometricsCache) get(rider string) (cachedBiometrics, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.m[rider]
+	return v, ok
+}
+
+func (c *biometricsCache) put(rider string, v cachedBiometrics) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = map[string]cachedBiometrics{}
+	}
+	c.m[rider] = v
+}
+
+// garminBiometrics returns what Garmin holds about the rider's physiology,
+// from the cache unless it is stale or force is set (a rider's own "Sync
+// now" always asks — they are waiting on the answer).
+//
+// Deliberately silent to the rider on failure, logged at Warn: these are
+// undocumented endpoints with no coverage against a live account (see
+// garmin.Client.Biometrics and RestingHeartRate), and an optional
+// enhancement to an otherwise-successful sync is exactly the "did not
+// happen, nothing is broken" case AGENTS.md's Observability checklist calls
+// a Warn, not something that should read as a sync failure.
+func (s *Server) garminBiometrics(ctx context.Context, rider string, session garmin.Session, wantResting, force bool) cachedBiometrics {
+	if cached, ok := s.biometrics.get(rider); ok && !force && time.Since(cached.at) < biometricsRefreshEvery {
+		return cached
+	}
+
+	consumer, _ := s.garminConsumer()
+	out := cachedBiometrics{at: time.Now()}
+
+	b, err := s.Garmin.Biometrics(ctx, consumer, session, time.Now())
+	if err != nil {
+		s.logger().Warn("garmin biometrics lookup incomplete", "rider", rider, "err", err)
+	}
+	out.biometrics = b
+
+	// Resting HR is a direct overnight measurement, not something computed
+	// from ride data. A small run of recent dates, since a day with no
+	// reading — the watch was not worn to bed — is normal and not a reason
+	// to give up after one try.
+	if wantResting {
+		for daysAgo := 0; daysAgo < 3 && out.restingHR == 0; daysAgo++ {
+			bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, time.Now().AddDate(0, 0, -daysAgo))
+			if err != nil {
+				s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
+				break
+			}
+			out.restingHR = bpm
+		}
+	}
+
+	s.biometrics.put(rider, out)
+	return out
+}
+
 // syncRiderMetrics pulls recently completed activities from whichever of the
 // rider's own Garmin/Wahoo accounts are connected, records them as
-// completed_sessions, and recomputes the rider's whole CTL/ATL/TSB history
-// from the result. Takes a bare context.Context rather than *http.Request so
+// completed_sessions, recomputes the rider's whole CTL/ATL/TSB history, and
+// fills in whatever of their fitness profile is still empty — from Garmin's
+// own biometrics where it holds them, and from the pattern in the rider's
+// own history otherwise (see internal/autoprofile for what may and may not
+// be overwritten). Takes a bare context.Context rather than *http.Request so
 // the background loop can call it too, with no request of its own — the same
 // split scheduleGoal already makes for the same reason.
 //
+// force skips the biometrics cache; the rider's own click sets it.
+//
 // A provider failing is a warning in the result, never an error: only a
 // problem with this app's own storage returns one.
-func (s *Server) syncRiderMetrics(ctx context.Context, rider string) (syncMetricsResultDTO, error) {
+func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool) (syncMetricsResultDTO, error) {
 	profile, _, err := s.Training.GetProfile(ctx, rider)
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
+	// GetProfile returns a zero-value RiderProfile (Rider == "") when the
+	// rider has never saved one yet — SaveProfile refuses that as ownerless.
+	profile.Rider = rider
 
 	var warnings []string
 	synced := 0
 	var restingHR int
+	var autoFilled []string
 
+	garminSession, garminConnected := garmin.Session{}, false
 	if s.Garmin != nil {
-		if session, ok := s.garminSessionForRider(rider); ok {
-			consumer, _ := s.garminConsumer()
-			activities, err := s.Garmin.ListActivities(ctx, consumer, session)
-			if err != nil {
-				warnings = append(warnings, "garmin: "+err.Error())
-			} else {
-				for _, a := range activities {
-					if a.ID == "" || a.StartTime.IsZero() {
-						continue
-					}
-					load := workout.TrainingLoad(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile)
-					if _, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
-						Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
-						Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
-						DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load,
-					}); err != nil {
-						warnings = append(warnings, "garmin: recording a session: "+err.Error())
-						continue
-					}
-					synced++
-				}
-			}
+		garminSession, garminConnected = s.garminSessionForRider(rider)
+	}
 
-			// Resting HR is a direct overnight measurement, not something
-			// computed from ride data the way FTP is — only worth asking
-			// for at all when the rider has not already typed one in (see
-			// the SaveProfile call below for why that value is never
-			// overwritten once set). A small run of recent dates, since a
-			// day with no reading — the watch was not worn to bed — is
-			// normal and not a reason to give up after one try.
-			//
-			// Deliberately silent on failure rather than a warning: this
-			// hits an undocumented Connect endpoint with no coverage
-			// against a live account (see garmin.Client.RestingHeartRate's
-			// own doc comment), and it is an optional enhancement to an
-			// otherwise-successful sync — exactly the "the action did not
-			// happen, but nothing is broken" case AGENTS.md's own
-			// Observability checklist calls a Warn, not something that
-			// should read as a sync failure to the rider.
-			if profile.RestingHR == 0 {
-				for daysAgo := 0; daysAgo < 3 && restingHR == 0; daysAgo++ {
-					bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, time.Now().AddDate(0, 0, -daysAgo))
-					if err != nil {
-						s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
-						break
-					}
-					restingHR = bpm
+	// Biometrics first, and merged into the profile before any session is
+	// recorded: a session's training load is computed from FTP and heart
+	// rate, so a first sync should score its history with the numbers Garmin
+	// just supplied, not with an empty profile.
+	var suggestion autoprofile.Suggestion
+	if garminConnected {
+		wantResting := profile.RestingHR == 0 || profile.IsEstimated(workout.FieldRestingHR)
+		bio := s.garminBiometrics(ctx, rider, garminSession, wantResting, force)
+		suggestion = autoprofile.Suggestion{
+			FTPWatts:              bio.biometrics.CyclingFTPWatts,
+			MaxHR:                 bio.biometrics.MaxHR,
+			ThresholdPaceSecPerKM: bio.biometrics.ThresholdPaceSecPerKM,
+			RestingHR:             bio.restingHR,
+		}
+		restingHR = bio.restingHR
+		var changed []string
+		profile, changed = autoprofile.Apply(profile, suggestion)
+		autoFilled = append(autoFilled, changed...)
+	}
+
+	if garminConnected {
+		consumer, _ := s.garminConsumer()
+		activities, err := s.Garmin.ListActivities(ctx, consumer, garminSession)
+		if err != nil {
+			warnings = append(warnings, "garmin: "+err.Error())
+		} else {
+			for _, a := range activities {
+				if a.ID == "" || a.StartTime.IsZero() {
+					continue
 				}
+				load := workout.TrainingLoad(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile)
+				if _, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+					Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
+					Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
+					DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load,
+				}); err != nil {
+					warnings = append(warnings, "garmin: recording a session: "+err.Error())
+					continue
+				}
+				synced++
 			}
 		}
 	}
@@ -177,52 +273,66 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string) (syncMetric
 		}
 	}
 
-	// Both of these fold into one SaveProfile call below rather than two —
-	// a first sync on a fresh profile can legitimately produce both a new
-	// FTP estimate and a first resting HR reading at once, and there is no
-	// reason to write the profile twice for that.
-	//
-	// GetProfile returns a zero-value RiderProfile (Rider == "") when the
-	// rider has never saved one yet — has to be set back before either
-	// mutation, or SaveProfile refuses it as ownerless.
+	// What the history itself can say, now that it is on file: an FTP
+	// estimate (only where Garmin gave none — its own detected FTP is a
+	// better number than an average over one ride) and the rider's training
+	// pattern. Both merge through the same autoprofile.Apply, so the same
+	// rule holds: an unset or already-estimated field may be filled, a
+	// rider-confirmed one never is.
+	sessions, err := s.Training.ListSessions(ctx, rider)
+	if err != nil {
+		return syncMetricsResultDTO{}, err
+	}
+	history := autoprofile.Suggestion{}
+	if suggestion.FTPWatts == 0 {
+		if watts, ok := fitnesstest.EstimateFTP(sessions); ok {
+			history.FTPWatts = watts
+		}
+	}
+	if pattern, ok := autoprofile.Infer(sessions, time.Now()); ok {
+		history.AvailableDays = pattern.AvailableDays
+		history.HoursPerAvailableDay = pattern.HoursPerAvailableDay
+		history.ExperienceLevel = pattern.ExperienceLevel
+	}
+	profile, changed := autoprofile.Apply(profile, history)
+	autoFilled = append(autoFilled, changed...)
+
+	// autoFilled can hold a field twice (Garmin's FTP, then a session
+	// estimate that replaced it in one run) — report it once.
+	autoFilled = uniq(autoFilled)
+
 	var estimatedFTP float64
-	profileChanged := false
-
-	if profile.RestingHR == 0 && restingHR > 0 {
-		profile.Rider = rider
-		profile.RestingHR = restingHR
-		profileChanged = true
-		s.logger().Info("resting heart rate synced from garmin", "rider", rider, "bpm", restingHR)
+	if slices.Contains(autoFilled, "ftp") {
+		estimatedFTP = profile.FTPWatts
+	}
+	if !slices.Contains(autoFilled, workout.FieldRestingHR) {
+		restingHR = 0
 	}
 
-	// Refresh the FTP estimate from whatever sessions are now on file —
-	// but only into a field the rider has never confirmed by hand: 0 (never
-	// set) or FTPEstimated (a previous estimate, safe to keep refining).
-	// See RiderProfile.FTPEstimated's own doc comment for why a
-	// rider-entered value is never touched here, synced or not.
-	if synced > 0 && (profile.FTPWatts == 0 || profile.FTPEstimated) {
-		sessions, err := s.Training.ListSessions(ctx, rider)
-		if err != nil {
-			return syncMetricsResultDTO{}, err
-		}
-		if watts, ok := fitnesstest.EstimateFTP(sessions); ok && watts != profile.FTPWatts {
-			profile.Rider = rider
-			profile.FTPWatts = watts
-			profile.FTPEstimated = true
-			profileChanged = true
-			estimatedFTP = watts
-			s.logger().Info("ftp estimated from synced sessions", "rider", rider, "watts", watts)
-		}
-	}
-
-	if profileChanged {
+	if len(autoFilled) > 0 {
 		if _, err := s.Training.SaveProfile(ctx, profile); err != nil {
 			return syncMetricsResultDTO{}, err
 		}
+		s.logger().Info("training profile auto-filled", "rider", rider, "fields", autoFilled)
 	}
 
 	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
-	return syncMetricsResultDTO{Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR}, nil
+	return syncMetricsResultDTO{
+		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
+		AutoFilled: autoFilled,
+	}, nil
+}
+
+func uniq(in []string) []string {
+	seen := map[string]bool{}
+	out := in[:0:0]
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // autoSyncTrainingMetrics runs syncRiderMetrics for every rider who has
@@ -262,7 +372,7 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
 		// A rider one provider's call failed for is still a rider the next
 		// one gets synced for — one bad account never aborts the pass, the
 		// same rule AGENTS.md states for routes.
-		result, err := s.syncRiderMetrics(ctx, rider)
+		result, err := s.syncRiderMetrics(ctx, rider, false)
 		if err != nil {
 			s.logger().Error("auto-sync metrics failed", "rider", rider, "err", err)
 			continue

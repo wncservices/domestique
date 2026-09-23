@@ -552,3 +552,135 @@ func TestAutoScheduleTickOneRidersProviderFailingDoesNotStopTheRest(t *testing.T
 		t.Errorf("sessions = %+v, want the one Wahoo session despite Garmin failing", fit.Sessions)
 	}
 }
+
+// getProfile reads the rider's own profile back through the API.
+type profileBody struct {
+	FTPWatts              float64  `json:"ftpWatts"`
+	FTPEstimated          bool     `json:"ftpEstimated"`
+	MaxHR                 int      `json:"maxHr"`
+	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm"`
+	AvailableDays         []string `json:"availableDays"`
+	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay"`
+	ExperienceLevel       string   `json:"experienceLevel"`
+	Estimated             []string `json:"estimated"`
+}
+
+func (h *metricsSyncHarness) profile(rider string) profileBody {
+	h.t.Helper()
+	resp := h.as(rider, "cyclists", http.MethodGet, "/api/training/profile", "")
+	var p profileBody
+	if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		h.t.Fatal(err)
+	}
+	return p
+}
+
+func TestSyncFillsTheProfileFromGarminBiometrics(t *testing.T) {
+	fake := &fakeGarmin{biometrics: garmin.Biometrics{MaxHR: 191, ThresholdPaceSecPerKM: 290, CyclingFTPWatts: 262}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		AutoFilled []string `json:"autoFilled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.AutoFilled) != 3 {
+		t.Errorf("autoFilled = %v, want ftp, max_hr and threshold_pace", out.AutoFilled)
+	}
+
+	p := h.profile("wilant")
+	if p.FTPWatts != 262 || !p.FTPEstimated || p.MaxHR != 191 || p.ThresholdPaceSecPerKM != 290 {
+		t.Errorf("profile = %+v, want Garmin's numbers, all labelled as estimates", p)
+	}
+	if len(p.Estimated) != 2 {
+		t.Errorf("estimated = %v, want max_hr and threshold_pace", p.Estimated)
+	}
+}
+
+func TestSyncNeverOverwritesAConfirmedProfileWithBiometrics(t *testing.T) {
+	fake := &fakeGarmin{biometrics: garmin.Biometrics{MaxHR: 191, ThresholdPaceSecPerKM: 290, CyclingFTPWatts: 262}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"ftpWatts":300,"maxHr":185,"thresholdPaceSecPerKm":270}`)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	p := h.profile("wilant")
+	if p.FTPWatts != 300 || p.MaxHR != 185 || p.ThresholdPaceSecPerKM != 270 || len(p.Estimated) != 0 {
+		t.Errorf("profile = %+v, want the rider's own numbers untouched", p)
+	}
+}
+
+func TestSyncPrefersGarminsFTPOverASessionEstimate(t *testing.T) {
+	// A 20-minute session at 200W would estimate an FTP of 190; Garmin says 262.
+	fake := &fakeGarmin{
+		biometrics: garmin.Biometrics{CyclingFTPWatts: 262},
+		activities: []garmin.Activity{{ID: "1", Sport: "cycling", StartTime: time.Now().AddDate(0, 0, -2),
+			DurationSeconds: 20 * 60, AvgPowerWatts: 200}},
+	}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	// A second sync, off the cache, must not let the estimate replace it.
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+
+	if p := h.profile("wilant"); p.FTPWatts != 262 {
+		t.Errorf("ftp = %v, want Garmin's 262", p.FTPWatts)
+	}
+}
+
+func TestBackgroundTicksAskGarminForBiometricsOncePerDay(t *testing.T) {
+	fake := &fakeGarmin{biometrics: garmin.Biometrics{MaxHR: 190}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 4; i++ {
+		h.srv.AutoScheduleTick(context.Background())
+	}
+
+	if fake.biometricsCalls != 1 {
+		t.Errorf("biometrics calls = %d over four ticks, want 1 — these are undocumented endpoints, not to be polled", fake.biometricsCalls)
+	}
+	if p := h.profile("wilant"); p.MaxHR != 190 {
+		t.Errorf("maxHr = %d, want 190 filled in with nobody clicking", p.MaxHR)
+	}
+}
+
+func TestSyncInfersTheTrainingPatternFromHistory(t *testing.T) {
+	// Ten weeks of Tue/Thu/Sat rides, 90 minutes each.
+	var acts []garmin.Activity
+	now := time.Now()
+	monday := now.AddDate(0, 0, -((int(now.Weekday()) + 6) % 7))
+	for w := 1; w <= 10; w++ {
+		for i, offset := range []int{1, 3, 5} {
+			day := monday.AddDate(0, 0, -7*w+offset)
+			acts = append(acts, garmin.Activity{
+				ID: fmt.Sprintf("a-%d-%d", w, i), Sport: "cycling",
+				StartTime: time.Date(day.Year(), day.Month(), day.Day(), 7, 0, 0, 0, time.UTC), DurationSeconds: 5400,
+			})
+		}
+	}
+	h := newMetricsSyncHarness(t, &fakeGarmin{activities: acts})
+	h.seedGarminSession("wilant")
+
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+
+	p := h.profile("wilant")
+	if got := strings.Join(p.AvailableDays, ","); got != "tue,thu,sat" {
+		t.Errorf("available days = %q, want tue,thu,sat", got)
+	}
+	if p.HoursPerAvailableDay != 1.5 || p.ExperienceLevel == "" {
+		t.Errorf("profile = %+v, want 1.5h per day and an experience label", p)
+	}
+}
