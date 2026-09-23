@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -92,6 +93,16 @@ type fakeGarmin struct {
 	biometrics      garmin.Biometrics
 	biometricsErr   error
 	biometricsCalls int
+
+	// remoteWorkouts is what the fake account holds, keyed by the ids
+	// PushWorkout hands out, and calendar what has been scheduled onto it
+	// (schedule id -> date). Every Update/Delete/Schedule call is also
+	// appended to workoutCalls, in order, as "verb id".
+	remoteWorkouts map[string]string
+	calendar       map[string]string
+	workoutCalls   []string
+	nextRemoteID   int
+	scheduleErr    error
 }
 
 func (f *fakeGarmin) ListActivities(_ context.Context, _ api.GarminConsumer, session garmin.Session) ([]garmin.Activity, error) {
@@ -105,10 +116,58 @@ func (f *fakeGarmin) PushWorkout(_ context.Context, _ api.GarminConsumer, sessio
 	if f.pushWorkoutErr != nil {
 		return "", f.pushWorkoutErr
 	}
-	if f.pushedWorkoutID == "" {
-		f.pushedWorkoutID = "garmin-workout-1"
+	if f.remoteWorkouts == nil {
+		f.remoteWorkouts = map[string]string{}
 	}
-	return f.pushedWorkoutID, nil
+	f.nextRemoteID++
+	id := fmt.Sprintf("garmin-workout-%d", f.nextRemoteID)
+	// A test that pins the id (the original single-push tests) still can.
+	if f.pushedWorkoutID != "" {
+		id = f.pushedWorkoutID
+	}
+	f.remoteWorkouts[id] = name
+	f.workoutCalls = append(f.workoutCalls, "create "+id)
+	return id, nil
+}
+
+func (f *fakeGarmin) UpdateWorkout(_ context.Context, _ api.GarminConsumer, _ garmin.Session, id, name, _ string, _ []fitworkout.Step) error {
+	f.workoutCalls = append(f.workoutCalls, "update "+id)
+	if _, ok := f.remoteWorkouts[id]; !ok {
+		return garmin.ErrWorkoutGone
+	}
+	f.remoteWorkouts[id] = name
+	return nil
+}
+
+func (f *fakeGarmin) DeleteWorkout(_ context.Context, _ api.GarminConsumer, _ garmin.Session, id string) error {
+	f.workoutCalls = append(f.workoutCalls, "delete "+id)
+	if _, ok := f.remoteWorkouts[id]; !ok {
+		return garmin.ErrWorkoutGone
+	}
+	delete(f.remoteWorkouts, id)
+	return nil
+}
+
+func (f *fakeGarmin) ScheduleWorkout(_ context.Context, _ api.GarminConsumer, _ garmin.Session, id, date string) (string, error) {
+	f.workoutCalls = append(f.workoutCalls, "schedule "+id+" "+date)
+	if f.scheduleErr != nil {
+		return "", f.scheduleErr
+	}
+	if _, ok := f.remoteWorkouts[id]; !ok {
+		return "", garmin.ErrWorkoutGone
+	}
+	if f.calendar == nil {
+		f.calendar = map[string]string{}
+	}
+	entry := fmt.Sprintf("entry-%d", len(f.calendar)+1)
+	f.calendar[entry] = date
+	return entry, nil
+}
+
+func (f *fakeGarmin) UnscheduleWorkout(_ context.Context, _ api.GarminConsumer, _ garmin.Session, entry string) error {
+	f.workoutCalls = append(f.workoutCalls, "unschedule "+entry)
+	delete(f.calendar, entry)
+	return nil
 }
 
 func (f *fakeGarmin) RestingHeartRate(_ context.Context, _ api.GarminConsumer, session garmin.Session, _ time.Time) (int, error) {

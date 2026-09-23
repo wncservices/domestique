@@ -73,6 +73,17 @@ type GarminConnector interface {
 	// garmin.Client.Biometrics for why a partial result comes back alongside
 	// an error.
 	Biometrics(ctx context.Context, consumer GarminConsumer, session garmin.Session, now time.Time) (garmin.Biometrics, error)
+	// UpdateWorkout replaces a workout PushWorkout created; it fails with
+	// garmin.ErrWorkoutGone when the rider has since deleted it in Connect.
+	UpdateWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID, name, sport string, steps []fitworkout.Step) error
+	// DeleteWorkout removes one; garmin.ErrWorkoutGone means it was already gone.
+	DeleteWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID string) error
+	// ScheduleWorkout places a workout on a calendar date ("YYYY-MM-DD") and
+	// returns the id of that calendar entry (possibly empty — see
+	// garmin.Client.ScheduleWorkout).
+	ScheduleWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID, date string) (string, error)
+	// UnscheduleWorkout removes a calendar entry ScheduleWorkout returned.
+	UnscheduleWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, scheduleID string) error
 }
 
 // LiveGarmin is the real connector: it talks to Garmin.
@@ -204,4 +215,40 @@ func (l LiveGarmin) Biometrics(ctx context.Context, consumer GarminConsumer, ses
 		return garmin.Biometrics{}, err
 	}
 	return client.Biometrics(ctx, now)
+}
+
+// UpdateWorkout replaces a workout already on a connected account.
+func (l LiveGarmin) UpdateWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID, name, sport string, steps []fitworkout.Step) error {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return err
+	}
+	return client.UpdateWorkout(ctx, remoteID, name, sport, steps)
+}
+
+// DeleteWorkout removes a workout from a connected account.
+func (l LiveGarmin) DeleteWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID string) error {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return err
+	}
+	return client.DeleteWorkout(ctx, remoteID)
+}
+
+// ScheduleWorkout places a workout on a connected account's calendar.
+func (l LiveGarmin) ScheduleWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID, date string) (string, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return "", err
+	}
+	return client.ScheduleWorkout(ctx, remoteID, date)
+}
+
+// UnscheduleWorkout removes a calendar entry from a connected account.
+func (l LiveGarmin) UnscheduleWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, scheduleID string) error {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return err
+	}
+	return client.UnscheduleWorkout(ctx, scheduleID)
 }

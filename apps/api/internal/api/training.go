@@ -129,6 +129,9 @@ type riderProfileDTO struct {
 	AvailableDays         []string `json:"availableDays,omitempty"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay,omitempty"`
 	ExperienceLevel       string   `json:"experienceLevel,omitempty"`
+	// AutoPushWorkouts is the rider's standing permission to place their
+	// scheduled workouts on their Garmin account automatically.
+	AutoPushWorkouts bool `json:"autoPushWorkouts,omitempty"`
 	// Estimated names the fields above (other than FTP, which has its own
 	// flag) that were filled in automatically and not yet confirmed by the
 	// rider. Output only — handleSaveRiderProfile never reads it back.
@@ -141,7 +144,7 @@ func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
 		MaxHR: p.MaxHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
-		Estimated: p.Estimated, UpdatedAt: p.UpdatedAt,
+		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, UpdatedAt: p.UpdatedAt,
 	}
 }
 
@@ -659,6 +662,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
 		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
+		AutoPushWorkouts: body.AutoPushWorkouts,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -930,6 +934,10 @@ func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Off the rider's watch first, while the push record that says where it
+	// is still exists — DeleteWorkout removes that record with the workout.
+	s.removeWorkoutFromGarmin(r.Context(), wk)
+
 	if err := s.Training.DeleteWorkout(r.Context(), id); err != nil {
 		s.failTrainingLookup(w, err)
 		return
@@ -976,17 +984,13 @@ func (s *Server) handleDownloadWorkoutFIT(w http.ResponseWriter, r *http.Request
 	writeFITAttachment(s.logger(), w, wk.ID, fitBytes)
 }
 
-// handlePushWorkoutToGarmin pushes a structured workout to the rider's own
-// connected Garmin account — the automatic counterpart to
-// handleDownloadWorkoutFIT's manual USB-copy path, now that
-// internal/garmin.CreateWorkout exists (Connect's own JSON schema, not the
-// FIT bytes the download endpoint produces — see that client's own doc
-// comment). One-shot: this always creates a new Garmin workout, it does not
-// yet track and update the one from a previous push for the same workout —
-// pushing again makes a second entry on the account rather than replacing
-// the first. Good enough for a first version; keeping them in sync on
-// every edit is real design work (where does the remote id live, what
-// happens if the rider deleted it on the Garmin side) left for later.
+// handlePushWorkoutToGarmin puts a structured workout on the rider's own
+// connected Garmin account and on its calendar date — the manual counterpart
+// to autoPushWorkouts, and to handleDownloadWorkoutFIT's USB-copy path (this
+// one sends Connect's own JSON schema, not the FIT bytes that download
+// produces — see internal/garmin's own doc comment). Idempotent: see
+// syncWorkoutToGarmin. Pressing it again on an unchanged workout is a no-op,
+// on an edited one updates the existing copy, and never adds a second.
 func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -1017,16 +1021,14 @@ func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	consumer, _ := s.garminConsumer()
-
-	remoteID, err := s.Garmin.PushWorkout(r.Context(), consumer, session, wk.Name, string(wk.Sport), workout.FITSteps(wk.Steps))
+	res, err := s.syncWorkoutToGarmin(r.Context(), session, wk)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 
-	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", remoteID, "rider", identity.User)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "garminWorkoutId": remoteID})
+	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", res.RemoteID, "outcome", res.Outcome, "rider", identity.User)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "outcome": res.Outcome, "garminWorkoutId": res.RemoteID})
 }
 
 // ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------

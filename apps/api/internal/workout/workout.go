@@ -22,6 +22,9 @@
 package workout
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
@@ -93,6 +96,13 @@ type RiderProfile struct {
 	// and confirmed is never silently touched again. A field that is not
 	// listed here and is not zero was entered by the rider.
 	Estimated []string
+	// AutoPushWorkouts is the rider's standing permission for this app to
+	// place their scheduled workouts on their Garmin account — and keep them
+	// in step as the plan moves — without being asked each time. Off by
+	// default: putting something on a person's watch is an outward-facing
+	// act, so it is theirs to switch on, not something a deployment-wide
+	// setting does to them.
+	AutoPushWorkouts bool
 	// ThresholdPaceSecPerKM is a runner's threshold pace. 0 means unset.
 	// Unlike FTPWatts, this is never auto-estimated today — see
 	// internal/fitnesstest's own doc comment for why a training run's pace
@@ -313,4 +323,38 @@ func FITSteps(steps []WorkoutStep) []fitworkout.Step {
 		})
 	}
 	return out
+}
+
+// Push records that a workout has been placed on a provider's account: which
+// remote copy it is, which calendar entry puts it on a date, and a hash of
+// what was sent — so the next pass can tell "unchanged, leave it" from "edited
+// since, update the copy" from "never sent". Without this every push creates
+// a second copy, and a rider's Garmin fills with duplicates.
+type Push struct {
+	WorkoutID string
+	Provider  string
+	// RemoteID is the provider's id for the workout itself.
+	RemoteID string
+	// ScheduleID is the provider's id for the calendar entry, empty when the
+	// provider did not name one (then the entry cannot be moved, only added to).
+	ScheduleID string
+	// ScheduledDate is the date the workout was last placed on, "YYYY-MM-DD".
+	ScheduledDate string
+	// ContentHash is ContentHash of the workout as last sent.
+	ContentHash string
+	PushedAt    string
+}
+
+// ContentHash fingerprints what a provider is shown of a workout — name,
+// sport and steps. The date is deliberately not part of it: moving a workout
+// to another day changes where it sits, not what it is, and is tracked as
+// Push.ScheduledDate.
+func ContentHash(w Workout) string {
+	body, _ := json.Marshal(struct {
+		Name  string
+		Sport model.Sport
+		Steps []WorkoutStep
+	}{w.Name, w.Sport, w.Steps})
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
 }

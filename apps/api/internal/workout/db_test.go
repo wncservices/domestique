@@ -299,6 +299,64 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("push records upsert, list opted-in riders, and vanish with the workout", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", AutoPushWorkouts: true}); err != nil {
+					t.Fatalf("save opted-in profile: %v", err)
+				}
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "other"}); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				riders, err := db.ListAutoPushRiders(ctx)
+				if err != nil || len(riders) != 1 || riders[0] != "wilant" {
+					t.Fatalf("riders = %v, err = %v, want only wilant", riders, err)
+				}
+
+				wk, err := db.CreateWorkout(ctx, CreateWorkoutRequest{
+					Rider: "wilant", Sport: "cycling", Name: "Tempo",
+					Steps: []WorkoutStep{{Name: "Ride", Duration: DurationOpen, Target: TargetOpen}},
+				})
+				if err != nil {
+					t.Fatalf("create workout: %v", err)
+				}
+				if _, have, _ := db.GetPush(ctx, wk.ID, "garmin"); have {
+					t.Error("a workout never pushed has no record")
+				}
+
+				p := Push{WorkoutID: wk.ID, Provider: "garmin", RemoteID: "r1", ContentHash: ContentHash(wk)}
+				if err := db.SavePush(ctx, p); err != nil {
+					t.Fatalf("save push: %v", err)
+				}
+				p.ScheduleID, p.ScheduledDate = "e1", "2026-03-20"
+				if err := db.SavePush(ctx, p); err != nil {
+					t.Fatalf("save push again: %v", err)
+				}
+				got, have, err := db.GetPush(ctx, wk.ID, "garmin")
+				if err != nil || !have || got.ScheduleID != "e1" || got.ScheduledDate != "2026-03-20" || got.RemoteID != "r1" {
+					t.Errorf("push = %+v have=%v err=%v, want the second write to have replaced the first", got, have, err)
+				}
+
+				renamed := wk
+				renamed.Name = "Tempo 2"
+				if ContentHash(renamed) == ContentHash(wk) {
+					t.Error("renaming must change the content hash")
+				}
+				moved := wk
+				moved.Date = "2026-04-01"
+				if ContentHash(moved) != ContentHash(wk) {
+					t.Error("moving to another day must not change the content hash: it is the same workout")
+				}
+
+				if err := db.DeleteWorkout(ctx, wk.ID); err != nil {
+					t.Fatalf("delete workout: %v", err)
+				}
+				if _, have, _ := db.GetPush(ctx, wk.ID, "garmin"); have {
+					t.Error("the push record must go with the workout")
+				}
+			})
+
 			t.Run("workout create, read, update, delete with nested steps", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()

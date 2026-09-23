@@ -263,6 +263,12 @@ func encodeTarget(step *workoutStepDTO, s fitworkout.Step) error {
 	return nil
 }
 
+// ErrWorkoutGone means the workout no longer exists on the account — the
+// rider deleted it in Connect. Callers that keep a remote id treat it as
+// "that copy is gone", not as a failure: a push re-creates it, a delete has
+// nothing left to do.
+var ErrWorkoutGone = errors.New("garmin: that workout no longer exists on the account")
+
 // CreateWorkout pushes a new structured workout to Connect and returns its
 // id.
 func (c *Client) CreateWorkout(ctx context.Context, name, sport string, steps []fitworkout.Step) (string, error) {
@@ -338,6 +344,8 @@ func (c *Client) UpdateWorkout(ctx context.Context, id, name, sport string, step
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
 		return errors.New("garmin: the session was refused — sign in again")
+	case status == http.StatusNotFound:
+		return fmt.Errorf("%w (updating returned 404)", ErrWorkoutGone)
 	case status >= 300:
 		return fmt.Errorf("garmin: updating the workout returned %d: %s", status, longSnippet(raw))
 	}
@@ -366,6 +374,8 @@ func (c *Client) DeleteWorkout(ctx context.Context, id string) error {
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
 		return errors.New("garmin: the session was refused — sign in again")
+	case status == http.StatusNotFound:
+		return fmt.Errorf("%w (deleting returned 404)", ErrWorkoutGone)
 	case status >= 300:
 		return fmt.Errorf("garmin: deleting the workout returned %d: %s", status, snippet(raw))
 	}

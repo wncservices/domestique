@@ -778,6 +778,9 @@ export interface RiderProfile {
   availableDays?: string[]
   hoursPerAvailableDay?: number
   experienceLevel?: string
+  /** Standing permission to place scheduled workouts on the rider's Garmin
+   *  account automatically, and keep them in step as the plan moves. */
+  autoPushWorkouts?: boolean
   /** Fields (other than FTP, which has ftpEstimated) that were filled in
    *  automatically — from Garmin's own biometrics or the rider's recent
    *  training — and not yet confirmed. Names match internal/workout's Field*
