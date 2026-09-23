@@ -250,7 +250,7 @@ func buildSession(t sessionType, hours float64, sport model.Sport, profile worko
 	return workout.CreateWorkoutRequest{
 		Sport:       sport,
 		Name:        name,
-		Description: "Generated from the periodization plan.",
+		Description: GeneratedDescription,
 		Steps: []workout.WorkoutStep{
 			{Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationOpen, Target: workout.TargetOpen},
 			main,

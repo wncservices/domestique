@@ -433,6 +433,16 @@ async function pushWorkoutToGarmin(w: Workout) {
   }
 }
 
+// A workout the plan changed on its own carries the reason in its description,
+// after this marker (see internal/scheduler.AdjustedMarker) — shown so a rider
+// is never left wondering why Thursday's session is not what it was on Monday.
+const ADJUSTED_MARKER = 'Adjusted automatically:'
+
+function adjustmentNote(w: Workout): string {
+  const at = (w.description ?? '').indexOf(ADJUSTED_MARKER)
+  return at < 0 ? '' : w.description!.slice(at + ADJUSTED_MARKER.length).trim()
+}
+
 function stepCount(w: Workout): number {
   // Flat count including a repeat block's own children, so the summary line
   // reads like "5 steps" rather than "3" for a workout that's mostly one
@@ -609,6 +619,10 @@ onMounted(() => {
             <p class="text-sm text-muted">
               {{ w.sport }} · {{ stepCount(w) }} step(s)
               <template v-if="w.date">· {{ w.date }}</template>
+            </p>
+            <p v-if="adjustmentNote(w)" class="mt-1 flex items-start gap-1 text-xs text-info">
+              <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
+              <span>{{ adjustmentNote(w) }}</span>
             </p>
           </div>
           <div class="flex items-center gap-1 shrink-0">

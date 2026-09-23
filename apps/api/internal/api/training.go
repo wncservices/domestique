@@ -385,7 +385,7 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 		return periodization.Plan{}, workout.RiderProfile{}, err
 	}
 
-	plan, err := periodization.Build(g, profile, time.Now())
+	plan, err := periodization.Build(g, profile, s.now())
 	if err != nil {
 		// ErrNoEventDate/ErrEventInThePast are the only errors BuildPlan
 		// returns — both are the rider's own data being unsuitable to plan
@@ -398,7 +398,7 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 	if err != nil {
 		return periodization.Plan{}, profile, err
 	}
-	return adapter.Reconcile(g, profile, plan, sessions, time.Now()), profile, nil
+	return adapter.Reconcile(g, profile, plan, sessions, s.now()), profile, nil
 }
 
 type scheduledWorkoutsDTO struct {
@@ -468,7 +468,7 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Wo
 		return nil, 0, err
 	}
 
-	requests, err := scheduler.NextWorkouts(plan, profile, g.Rider, g.ID, g.Sport, time.Now())
+	requests, err := scheduler.NextWorkouts(plan, profile, g.Rider, g.ID, g.Sport, s.now())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -487,6 +487,13 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Wo
 	for _, wk := range existing {
 		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
+			// A workout moved to another day by an automatic adjustment
+			// leaves its original day empty. That day is not free: it is
+			// where the session was planned, and scheduling must not read the
+			// gap and plan it again on top of the moved one.
+			if from, ok := scheduler.MovedFrom(wk.Description); ok {
+				alreadyScheduled[from] = true
+			}
 		}
 	}
 
