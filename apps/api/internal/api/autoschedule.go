@@ -134,7 +134,7 @@ func (s *Server) RunAutoScheduleLoop(ctx context.Context) {
 // single tick. Exported so a test can drive it directly instead of
 // waiting on a real ticker.
 //
-// Every goal with an event date, across every rider, is scheduled the same
+// Every goal, across every rider, is scheduled the same
 // way handleGoalSchedule schedules one on a rider's own click — same
 // scheduleGoal call, same idempotency (a date already covered for a goal
 // is left alone), so a rider who has never opened the training page since
@@ -163,7 +163,7 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		// are useful before anyone has set a goal.
 		s.autoSyncTrainingMetrics(ctx)
 
-		goals, err := s.Training.ListGoalsWithEventDate(ctx)
+		goals, err := s.Training.ListAllGoals(ctx)
 		if err != nil {
 			s.logger().Error("auto-schedule: listing goals failed", "err", err)
 			return
@@ -176,11 +176,12 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 				// goal simply outlived its event and nobody has deleted it
 				// yet, no different from AGENTS.md's "one bad route never
 				// aborts a run": this goal is skipped, every other rider's
-				// goal still gets scheduled. ErrNoEventDate cannot happen
-				// here — ListGoalsWithEventDate already filters it out —
-				// but is still excluded from the noisy case rather than
-				// asserted against, since a defensive check that never
-				// fires is cheaper than one that panics if it ever does.
+				// goal still gets scheduled. A goal with no date is not an
+				// error either — it gets a rolling general-fitness plan —
+				// but ErrNoEventDate stays excluded from the noisy case
+				// rather than asserted against, since a defensive check that
+				// never fires is cheaper than one that panics if it ever
+				// does.
 				if err != periodization.ErrNoEventDate && err != periodization.ErrEventInThePast {
 					s.logger().Warn("auto-schedule failed for a goal", "goal", g.ID, "rider", g.Rider, "err", err)
 				}

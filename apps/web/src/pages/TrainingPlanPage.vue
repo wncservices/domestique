@@ -8,6 +8,7 @@
 // partner entitlement this deployment does not have; see the plan doc's
 // own "Structured workouts and the providers".
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import { useLibrary } from '@/composables/useLibrary'
@@ -25,6 +26,8 @@ import type {
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 const { canSyncGarmin } = useLibrary()
 
 // --- me: only fetched here for narrationEnabled, so "Explain this plan"
@@ -98,12 +101,16 @@ function freshGoalForm() {
 
 function openCreateGoal() {
   editingGoalId.value = null
+  goalNote.value = ''
+  goalExplanation.value = ''
   goalForm.value = freshGoalForm()
   goalModalOpen.value = true
 }
 
 function openEditGoal(g: Goal) {
   editingGoalId.value = g.id
+  goalNote.value = ''
+  goalExplanation.value = ''
   goalForm.value = {
     name: g.name,
     sport: g.sport,
@@ -114,6 +121,80 @@ function openEditGoal(g: Goal) {
     notes: g.notes ?? '',
   }
   goalModalOpen.value = true
+}
+
+// --- goal shortcuts: describe it in a sentence, start from a route in the
+// library, or skip the event entirely and just keep training ---
+
+const goalNote = ref('')
+const proposingGoal = ref(false)
+const goalExplanation = ref('')
+
+// Turns a sentence into the goal form's fields. Nothing is saved: the rider
+// reviews the filled-in form and presses Save, same as the profile note.
+async function proposeGoal() {
+  if (!goalNote.value.trim()) return
+  proposingGoal.value = true
+  try {
+    const p = await api.proposeGoal(goalNote.value)
+    goalForm.value = {
+      ...goalForm.value,
+      name: p.name,
+      sport: p.sport,
+      eventDate: p.eventDate ?? '',
+      priority: p.priority,
+      targetDistanceKm: p.targetDistanceM ? String(p.targetDistanceM / 1000) : '',
+      targetElevationM: p.targetElevationM ? String(p.targetElevationM) : '',
+    }
+    goalExplanation.value = p.explanation ?? ''
+  } catch (err) {
+    toast.add({ title: 'Could not turn that into a goal', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    proposingGoal.value = false
+  }
+}
+
+// "Train for this route" in the library lands here with ?goalFromRoute=<slug>.
+// The distance and climbing are already known, so the form opens with them
+// filled in and the rider only has to add a date. The query is cleared so a
+// refresh does not reopen the modal.
+async function startGoalFromRoute() {
+  const slug = route.query.goalFromRoute
+  if (typeof slug !== 'string' || !slug) return
+  router.replace({ path: route.path, query: {} })
+  try {
+    const library = await api.routes()
+    const found = library.routes.find((r) => r.slug === slug)
+    if (!found) return
+    openCreateGoal()
+    goalForm.value = {
+      ...goalForm.value,
+      name: found.name,
+      sport: found.sport,
+      targetDistanceKm: String(Math.round(found.distanceM / 100) / 10),
+      targetElevationM: String(Math.round(found.ascentM)),
+    }
+  } catch (err) {
+    toast.add({ title: 'Could not load that route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  }
+}
+
+// One click for a rider with nothing to train for: an undated goal is a
+// rolling general-fitness plan (see periodization.BuildRollingPlan). Cycling
+// by default; the pencil changes it.
+const startingGeneralPlan = ref(false)
+
+async function startGeneralPlan() {
+  startingGeneralPlan.value = true
+  try {
+    await api.createGoal({ name: 'General fitness', sport: 'cycling', priority: 'C' })
+    toast.add({ title: 'Started a general fitness plan', description: 'Twelve rolling weeks of steady base training.', icon: 'i-lucide-flag', color: 'success' })
+    await loadGoals()
+  } catch (err) {
+    toast.add({ title: 'Could not start a plan', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    startingGeneralPlan.value = false
+  }
 }
 
 const savingGoal = ref(false)
@@ -366,6 +447,7 @@ onMounted(() => {
   loadProfile()
   loadGoals()
   loadWorkouts()
+  startGoalFromRoute()
 })
 </script>
 
@@ -388,9 +470,15 @@ onMounted(() => {
         </div>
       </template>
 
-      <p v-if="!loadingGoals && goals.length === 0" class="text-muted text-sm">
-        No goals yet — a goal is optional, but gives your workouts something to build toward.
-      </p>
+      <div v-if="!loadingGoals && goals.length === 0" class="flex flex-col items-start gap-3">
+        <p class="text-muted text-sm">
+          No goals yet. Add a race or event to train toward — or, if there is nothing on the calendar, start a
+          general fitness plan and Domestique keeps you training steadily anyway.
+        </p>
+        <UButton color="neutral" variant="soft" icon="i-lucide-wand-sparkles" :loading="startingGeneralPlan" @click="startGeneralPlan">
+          Start a general fitness plan
+        </UButton>
+      </div>
 
       <div class="flex flex-col divide-y divide-default">
         <div v-for="g in goals" :key="g.id" class="py-3 first:pt-0 last:pb-0">
@@ -403,13 +491,13 @@ onMounted(() => {
               <p class="text-sm text-muted">
                 {{ g.sport }}
                 <template v-if="g.eventDate">· {{ g.eventDate }}</template>
+                <template v-else>· no date — rolling plan</template>
                 <template v-if="g.targetDistanceM">· {{ (g.targetDistanceM / 1000).toFixed(0) }} km</template>
                 <template v-if="g.targetElevationM">· {{ g.targetElevationM.toFixed(0) }} m climbing</template>
               </p>
             </div>
             <div class="flex items-center gap-1 shrink-0">
               <UButton
-                v-if="g.eventDate"
                 color="neutral"
                 variant="ghost"
                 size="sm"
@@ -561,6 +649,26 @@ onMounted(() => {
     <UModal v-model:open="goalModalOpen" :title="editingGoalId ? 'Edit goal' : 'Add a goal'">
       <template #body>
         <form class="flex flex-col gap-4" @submit.prevent="saveGoal">
+          <div v-if="me?.narrationEnabled && !editingGoalId" class="rounded-md border border-default p-3">
+            <p class="text-sm font-medium mb-1">Describe it</p>
+            <p class="text-xs text-muted mb-2">
+              e.g. "gran fondo, 180 km, 2400 m of climbing, mid June" — fills in the fields below for you to review.
+            </p>
+            <div class="flex gap-2">
+              <UInput v-model="goalNote" class="w-full" placeholder="What are you training for?" @keydown.enter.prevent="proposeGoal" />
+              <UButton
+                icon="i-lucide-sparkles"
+                color="neutral"
+                variant="soft"
+                :loading="proposingGoal"
+                :disabled="!goalNote.trim()"
+                @click="proposeGoal"
+              >
+                Fill in
+              </UButton>
+            </div>
+            <p v-if="goalExplanation" class="mt-2 text-sm text-muted italic">{{ goalExplanation }}</p>
+          </div>
           <UFormField label="Name">
             <UInput v-model="goalForm.name" placeholder="Local Gran Fondo" class="w-full" />
           </UFormField>
@@ -572,7 +680,7 @@ onMounted(() => {
               <USelect v-model="goalForm.priority" :items="priorities" value-key="value" class="w-full" />
             </UFormField>
           </div>
-          <UFormField label="Event date">
+          <UFormField label="Event date" help="Leave empty if there is no event — you get a rolling general fitness plan.">
             <UInput v-model="goalForm.eventDate" type="date" class="w-full" />
           </UFormField>
           <div class="grid grid-cols-2 gap-4">

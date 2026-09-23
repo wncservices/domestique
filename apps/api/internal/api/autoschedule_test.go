@@ -225,3 +225,73 @@ func TestHandleAutoScheduleGetAndSet(t *testing.T) {
 		t.Error("flag not actually set")
 	}
 }
+
+// A rider with no race on the calendar still trains: a goal with no event
+// date gets a rolling general-fitness plan and is scheduled like any other.
+func TestAutoScheduleTickSchedulesAGoalWithNoEventDate(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", HoursPerAvailableDay: 1.5, AvailableDays: []string{"tue", "thu", "sat"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AutoScheduleTick(ctx)
+
+	workouts, err := h.store.ListWorkouts(ctx, "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workouts) != 3 {
+		t.Errorf("workouts = %d, want 3 — one per available day from the rolling plan", len(workouts))
+	}
+}
+
+// A rider with both a race and a general-fitness goal must not get two
+// sessions on the same day. The dated goal is visited first and keeps the
+// day; the undated one fills nothing that is already taken.
+func TestAutoScheduleTickNeverDoubleBooksTwoGoals(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	// Created undated-first on purpose: order of creation must not matter.
+	undated, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dated, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{
+		Rider: "wilant", Name: "Race Day", EventDate: time.Now().AddDate(0, 0, 70).Format("2006-01-02"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", HoursPerAvailableDay: 1.5, AvailableDays: []string{"tue", "thu", "sat", "sun"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AutoScheduleTick(ctx)
+
+	workouts, err := h.store.ListWorkouts(ctx, "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workouts) != 4 {
+		t.Fatalf("workouts = %d, want 4 — two goals must share one week, not double it", len(workouts))
+	}
+	for _, wk := range workouts {
+		if wk.GoalID != dated.ID {
+			t.Errorf("workout %q belongs to goal %q, want the dated goal %q (not %q)", wk.Name, wk.GoalID, dated.ID, undated.ID)
+		}
+	}
+}

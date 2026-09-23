@@ -190,6 +190,70 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	return plan, nil
 }
 
+// rollingWeeks is how far ahead a plan with no event date looks.
+const rollingWeeks = 12
+
+// rollingAnchor is the fixed Monday every rolling plan counts weeks from.
+// Any Monday would do; it only has to be the same one forever.
+var rollingAnchor = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// Build is BuildPlan for a goal with an event date and BuildRollingPlan for
+// one without — the one entry point callers should use, so "a goal with no
+// date" is a supported kind of goal (general fitness) rather than an error
+// each call site has to remember to handle.
+func Build(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Plan, error) {
+	if goal.EventDate == "" {
+		return BuildRollingPlan(goal, profile, today), nil
+	}
+	return BuildPlan(goal, profile, today)
+}
+
+// BuildRollingPlan is the plan for a rider who is training but not toward
+// any particular day: rollingWeeks of steady base volume with the same 3:1
+// load/recover cycle, always starting at this week. There is no build, peak
+// or taper because there is nothing to peak for — the point is to keep a
+// rider who has no race on the calendar training consistently, which is
+// most riders most of the year.
+//
+// The one subtle thing is where a recovery week falls. An event plan counts
+// weeks from its own start, so recovery lands on the plan's 4th, 8th, …
+// week. Rolling plans are rebuilt from "today" on every request, so counting
+// from the plan's own start would put this week at position 1 every single
+// time and recovery would never arrive. Weeks are counted from a fixed
+// anchor Monday instead: the same calendar week is the same position in the
+// cycle whichever day the plan was built on, so a rider gets a recovery week
+// every fourth calendar week, and yesterday's plan and today's agree about
+// next week.
+func BuildRollingPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time) Plan {
+	start := MondayOf(today)
+	// Calendar arithmetic on the date, not on instants: a local Monday
+	// midnight is not a UTC midnight, and dividing hours by 24 would land a
+	// day short of the true week count in zones east of UTC.
+	startUTC := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	firstWeek := int(startUTC.Sub(rollingAnchor).Hours()/24) / 7
+
+	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
+
+	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, rollingWeeks), Adjustment: 1}
+	for i := 0; i < rollingWeeks; i++ {
+		index := firstWeek + i
+		if index < 0 {
+			// Before the anchor: only reachable by a clock set before 2024,
+			// but a negative modulus below would misplace recovery weeks.
+			index = ((index % recoveryEveryNWeeks) + recoveryEveryNWeeks) % recoveryEveryNWeeks
+		}
+		recovery := (index+1)%recoveryEveryNWeeks == 0
+		plan.Weeks = append(plan.Weeks, Week{
+			Number:      i + 1,
+			StartDate:   start.AddDate(0, 0, i*7).Format("2006-01-02"),
+			Phase:       PhaseBase,
+			Recovery:    recovery,
+			TargetHours: peakHours * weekFraction(PhaseBase, index, rollingWeeks, recovery),
+		})
+	}
+	return plan
+}
+
 // allocateWeeks splits totalWeeks across the four phases. Short plans
 // cannot fit all four meaningfully — there is no point calling a single
 // week "Base" — so this collapses toward the phases nearest the event
