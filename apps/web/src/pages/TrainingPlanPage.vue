@@ -29,6 +29,7 @@ import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
+import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { adjustmentNote } from '@/utils/workoutMath'
 
 const toast = useToast()
@@ -531,12 +532,27 @@ function selectGoal(id: string) {
   focusGoalId.value = id
 }
 
+// The browsed week not being the current one is why week.focus can be
+// undefined even with goals on file — the server only fills it in for the
+// goal whose own periodized plan has a week starting on this exact date
+// (internal/api/trainingweek.go's weekFocus). Rather than show a bare
+// icon-chip, fall back to the same goal the header's own dropdown lets a
+// rider pick by hand: the override if one is set, otherwise
+// pickFallbackGoal's ordering — the same priority/dated-first/nearest-event
+// rule the server uses to pick a *real* focus, just applied here because
+// there isn't one. Either way this is a plain Goal, not a periodized plan,
+// so it carries no phase/week fields (PlanGoalHeader treats that absence as
+// "outside this goal's plan weeks" rather than a real weekFocus).
 const effectiveFocus = computed<WeekFocus | undefined>(() => {
-  if (focusGoalId.value && focusGoalId.value !== week.value?.focus?.goalId) {
+  const real = week.value?.focus
+  if (focusGoalId.value && focusGoalId.value !== real?.goalId) {
     const g = goals.value.find((x) => x.id === focusGoalId.value)
-    if (g) return { goalId: g.id, name: g.name, priority: g.priority, sport: g.sport }
+    if (g) return { goalId: g.id, name: g.name, priority: g.priority, sport: g.sport, eventDate: g.eventDate }
   }
-  return week.value?.focus
+  if (real) return real
+  const fallback = pickFallbackGoal(goals.value)
+  if (!fallback) return undefined
+  return { goalId: fallback.id, name: fallback.name, priority: fallback.priority, sport: fallback.sport, eventDate: fallback.eventDate }
 })
 
 const headerExplaining = computed(() => !!effectiveFocus.value && explainingGoal.value === effectiveFocus.value.goalId)

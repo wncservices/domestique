@@ -26,12 +26,30 @@ function capitalize(phase: PeriodizationPhase): string {
   return phase.charAt(0).toUpperCase() + phase.slice(1)
 }
 
-// "{daysToEvent} days to go · {Phase} · week {n} of {m}", dropping
-// whatever piece the focus doesn't carry — a rolling (undated) goal has no
-// daysToEvent, a goal with no periodized plan yet has no phase/week.
+function formatEventDateShort(date: string): string {
+  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+}
+
+// The server only computes weekNumber/totalWeeks for the goal whose own
+// periodized plan actually has a week starting on the browsed date — see
+// internal/api/trainingweek.go's weekFocus. A focus without it is one
+// TrainingPlanPage.vue built locally (the goal picker's override, or its
+// pickFallbackGoal fallback when the browsed week has no real focus at
+// all), so it gets its own, plainer meta line and no "Explain" button —
+// there's no periodized plan for *this* week to ask narration about.
+const isRealFocus = computed(() => props.focus?.weekNumber !== undefined)
+
+// Real focus: "{daysToEvent} days to go · {Phase} · week {n} of {m}",
+// dropping whatever piece it doesn't carry. Fallback focus: says plainly
+// that this goal isn't what the browsed week's own plan is about.
 const metaLine = computed(() => {
   const focus = props.focus
   if (!focus) return ''
+  if (!isRealFocus.value) {
+    return focus.eventDate
+      ? `${formatEventDateShort(focus.eventDate)} · outside this goal's plan weeks`
+      : `Rolling plan · outside its plan weeks`
+  }
   const parts: string[] = []
   parts.push(focus.daysToEvent !== undefined ? `${focus.daysToEvent} days to go` : 'Rolling plan')
   if (focus.phase) parts.push(capitalize(focus.phase))
@@ -84,7 +102,7 @@ const newMenuItems = computed(() => [
 
       <div class="flex shrink-0 items-center gap-2">
         <UButton
-          v-if="narrationEnabled && focus"
+          v-if="narrationEnabled && isRealFocus"
           color="neutral"
           variant="soft"
           icon="i-lucide-sparkles"
