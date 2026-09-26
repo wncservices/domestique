@@ -4,6 +4,9 @@
 // what a rider is training *toward*: goals, the periodized plan each one
 // produces (Phases C/D, see internal/periodization and internal/adapter),
 // and the manual workout builder (Phase A) with its Phase B2 Garmin push.
+// Laid out today → week → season (see docs/training-plan.md's "The Plan
+// page as built"); the sections are components under components/plan/,
+// and this page only loads data and wires their events together.
 // Still no Wahoo structured-workout push — it needs a further-gated
 // partner entitlement this deployment does not have; see the plan doc's
 // own "Structured workouts and the providers".
