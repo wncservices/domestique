@@ -154,7 +154,8 @@ AGENTS.md.
 - `internal/compliance`: table tests for every status boundary.
 - `internal/api`: handler tests for `/api/training/week` (default start,
   snapping, bad start 400, other rider's data never included, focus
-  selection, totals) under `TestEachEngine`; acceptance test entry.
+  selection, totals) in `trainingweek_test.go`. No new SQL is added, so
+  engine coverage stays with the existing `workout` store tests.
 - `just check` green (typecheck, vet, go test).
 - `utils/workoutMath.ts` round-trips exercised by a small script if no JS
   test runner exists (there is none today; do not add one for this).
@@ -163,7 +164,8 @@ AGENTS.md.
 
 ## Delivery
 
-Four PRs, stacked:
+Four phases, each a commit series on one branch (split into stacked PRs at
+publish time if review wants it):
 
 1. API — `internal/compliance`, `GET /api/training/week`, `plannedSeconds`.
 2. Today card + week strip + page shell (goal header, move/drag).
