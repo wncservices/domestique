@@ -533,17 +533,28 @@ function headerExplain() {
 
 const seasonPlan = ref<PeriodizationPlan | null>(null)
 
+// A rider flipping focus quickly (the header's own goal dropdown, or
+// "Set as focus" below) can fire a second load before the first one's
+// response lands — nothing here cancels the in-flight fetch, so without this
+// counter a slow response for the *previous* goal can overwrite a faster one
+// for the goal a rider is actually looking at now. Each call captures its own
+// ticket; only the call still holding the latest ticket is allowed to write,
+// on both the success and error paths.
+let seasonRequest = 0
+
 watch(
   () => effectiveFocus.value?.goalId,
   async (id) => {
+    const requestId = ++seasonRequest
     if (!id) {
       seasonPlan.value = null
       return
     }
     try {
-      seasonPlan.value = await api.goalPeriodization(id)
+      const plan = await api.goalPeriodization(id)
+      if (requestId === seasonRequest) seasonPlan.value = plan
     } catch {
-      seasonPlan.value = null
+      if (requestId === seasonRequest) seasonPlan.value = null
     }
   },
   { immediate: true },

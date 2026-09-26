@@ -155,11 +155,12 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
         role="button"
         tabindex="0"
         :aria-label="`Week ${w.number}, ${w.phase}, ${(w.targetHours ?? 0).toFixed(1)} h`"
-        class="cursor-pointer outline-none"
+        class="week-bar cursor-pointer outline-none"
         @click="selectWeek(w)"
         @keydown="onKeydown($event, w)"
       >
         <rect
+          class="week-bar-rect"
           :x="colX(i) + 1"
           :y="BAR_BASELINE - barHeightFor(w)"
           :width="Math.max(colWidth - 2, 1)"
@@ -201,3 +202,21 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
     </div>
   </UCard>
 </template>
+
+<style scoped>
+/* `outline-none` on the `<g>` above suppresses the browser's own rectangular
+ * focus outline (which would otherwise draw around the bar's full bounding
+ * box, clipped by the card), so a keyboard user needs a replacement — a
+ * Tailwind `focus-visible:` utility on an SVG `<g>` doesn't reliably paint
+ * across browsers, so this is a plain scoped rule instead, confirmed to
+ * actually render (see the Task 5 fix report). Deliberately a different
+ * colour (`--ui-border-accented`) from the `--ui-primary` stroke a bar gets
+ * for *being the selected week* above — a rider tabbing through needs to
+ * tell "this is where my keyboard focus is" apart from "this is the week
+ * I've picked", especially when both land on the same bar. */
+.week-bar:focus-visible .week-bar-rect {
+  stroke: var(--ui-border-accented);
+  stroke-width: 2px;
+  stroke-dasharray: none;
+}
+</style>
