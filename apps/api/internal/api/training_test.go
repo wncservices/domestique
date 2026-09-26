@@ -256,10 +256,11 @@ const exampleWorkoutBody = `{
 }`
 
 type workoutDTOOut struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Date  string `json:"date"`
-	Steps []struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Date           string  `json:"date"`
+	PlannedSeconds float64 `json:"plannedSeconds"`
+	Steps          []struct {
 		Name   string `json:"name"`
 		Repeat int    `json:"repeat"`
 		Steps  []struct {

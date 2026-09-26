@@ -156,15 +156,18 @@ type workoutDTO struct {
 	Date        string           `json:"date,omitempty"`
 	Description string           `json:"description,omitempty"`
 	Steps       []workoutStepDTO `json:"steps"`
-	CreatedAt   string           `json:"createdAt"`
-	UpdatedAt   string           `json:"updatedAt"`
+	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
+	PlannedSeconds float64 `json:"plannedSeconds"`
+	CreatedAt      string  `json:"createdAt"`
+	UpdatedAt      string  `json:"updatedAt"`
 }
 
 func workoutDTOFrom(w workout.Workout) workoutDTO {
 	dto := workoutDTO{
 		ID: w.ID, Sport: string(w.Sport), Name: w.Name, GoalID: w.GoalID, Date: w.Date,
 		Description: w.Description, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
-		Steps: make([]workoutStepDTO, 0, len(w.Steps)),
+		PlannedSeconds: workout.PlannedSeconds(w.Steps),
+		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
 	}
 	for _, s := range w.Steps {
 		dto.Steps = append(dto.Steps, stepDTOFrom(s))
@@ -1052,6 +1055,14 @@ type completedSessionDTO struct {
 	TrainingLoad    float64 `json:"trainingLoad"`
 }
 
+func completedSessionDTOFrom(sess workout.CompletedSession) completedSessionDTO {
+	return completedSessionDTO{
+		ID: sess.ID, Provider: sess.Provider, Sport: sess.Sport, Date: sess.Date,
+		DurationSeconds: sess.DurationSeconds, DistanceM: sess.DistanceM,
+		AvgHR: sess.AvgHR, AvgPowerWatts: sess.AvgPowerWatts, TrainingLoad: sess.TrainingLoad,
+	}
+}
+
 type fitnessSnapshotDTO struct {
 	Date string  `json:"date"`
 	CTL  float64 `json:"ctl"`
@@ -1097,11 +1108,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 		dto.Snapshots = append(dto.Snapshots, fitnessSnapshotDTO{Date: snap.Date, CTL: snap.CTL, ATL: snap.ATL, TSB: snap.TSB})
 	}
 	for _, sess := range sessions {
-		dto.Sessions = append(dto.Sessions, completedSessionDTO{
-			ID: sess.ID, Provider: sess.Provider, Sport: sess.Sport, Date: sess.Date,
-			DurationSeconds: sess.DurationSeconds, DistanceM: sess.DistanceM,
-			AvgHR: sess.AvgHR, AvgPowerWatts: sess.AvgPowerWatts, TrainingLoad: sess.TrainingLoad,
-		})
+		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess))
 	}
 	writeJSON(w, http.StatusOK, dto)
 }
