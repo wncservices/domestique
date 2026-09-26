@@ -5,6 +5,7 @@
 // renders them and emits back — see forms.ts for the GoalForm shape.
 import type { GoalPriority, Sport } from '@/api/types'
 import type { GoalForm } from '@/components/plan/forms'
+import { sports } from '@/components/plan/forms'
 
 const open = defineModel<boolean>('open', { required: true })
 const note = defineModel<string>('note', { required: true })
@@ -28,10 +29,6 @@ const priorities: { value: GoalPriority; label: string }[] = [
   { value: 'A', label: 'A — peak for this one' },
   { value: 'B', label: 'B — good practice' },
   { value: 'C', label: 'C — low priority' },
-]
-const sports: { value: Sport; label: string }[] = [
-  { value: 'cycling', label: 'Cycling' },
-  { value: 'running', label: 'Running' },
 ]
 </script>
 

@@ -3,6 +3,13 @@
 // can both import them without either owning the other's type.
 import type { GoalPriority, Sport, WorkoutStep } from '@/api/types'
 
+// Shared by GoalSlideover.vue and WorkoutSlideover.vue's Sport selects — one
+// list rather than two copies drifting apart.
+export const sports: { value: Sport; label: string }[] = [
+  { value: 'cycling', label: 'Cycling' },
+  { value: 'running', label: 'Running' },
+]
+
 export interface GoalForm {
   name: string
   sport: Sport

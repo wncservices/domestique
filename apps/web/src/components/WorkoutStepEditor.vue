@@ -12,12 +12,12 @@
 // either way (internal/fitworkout.Target's own doc comment still holds),
 // this is purely how the rider enters it.
 import { reactive } from 'vue'
-import type { RiderProfile, StepDuration, StepIntensity, StepTarget, WorkoutStep } from '@/api/types'
+import type { RiderProfile, Sport, StepDuration, StepIntensity, StepTarget, WorkoutStep } from '@/api/types'
 import { formatClock, fromPercent, parseClock, thresholdFor, toPercent } from '@/utils/workoutMath'
 
 const steps = defineModel<WorkoutStep[]>({ required: true })
 
-const props = defineProps<{ profile?: RiderProfile }>()
+const props = defineProps<{ profile?: RiderProfile; sport?: Sport }>()
 
 const intensities: { value: StepIntensity; label: string }[] = [
   { value: 'warmup', label: 'Warmup' },
@@ -63,7 +63,25 @@ function addRepeatBlock() {
   steps.value = [...steps.value, { name: 'Intervals', duration: 'open', target: 'open', repeat: 4, steps: [] }]
 }
 
+// The local per-row state below (duration draft/invalid, %/absolute mode) is
+// keyed by array index, not by step identity — steps carry no stable id.
+// Removing a row shifts every later step down by one, so its local state has
+// to shift the same way or the row that slides into the removed index
+// inherits whatever the old occupant of that index was mid-editing (a stale
+// invalid duration, a %/absolute choice that was never its own).
+function shiftRecordDown<T>(record: Record<number, T>, removedIndex: number, lengthBeforeRemoval: number) {
+  for (let i = removedIndex + 1; i < lengthBeforeRemoval; i++) {
+    if (record[i] !== undefined) record[i - 1] = record[i]
+    else delete record[i - 1]
+  }
+  delete record[lengthBeforeRemoval - 1]
+}
+
 function removeStep(index: number) {
+  const lengthBeforeRemoval = steps.value.length
+  shiftRecordDown(durationDraft, index, lengthBeforeRemoval)
+  shiftRecordDown(durationInvalid, index, lengthBeforeRemoval)
+  shiftRecordDown(percentMode, index, lengthBeforeRemoval)
   steps.value = steps.value.filter((_, i) => i !== index)
 }
 
@@ -160,10 +178,18 @@ function otherUnitHint(index: number, step: WorkoutStep, threshold: number | nul
 // --- quick-add: a rider building a workout from scratch shouldn't have to
 // hand-assemble every step; these cover the shapes that show up constantly.
 // Percent targets fall back through the thresholds the rider actually has on
-// file — power first (the common case for a structured cycling workout),
-// then heart rate, then no target at all rather than guessing a number. ---
+// file, in an order that depends on the sport — pace means nothing for a
+// cycling workout, and power isn't how a runner thinks about effort — then
+// heart rate, then no target at all rather than guessing a number. With no
+// sport passed down (older callers, or a repeat block that hasn't been given
+// one), the cycling chain is the default. ---
 
 function quickAddThreshold(): { target: StepTarget; threshold: number } | null {
+  if (props.sport === 'running') {
+    if (props.profile?.thresholdPaceSecPerKm) return { target: 'pace', threshold: 1000 / props.profile.thresholdPaceSecPerKm }
+    if (props.profile?.maxHr) return { target: 'heart_rate', threshold: props.profile.maxHr }
+    return null
+  }
   if (props.profile?.ftpWatts) return { target: 'power', threshold: props.profile.ftpWatts }
   if (props.profile?.maxHr) return { target: 'heart_rate', threshold: props.profile.maxHr }
   return null
@@ -317,6 +343,7 @@ function addCooldown() {
             <WorkoutStepEditor
               :model-value="step.steps ?? []"
               :profile="profile"
+              :sport="sport"
               @update:model-value="(v: WorkoutStep[]) => updateChildSteps(index, v)"
             />
           </div>

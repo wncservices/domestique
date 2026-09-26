@@ -8,6 +8,7 @@ import { computed } from 'vue'
 import type { RiderProfile, Sport } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
+import { sports } from '@/components/plan/forms'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import { flattenSteps, formatDuration } from '@/utils/workoutMath'
 
@@ -26,11 +27,6 @@ const emit = defineEmits<{ 'update:form': [WorkoutForm]; save: [] }>()
 function set<K extends keyof WorkoutForm>(field: K, value: WorkoutForm[K]) {
   emit('update:form', { ...props.form, [field]: value })
 }
-
-const sports: { value: Sport; label: string }[] = [
-  { value: 'cycling', label: 'Cycling' },
-  { value: 'running', label: 'Running' },
-]
 
 const flat = computed(() => flattenSteps(props.form.steps, props.profile))
 const totalSeconds = computed(() => flat.value.reduce((sum, s) => sum + s.seconds, 0))
@@ -66,7 +62,7 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
         </div>
 
         <UFormField label="Steps">
-          <WorkoutStepEditor :model-value="form.steps" :profile="profile" @update:model-value="(v) => set('steps', v)" />
+          <WorkoutStepEditor :model-value="form.steps" :profile="profile" :sport="form.sport" @update:model-value="(v) => set('steps', v)" />
         </UFormField>
 
         <div class="flex justify-end gap-2">
