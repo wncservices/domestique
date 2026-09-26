@@ -186,3 +186,13 @@ function percentRange(low: number, high: number, threshold: number): string {
   const pHigh = toPercent(high, threshold)
   return pLow === pHigh ? `${pLow}` : `${pLow}–${pHigh}`
 }
+
+// A workout the plan changed on its own carries the reason in its description,
+// after this marker (see internal/scheduler.AdjustedMarker) — shown so a rider
+// is never left wondering why Thursday's session is not what it was on Monday.
+const ADJUSTED_MARKER = 'Adjusted automatically:'
+
+export function adjustmentNote(description?: string): string {
+  const at = (description ?? '').indexOf(ADJUSTED_MARKER)
+  return at < 0 ? '' : description!.slice(at + ADJUSTED_MARKER.length).trim()
+}
