@@ -3,11 +3,13 @@
 // Goals/Workouts list-of-everything view never answered without scanning
 // past a whole week of other rows. Only ever shown for the current week
 // (TrainingPlanPage.vue looks up `day`/`yesterday` from `week.today`).
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type { RiderProfile, WeekDay, Workout, WorkoutStep } from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
-import { adjustmentNote, describeTarget, formatDuration } from '@/utils/workoutMath'
+import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import OutcomeChip from './OutcomeChip.vue'
+import StepResultsTable from './StepResultsTable.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 
 const props = defineProps<{
@@ -80,6 +82,32 @@ function moveMenuItems(w: Workout, fromDate: string) {
 }
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
+
+// The chip/step-table pair shown in the done and unplanned-ride states —
+// see pickAnalysedSession's own doc comment for why this is one session per
+// day, not one per completed ride.
+const analysedSession = computed(() => (props.day ? pickAnalysedSession(props.day.completed) : undefined))
+const canOpenResults = computed(() => (analysedSession.value?.analysis?.steps?.length ?? 0) > 0)
+
+// Counts only hard steps (see AnalysisStep.hard's own doc comment) — a
+// recovery interval hitting its (real but easy) target isn't an "effort"
+// worth reporting alongside the hard ones.
+const hardStepsLine = computed(() => {
+  const steps = analysedSession.value?.analysis?.steps
+  if (!steps) return null
+  const hard = steps.filter((s) => s.hard)
+  if (hard.length === 0) return null
+  const hits = hard.filter((s) => s.result === 'hit').length
+  return `${hits} of ${hard.length} efforts on target`
+})
+
+const resultsOpen = ref(false)
+const resultsTitle = computed(() => props.day?.planned[0]?.name ?? 'Today')
+
+function openResults() {
+  if (!canOpenResults.value) return
+  resultsOpen.value = true
+}
 </script>
 
 <template>
@@ -103,12 +131,24 @@ const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 
       <template v-if="day">
         <!-- Done -->
-        <div v-if="day.status === 'done'" class="mt-2 flex items-center gap-2">
-          <UIcon name="i-lucide-circle-check" class="size-5 text-success" />
-          <span class="font-medium text-highlighted">Done</span>
-          <span class="font-mono tabular-nums text-sm text-muted">
-            {{ formatDuration(completedSecondsOf(day)) }} of {{ formatDuration(plannedSecondsOf(day)) }} planned
-          </span>
+        <div v-if="day.status === 'done'" class="mt-2 flex flex-col gap-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <UIcon name="i-lucide-circle-check" class="size-5 text-success" />
+            <span class="font-medium text-highlighted">Done</span>
+            <span class="font-mono tabular-nums text-sm text-muted">
+              {{ formatDuration(completedSecondsOf(day)) }} of {{ formatDuration(plannedSecondsOf(day)) }} planned
+            </span>
+            <button
+              v-if="analysedSession"
+              type="button"
+              :class="{ 'cursor-default': !canOpenResults }"
+              aria-label="View ride results"
+              @click="openResults"
+            >
+              <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
+            </button>
+          </div>
+          <p v-if="hardStepsLine" class="text-xs text-muted">{{ hardStepsLine }}</p>
         </div>
 
         <!-- Planned -->
@@ -147,10 +187,19 @@ const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
         </div>
 
         <!-- Unplanned but something logged -->
-        <div v-else-if="day.completed.length > 0" class="mt-2 flex items-center gap-2">
+        <div v-else-if="day.completed.length > 0" class="mt-2 flex flex-wrap items-center gap-2">
           <UIcon name="i-lucide-info" class="size-5 text-info" />
           <span class="font-medium text-highlighted">Unplanned ride</span>
           <span class="font-mono tabular-nums text-sm text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
+          <button
+            v-if="analysedSession"
+            type="button"
+            :class="{ 'cursor-default': !canOpenResults }"
+            aria-label="View ride results"
+            @click="openResults"
+          >
+            <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
+          </button>
         </div>
 
         <!-- Rest day -->
@@ -161,5 +210,11 @@ const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
         </div>
       </template>
     </UCard>
+
+    <StepResultsTable
+      v-model:open="resultsOpen"
+      :title="resultsTitle"
+      :steps="analysedSession?.analysis?.steps ?? []"
+    />
   </div>
 </template>

@@ -4,10 +4,12 @@
 // it. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
-import type { RiderProfile, TrainingWeek, WeekDay, Workout } from '@/api/types'
+import type { AnalysisStep, RiderProfile, TrainingWeek, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
-import { adjustmentNote, formatDuration } from '@/utils/workoutMath'
+import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
+import StepResultsTable from './StepResultsTable.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 
 const props = defineProps<{
@@ -102,6 +104,42 @@ function onDrop(e: DragEvent, date: string) {
       return
     }
   }
+}
+
+// The chip a tile shows is the day's most relevant analysed session (see
+// pickAnalysedSession) — never one chip per completed session, which would
+// crowd a tile that's already fighting for space at 375px.
+function analysedSession(day: WeekDay) {
+  return pickAnalysedSession(day.completed)
+}
+
+const resultsDay = ref<WeekDay | null>(null)
+const resultsOpen = computed({
+  get: () => resultsDay.value !== null,
+  set: (v: boolean) => {
+    if (!v) resultsDay.value = null
+  },
+})
+const resultsSteps = computed<AnalysisStep[]>(() => {
+  const day = resultsDay.value
+  if (!day) return []
+  return analysedSession(day)?.analysis?.steps ?? []
+})
+const resultsTitle = computed(() => {
+  const day = resultsDay.value
+  if (!day) return ''
+  const workoutName = day.planned[0]?.name
+  const dateLabel = `${weekdayShort(day.date)} ${dayNumber(day.date)}`
+  return workoutName ? `${workoutName} · ${dateLabel}` : dateLabel
+})
+
+function canOpenResults(day: WeekDay): boolean {
+  return (analysedSession(day)?.analysis?.steps?.length ?? 0) > 0
+}
+
+function openResults(day: WeekDay) {
+  if (!canOpenResults(day)) return
+  resultsDay.value = day
 }
 
 const canFillWeek = computed(
@@ -204,6 +242,17 @@ watch(
           <UIcon name="i-lucide-activity" class="size-3" />
           {{ formatDuration(c.durationSeconds) }}
         </p>
+
+        <button
+          v-if="analysedSession(day)"
+          type="button"
+          class="self-start"
+          :class="{ 'cursor-default': !canOpenResults(day) }"
+          :aria-label="`View ride results for ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
+          @click.stop="openResults(day)"
+        >
+          <OutcomeChip :outcome="analysedSession(day)!.analysis!.outcome" size="xs" />
+        </button>
       </div>
     </div>
 
@@ -213,5 +262,7 @@ watch(
       </UButton>
       <p class="text-xs text-muted">Builds this week's sessions from your plan.</p>
     </div>
+
+    <StepResultsTable v-model:open="resultsOpen" :title="resultsTitle" :steps="resultsSteps" />
   </UCard>
 </template>

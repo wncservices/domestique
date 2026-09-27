@@ -3,7 +3,7 @@
 // (Task 6), and the plan/library workout cards (Task 4/5) all need the same
 // duration formatting and target/threshold arithmetic, so it lives once
 // here rather than being re-derived per component.
-import type { RiderProfile, StepIntensity, StepTarget, WorkoutStep } from '@/api/types'
+import type { CompletedSession, RiderProfile, StepIntensity, StepTarget, WorkoutStep } from '@/api/types'
 
 /** One timed step, after repeat blocks are expanded — what the profile
  *  chart actually draws one rect per. `level` is 0..1.5, a relative-effort
@@ -199,4 +199,15 @@ const ADJUSTED_MARKER = 'Adjusted automatically:'
 export function adjustmentNote(description?: string): string {
   const at = (description ?? '').indexOf(ADJUSTED_MARKER)
   return at < 0 ? '' : description!.slice(at + ADJUSTED_MARKER.length).trim()
+}
+
+/** Which of a day's completed sessions the outcome chip / step table speak
+ *  for: the one whose analysis actually matched a planned workout (a real
+ *  'nailed'/'completed'/'struggled'/'incomplete' verdict, not 'unplanned' —
+ *  see rideanalysis.Analyze), falling back to the first analysed session so
+ *  an unplanned-only day still gets a chip. Undefined when nothing on the
+ *  day has been analysed yet (not synced from a FIT source, or older than
+ *  the analysis window — see CompletedSession.analysis's own doc comment). */
+export function pickAnalysedSession(completed: CompletedSession[]): CompletedSession | undefined {
+  return completed.find((c) => c.analysis && c.analysis.outcome !== 'unplanned') ?? completed.find((c) => c.analysis)
 }
