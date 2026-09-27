@@ -297,6 +297,24 @@ needs):
   miniature; the one chart in this feature actually worth a dedicated view, since it is the
   whole point of pulling metrics back in the first place.
 
+### The Plan page as built
+
+`TrainingPlanPage.vue` answers "what do I ride today, and how is this week going" first — the
+shape JOIN and TrainerRoad converge on — with the season underneath. Top to bottom: the focus
+goal's header (days to go, phase, week N of M), a today card, a Monday–Sunday week strip that
+compares planned and completed sessions, a phase timeline for the whole plan, then goals and the
+undated workout library. Goal and workout forms are slide-overs; the step editor takes `mm:ss`
+durations and targets as a percentage of FTP / max HR / threshold speed, stored as absolute
+values exactly as before. Components live under `apps/web/src/components/plan/`; the design
+record is `docs/superpowers/specs/2026-09-26-plan-page-redesign-design.md`.
+
+The page reads one endpoint, `GET /api/training/week?start=YYYY-MM-DD` (snapped to its Monday),
+rather than stitching workouts, sessions and periodization together in the browser. Each day's
+status comes from `internal/compliance`: `done` at 80% of the planned duration in the planned
+sport, `partial` from 30%, `missed` below that once the day has passed. The focus goal is the
+highest-priority goal whose plan covers the week, nearest event first — a race outranks
+"keep training".
+
 ## Security and privacy
 
 `AGENTS.md`'s existing guardrails ("never commit a credential," "GPX files are personal

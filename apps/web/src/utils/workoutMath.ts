@@ -66,8 +66,12 @@ export function flattenSteps(steps: WorkoutStep[], profile?: RiderProfile): Flat
 /** A short, human duration for a card/summary line: "45s", "15m", "1h 15m". */
 export function formatDuration(seconds: number): string {
   if (seconds <= 0) return '—'
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const totalMinutes = Math.round(seconds / 60)
+  // Round to whole seconds before branching, not after — 59.5 rounds to 60,
+  // which belongs in the "under a minute" branch as "1m", not the seconds
+  // branch as the nonsensical "60s".
+  const rounded = Math.round(seconds)
+  if (rounded < 60) return `${rounded}s`
+  const totalMinutes = Math.round(rounded / 60)
   if (totalMinutes < 60) return `${totalMinutes}m`
   const hours = Math.floor(totalMinutes / 60)
   const minutes = totalMinutes % 60

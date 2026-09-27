@@ -6,6 +6,7 @@
 import { computed } from 'vue'
 import { api } from '@/api/client'
 import type { RiderProfile, WeekDay, Workout, WorkoutStep } from '@/api/types'
+import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { adjustmentNote, describeTarget, formatDuration } from '@/utils/workoutMath'
 import WorkoutProfile from './WorkoutProfile.vue'
 
@@ -23,11 +24,7 @@ const emit = defineEmits<{
   move: [w: Workout, date: string]
 }>()
 
-function eyebrowDate(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-}
-
-const eyebrow = computed(() => (props.day ? `Today · ${eyebrowDate(props.day.date)}` : 'Today'))
+const eyebrow = computed(() => (props.day ? `Today · ${weekdayDateShort(props.day.date)}` : 'Today'))
 
 function plannedSecondsOf(day: WeekDay): number {
   return day.planned.reduce((sum, w) => sum + w.plannedSeconds, 0)
@@ -62,7 +59,7 @@ const firstWorkoutTarget = computed(() => {
 // "Move" offers. Computed from the day's own date rather than passed the
 // whole week, since that's all this card needs.
 function otherDaysOf(date: string): string[] {
-  const d = new Date(`${date}T00:00:00`)
+  const d = localDate(date)
   const monday = new Date(d)
   monday.setDate(d.getDate() - ((d.getDay() + 6) % 7))
   const days: string[] = []
@@ -77,7 +74,7 @@ function otherDaysOf(date: string): string[] {
 
 function moveMenuItems(w: Workout, fromDate: string) {
   return otherDaysOf(fromDate).map((date) => ({
-    label: new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }),
+    label: weekdayAndDay(date),
     onSelect: () => emit('move', w, date),
   }))
 }

@@ -6,6 +6,7 @@
 // need its own "no goals yet" copy.
 import { computed } from 'vue'
 import type { Goal, PeriodizationPhase, WeekFocus } from '@/api/types'
+import { shortDate } from '@/utils/planDates'
 
 const props = defineProps<{
   focus?: WeekFocus
@@ -26,10 +27,6 @@ function capitalize(phase: PeriodizationPhase): string {
   return phase.charAt(0).toUpperCase() + phase.slice(1)
 }
 
-function formatEventDateShort(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
-
 // The server only computes weekNumber/totalWeeks for the goal whose own
 // periodized plan actually has a week starting on the browsed date — see
 // internal/api/trainingweek.go's weekFocus. A focus without it is one
@@ -47,7 +44,7 @@ const metaLine = computed(() => {
   if (!focus) return ''
   if (!isRealFocus.value) {
     return focus.eventDate
-      ? `${formatEventDateShort(focus.eventDate)} · outside this goal's plan weeks`
+      ? `${shortDate(focus.eventDate)} · outside this goal's plan weeks`
       : `Rolling plan · outside its plan weeks`
   }
   const parts: string[] = []
