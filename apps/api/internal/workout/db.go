@@ -127,7 +127,23 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     steps                TEXT NOT NULL DEFAULT '',
     analysed_at          TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider);`, d.Blob, d.Boolean)
+CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider);
+
+-- progression_levels holds each rider's current 1-10 level per sport/zone
+-- (internal/progression computes the numbers; this table just stores the
+-- result). One row per rider/sport/zone, upserted on every level change —
+-- there is no history table, just the current value and the reason it last
+-- moved (see SessionAnalysis.LevelDelta for how a re-rate finds and undoes
+-- the specific change it is replacing).
+CREATE TABLE IF NOT EXISTS progression_levels (
+    rider      TEXT NOT NULL,
+    sport      TEXT NOT NULL,
+    zone       TEXT NOT NULL,
+    level      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    reason     TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (rider, sport, zone)
+);`, d.Blob, d.Boolean)
 }
 
 // DB stores goals, rider profiles and workouts as rows. The one
@@ -162,6 +178,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addZoneLevelColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.addAnalysisFeelColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
@@ -204,6 +223,30 @@ func (d *DB) addZoneLevelColumns() error {
 	for _, stmt := range []string{
 		`ALTER TABLE workouts ADD COLUMN zone TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workouts ADD COLUMN level DOUBLE PRECISION NOT NULL DEFAULT 0`,
+	} {
+		_, err := d.db.Exec(stmt)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+// addAnalysisFeelColumns adds feel/level_delta to a session_analyses table
+// that predates them — the same "table exists, column doesn't" situation
+// addZoneLevelColumns already handles for workouts. Defaulting to 0/0 is
+// correct for every pre-existing row: a ride analysed before feel ratings
+// existed was never rated and never moved a level under this scheme
+// (progression levels themselves ship in this same change).
+func (d *DB) addAnalysisFeelColumns() error {
+	for _, stmt := range []string{
+		`ALTER TABLE session_analyses ADD COLUMN feel INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE session_analyses ADD COLUMN level_delta DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {

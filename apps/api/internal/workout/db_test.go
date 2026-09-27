@@ -27,7 +27,7 @@ func openStore(t *testing.T, dsn string) *DB {
 		t.Fatal(err)
 	}
 	// Postgres tests share a database; start clean.
-	for _, table := range []string{"goals", "rider_profiles", "workouts", "completed_sessions", "session_analyses", "fitness_snapshots"} {
+	for _, table := range []string{"goals", "rider_profiles", "workouts", "completed_sessions", "session_analyses", "fitness_snapshots", "progression_levels"} {
 		if _, err := src.Conn().Exec(`DELETE FROM ` + table); err != nil {
 			t.Fatal(err)
 		}
