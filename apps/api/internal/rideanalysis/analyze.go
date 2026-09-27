@@ -50,6 +50,17 @@ type StepResult struct {
 	Actual      float64
 	InTargetPct float64
 	Result      string // "hit" | "under" | "over"
+	// Hard is isHardStep's own verdict on the planned step this result
+	// scored — an interval/active step with a real target, as opposed to a
+	// recovery, warmup or cooldown step that happens to carry one too (a
+	// generated interval session's "Recovery" step has a real power target,
+	// not TargetOpen — see scheduler.intervalOffTarget). hitFraction already
+	// used isHardStep to decide the outcome; this exposes the same verdict
+	// per step so a caller naming which steps were "hit of hard" (adapter's
+	// struggle-fatigue reason, say) does not have to re-flatten the plan and
+	// re-derive it — and, without this, would silently count every scored
+	// step, recovery included, doubling a 4-rep session's denominator to 8.
+	Hard bool
 }
 
 // Summary is a provider's own ride summary numbers — present even when no
@@ -322,6 +333,7 @@ func scoreLaps(act *filedef.Activity, samples []Sample, flattened []workout.Work
 			High:   step.TargetHigh,
 			Actual: actual,
 			Result: classifyStep(actual, step.TargetLow, step.TargetHigh),
+			Hard:   isHardStep(step),
 		})
 	}
 	return out
@@ -415,6 +427,7 @@ func scoreMainStepByTime(samples []Sample, idx int, step workout.WorkoutStep) St
 		Actual:      actual,
 		InTargetPct: frac * 100,
 		Result:      result,
+		Hard:        isHardStep(step),
 	}
 }
 
@@ -435,6 +448,7 @@ func scoreMainStepBySummary(summary Summary, idx int, step workout.WorkoutStep) 
 		High:   step.TargetHigh,
 		Actual: actual,
 		Result: classifyStep(actual, step.TargetLow, step.TargetHigh),
+		Hard:   isHardStep(step),
 	}
 }
 
@@ -445,17 +459,15 @@ func scoreMainStepBySummary(summary Summary, idx int, step workout.WorkoutStep) 
 // step is hit". The bool return is false when there is nothing to score at
 // all (no hard steps and no main step with a target), in which case the
 // outcome comes from the duration ratio alone.
-func hitFraction(steps []StepResult, flattened []workout.WorkoutStep, mainIdx int) (frac float64, scorable bool) {
+func hitFraction(steps []StepResult, mainIdx int) (frac float64, scorable bool) {
 	var hardTotal, hardHit int
 	for _, s := range steps {
-		if s.Index < 0 || s.Index >= len(flattened) {
+		if !s.Hard {
 			continue
 		}
-		if isHardStep(flattened[s.Index]) {
-			hardTotal++
-			if s.Result == "hit" {
-				hardHit++
-			}
+		hardTotal++
+		if s.Result == "hit" {
+			hardHit++
 		}
 	}
 	if hardTotal > 0 {
@@ -588,7 +600,7 @@ func Analyze(in Input) Analysis {
 		a.Steps = []StepResult{scoreMainStepBySummary(in.Summary, mainIdx, *main)}
 	}
 
-	frac, scorable := hitFraction(a.Steps, flattened, mainIdx)
+	frac, scorable := hitFraction(a.Steps, mainIdx)
 	a.Outcome = outcomeFrom(a.DurationRatio, frac, scorable)
 	return a
 }

@@ -71,6 +71,16 @@ type fakeGarmin struct {
 	activities    []garmin.Activity
 	activitiesErr error
 
+	// fitByID is what ActivityFIT hands back for a given activity id;
+	// fitErr, when set, is what it fails with regardless of id — the ride
+	// analysis sync's own FIT-download failure path. fitCalls records every
+	// activity id asked for, in order, so a test can assert exactly which
+	// (and how many) rides got downloaded — the per-provider sync cap's own
+	// test needs this.
+	fitByID  map[string][]byte
+	fitErr   error
+	fitCalls []string
+
 	// pushedWorkoutName/pushedWorkoutSteps record what PushWorkout was
 	// asked to send; pushedWorkoutID is what it hands back, and
 	// pushWorkoutErr, when set, is what it fails with instead.
@@ -108,6 +118,17 @@ type fakeGarmin struct {
 func (f *fakeGarmin) ListActivities(_ context.Context, _ api.GarminConsumer, session garmin.Session) ([]garmin.Activity, error) {
 	f.setResumedSession(session)
 	return f.activities, f.activitiesErr
+}
+
+func (f *fakeGarmin) ActivityFIT(_ context.Context, _ api.GarminConsumer, session garmin.Session, activityID string) ([]byte, error) {
+	f.setResumedSession(session)
+	f.mu.Lock()
+	f.fitCalls = append(f.fitCalls, activityID)
+	f.mu.Unlock()
+	if f.fitErr != nil {
+		return nil, f.fitErr
+	}
+	return f.fitByID[activityID], nil
 }
 
 func (f *fakeGarmin) PushWorkout(_ context.Context, _ api.GarminConsumer, session garmin.Session, name, sport string, steps []fitworkout.Step) (string, error) {

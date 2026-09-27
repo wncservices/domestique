@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
+	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -181,6 +182,15 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		garminSession, garminConnected = s.garminSessionForRider(rider)
 	}
 
+	// sessionFITSources carries the Garmin activity id / Wahoo file URL and
+	// provider summary numbers for exactly the sessions this sync's own
+	// provider lists just fetched — see analyseNewSessions' own doc comment
+	// for why this is kept in memory only, for the duration of this one
+	// call, rather than added to completed_sessions.
+	sessionFITSources := map[string]sessionFITSource{}
+	var wahooToken string
+	var wahooConnected bool
+
 	// Biometrics first, and merged into the profile before any session is
 	// recorded: a session's training load is computed from FTP and heart
 	// rate, so a first sync should score its history with the numbers Garmin
@@ -212,21 +222,34 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 					continue
 				}
 				load := workout.TrainingLoad(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile)
-				if _, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+				session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 					Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
 					Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
 					DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load,
-				}); err != nil {
+				})
+				if err != nil {
 					warnings = append(warnings, "garmin: recording a session: "+err.Error())
 					continue
 				}
 				synced++
+				sessionFITSources[session.ID] = sessionFITSource{
+					garminActivityID: a.ID,
+					summary: rideanalysis.Summary{
+						DurationSeconds: a.DurationSeconds,
+						AvgPower:        a.AvgPowerWatts,
+						AvgHR:           a.AvgHR,
+						NormalizedPower: a.NormalizedPower,
+						TSS:             a.TrainingStressScore,
+						IntensityFactor: a.IntensityFactor,
+					},
+				}
 			}
 		}
 	}
 
 	if s.Wahoo != nil {
 		token, err := s.wahooAccessToken(ctx, rider)
+		wahooToken, wahooConnected = token, err == nil
 		if err != nil {
 			// A rider who has simply never connected Wahoo is not a sync
 			// failure — the same non-event garminSessionForRider's own `ok`
@@ -248,7 +271,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 						continue
 					}
 					load := workout.TrainingLoad(wk.DurationSeconds, wk.AvgPowerWatts, wk.AvgHR, profile)
-					if _, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+					session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 						// Wahoo's completed-workout list does not carry a
 						// sport this pass decodes (see internal/wahoo's own
 						// doc comment) — cycling, the same "this is a
@@ -257,11 +280,22 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 						Rider: rider, Provider: "wahoo", ExternalID: wk.ID, Sport: "cycling",
 						Date: wk.Starts.Format("2006-01-02"), DurationSeconds: wk.DurationSeconds,
 						DistanceM: wk.DistanceM, AvgHR: wk.AvgHR, AvgPowerWatts: wk.AvgPowerWatts, TrainingLoad: load,
-					}); err != nil {
+					})
+					if err != nil {
 						warnings = append(warnings, "wahoo: recording a session: "+err.Error())
 						continue
 					}
 					synced++
+					sessionFITSources[session.ID] = sessionFITSource{
+						wahooFileURL: wk.FileURL,
+						summary: rideanalysis.Summary{
+							DurationSeconds: wk.DurationSeconds,
+							AvgPower:        wk.AvgPowerWatts,
+							AvgHR:           wk.AvgHR,
+							NormalizedPower: wk.NormalizedPower,
+							TSS:             wk.TSS,
+						},
+					}
 				}
 			}
 		}
@@ -271,6 +305,17 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		if err := s.Training.RecomputeFitnessSnapshots(ctx, rider); err != nil {
 			return syncMetricsResultDTO{}, err
 		}
+	}
+
+	// Score every newly (and not-yet) analysed ride against its planned
+	// workout — after sessions are upserted, so a ride just synced this
+	// pass is already in completed_sessions for MatchPlanned/SaveAnalysis
+	// to find. See analyseNewSessions' own doc comment for the 42-day
+	// window, the per-provider cap, and why a download/decode/save failure
+	// here is a Warn rather than a sync failure.
+	consumer, _ := s.garminConsumer()
+	if err := s.analyseNewSessions(ctx, rider, profile, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected); err != nil {
+		return syncMetricsResultDTO{}, err
 	}
 
 	// What the history itself can say, now that it is on file: an FTP
