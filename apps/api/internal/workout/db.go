@@ -100,7 +100,32 @@ CREATE TABLE IF NOT EXISTS fitness_snapshots (
     atl        DOUBLE PRECISION NOT NULL DEFAULT 0,
     tsb        DOUBLE PRECISION NOT NULL DEFAULT 0,
     PRIMARY KEY (rider, date)
-);`, d.Blob, d.Boolean)
+);
+
+-- session_analyses holds rideanalysis's verdict on one completed session:
+-- one row per analysed ride, upserted on re-analysis. No REFERENCES to
+-- completed_sessions — this package's other tables (workouts.goal_id) skip
+-- real FK constraints the same way, unlinking rather than relying on the
+-- engine to cascade. JSON columns are TEXT on both engines, read and
+-- written as a whole, never queried by individual element — the same
+-- reasoning workouts.steps documents at the top of this file.
+CREATE TABLE IF NOT EXISTS session_analyses (
+    session_id          TEXT PRIMARY KEY,
+    rider                TEXT NOT NULL,
+    workout_id           TEXT NOT NULL DEFAULT '',
+    outcome              TEXT NOT NULL DEFAULT '',
+    load_source          TEXT NOT NULL DEFAULT '',
+    normalized_power     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    intensity_factor     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    tss                  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    duration_ratio       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    power_zone_seconds   TEXT NOT NULL DEFAULT '',
+    hr_zone_seconds      TEXT NOT NULL DEFAULT '',
+    power_curve          TEXT NOT NULL DEFAULT '',
+    steps                TEXT NOT NULL DEFAULT '',
+    analysed_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider);`, d.Blob, d.Boolean)
 }
 
 // DB stores goals, rider profiles and workouts as rows. The one
