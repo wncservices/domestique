@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
 	"strconv"
 	"time"
 
@@ -346,7 +345,7 @@ func (s *Server) applyProgressionForAnalysis(ctx context.Context, rider string, 
 	// level - storedDelta land somewhere Apply never actually put the rider
 	// (e.g. cur 9.9, workoutLevel 10.0, nailed: Delta gives 0.4, but Apply
 	// clamps 10.3 down to 10.0 — the real change was only +0.1).
-	applied := math.Round((newLevel-cur)*10) / 10
+	applied := roundLevelDelta(newLevel - cur)
 
 	if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
 		Rider: rider, Sport: matched.Sport, Zone: matched.Zone, Level: newLevel, Reason: reason,
