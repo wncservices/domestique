@@ -180,7 +180,11 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 	}
 
 	req := workoutlib.Instantiate(ladder, rung, profile)
-	description := wk.Description + " " + adapter.Note(c)
+	// The source marker is what stops a later adaptation pass (every 30
+	// minutes) from stepping down a second same-zone workout off the exact
+	// same struggle, once this one is no longer IsGenerated — see
+	// adapter.StepDownSourceNote's own doc comment.
+	description := wk.Description + " " + adapter.Note(c) + " " + adapter.StepDownSourceNote(c.StepDownSourceID)
 	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
 		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
 	})

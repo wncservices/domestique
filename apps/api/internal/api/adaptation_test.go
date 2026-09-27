@@ -200,6 +200,98 @@ func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
 	}
 }
 
+// TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle
+// is round 1's important fix (review finding #2): AutoScheduleTick runs
+// every 30 minutes, and a struggled session's own analysis never changes
+// between runs. With two untouched same-zone workouts in the 7-day window,
+// a second AdaptWorkouts pass must not see the very same struggle again and
+// step down the second one too, now that the first is no longer
+// IsGenerated — exactly one step-down per struggle, ever, not one per pass
+// until every same-zone candidate is used up.
+func TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) } // Thursday
+
+	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
+		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 5,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "6500", Sport: "cycling",
+		Date: "2026-03-17", DurationSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sess.ID, Rider: "wilant", WorkoutID: struggledWorkout.ID, Outcome: "struggled",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two eligible same-zone, same-window targets — exactly the shape that
+	// exposed the bug: stepDownTarget always picks "the next untouched one,"
+	// so once the first is touched a naive re-run just advances to the
+	// second.
+	firstTarget, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
+		Date: "2026-03-20", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTarget, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x6",
+		Date: "2026-03-22", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 2400}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First pass: steps down exactly the first (earliest) target.
+	h.srv.AdaptWorkouts(ctx)
+	afterFirst, err := h.store.GetWorkout(ctx, firstTarget.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFirst.Level != 3 || scheduler.IsGenerated(afterFirst) {
+		t.Fatalf("first target after pass 1 = %+v, want stepped down to level 3 and no longer generated", afterFirst)
+	}
+	stillGenerated, err := h.store.GetWorkout(ctx, secondTarget.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillGenerated.Level != 4 || !scheduler.IsGenerated(stillGenerated) {
+		t.Fatalf("second target after pass 1 = %+v, want untouched", stillGenerated)
+	}
+
+	// Second pass, same struggle, nothing new synced: the second target must
+	// stay untouched — this is the regression the fix guards.
+	h.srv.AdaptWorkouts(ctx)
+	afterSecondPass, err := h.store.GetWorkout(ctx, secondTarget.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSecondPass.Level != 4 || !scheduler.IsGenerated(afterSecondPass) {
+		t.Errorf("second target after pass 2 = %+v, want still untouched — one struggle steps down exactly one workout, ever", afterSecondPass)
+	}
+}
+
 func TestARidersOwnWorkoutsAreNeverAdapted(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()
