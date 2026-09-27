@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,10 @@ type trainingHarness struct {
 	base   string
 	store  *workout.DB
 	srv    *api.Server
+	// conn is the same *sql.DB workout.UseDB wraps — kept only so a test can
+	// break the session_analyses table on its own (see breakAnalysisStorage)
+	// to prove the degrade path, without a production-only test hook.
+	conn *sql.DB
 }
 
 func newTrainingHarness(t *testing.T) *trainingHarness {
@@ -58,7 +63,21 @@ func newTrainingHarness(t *testing.T) *trainingHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, srv: srv}
+	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, srv: srv, conn: db.Conn()}
+}
+
+// breakAnalysisStorage drops session_analyses out from under the store —
+// the seam this test package has for making ListAnalyses fail without a
+// production-only hook: it is the same *sql.DB workout.UseDB wraps, just
+// reached directly. ListSessions/ListWorkouts read other tables, so the
+// rest of a fitness/week request still succeeds; only the analysis
+// attachment degrades, which is exactly what
+// TestFitness/TrainingWeekDegradesWhenAnalysisStorageFails is checking.
+func (h *trainingHarness) breakAnalysisStorage() {
+	h.t.Helper()
+	if _, err := h.conn.Exec("DROP TABLE session_analyses"); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 // seedSession records one completed session directly through the store —
@@ -946,5 +965,135 @@ func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
 	}
 	if len(goals) != 0 {
 		t.Errorf("goals = %v, want none — a proposal must not create anything", goals)
+	}
+}
+
+// analysisOut mirrors sessionAnalysisDTO's JSON shape (see training.go) —
+// same pattern as goalDTOOut/weekOut: a local struct in the test package
+// rather than importing the unexported DTO.
+type analysisOut struct {
+	Outcome       string  `json:"outcome"`
+	LoadSource    string  `json:"loadSource"`
+	NP            float64 `json:"np"`
+	IF            float64 `json:"if"`
+	TSS           float64 `json:"tss"`
+	DurationRatio float64 `json:"durationRatio"`
+	Steps         []struct {
+		Name string `json:"name"`
+	} `json:"steps"`
+	WorkoutID string `json:"workoutId"`
+}
+
+type fitnessOut struct {
+	Sessions []struct {
+		ID       string       `json:"id"`
+		Date     string       `json:"date"`
+		Analysis *analysisOut `json:"analysis"`
+	} `json:"sessions"`
+}
+
+// TestFitnessIncludesAnalysisForAnalysedSessionsOnly is Task 7's own RED
+// case: /api/training/fitness must carry each analysed session's verdict
+// and omit it for a session nobody has analysed yet.
+func TestFitnessIncludesAnalysisForAnalysedSessionsOnly(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	analysedDate := time.Now().Format("2006-01-02")
+	plainDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	h.seedSession("wilant", analysedDate, 1)
+	h.seedSession("wilant", plainDate, 1)
+
+	analysedID := "garmin:" + analysedDate
+	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
+		SessionID: analysedID, Rider: "wilant", WorkoutID: "threshold-6x3", Outcome: "nailed", LoadSource: "measured",
+		NormalizedPower: 220, IntensityFactor: 0.85, TSS: 65, DurationRatio: 1.0,
+		Steps: []workout.AnalysisStep{{Index: 0, Name: "Warmup", Target: "open", Result: "hit"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out fitnessOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(out.Sessions))
+	}
+	for _, sess := range out.Sessions {
+		if sess.ID == analysedID {
+			if sess.Analysis == nil {
+				t.Fatalf("analysed session %s: analysis = nil, want present", sess.ID)
+			}
+			if sess.Analysis.Outcome != "nailed" || sess.Analysis.TSS != 65 || sess.Analysis.NP != 220 {
+				t.Errorf("analysis = %+v", sess.Analysis)
+			}
+			if sess.Analysis.WorkoutID != "threshold-6x3" {
+				t.Errorf("workoutId = %q, want threshold-6x3", sess.Analysis.WorkoutID)
+			}
+			if len(sess.Analysis.Steps) != 1 || sess.Analysis.Steps[0].Name != "Warmup" {
+				t.Errorf("steps = %+v", sess.Analysis.Steps)
+			}
+		} else if sess.Analysis != nil {
+			t.Errorf("unanalysed session %s: analysis = %+v, want nil", sess.ID, sess.Analysis)
+		}
+	}
+}
+
+// A different rider's analysis must never leak onto this rider's own
+// session list — the same owner-only rule every other training endpoint
+// follows (isOwnTraining), here enforced by ListAnalyses' own rider filter.
+func TestFitnessAnalysisIsOwnerOnly(t *testing.T) {
+	h := newTrainingHarness(t)
+	date := time.Now().Format("2006-01-02")
+	h.seedSession("wilant", date, 1)
+	otherDate := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+	h.seedSession("other", otherDate, 1)
+
+	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
+		SessionID: "garmin:" + otherDate, Rider: "other", Outcome: "nailed", LoadSource: "measured",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	var out fitnessOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 (owner-only)", len(out.Sessions))
+	}
+	if out.Sessions[0].Analysis != nil {
+		t.Errorf("analysis = %+v, want nil — wilant has no analysis of their own", out.Sessions[0].Analysis)
+	}
+}
+
+// TestFitnessDegradesWhenAnalysisStorageFails is the fix-round-1 case: a
+// ListAnalyses failure must not take the whole endpoint down with it — the
+// fitness list worked before analyses existed and has to keep working when
+// analysis storage alone has a bad day. See analysesSince's own doc comment.
+func TestFitnessDegradesWhenAnalysisStorageFails(t *testing.T) {
+	h := newTrainingHarness(t)
+	date := time.Now().Format("2006-01-02")
+	h.seedSession("wilant", date, 1)
+	h.breakAnalysisStorage()
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 even though analysis storage is broken", resp.StatusCode)
+	}
+	var out fitnessOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 — the session itself must still come back", len(out.Sessions))
+	}
+	if out.Sessions[0].Analysis != nil {
+		t.Errorf("analysis = %+v, want nil — analysis storage is broken, so nothing to attach", out.Sessions[0].Analysis)
 	}
 }

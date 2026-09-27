@@ -1,11 +1,14 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // weekOut mirrors trainingWeekDTO's JSON shape (see trainingweek.go) closely
@@ -33,8 +36,9 @@ type weekOut struct {
 		Status    string          `json:"status"`
 		Planned   []workoutDTOOut `json:"planned"`
 		Completed []struct {
-			ID              string  `json:"id"`
-			DurationSeconds float64 `json:"durationSeconds"`
+			ID              string       `json:"id"`
+			DurationSeconds float64      `json:"durationSeconds"`
+			Analysis        *analysisOut `json:"analysis"`
 		} `json:"completed"`
 	} `json:"days"`
 	Totals struct {
@@ -307,5 +311,68 @@ func TestTrainingWeekNoGoals(t *testing.T) {
 	}
 	if len(week.Days) != 7 {
 		t.Errorf("days = %d, want 7", len(week.Days))
+	}
+}
+
+// TestTrainingWeekIncludesAnalysisForCompletedSessions is Task 7's own RED
+// case for the week endpoint: a completed session's day carries the same
+// analysis /api/training/fitness does, since both funnel through
+// completedSessionDTOFrom.
+func TestTrainingWeekIncludesAnalysisForCompletedSessions(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.srv.Clock = weekClock
+
+	h.seedSession("wilant", "2026-09-28", 1)
+	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
+		SessionID: "garmin:2026-09-28", Rider: "wilant", Outcome: "struggled", LoadSource: "estimated",
+		TSS: 40,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/week", "")
+	week := decodeWeek(t, resp)
+	byDate := map[string]int{}
+	for i, d := range week.Days {
+		byDate[d.Date] = i
+	}
+	mon := week.Days[byDate["2026-09-28"]]
+	if len(mon.Completed) != 1 {
+		t.Fatalf("mon.Completed = %+v, want 1", mon.Completed)
+	}
+	if mon.Completed[0].Analysis == nil {
+		t.Fatalf("analysis = nil, want present")
+	}
+	if mon.Completed[0].Analysis.Outcome != "struggled" || mon.Completed[0].Analysis.TSS != 40 {
+		t.Errorf("analysis = %+v", mon.Completed[0].Analysis)
+	}
+}
+
+// TestTrainingWeekDegradesWhenAnalysisStorageFails mirrors
+// TestFitnessDegradesWhenAnalysisStorageFails for the week endpoint — a
+// broken session_analyses table must not fail the whole week, just leave
+// analysis unattached on the affected day.
+func TestTrainingWeekDegradesWhenAnalysisStorageFails(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.srv.Clock = weekClock
+
+	h.seedSession("wilant", "2026-09-28", 1)
+	h.breakAnalysisStorage()
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/week", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 even though analysis storage is broken", resp.StatusCode)
+	}
+	week := decodeWeek(t, resp)
+	byDate := map[string]int{}
+	for i, d := range week.Days {
+		byDate[d.Date] = i
+	}
+	mon := week.Days[byDate["2026-09-28"]]
+	if len(mon.Completed) != 1 {
+		t.Fatalf("mon.Completed = %+v, want 1 — the session itself must still come back", mon.Completed)
+	}
+	if mon.Completed[0].Analysis != nil {
+		t.Errorf("analysis = %+v, want nil — analysis storage is broken, so nothing to attach", mon.Completed[0].Analysis)
 	}
 }

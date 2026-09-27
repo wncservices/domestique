@@ -47,12 +47,15 @@ function formatDistance(meters: number | undefined): string | null {
         <UIcon :name="sportIcon(session.sport)" class="size-4 text-muted shrink-0" />
         <span class="text-muted shrink-0">{{ formatLocalDate(session.date) }}</span>
       </div>
-      <div class="flex items-center gap-3 font-mono tabular-nums text-xs sm:text-sm">
+      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 font-mono tabular-nums text-xs sm:text-sm">
         <span>{{ formatDuration(session.durationSeconds) }}</span>
         <span v-if="formatDistance(session.distanceM)">{{ formatDistance(session.distanceM) }}</span>
         <span v-if="session.avgPowerWatts">{{ Math.round(session.avgPowerWatts) }} W</span>
         <span v-else-if="session.avgHr">{{ Math.round(session.avgHr) }} bpm</span>
         <span class="text-muted">load {{ Math.round(session.trainingLoad) }}</span>
+        <span v-if="session.analysis?.np" class="text-muted">NP {{ Math.round(session.analysis.np) }} W</span>
+        <span v-if="session.analysis?.if" class="text-muted">IF {{ session.analysis.if.toFixed(2) }}</span>
+        <span v-if="session.analysis?.tss" class="text-muted">TSS {{ Math.round(session.analysis.tss) }}</span>
       </div>
     </div>
 
