@@ -4,6 +4,7 @@
 import { computed, ref } from 'vue'
 import type { CompletedSession } from '@/api/types'
 import { formatDuration } from '@/utils/workoutMath'
+import { parseLocalDate } from '@/utils/fitnessMath'
 
 const props = defineProps<{ sessions: CompletedSession[] }>()
 
@@ -23,7 +24,7 @@ function sportIcon(sport: CompletedSession['sport']): string {
 }
 
 function formatLocalDate(ymd: string): string {
-  const date = new Date(`${ymd}T00:00:00`)
+  const date = parseLocalDate(ymd)
   const weekday = date.toLocaleDateString('en-GB', { weekday: 'short' })
   const month = date.toLocaleDateString('en-GB', { month: 'short' })
   return `${weekday} ${date.getDate()} ${month}`

@@ -63,14 +63,21 @@ function formatDelta(delta: number | undefined, suffix = ' in 7 days'): string |
     <template #header>
       <div class="flex items-center justify-between">
         <h2 class="text-lg font-semibold">Fitness</h2>
-        <UButton icon="i-lucide-refresh-cw" color="neutral" variant="outline" :loading="syncing" @click="emit('sync')">
+        <UButton
+          v-if="loading || hasHistory"
+          icon="i-lucide-refresh-cw"
+          color="neutral"
+          variant="outline"
+          :loading="syncing"
+          @click="emit('sync')"
+        >
           Sync now
         </UButton>
       </div>
     </template>
 
     <UAlert
-      v-if="needsSetup"
+      v-if="needsSetup && hasHistory"
       class="mb-4"
       color="info"
       variant="subtle"

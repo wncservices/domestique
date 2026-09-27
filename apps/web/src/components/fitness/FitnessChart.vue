@@ -6,7 +6,7 @@
 // rest of the redesigned Fitness page.
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import type { FitnessSnapshot } from '@/api/types'
-import { filterByRange, type ChartRange } from '@/utils/fitnessMath'
+import { filterByRange, parseLocalDate, type ChartRange } from '@/utils/fitnessMath'
 
 const props = defineProps<{ snapshots: FitnessSnapshot[] }>()
 
@@ -106,7 +106,7 @@ const highRiskBand = computed(() => {
 // --- x-axis ticks: 4-6 evenly spaced local dates ---
 
 function formatTickDate(ymd: string): string {
-  const date = new Date(`${ymd}T00:00:00`)
+  const date = parseLocalDate(ymd)
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
@@ -160,7 +160,7 @@ const crosshairX = computed(() => (crosshairIndex.value === null ? 0 : xFor(cros
 const readoutOnRight = computed(() => crosshairX.value <= WIDTH.value / 2)
 
 function formatReadoutDate(ymd: string): string {
-  const date = new Date(`${ymd}T00:00:00`)
+  const date = parseLocalDate(ymd)
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
@@ -291,7 +291,7 @@ const ariaLabel = computed(() => {
 
       <div
         v-if="crosshairSnapshot"
-        class="absolute top-2 bg-elevated border border-default rounded-md text-xs px-2 py-1 pointer-events-none whitespace-nowrap"
+        class="absolute top-2 bg-elevated border border-default rounded-md text-xs px-2 py-1 pointer-events-none max-w-[11rem]"
         :style="readoutOnRight ? { left: `${crosshairX + 8}px` } : { right: `${WIDTH - crosshairX + 8}px` }"
       >
         <p class="font-medium">{{ formatReadoutDate(crosshairSnapshot.date) }}</p>

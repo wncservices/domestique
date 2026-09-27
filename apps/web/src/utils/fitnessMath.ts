@@ -7,7 +7,7 @@ import type { CompletedSession, FitnessSnapshot } from '@/api/types'
 // Snapshot/session dates are plain 'YYYY-MM-DD' strings with no timezone of
 // their own; parsing them as UTC (or via `new Date(ymd)`) shifts the
 // calendar day for anyone west of UTC. Always go through midnight-local.
-function parseLocalDate(ymd: string): Date {
+export function parseLocalDate(ymd: string): Date {
   return new Date(`${ymd}T00:00:00`)
 }
 
