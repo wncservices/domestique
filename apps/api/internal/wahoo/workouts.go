@@ -1,8 +1,10 @@
 package wahoo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +30,16 @@ type Workout struct {
 	DistanceM       float64
 	AvgHR           int
 	AvgPowerWatts   float64
+
+	// NormalizedPower and TSS are the summary fallback used when a rider's
+	// FIT file could not be downloaded or decoded — the same role Garmin's
+	// own normPower/trainingStressScore summary fields play there.
+	NormalizedPower float64
+	TSS             float64
+	// FileURL is workout_summary.file.url — the FIT file for this workout,
+	// fetched with WorkoutFIT. Empty when Wahoo has not attached a summary
+	// yet (see ListWorkouts' own fallback for a workout still processing).
+	FileURL string
 }
 
 // workoutSummaryDTO is Wahoo's own nested summary object. Every numeric
@@ -46,6 +58,43 @@ type workoutSummaryDTO struct {
 	HeartRateAvg       string `json:"heart_rate_avg"`
 	PowerBikeAvg       string `json:"power_bike_avg"`
 	PowerAvg           string `json:"power_avg"`
+	// PowerBikeNPLast and PowerBikeTSSLast were observed to vary between a
+	// JSON string and a bare JSON number — unlike every other field above,
+	// confirmed to always be strings — so they decode through
+	// flexibleNumber rather than assuming one form.
+	PowerBikeNPLast  flexibleNumber `json:"power_bike_np_last"`
+	PowerBikeTSSLast flexibleNumber `json:"power_bike_tss_last"`
+	// File is where the FIT file for this workout lives — the same shape
+	// GET /v1/routes' file.url already carries for a route (wahoo.go's
+	// routeListItem).
+	File struct {
+		URL string `json:"url"`
+	} `json:"file"`
+}
+
+// flexibleNumber decodes a JSON field that may arrive as either a quoted
+// string ("85.5") or a bare number (85.5). Wahoo's own workout_summary
+// object is documented nowhere; power_bike_np_last and power_bike_tss_last
+// are the two fields observed to vary, so this is not applied to the rest of
+// workoutSummaryDTO's plain-string fields above, which have not shown the
+// same inconsistency.
+type flexibleNumber float64
+
+func (n *flexibleNumber) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	if s == "" || s == "null" {
+		*n = 0
+		return nil
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return fmt.Errorf("wahoo: unreadable number %q: %w", s, err)
+	}
+	*n = flexibleNumber(v)
+	return nil
 }
 
 func (s *workoutSummaryDTO) avgPower() float64 {
@@ -140,8 +189,70 @@ func (c *Client) ListWorkouts(ctx context.Context, accessToken string, page, per
 			w.DistanceM = parseFloatOr0(it.WorkoutSummary.DistanceAccum)
 			w.AvgHR = int(parseFloatOr0(it.WorkoutSummary.HeartRateAvg))
 			w.AvgPowerWatts = it.WorkoutSummary.avgPower()
+			w.NormalizedPower = float64(it.WorkoutSummary.PowerBikeNPLast)
+			w.TSS = float64(it.WorkoutSummary.PowerBikeTSSLast)
+			w.FileURL = it.WorkoutSummary.File.URL
 		}
 		out = append(out, w)
 	}
 	return out, nil
+}
+
+// MaxFITBytes caps a downloaded FIT file — the same limit
+// garmin.MaxFITBytes enforces, kept as its own constant here since this
+// package has no dependency on internal/garmin for one shared number.
+const MaxFITBytes = 32 << 20
+
+// fitSignature is a FIT file header's own magic bytes, at offset 8 of the
+// header, per the Global FIT SDK.
+var fitSignature = []byte(".FIT")
+
+// WorkoutFIT downloads one completed workout's FIT file from fileURL —
+// workout_summary.file.url, which in every observed case lands on Wahoo's
+// CDN (cdn.wahooligan.com) rather than the Cloud API host itself, the same
+// split DownloadRoute already handles for a route's own file.url.
+//
+// Unlike DownloadRoute, this takes no access token: fileURL is a pre-signed
+// link that works unauthenticated, and there is nothing to attach even in
+// the case where it happens to resolve to the API host — allowedFileHost is
+// still checked purely so a compromised or malicious upstream response
+// cannot point this pod at an arbitrary internal address (the same
+// SSRF-prevention reasoning as DownloadRoute's own doc comment), not to
+// decide whether to send a credential this function was never given.
+func (c *Client) WorkoutFIT(ctx context.Context, fileURL string) ([]byte, error) {
+	if fileURL == "" {
+		return nil, errors.New("wahoo: no file URL to download")
+	}
+	if _, err := c.allowedFileHost(fileURL); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("wahoo: building workout FIT request: %w", err)
+	}
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("wahoo: downloading workout FIT: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Read up to MaxFITBytes+1 so a body over the cap is reported as an
+	// error rather than silently truncated — the same distinction
+	// garmin.ActivityFIT's readLimited draws.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxFITBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("wahoo: reading workout FIT: %w", err)
+	}
+	if len(raw) > MaxFITBytes {
+		return nil, fmt.Errorf("wahoo: workout FIT exceeded the %d byte limit", MaxFITBytes)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("wahoo: workout FIT download returned %d: %s", resp.StatusCode, snippet(raw))
+	}
+	if len(raw) < 12 || !bytes.Equal(raw[8:12], fitSignature) {
+		return nil, errors.New("wahoo: workout FIT response was not a FIT file (missing the .FIT signature)")
+	}
+	return raw, nil
 }
