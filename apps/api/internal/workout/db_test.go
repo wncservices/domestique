@@ -475,7 +475,7 @@ func TestEachEngine(t *testing.T) {
 					PowerCurve:       map[string]float64{"5": 550, "60": 400, "300": 260, "1200": 230},
 					Steps: []AnalysisStep{
 						{Index: 0, Name: "Warmup", Target: "open", Actual: 150, Result: "hit"},
-						{Index: 1, Name: "On", Target: "power", Low: 280, High: 300, Actual: 275, Result: "under", InTargetPct: 62.5},
+						{Index: 1, Name: "On", Target: "power", Low: 280, High: 300, Actual: 275, Result: "under", InTargetPct: 62.5, Hard: true},
 					},
 				}
 				if err := db.SaveAnalysis(ctx, analysis); err != nil {
@@ -508,6 +508,9 @@ func TestEachEngine(t *testing.T) {
 				}
 				if len(fetched.Steps) != 2 || fetched.Steps[1].InTargetPct != 62.5 || fetched.Steps[1].Low != 280 {
 					t.Errorf("steps = %+v", fetched.Steps)
+				}
+				if fetched.Steps[1].Hard != true || fetched.Steps[0].Hard != false {
+					t.Errorf("steps hard flag did not round-trip: %+v", fetched.Steps)
 				}
 				if fetched.AnalysedAt == "" {
 					t.Error("analysed_at was not stamped")

@@ -167,7 +167,19 @@ func analysed(workoutID, outcome string, tss float64, steps ...workout.AnalysisS
 	return workout.SessionAnalysis{WorkoutID: workoutID, Outcome: outcome, TSS: tss, Steps: steps}
 }
 
-func hitStep(result string) workout.AnalysisStep { return workout.AnalysisStep{Result: result} }
+// onStep and recoveryStep build the two kinds of scored step a real
+// generated interval session produces: an "on" rep, which is Hard, and a
+// "Recovery" rep, which is scored too (scheduler.intervalOffTarget gives it
+// a real power target, not TargetOpen) but is never Hard — the case that
+// motivated AnalysisStep carrying Hard at all, since counting every scored
+// step would double a 4-rep session's denominator to 8.
+func onStep(result string) workout.AnalysisStep {
+	return workout.AnalysisStep{Name: "On", Result: result, Hard: true}
+}
+
+func recoveryStep(result string) workout.AnalysisStep {
+	return workout.AnalysisStep{Name: "Recovery", Result: result, Hard: false}
+}
 
 func TestAnIncompleteAnalysisIsTreatedAsMissedEvenIfTimeWasLogged(t *testing.T) {
 	ws := []workout.Workout{planned("tue", "VO2max intervals", "2026-03-17")}
@@ -202,14 +214,23 @@ func TestLastTwoStruggledKeySessionsSwapTodaysHardSessionEvenWithMildTSB(t *test
 	mild := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -10}
 	analyses := map[string]workout.SessionAnalysis{
 		"mon": analysed("mon", "struggled", 70),
-		"wed": analysed("wed", "struggled", 75, hitStep("under"), hitStep("hit"), hitStep("under"), hitStep("under")),
+		// A realistic 4-on/4-recovery interval session: 4 hard "On" steps
+		// (2 hit, 2 under) interleaved with 4 non-hard "Recovery" steps
+		// (all hit, since an easy recovery target is rarely missed) — only
+		// the On steps should ever appear in the reason's "of 4".
+		"wed": analysed("wed", "struggled", 75,
+			onStep("under"), recoveryStep("hit"),
+			onStep("hit"), recoveryStep("hit"),
+			onStep("under"), recoveryStep("hit"),
+			onStep("hit"), recoveryStep("hit"),
+		),
 	}
 
 	got := AdaptSessions(ws, nil, profileAvailable("mon", "wed", "thu", "fri"), mild, thursday, analyses)
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy: two struggled key sessions in a row is fatigue even without TSB", got)
 	}
-	if !strings.Contains(got[0].Reason, "Wednesday's interval session were under target (1 of 4)") {
+	if !strings.Contains(got[0].Reason, "Wednesday's interval session were under target (2 of 4)") {
 		t.Errorf("reason %q must name the most recent struggled ride and its hit count", got[0].Reason)
 	}
 }

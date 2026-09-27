@@ -300,8 +300,12 @@ func lastTwoStruggledKeySessions(workouts []workout.Workout, analyses map[string
 
 // struggleReason names the most recent of the two struggled rides that
 // triggered the swap, in the shape the spec gives: weekday, the workout's
-// own name lower-cased, and how many of the steps ride-analysis could score
-// were actually hit.
+// own name lower-cased, and how many of its *hard* steps ride-analysis
+// scored were actually hit. Only Hard steps count toward that fraction — a
+// generated interval session's recovery step carries a real power target
+// too (see rideanalysis.StepResult.Hard's own doc comment), so counting
+// every scored step would double a 4-rep session's denominator to 8 and
+// read "2 of 8" for what the rider experienced as 4 hard reps.
 func struggleReason(w workout.Workout, a workout.SessionAnalysis) string {
 	weekday := w.Date
 	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
@@ -309,6 +313,9 @@ func struggleReason(w workout.Workout, a workout.SessionAnalysis) string {
 	}
 	hit, total := 0, 0
 	for _, s := range a.Steps {
+		if !s.Hard {
+			continue
+		}
 		total++
 		if s.Result == "hit" {
 			hit++

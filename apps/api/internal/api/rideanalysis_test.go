@@ -116,6 +116,13 @@ func TestSyncAnalysesARideAgainstItsPlannedWorkout(t *testing.T) {
 	if analysis.TSS <= 0 {
 		t.Errorf("tss = %v, want > 0", analysis.TSS)
 	}
+	// The round-1 fix: rideanalysis.StepResult.Hard must survive the DTO
+	// conversion (analysisStepsDTO) and the JSON round trip through storage —
+	// this workout's only step is Active/power-targeted, so isHardStep says
+	// it is hard.
+	if len(analysis.Steps) != 1 || !analysis.Steps[0].Hard {
+		t.Errorf("steps = %+v, want a single Hard step (Active intensity, power target)", analysis.Steps)
+	}
 
 	sessions, err := h.srv.Training.ListSessions(context.Background(), "wilant")
 	if err != nil {

@@ -547,6 +547,63 @@ func TestAnalyzeNoHardStepsUsesMainStepForNailed(t *testing.T) {
 	}
 }
 
+// TestAnalyzeStepResultHardFlagExcludesRecoveryEvenWithARealTarget guards
+// the round-1 fix: a generated interval session's recovery step carries a
+// real power target (scheduler.intervalOffTarget), not TargetOpen, so it
+// gets scored just like the "on" step — but must not count as Hard, or a
+// 4-rep session's "hard steps hit" fraction (and the adapter's own
+// struggle-fatigue reason) would see 8 scored steps instead of 4.
+func TestAnalyzeStepResultHardFlagExcludesRecoveryEvenWithARealTarget(t *testing.T) {
+	w := &workout.Workout{Steps: []workout.WorkoutStep{
+		{Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime, Seconds: 300, Target: workout.TargetOpen},
+		{Name: "On", Intensity: workout.IntensityInterval, Duration: workout.DurationTime, Seconds: 180, Target: workout.TargetPower, TargetLow: 260, TargetHigh: 280},
+		// A real power target, exactly like intervalOffTarget builds — not
+		// TargetOpen — which is precisely what let a recovery step get
+		// scored (and, before this fix, wrongly counted as hard) at all.
+		{Name: "Recovery", Intensity: workout.IntensityRecovery, Duration: workout.DurationTime, Seconds: 120, Target: workout.TargetPower, TargetLow: 100, TargetHigh: 120},
+		{Name: "Cooldown", Intensity: workout.IntensityCooldown, Duration: workout.DurationTime, Seconds: 300, Target: workout.TargetOpen},
+	}}
+	samples := []fixture{}
+	add := func(seconds, watts int) {
+		for i := 0; i < seconds; i++ {
+			samples = append(samples, fixture{Sec: len(samples), Power: watts})
+		}
+	}
+	add(300, 100) // warmup
+	add(180, 270) // on, in range
+	add(120, 110) // recovery, in range
+	add(300, 100) // cooldown
+
+	laps := []lapFixture{
+		{StartSec: 0, EndSec: 300, StepIndex: 0},
+		{StartSec: 300, EndSec: 480, StepIndex: 1},
+		{StartSec: 480, EndSec: 600, StepIndex: 2},
+		{StartSec: 600, EndSec: 900, StepIndex: 3},
+	}
+	act := buildActivity(t, samples, laps)
+
+	a := Analyze(Input{Activity: act, Planned: w, Profile: fullProfile()})
+
+	var on, recovery *StepResult
+	for i := range a.Steps {
+		switch a.Steps[i].Name {
+		case "On":
+			on = &a.Steps[i]
+		case "Recovery":
+			recovery = &a.Steps[i]
+		}
+	}
+	if on == nil || recovery == nil {
+		t.Fatalf("Steps = %+v, want both On and Recovery scored (Recovery has a real target)", a.Steps)
+	}
+	if !on.Hard {
+		t.Error("the interval 'On' step must be Hard")
+	}
+	if recovery.Hard {
+		t.Error("the 'Recovery' step must not be Hard, even though it was scored (a real target, not open)")
+	}
+}
+
 func TestMatchPlannedPicksClosestDurationSameSportAndDate(t *testing.T) {
 	planned := []workout.Workout{
 		{Date: "2026-01-05", Sport: "cycling", Steps: []workout.WorkoutStep{{Duration: workout.DurationTime, Seconds: 3600}}}, // 60 min

@@ -45,6 +45,11 @@ type AnalysisStep struct {
 	Actual      float64 `json:"actual"`
 	Result      string  `json:"result"`
 	InTargetPct float64 `json:"inTargetPct,omitempty"`
+	// Hard mirrors rideanalysis.StepResult.Hard — see that field's own doc
+	// comment for why a scored step is not necessarily a "hard" one (a
+	// generated interval session's Recovery step carries a real power
+	// target, not TargetOpen, so it gets scored too).
+	Hard bool `json:"hard,omitempty"`
 }
 
 // SaveAnalysis upserts on session_id — a re-analysed ride (e.g. after a

@@ -317,6 +317,7 @@ func analysisStepsDTO(steps []rideanalysis.StepResult) []workout.AnalysisStep {
 			Actual:      st.Actual,
 			Result:      st.Result,
 			InTargetPct: st.InTargetPct,
+			Hard:        st.Hard,
 		})
 	}
 	return out
