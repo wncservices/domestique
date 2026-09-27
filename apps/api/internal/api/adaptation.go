@@ -76,12 +76,32 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		latest = &snapshots[len(snapshots)-1]
 	}
 
+	// struggleLookbackWindow covers adapter.AdaptSessions' widest lookback
+	// (its 14-day struggled-key-session check) — anything analysed further
+	// back cannot affect a decision made today, so there is no reason to ask
+	// the store for more.
+	sinceDate := s.now().AddDate(0, 0, -14).Format("2006-01-02")
+	analyses, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
+	if err != nil {
+		s.logger().Warn("adapt: reading ride analyses failed", "rider", rider, "err", err)
+		analyses = nil
+	}
+	// Keyed by the planned workout id, never the session id — that is what
+	// AdaptSessions' own done/detectFatigue look a workout up by, and only a
+	// ride that actually matched a planned workout carries one.
+	byWorkout := make(map[string]workout.SessionAnalysis, len(analyses))
+	for _, a := range analyses {
+		if a.WorkoutID != "" {
+			byWorkout[a.WorkoutID] = a
+		}
+	}
+
 	byID := make(map[string]workout.Workout, len(workouts))
 	for _, w := range workouts {
 		byID[w.ID] = w
 	}
 
-	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, latest, s.now()) {
+	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, latest, s.now(), byWorkout) {
 		wk := byID[c.WorkoutID]
 		description := wk.Description + " " + adapter.Note(c)
 		req := workout.UpdateWorkoutRequest{Description: &description}
