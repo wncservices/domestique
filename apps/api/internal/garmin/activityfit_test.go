@@ -32,14 +32,25 @@ func syntheticFIT(t *testing.T) []byte {
 
 func zipOf(t *testing.T, name string, data []byte) []byte {
 	t.Helper()
+	return zipOfEntries(t, map[string][]byte{name: data})
+}
+
+// zipOfEntries builds a zip with one entry per map key. Go's map iteration
+// order is randomized, which is exactly what TestActivityFITRejectsAZipWithMultipleFitEntries
+// wants: the "ambiguous" error names both entries regardless of which one
+// zip.Writer happened to visit first.
+func zipOfEntries(t *testing.T, entries map[string][]byte) []byte {
+	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	w, err := zw.Create(name)
-	if err != nil {
-		t.Fatalf("zip create: %v", err)
-	}
-	if _, err := w.Write(data); err != nil {
-		t.Fatalf("zip write: %v", err)
+	for name, data := range entries {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create: %v", err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatalf("zip write: %v", err)
+		}
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatalf("zip close: %v", err)
@@ -181,6 +192,25 @@ func TestExtractFITRejectsAZipWithNoFitEntry(t *testing.T) {
 	zipped := zipOf(t, "readme.txt", []byte("not a fit file"))
 	if _, err := extractFIT(zipped); err == nil {
 		t.Fatal("expected an error for a zip with no .fit entry")
+	}
+}
+
+// A zip with more than one .fit entry is ambiguous — Connect's own download
+// has only ever been observed to hold one, so a second is treated as an
+// error rather than silently picking whichever entry came first, which
+// could return the wrong ride's data.
+func TestActivityFITRejectsAZipWithMultipleFitEntries(t *testing.T) {
+	fitA := syntheticFIT(t)
+	fitB := syntheticFIT(t)
+	zipped := zipOfEntries(t, map[string][]byte{
+		"111_ACTIVITY.fit": fitA,
+		"222_ACTIVITY.fit": fitB,
+	})
+
+	if _, err := extractFIT(zipped); err == nil {
+		t.Fatal("expected an error for a zip with more than one .fit entry")
+	} else if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error = %q, want it to call out the ambiguity", err.Error())
 	}
 }
 

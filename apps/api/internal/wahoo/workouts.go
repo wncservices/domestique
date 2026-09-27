@@ -229,12 +229,12 @@ func (c *Client) WorkoutFIT(ctx context.Context, fileURL string) ([]byte, error)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("wahoo: building workout FIT request: %w", err)
+		return nil, wrapURLErr("building workout FIT request", err)
 	}
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("wahoo: downloading workout FIT: %w", err)
+		return nil, wrapURLErr("downloading workout FIT", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

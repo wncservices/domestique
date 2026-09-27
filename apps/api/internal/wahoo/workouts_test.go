@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
@@ -254,5 +255,47 @@ func TestWorkoutFITRejectsAnOversizedBodyWithoutBuffering(t *testing.T) {
 	})
 	if _, err := c.WorkoutFIT(t.Context(), c.APIBase+"/workout/5/file.fit"); err == nil {
 		t.Fatal("expected an error for a body over MaxFITBytes")
+	}
+}
+
+// A fileURL is a pre-signed link with an access token in its query string
+// (workout_summary.file.url) — an ordinary network failure must not leak it
+// into the error message via a wrapped *url.Error, which renders the full
+// URL it was given.
+func TestWorkoutFITDoesNotLeakTheQueryStringOnANetworkFailure(t *testing.T) {
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	closed.Close() // refuses every connection from here on
+
+	c := New(Config{ClientID: "id", ClientSecret: "secret", RedirectURL: "https://app.example.test/callback"})
+	c.APIBase = closed.URL
+
+	fileURL := closed.URL + "/workout/5/file.fit?token=SECRET-TOKEN-VALUE"
+	_, err := c.WorkoutFIT(t.Context(), fileURL)
+	if err == nil {
+		t.Fatal("expected an error for a connection to a closed server")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN-VALUE") {
+		t.Errorf("error leaked the query string: %v", err)
+	}
+	if strings.Contains(err.Error(), "?") {
+		t.Errorf("error still carries a query string: %v", err)
+	}
+}
+
+// Same leak, different failure point: the URL never gets far enough to be
+// requested at all — allowedFileHost's own url.Parse fails first, and
+// (*url.Error).Error() renders the full input URL it was asked to parse.
+func TestWorkoutFITDoesNotLeakTheQueryStringOnAnUnparsableURL(t *testing.T) {
+	c := New(Config{ClientID: "id", ClientSecret: "secret", RedirectURL: "https://app.example.test/callback"})
+	c.APIBase = "https://api.example.test"
+
+	// A literal control character makes url.Parse itself fail.
+	fileURL := "https://api.example.test/workout?token=SECRET-TOKEN-VALUE\n"
+	_, err := c.WorkoutFIT(t.Context(), fileURL)
+	if err == nil {
+		t.Fatal("expected an error for an unparsable URL")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN-VALUE") {
+		t.Errorf("error leaked the query string: %v", err)
 	}
 }

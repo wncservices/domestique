@@ -109,10 +109,18 @@ func extractFIT(raw []byte) ([]byte, error) {
 func extractFITFromZip(zr *zip.Reader) ([]byte, error) {
 	var entry *zip.File
 	for _, f := range zr.File {
-		if strings.HasSuffix(strings.ToLower(f.Name), ".fit") {
-			entry = f
-			break
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".fit") {
+			continue
 		}
+		if entry != nil {
+			// Connect's own download is documented nowhere, and this
+			// package has only ever observed one .fit per zip. A second
+			// one means the assumption "there is exactly one" no longer
+			// holds, and picking the first silently would risk returning
+			// the wrong ride's data — safer to fail loudly than guess.
+			return nil, fmt.Errorf("the zip contained more than one .fit entry (at least %q and %q), which .fit to use is ambiguous", entry.Name, f.Name)
+		}
+		entry = f
 	}
 	if entry == nil {
 		return nil, errors.New("the zip contained no .fit entry")
