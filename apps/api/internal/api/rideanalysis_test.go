@@ -519,3 +519,131 @@ func TestSyncOfAnEndurancePlannedRideMovesNoLevel(t *testing.T) {
 		t.Errorf("levels = %+v, want none — an endurance workout carries no level to move", levels)
 	}
 }
+
+// findThresholdLevel is the assertion helper the two boundary tests below
+// share: the threshold zone's own saved ProgressionLevel row, or a fatal
+// failure if it was never saved.
+func findThresholdLevel(t *testing.T, levels []workout.ProgressionLevel) workout.ProgressionLevel {
+	t.Helper()
+	for _, l := range levels {
+		if l.Zone == workout.ZoneThreshold {
+			return l
+		}
+	}
+	t.Fatalf("no threshold level found in %+v", levels)
+	return workout.ProgressionLevel{}
+}
+
+// TestSyncStoresTheAppliedDeltaNotTheRawOneAtTheCeiling is round 1's
+// critical fix (review finding #1): a rider already at 9.9 who nails a
+// level-10.0 workout gets clamped to the 10.0 ceiling by
+// progression.Apply, but Delta's own raw, unclamped result for this case
+// (max(9.9,10.0)+0.3-9.9 = 0.4) overstates what actually happened by 0.3 —
+// the real change was only 10.0-9.9 = 0.1. What analyseNewSessions stores
+// via SetAnalysisFeel must be the applied 0.1, not Delta's raw 0.4, or a
+// later re-rate's own cur_without := level - storedDelta would drift the
+// rider down to 9.6 instead of recovering the true 9.9 (see
+// progression_test.go's own re-rate regression tests for that half of the
+// bug).
+func TestSyncStoresTheAppliedDeltaNotTheRawOneAtTheCeiling(t *testing.T) {
+	h, sessionID := syncNailedThresholdRide(t)
+	// This fixture's planned workout was created with Level: 5.0 — replace
+	// it with the ceiling case this test actually needs.
+	workouts, err := h.srv.Training.ListWorkouts(context.Background(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	level := 10.0
+	if _, err := h.srv.Training.UpdateWorkout(context.Background(), workouts[0].ID, workout.UpdateWorkoutRequest{Level: &level}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.srv.Training.SaveLevel(context.Background(), workout.ProgressionLevel{
+		Rider: "wilant", Sport: model.SportCycling, Zone: workout.ZoneThreshold, Level: 9.9, Reason: "seeded near the ceiling",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	analysis, ok, err := h.srv.Training.GetAnalysis(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || analysis.Outcome != "nailed" {
+		t.Fatalf("analysis = %+v, ok=%v, want nailed", analysis, ok)
+	}
+	if analysis.LevelDelta != 0.1 {
+		t.Errorf("LevelDelta = %v, want 0.1 (the applied change: 10.0 ceiling - 9.9 starting level), not Delta's raw 0.4", analysis.LevelDelta)
+	}
+
+	levels, err := h.srv.Training.ListLevels(context.Background(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findThresholdLevel(t, levels).Level; got != 10.0 {
+		t.Errorf("threshold level = %v, want 10.0 (clamped at the ceiling)", got)
+	}
+}
+
+// TestSyncStoresTheAppliedDeltaNotTheRawOneAtTheFloor is the same
+// regression at the other clamp: a rider at 1.1 who comes up incomplete
+// against a level-1.0 workout is clamped to the 1.0 floor, but Delta's own
+// raw result (-0.3) overstates the real -0.1 change by 0.2.
+func TestSyncStoresTheAppliedDeltaNotTheRawOneAtTheFloor(t *testing.T) {
+	start := time.Now().AddDate(0, 0, -1)
+	date := start.Format("2006-01-02")
+	fake := &fakeGarmin{
+		activities: []garmin.Activity{
+			// No FIT bytes registered for this id — decode fails and
+			// analysis falls back to the provider's own summary numbers
+			// (see TestSyncOfAnUnplannedRideMovesNoLevel's own comment on
+			// this same fallback), so DurationRatio comes straight from
+			// this DurationSeconds against the workout's planned 1200s:
+			// 400/1200 = 0.33, well under the 0.5 incomplete threshold.
+			{ID: "6900", Sport: "cycling", StartTime: start, DurationSeconds: 400, AvgPowerWatts: 150},
+		},
+	}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	if _, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: model.SportCycling, Name: "Threshold 3x12", Date: date,
+		Zone: workout.ZoneThreshold, Level: 1.0,
+		Steps: []workout.WorkoutStep{
+			{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
+				Seconds: 1200, Target: workout.TargetPower, TargetLow: 150, TargetHigh: 200},
+		},
+	}); err != nil {
+		t.Fatalf("create planned workout: %v", err)
+	}
+	if err := h.srv.Training.SaveLevel(context.Background(), workout.ProgressionLevel{
+		Rider: "wilant", Sport: model.SportCycling, Zone: workout.ZoneThreshold, Level: 1.1, Reason: "seeded near the floor",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	analysis, ok, err := h.srv.Training.GetAnalysis(context.Background(), "garmin:6900")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || analysis.Outcome != "incomplete" {
+		t.Fatalf("analysis = %+v, ok=%v, want incomplete", analysis, ok)
+	}
+	if analysis.LevelDelta != -0.1 {
+		t.Errorf("LevelDelta = %v, want -0.1 (the applied change: 1.0 floor - 1.1 starting level), not Delta's raw -0.3", analysis.LevelDelta)
+	}
+
+	levels, err := h.srv.Training.ListLevels(context.Background(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findThresholdLevel(t, levels).Level; got != 1.0 {
+		t.Errorf("threshold level = %v, want 1.0 (clamped at the floor)", got)
+	}
+}

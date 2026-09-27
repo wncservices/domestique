@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -157,9 +158,16 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 			// one — a re-rate replaces the delta, it never stacks a second
 			// adjustment on top of the first.
 			curWithout := levels[string(wk.Zone)] - analysis.LevelDelta
-			newDelta = progression.Delta(curWithout, wk.Level, analysis.Outcome, body.Feel)
-			newLevel := progression.Apply(curWithout, newDelta)
+			rawDelta := progression.Delta(curWithout, wk.Level, analysis.Outcome, body.Feel)
+			newLevel := progression.Apply(curWithout, rawDelta)
 			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, analysis.Outcome)
+
+			// Store what Apply actually did (newLevel - curWithout, rounded),
+			// not Delta's raw, unclamped result — see
+			// applyProgressionForAnalysis's own comment on why the two can
+			// differ at the 1.0/10.0 clamp boundary, and why storing the raw
+			// value would drift a later re-rate's own curWithout.
+			newDelta = math.Round((newLevel-curWithout)*10) / 10
 
 			if err := s.Training.SaveLevel(r.Context(), workout.ProgressionLevel{
 				Rider: analysis.Rider, Sport: wk.Sport, Zone: wk.Zone, Level: newLevel, Reason: reason,

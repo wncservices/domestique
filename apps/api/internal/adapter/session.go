@@ -93,6 +93,14 @@ type Change struct {
 	// one that actually picks the lower rung, via workoutlib — this package
 	// only decides which workout it should happen to.
 	StepDown bool
+	// StepDownSourceID is the id of the struggled key session that
+	// triggered this StepDown. The caller records it in the replacement
+	// workout's own description (via StepDownSourceNote) so a later
+	// adaptation pass can tell this exact struggle already produced one
+	// step-down and must not produce a second from it — see
+	// stepDownTarget's own doc comment for why that matters with more than
+	// one untouched same-zone workout in the window.
+	StepDownSourceID string
 	// Reason is shown to the rider.
 	Reason string
 }
@@ -169,11 +177,40 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 
 	if src, target, ok := stepDownTarget(ordered, analyses, today); ok {
 		changes = append(changes, Change{
-			WorkoutID: target.ID, StepDown: true,
+			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
 			Reason: stepDownReason(src),
 		})
 	}
 	return changes
+}
+
+// stepDownSourceMarker prefixes the note recording which struggled session
+// caused a step-down — see StepDownSourceNote.
+const stepDownSourceMarker = "step-down source:"
+
+// StepDownSourceNote is the text internal/api's applyStepDown appends to a
+// stepped-down workout's own description, alongside the ordinary adjustment
+// marker/reason — naming the struggled session (by id) that caused it.
+// AutoScheduleTick runs every 30 minutes, and a struggled session's own
+// analysis does not change between runs, so without this a second pass
+// would otherwise see the exact same struggle and step down a *second*
+// same-zone workout too, once the first one is no longer IsGenerated —
+// hasStepDownSource is what stepDownTarget checks to refuse that.
+func StepDownSourceNote(sourceID string) string {
+	return fmt.Sprintf("%s %s", stepDownSourceMarker, sourceID)
+}
+
+// hasStepDownSource reports whether any workout already carries sourceID's
+// own StepDownSourceNote — meaning that struggled session has already
+// produced one step-down and must not produce a second one.
+func hasStepDownSource(ordered []workout.Workout, sourceID string) bool {
+	note := StepDownSourceNote(sourceID)
+	for _, w := range ordered {
+		if strings.Contains(w.Description, note) {
+			return true
+		}
+	}
+	return false
 }
 
 // stepDownTarget looks for the most recent analysed, generated key session
@@ -182,7 +219,9 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 // after it — within stepDownWindowDays of the struggled session itself —
 // the one the spec says to step down a level (docs/superpowers/specs's
 // progression-levels design, "Struggled -> step down"). False when there is
-// no recent struggle to react to, or nothing left in that zone to step down.
+// no recent struggle to react to, that struggle has already produced a
+// step-down (hasStepDownSource), or nothing is left in that zone to step
+// down.
 func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time) (workout.Workout, workout.Workout, bool) {
 	var source workout.Workout
 	found := false
@@ -198,7 +237,7 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 			source, found = w, true
 		}
 	}
-	if !found {
+	if !found || hasStepDownSource(ordered, source.ID) {
 		return workout.Workout{}, workout.Workout{}, false
 	}
 
