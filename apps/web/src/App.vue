@@ -98,10 +98,11 @@ const links = computed(() =>
       ? { to: '/build', label: 'Build route', icon: 'i-lucide-pencil-ruler' }
       : null,
     canManageCrews.value ? { to: '/crews', label: 'Crews', icon: 'i-lucide-users-round' } : null,
-    // Straight to the Fitness sub-page rather than the bare /training that
-    // redirects there — isActiveSection below still matches this link on
-    // either sub-page, so it does not change what "active" means.
-    canManageTraining.value ? { to: '/training/fitness', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
+    // Straight to the Plan sub-page rather than the bare /training that
+    // redirects there — riders come here to see what to ride, not to check
+    // their fitness numbers. isActiveSection below still matches this link
+    // on either sub-page, so it does not change what "active" means.
+    canManageTraining.value ? { to: '/training/plan', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
     canManagePeople.value ? { to: '/people', label: 'People', icon: 'i-lucide-users' } : null,
     { to: '/settings', label: 'Settings', icon: 'i-lucide-settings' },
   ].filter((link) => link !== null),

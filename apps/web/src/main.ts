@@ -29,12 +29,12 @@ const router = createRouter({
       path: '/training',
       component: () => import('./pages/TrainingPage.vue'),
       children: [
-        // A relative string redirect ('fitness') does not resolve reliably
+        // A relative string redirect ('plan') does not resolve reliably
         // against this child's own empty path — it left a bare /training
         // visit falling through to the catch-all below and bouncing to /
-        // instead of /training/fitness. Absolute sidesteps that resolution
+        // instead of /training/plan. Absolute sidesteps that resolution
         // entirely.
-        { path: '', redirect: '/training/fitness' },
+        { path: '', redirect: '/training/plan' },
         { path: 'fitness', component: () => import('./pages/TrainingFitnessPage.vue') },
         { path: 'plan', component: () => import('./pages/TrainingPlanPage.vue') },
       ],

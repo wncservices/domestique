@@ -11,8 +11,8 @@
 // works correctly on its own regardless of which one a rider lands on
 // first.
 const subTabs = [
-  { to: '/training/fitness', label: 'Fitness', icon: 'i-lucide-heart-pulse' },
   { to: '/training/plan', label: 'Plan', icon: 'i-lucide-calendar-range' },
+  { to: '/training/fitness', label: 'Fitness', icon: 'i-lucide-heart-pulse' },
 ]
 </script>
 
