@@ -425,14 +425,22 @@ func TestAnalyzeNilActivityUsesSummaryMetricsAndScoresMainStep(t *testing.T) {
 // anything at all. Here a lap scores the warmup (an open-target step, so it
 // is never actually scored) and the device never laps the main step, so the
 // only lap in the ride carries no scorable target: the main step must still
-// get a time-in-range score across the whole ride, not be left unscored.
+// get a time-in-range score, not be left unscored.
+//
+// Round 2's finding: this score must be computed over the samples the
+// warmup lap did NOT already claim, not the whole ride — otherwise the
+// lapped warmup's easy, out-of-range wattage dilutes the main step's own
+// average and time-in-range fraction. Asserts the exact undiluted numbers
+// (180 W / 80% in range for just the Endurance segment), which a
+// whole-ride computation would report as ~173 W / ~73% instead.
 func TestAnalyzeMainStepScoredByTimeWhenOnlyOtherStepsHaveLaps(t *testing.T) {
 	w := &workout.Workout{Steps: []workout.WorkoutStep{
 		{Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime, Seconds: 300, Target: workout.TargetOpen},
 		{Name: "Endurance", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3300, Target: workout.TargetPower, TargetLow: 180, TargetHigh: 220},
 	}}
 	// 80% of the non-warmup ride in range, one lap covering only the
-	// warmup (step index 0, open target, never scored by scoreLaps).
+	// warmup (step index 0, open target, never scored by scoreLaps, but
+	// still excluded from the main step's own window).
 	var samples []fixture
 	sec := 0
 	add := func(seconds, watts int) {
@@ -456,6 +464,59 @@ func TestAnalyzeMainStepScoredByTimeWhenOnlyOtherStepsHaveLaps(t *testing.T) {
 	}
 	if a.Steps[0].Result != "hit" {
 		t.Errorf("Steps[0].Result = %q, want hit (80%% in range)", a.Steps[0].Result)
+	}
+	// (2640*200 + 660*100) / 3300 = 180 W exactly — the Endurance segment
+	// alone, not the whole-ride average of ~173.33 W a diluted calculation
+	// would report.
+	if want := 180.0; math.Abs(a.Steps[0].Actual-want) > 0.01 {
+		t.Errorf("Actual = %v, want %v (undiluted by the warmup lap)", a.Steps[0].Actual, want)
+	}
+	if want := 80.0; math.Abs(a.Steps[0].InTargetPct-want) > 0.01 {
+		t.Errorf("InTargetPct = %v, want %v (undiluted by the warmup lap)", a.Steps[0].InTargetPct, want)
+	}
+	if a.Outcome != OutcomeNailed {
+		t.Errorf("Outcome = %q, want %q", a.Outcome, OutcomeNailed)
+	}
+}
+
+// TestAnalyzeLongLappedWarmupNoLongerFlipsMainStepVerdict is round 2's own
+// regression case: a long, easy, lapped warmup whose out-of-range seconds
+// would pull the whole-ride time-in-range fraction under the 70% hit
+// threshold (3000 in-range of 4500 total = 66.7%), even though the main
+// step itself is 100% in range across its own 3000 s. Excluding the
+// warmup's lapped seconds (mainStepWindow) keeps the verdict "hit"; without
+// the fix this reports "under" and the outcome would not reach nailed.
+func TestAnalyzeLongLappedWarmupNoLongerFlipsMainStepVerdict(t *testing.T) {
+	w := &workout.Workout{Steps: []workout.WorkoutStep{
+		{Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime, Seconds: 1500, Target: workout.TargetOpen},
+		{Name: "Endurance", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3000, Target: workout.TargetPower, TargetLow: 180, TargetHigh: 220},
+	}}
+	var samples []fixture
+	sec := 0
+	add := func(seconds, watts int) {
+		for i := 0; i < seconds; i++ {
+			samples = append(samples, fixture{Sec: sec, Power: watts})
+			sec++
+		}
+	}
+	add(1500, 50)  // long easy warmup, well out of the main step's range
+	add(3000, 200) // Endurance: 100% in range on its own
+	act := buildActivity(t, samples, []lapFixture{{StartSec: 0, EndSec: 1500, StepIndex: 0}})
+
+	a := Analyze(Input{Activity: act, Planned: w, Profile: fullProfile()})
+
+	if len(a.Steps) != 1 {
+		t.Fatalf("Steps = %+v, want a single main-step score", a.Steps)
+	}
+	if a.Steps[0].Result != "hit" {
+		t.Errorf("Steps[0].Result = %q, want hit — a whole-ride calculation "+
+			"(3000 in-range of 4500 = 66.7%%) would wrongly report \"under\"", a.Steps[0].Result)
+	}
+	if want := 200.0; math.Abs(a.Steps[0].Actual-want) > 0.01 {
+		t.Errorf("Actual = %v, want %v", a.Steps[0].Actual, want)
+	}
+	if want := 100.0; math.Abs(a.Steps[0].InTargetPct-want) > 0.01 {
+		t.Errorf("InTargetPct = %v, want %v", a.Steps[0].InTargetPct, want)
 	}
 	if a.Outcome != OutcomeNailed {
 		t.Errorf("Outcome = %q, want %q", a.Outcome, OutcomeNailed)

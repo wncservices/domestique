@@ -339,13 +339,66 @@ func stepScored(steps []StepResult, idx int) bool {
 	return false
 }
 
+// mainStepWindow returns the samples the main-step time-in-range fallback
+// should judge: every second of the ride *except* the ones a lap already
+// attributed to some other planned step. Without this, a lap'd warmup or
+// cooldown at an easy, out-of-range wattage dilutes the main step's own
+// average and time-in-range fraction — round 2's own finding: a 300 s
+// lapped warmup at 100 W pulled a true 180 W / 80%-in-range main step down
+// to 173 W / 73%, and a long enough easy lap can flip a nailed main step to
+// "under" purely because of time it never claimed to cover. A lap with no
+// wkt_step_index at all (never attributed to any planned step) does not
+// exclude its seconds — only a lap that FIT explicitly mapped elsewhere
+// does. When mainIdx itself has no lap (the caller only reaches this
+// function via stepScored being false for it), there is nothing of its own
+// to additionally exclude.
+func mainStepWindow(act *filedef.Activity, samples []Sample, mainIdx int, flattened []workout.WorkoutStep) []Sample {
+	if act == nil || len(act.Records) == 0 || len(act.Laps) == 0 {
+		return samples
+	}
+	excluded := make([]bool, len(samples))
+	rideStart := act.Records[0].Timestamp
+	for _, lap := range act.Laps {
+		if lap.WktStepIndex == typedef.MessageIndexInvalid {
+			continue
+		}
+		idx := int(lap.WktStepIndex)
+		if idx < 0 || idx >= len(flattened) || idx == mainIdx {
+			continue
+		}
+		startSec := int(lap.StartTime.Sub(rideStart).Round(time.Second).Seconds())
+		endSec := int(lap.Timestamp.Sub(rideStart).Round(time.Second).Seconds())
+		if startSec < 0 {
+			startSec = 0
+		}
+		if endSec > len(samples) {
+			endSec = len(samples)
+		}
+		for sec := startSec; sec < endSec; sec++ {
+			excluded[sec] = true
+		}
+	}
+
+	window := make([]Sample, 0, len(samples))
+	for i, s := range samples {
+		if !excluded[i] {
+			window = append(window, s)
+		}
+	}
+	return window
+}
+
 // scoreMainStepByTime is the spec's "no step laps" fallback — also used
 // whenever no lap mapped to the main step specifically, even if other laps
 // scored other steps, so a planned workout is scored whenever it has
-// anything to score at all. The hit rule is time in range (InTargetPct >=
-// mainStepHitFraction), but Actual still reports the ride's average of the
-// target metric in its own physical unit, matching every other StepResult —
-// only InTargetPct carries the percentage this fallback actually judges by.
+// anything to score at all. samples is expected to already be mainStepWindow's
+// output — the ride's seconds minus whatever another lap already claimed —
+// not the raw per-second stream, so an easy lapped warmup/cooldown cannot
+// dilute the main step's own numbers. The hit rule is time in range
+// (InTargetPct >= mainStepHitFraction), but Actual still reports the
+// window's average of the target metric in its own physical unit, matching
+// every other StepResult — only InTargetPct carries the percentage this
+// fallback actually judges by.
 func scoreMainStepByTime(samples []Sample, idx int, step workout.WorkoutStep) StepResult {
 	frac := timeInRangeFraction(samples, step.TargetLow, step.TargetHigh, step.Target)
 	actual := averageOverRange(samples, 0, len(samples), step.Target)
@@ -523,7 +576,13 @@ func Analyze(in Input) Analysis {
 		// planned workout is scored whenever it has anything to score,
 		// rather than only in the all-or-nothing "free ride" case.
 		if main != nil && !stepScored(a.Steps, mainIdx) {
-			a.Steps = append(a.Steps, scoreMainStepByTime(samples, mainIdx, *main))
+			// Judge only the seconds no other lap already claimed — see
+			// mainStepWindow's own doc comment for why (round 2's finding:
+			// an easy lapped warmup/cooldown otherwise dilutes the main
+			// step's numbers and can flip its verdict).
+			if window := mainStepWindow(in.Activity, samples, mainIdx, flattened); len(window) > 0 {
+				a.Steps = append(a.Steps, scoreMainStepByTime(window, mainIdx, *main))
+			}
 		}
 	case main != nil:
 		a.Steps = []StepResult{scoreMainStepBySummary(in.Summary, mainIdx, *main)}
