@@ -4,8 +4,9 @@
 // it. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, ref } from 'vue'
-import type { PeriodizationPhase, RiderProfile, TrainingWeek, WeekDay, Workout } from '@/api/types'
+import type { RiderProfile, TrainingWeek, WeekDay, Workout } from '@/api/types'
 import { adjustmentNote, formatDuration } from '@/utils/workoutMath'
+import { phaseChipStyle, phaseLabel } from './phaseStyle'
 import WorkoutProfile from './WorkoutProfile.vue'
 
 const props = defineProps<{
@@ -32,17 +33,13 @@ const isCurrentWeek = computed(() => props.week.start <= props.week.today && pro
 const title = computed(() => (isCurrentWeek.value ? 'This week' : `${shortDate(props.week.start)} – ${shortDate(props.week.end)}`))
 
 // Categorical, not semantic — base/build/peak/taper are phases of a plan,
-// not a compliance status, so these never reuse the done/partial/missed
-// colours (see docs/design-system.md's categorical-vs-semantic rule).
-const phaseAccent: Partial<Record<PeriodizationPhase, string>> = { build: 'sky', peak: 'ember', taper: 'violet' }
-
+// not a compliance status, so this never reuses the done/partial/missed
+// colours (see docs/design-system.md's categorical-vs-semantic rule). Shared
+// with SeasonTimeline via phaseStyle.ts so the two read as the same palette.
 const phaseChip = computed(() => {
   const focus = props.week.focus
   if (!focus?.phase) return null
-  const accent = phaseAccent[focus.phase]
-  const label = focus.phase.charAt(0).toUpperCase() + focus.phase.slice(1) + (focus.recovery ? ' · recovery' : '')
-  if (!accent) return { label, class: 'bg-elevated text-muted', style: {} }
-  return { label, class: '', style: { background: `var(--app-accent-${accent}-soft)`, color: `var(--app-accent-${accent})` } }
+  return { label: phaseLabel(focus.phase, focus.recovery), ...phaseChipStyle(focus.phase) }
 })
 
 const doneHours = computed(() => props.week.totals.completedSeconds / 3600)

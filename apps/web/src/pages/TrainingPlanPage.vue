@@ -7,7 +7,7 @@
 // Still no Wahoo structured-workout push — it needs a further-gated
 // partner entitlement this deployment does not have; see the plan doc's
 // own "Structured workouts and the providers".
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
@@ -16,7 +16,6 @@ import type {
   Goal,
   GoalPriority,
   Me,
-  PeriodizationPhase,
   PeriodizationPlan,
   RiderProfile,
   Sport,
@@ -26,11 +25,13 @@ import type {
   WorkoutStep,
 } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
+import GoalsSection from '@/components/plan/GoalsSection.vue'
+import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
+import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
-import { adjustmentNote } from '@/utils/workoutMath'
 
 const toast = useToast()
 const route = useRoute()
@@ -238,30 +239,6 @@ async function saveGoal() {
 
 const deletingGoal = ref('')
 
-// --- periodization: one goal expanded at a time, fetched on demand ---
-
-const periodizationOpenFor = ref<string | null>(null)
-const periodizationPlan = ref<PeriodizationPlan | null>(null)
-const loadingPeriodization = ref('')
-
-async function togglePeriodization(g: Goal) {
-  if (periodizationOpenFor.value === g.id) {
-    periodizationOpenFor.value = null
-    return
-  }
-  periodizationOpenFor.value = g.id
-  periodizationPlan.value = null
-  loadingPeriodization.value = g.id
-  try {
-    periodizationPlan.value = await api.goalPeriodization(g.id)
-  } catch (err) {
-    toast.add({ title: 'Could not build a plan for this goal', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
-    periodizationOpenFor.value = null
-  } finally {
-    loadingPeriodization.value = ''
-  }
-}
-
 const schedulingGoal = ref('')
 
 async function scheduleGoal(g: Goal) {
@@ -303,16 +280,6 @@ async function explainPlan(g: Goal) {
   } finally {
     explainingGoal.value = ''
   }
-}
-
-const phaseColors: Record<PeriodizationPhase, 'neutral' | 'info' | 'warning' | 'primary'> = {
-  base: 'neutral',
-  build: 'info',
-  peak: 'warning',
-  taper: 'primary',
-}
-function phaseColor(phase: PeriodizationPhase) {
-  return phaseColors[phase]
 }
 
 async function deleteGoal(g: Goal) {
@@ -446,15 +413,6 @@ async function pushWorkoutToGarmin(w: Workout) {
   }
 }
 
-function stepCount(w: Workout): number {
-  // Flat count including a repeat block's own children, so the summary line
-  // reads like "5 steps" rather than "3" for a workout that's mostly one
-  // big interval set.
-  const count = (steps: WorkoutStep[]): number =>
-    steps.reduce((sum, s) => sum + 1 + ((s.repeat ?? 0) >= 2 ? count(s.steps ?? []) : 0), 0)
-  return count(w.steps)
-}
-
 // --- the week strip: one Monday–Sunday read, re-fetched whenever anything
 // that could change it (a save/delete/push above, a prev/next/today click,
 // a drag-to-move) happens — see loadWeek's own callers. ---
@@ -566,6 +524,53 @@ function headerExplain() {
   if (g) explainPlan(g)
 }
 
+// --- season timeline: the effective focus goal's own periodized structure.
+// Computed on the fly server-side (nothing persisted), so it's cheap to
+// reload whenever the focus changes rather than caching it. A goal with no
+// event date, or one whose event already passed, legitimately 400s here
+// (periodization.Build) — that's not a bug worth a toast, just a goal this
+// view has nothing to draw, so the timeline quietly disappears instead. ---
+
+const seasonPlan = ref<PeriodizationPlan | null>(null)
+
+// A rider flipping focus quickly (the header's own goal dropdown, or
+// "Set as focus" below) can fire a second load before the first one's
+// response lands — nothing here cancels the in-flight fetch, so without this
+// counter a slow response for the *previous* goal can overwrite a faster one
+// for the goal a rider is actually looking at now. Each call captures its own
+// ticket; only the call still holding the latest ticket is allowed to write,
+// on both the success and error paths.
+let seasonRequest = 0
+
+watch(
+  () => effectiveFocus.value?.goalId,
+  async (id) => {
+    const requestId = ++seasonRequest
+    if (!id) {
+      seasonPlan.value = null
+      return
+    }
+    try {
+      const plan = await api.goalPeriodization(id)
+      if (requestId === seasonRequest) seasonPlan.value = plan
+    } catch {
+      if (requestId === seasonRequest) seasonPlan.value = null
+    }
+  },
+  { immediate: true },
+)
+
+const seasonEventDate = computed(() => goals.value.find((g) => g.id === effectiveFocus.value?.goalId)?.eventDate)
+
+function selectSeasonWeek(startDate: string) {
+  weekStart.value = startDate
+  loadWeek()
+}
+
+function fromRoute() {
+  router.push('/')
+}
+
 const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && profile.value.availableDays?.length))
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
@@ -588,231 +593,81 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col gap-6">
-    <PlanGoalHeader
-      :focus="effectiveFocus"
-      :goals="goals"
+    <PlanEmptyState
+      v-if="!loadingGoals && goals.length === 0"
       :narration-enabled="!!me?.narrationEnabled"
-      :explaining="headerExplaining"
-      :explanation="headerExplanation"
-      @explain="headerExplain"
-      @new-goal="openCreateGoal"
-      @new-workout="openCreateWorkout"
-      @select-goal="selectGoal"
+      :starting="startingGeneralPlan"
+      @describe="openCreateGoal"
+      @from-route="fromRoute"
+      @general="startGeneralPlan"
     />
 
-    <TodayCard
-      v-if="week && isCurrentWeek"
-      :day="today"
-      :yesterday="yesterday"
-      :profile="profile"
+    <template v-else>
+      <PlanGoalHeader
+        :focus="effectiveFocus"
+        :goals="goals"
+        :narration-enabled="!!me?.narrationEnabled"
+        :explaining="headerExplaining"
+        :explanation="headerExplanation"
+        @explain="headerExplain"
+        @new-goal="openCreateGoal"
+        @new-workout="openCreateWorkout"
+        @select-goal="selectGoal"
+      />
+
+      <TodayCard
+        v-if="week && isCurrentWeek"
+        :day="today"
+        :yesterday="yesterday"
+        :profile="profile"
+        :can-sync-garmin="canSyncGarmin"
+        :pushing="pushingWorkout"
+        @push="pushWorkoutToGarmin"
+        @edit="openEditWorkout"
+        @move="moveWorkout"
+      />
+
+      <WeekStrip
+        v-if="week"
+        :week="week"
+        :profile="profile"
+        :can-fill="canFillWeek"
+        :filling="fillingWeek"
+        @prev="prevWeek"
+        @next="nextWeek"
+        @this-week="thisWeek"
+        @move="moveWorkout"
+        @open="openEditWorkout"
+        @fill="fillWeek"
+      />
+
+      <SeasonTimeline
+        v-if="week && seasonPlan"
+        :plan="seasonPlan"
+        :event-date="seasonEventDate"
+        :today="week.today"
+        :selected-start="week.start"
+        @select="selectSeasonWeek"
+      />
+    </template>
+
+    <GoalsSection
+      v-if="goals.length || workouts.length"
+      :goals="goals"
+      :workouts="workouts"
+      :focus-goal-id="effectiveFocus?.goalId"
       :can-sync-garmin="canSyncGarmin"
-      :pushing="pushingWorkout"
-      @push="pushWorkoutToGarmin"
-      @edit="openEditWorkout"
-      @move="moveWorkout"
+      :deleting-goal="deletingGoal"
+      :deleting-workout="deletingWorkout"
+      :pushing-workout="pushingWorkout"
+      @edit-goal="openEditGoal"
+      @delete-goal="deleteGoal"
+      @focus-goal="selectGoal"
+      @edit-workout="openEditWorkout"
+      @delete-workout="deleteWorkout"
+      @push-workout="pushWorkoutToGarmin"
+      @new-workout="openCreateWorkout"
     />
-
-    <WeekStrip
-      v-if="week"
-      :week="week"
-      :profile="profile"
-      :can-fill="canFillWeek"
-      :filling="fillingWeek"
-      @prev="prevWeek"
-      @next="nextWeek"
-      @this-week="thisWeek"
-      @move="moveWorkout"
-      @open="openEditWorkout"
-      @fill="fillWeek"
-    />
-
-    <!-- Goals -->
-    <UCard variant="outline">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <h2 class="text-lg font-semibold">Goals</h2>
-          <UButton icon="i-lucide-plus" @click="openCreateGoal">Add goal</UButton>
-        </div>
-      </template>
-
-      <div v-if="!loadingGoals && goals.length === 0" class="flex flex-col items-start gap-3">
-        <p class="text-muted text-sm">
-          No goals yet. Add a race or event to train toward — or, if there is nothing on the calendar, start a
-          general fitness plan and Domestique keeps you training steadily anyway.
-        </p>
-        <UButton color="neutral" variant="soft" icon="i-lucide-wand-sparkles" :loading="startingGeneralPlan" @click="startGeneralPlan">
-          Start a general fitness plan
-        </UButton>
-      </div>
-
-      <div class="flex flex-col divide-y divide-default">
-        <div v-for="g in goals" :key="g.id" class="py-3 first:pt-0 last:pb-0">
-          <div class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="font-medium">{{ g.name }}</span>
-                <UBadge color="neutral" variant="subtle" size="sm">{{ g.priority }}</UBadge>
-              </div>
-              <p class="text-sm text-muted">
-                {{ g.sport }}
-                <template v-if="g.eventDate">· {{ g.eventDate }}</template>
-                <template v-else>· no date — rolling plan</template>
-                <template v-if="g.targetDistanceM">· {{ (g.targetDistanceM / 1000).toFixed(0) }} km</template>
-                <template v-if="g.targetElevationM">· {{ g.targetElevationM.toFixed(0) }} m climbing</template>
-              </p>
-            </div>
-            <div class="flex items-center gap-1 shrink-0">
-              <UButton
-                color="neutral"
-                variant="ghost"
-                size="sm"
-                :icon="periodizationOpenFor === g.id ? 'i-lucide-chevron-up' : 'i-lucide-calendar-range'"
-                :loading="loadingPeriodization === g.id"
-                @click="togglePeriodization(g)"
-              >
-                Plan
-              </UButton>
-              <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" size="sm" @click="openEditGoal(g)" />
-              <UButton
-                icon="i-lucide-trash-2"
-                color="neutral"
-                variant="ghost"
-                size="sm"
-                :loading="deletingGoal === g.id"
-                @click="deleteGoal(g)"
-              />
-            </div>
-          </div>
-
-          <div v-if="periodizationOpenFor === g.id && periodizationPlan" class="mt-3 overflow-x-auto">
-            <p class="text-xs text-muted mb-2">
-              A periodized structure only — phases and a weekly hours target, not yet concrete sessions.
-              <template v-if="!(profile.hoursPerAvailableDay && profile.availableDays?.length)">
-                Fill in your fitness profile's hours and available days on the Fitness page for real hour targets.
-              </template>
-              <template v-else-if="periodizationPlan.adjustment && periodizationPlan.adjustment < 0.99">
-                Upcoming weeks eased off to {{ Math.round(periodizationPlan.adjustment * 100) }}% of plan based on recent training.
-              </template>
-              <template v-else-if="periodizationPlan.adjustment && periodizationPlan.adjustment > 1.01">
-                Upcoming weeks raised to {{ Math.round(periodizationPlan.adjustment * 100) }}% of plan based on recent training.
-              </template>
-            </p>
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-muted">
-                  <th class="pr-4 py-1">Week</th>
-                  <th class="pr-4 py-1">Starts</th>
-                  <th class="pr-4 py-1">Phase</th>
-                  <th class="pr-4 py-1">Target</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="w in periodizationPlan.weeks" :key="w.number" class="border-t border-default">
-                  <td class="pr-4 py-1">{{ w.number }}</td>
-                  <td class="pr-4 py-1">{{ w.startDate }}</td>
-                  <td class="pr-4 py-1">
-                    <UBadge :color="phaseColor(w.phase)" variant="subtle" size="sm">
-                      {{ w.phase }}{{ w.recovery ? ' · recovery' : '' }}
-                    </UBadge>
-                  </td>
-                  <td class="pr-4 py-1">
-                    {{ w.targetHours ? `${w.targetHours.toFixed(1)}h` : '—' }}
-                    <UBadge v-if="w.adjusted" color="info" variant="subtle" size="sm" class="ml-1">adjusted</UBadge>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <UButton
-                v-if="profile.hoursPerAvailableDay && profile.availableDays?.length"
-                color="primary"
-                variant="soft"
-                size="sm"
-                icon="i-lucide-calendar-plus"
-                :loading="schedulingGoal === g.id"
-                @click="scheduleGoal(g)"
-              >
-                Schedule this week's workouts
-              </UButton>
-              <UButton
-                v-if="me?.narrationEnabled"
-                color="neutral"
-                variant="soft"
-                size="sm"
-                :icon="explanationFor === g.id ? 'i-lucide-chevron-up' : 'i-lucide-sparkles'"
-                :loading="explainingGoal === g.id"
-                @click="explainPlan(g)"
-              >
-                Explain this plan
-              </UButton>
-            </div>
-            <p v-if="explanationFor === g.id" class="mt-2 text-sm text-muted italic">
-              {{ explanationText }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </UCard>
-
-    <!-- Workouts -->
-    <UCard variant="outline">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <h2 class="text-lg font-semibold">Workouts</h2>
-          <UButton icon="i-lucide-plus" @click="openCreateWorkout">Build a workout</UButton>
-        </div>
-      </template>
-
-      <p v-if="!loadingWorkouts && workouts.length === 0" class="text-muted text-sm">
-        No workouts yet. Build one with a warmup, intervals and a cooldown, then download it as a FIT file.
-      </p>
-
-      <div class="flex flex-col divide-y divide-default">
-        <div v-for="w in workouts" :key="w.id" class="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-          <div class="min-w-0">
-            <span class="font-medium">{{ w.name }}</span>
-            <p class="text-sm text-muted">
-              {{ w.sport }} · {{ stepCount(w) }} step(s)
-              <template v-if="w.date">· {{ w.date }}</template>
-            </p>
-            <p v-if="adjustmentNote(w.description)" class="mt-1 flex items-start gap-1 text-xs text-info">
-              <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
-              <span>{{ adjustmentNote(w.description) }}</span>
-            </p>
-          </div>
-          <div class="flex items-center gap-1 shrink-0">
-            <UButton
-              v-if="canSyncGarmin"
-              icon="i-lucide-watch"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :loading="pushingWorkout === w.id"
-              title="Push to your connected Garmin account"
-              @click="pushWorkoutToGarmin(w)"
-            />
-            <UButton
-              icon="i-lucide-download"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :to="api.workoutFitUrl(w.id)"
-              target="_blank"
-              title="Download as a FIT workout file"
-            />
-            <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" size="sm" @click="openEditWorkout(w)" />
-            <UButton
-              icon="i-lucide-trash-2"
-              color="neutral"
-              variant="ghost"
-              size="sm"
-              :loading="deletingWorkout === w.id"
-              @click="deleteWorkout(w)"
-            />
-          </div>
-        </div>
-      </div>
-    </UCard>
 
     <!-- Goal modal -->
     <UModal v-model:open="goalModalOpen" :title="editingGoalId ? 'Edit goal' : 'Add a goal'">
