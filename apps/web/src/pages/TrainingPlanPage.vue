@@ -20,10 +20,17 @@ import type {
   PeriodizationPlan,
   RiderProfile,
   Sport,
+  TrainingWeek,
+  WeekFocus,
   Workout,
   WorkoutStep,
 } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
+import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
+import TodayCard from '@/components/plan/TodayCard.vue'
+import WeekStrip from '@/components/plan/WeekStrip.vue'
+import { pickFallbackGoal } from '@/components/plan/goalOrdering'
+import { adjustmentNote } from '@/utils/workoutMath'
 
 const toast = useToast()
 const route = useRoute()
@@ -190,6 +197,7 @@ async function startGeneralPlan() {
     await api.createGoal({ name: 'General fitness', sport: 'cycling', priority: 'C' })
     toast.add({ title: 'Started a general fitness plan', description: 'Twelve rolling weeks of steady base training.', icon: 'i-lucide-flag', color: 'success' })
     await loadGoals()
+    await loadWeek()
   } catch (err) {
     toast.add({ title: 'Could not start a plan', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -220,6 +228,7 @@ async function saveGoal() {
     toast.add({ title: `Saved ${goalForm.value.name.trim()}`, icon: 'i-lucide-flag', color: 'success' })
     goalModalOpen.value = false
     await loadGoals()
+    await loadWeek()
   } catch (err) {
     toast.add({ title: 'Could not save goal', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -265,6 +274,7 @@ async function scheduleGoal(g: Goal) {
     } else {
       toast.add({ title: 'This week is already scheduled', icon: 'i-lucide-calendar-check' })
     }
+    await loadWeek()
   } catch (err) {
     toast.add({ title: 'Could not schedule this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -310,6 +320,7 @@ async function deleteGoal(g: Goal) {
   try {
     await api.deleteGoal(g.id)
     await loadGoals()
+    await loadWeek()
   } catch (err) {
     toast.add({ title: `Could not delete ${g.name}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -393,6 +404,7 @@ async function saveWorkout() {
     toast.add({ title: `Saved ${workoutForm.value.name.trim()}`, icon: 'i-lucide-dumbbell', color: 'success' })
     workoutModalOpen.value = false
     await loadWorkouts()
+    await loadWeek()
   } catch (err) {
     toast.add({ title: 'Could not save workout', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -407,6 +419,7 @@ async function deleteWorkout(w: Workout) {
   try {
     await api.deleteWorkout(w.id)
     await loadWorkouts()
+    await loadWeek()
   } catch (err) {
     toast.add({ title: `Could not delete ${w.name}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -433,16 +446,6 @@ async function pushWorkoutToGarmin(w: Workout) {
   }
 }
 
-// A workout the plan changed on its own carries the reason in its description,
-// after this marker (see internal/scheduler.AdjustedMarker) — shown so a rider
-// is never left wondering why Thursday's session is not what it was on Monday.
-const ADJUSTED_MARKER = 'Adjusted automatically:'
-
-function adjustmentNote(w: Workout): string {
-  const at = (w.description ?? '').indexOf(ADJUSTED_MARKER)
-  return at < 0 ? '' : w.description!.slice(at + ADJUSTED_MARKER.length).trim()
-}
-
 function stepCount(w: Workout): number {
   // Flat count including a repeat block's own children, so the summary line
   // reads like "5 steps" rather than "3" for a workout that's mostly one
@@ -452,23 +455,175 @@ function stepCount(w: Workout): number {
   return count(w.steps)
 }
 
+// --- the week strip: one Monday–Sunday read, re-fetched whenever anything
+// that could change it (a save/delete/push above, a prev/next/today click,
+// a drag-to-move) happens — see loadWeek's own callers. ---
+
+const week = ref<TrainingWeek | null>(null)
+const weekStart = ref<string | undefined>(undefined)
+
+async function loadWeek() {
+  try {
+    week.value = await api.trainingWeek(weekStart.value)
+  } catch (err) {
+    toast.add({ title: 'Could not load this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  }
+}
+
+// YYYY-MM-DD, built from local date parts rather than toISOString(), which
+// renders in UTC and so shifts the day for anyone west of it.
+function formatYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function shiftDate(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00`)
+  d.setDate(d.getDate() + days)
+  return formatYMD(d)
+}
+
+function prevWeek() {
+  if (!week.value) return
+  weekStart.value = shiftDate(week.value.start, -7)
+  loadWeek()
+}
+
+function nextWeek() {
+  if (!week.value) return
+  weekStart.value = shiftDate(week.value.start, 7)
+  loadWeek()
+}
+
+function thisWeek() {
+  weekStart.value = undefined
+  loadWeek()
+}
+
+async function moveWorkout(w: Workout, date: string) {
+  try {
+    await api.updateWorkout(w.id, { date })
+    const weekday = new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long' })
+    toast.add({ title: `Moved ${w.name} to ${weekday}`, icon: 'i-lucide-calendar-check' })
+    await loadWeek()
+    await loadWorkouts()
+  } catch (err) {
+    toast.add({ title: `Could not move ${w.name}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  }
+}
+
+async function fillWeek() {
+  const focus = week.value?.focus
+  if (!focus) return
+  const g = goals.value.find((x) => x.id === focus.goalId)
+  if (!g) return
+  await scheduleGoal(g)
+  await loadWeek()
+}
+const fillingWeek = computed(() => !!week.value?.focus && schedulingGoal.value === week.value.focus.goalId)
+
+// A rider can pick a different goal than the server's own weekFocus to look
+// at (PlanGoalHeader's dropdown, when there's more than one) without that
+// choice changing which goal actually gets scheduled — so this only swaps
+// what the header displays, built from the plain Goal (no phase/week
+// fields, since periodization is not re-run for it).
+const focusGoalId = ref<string | null>(null)
+
+function selectGoal(id: string) {
+  focusGoalId.value = id
+}
+
+// The browsed week not being the current one is why week.focus can be
+// undefined even with goals on file — the server only fills it in for the
+// goal whose own periodized plan has a week starting on this exact date
+// (internal/api/trainingweek.go's weekFocus). Rather than show a bare
+// icon-chip, fall back to the same goal the header's own dropdown lets a
+// rider pick by hand: the override if one is set, otherwise
+// pickFallbackGoal's ordering — the same priority/dated-first/nearest-event
+// rule the server uses to pick a *real* focus, just applied here because
+// there isn't one. Either way this is a plain Goal, not a periodized plan,
+// so it carries no phase/week fields (PlanGoalHeader treats that absence as
+// "outside this goal's plan weeks" rather than a real weekFocus).
+const effectiveFocus = computed<WeekFocus | undefined>(() => {
+  const real = week.value?.focus
+  if (focusGoalId.value && focusGoalId.value !== real?.goalId) {
+    const g = goals.value.find((x) => x.id === focusGoalId.value)
+    if (g) return { goalId: g.id, name: g.name, priority: g.priority, sport: g.sport, eventDate: g.eventDate }
+  }
+  if (real) return real
+  const fallback = pickFallbackGoal(goals.value)
+  if (!fallback) return undefined
+  return { goalId: fallback.id, name: fallback.name, priority: fallback.priority, sport: fallback.sport, eventDate: fallback.eventDate }
+})
+
+const headerExplaining = computed(() => !!effectiveFocus.value && explainingGoal.value === effectiveFocus.value.goalId)
+const headerExplanation = computed(() =>
+  effectiveFocus.value && explanationFor.value === effectiveFocus.value.goalId ? explanationText.value : '',
+)
+
+function headerExplain() {
+  const id = effectiveFocus.value?.goalId
+  const g = id ? goals.value.find((x) => x.id === id) : undefined
+  if (g) explainPlan(g)
+}
+
+const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && profile.value.availableDays?.length))
+
+const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
+const today = computed(() => (isCurrentWeek.value ? week.value?.days.find((d) => d.date === week.value!.today) : undefined))
+const yesterday = computed(() => {
+  if (!isCurrentWeek.value || !week.value) return undefined
+  const index = week.value.days.findIndex((d) => d.date === week.value!.today)
+  return index > 0 ? week.value.days[index - 1] : undefined
+})
+
 onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
   loadProfile()
   loadGoals()
   loadWorkouts()
+  loadWeek()
   startGoalFromRoute()
 })
 </script>
 
 <template>
   <div class="flex flex-col gap-6">
-    <UAlert
-      color="neutral"
-      variant="subtle"
-      icon="i-lucide-info"
-      title="Manual builder"
-      description="Build a workout by hand, then push it to a connected Garmin account or download it as a FIT file for any device over USB. Wahoo structured-workout push is not built yet — see docs/training-plan.md."
+    <PlanGoalHeader
+      :focus="effectiveFocus"
+      :goals="goals"
+      :narration-enabled="!!me?.narrationEnabled"
+      :explaining="headerExplaining"
+      :explanation="headerExplanation"
+      @explain="headerExplain"
+      @new-goal="openCreateGoal"
+      @new-workout="openCreateWorkout"
+      @select-goal="selectGoal"
+    />
+
+    <TodayCard
+      v-if="week && isCurrentWeek"
+      :day="today"
+      :yesterday="yesterday"
+      :profile="profile"
+      :can-sync-garmin="canSyncGarmin"
+      :pushing="pushingWorkout"
+      @push="pushWorkoutToGarmin"
+      @edit="openEditWorkout"
+      @move="moveWorkout"
+    />
+
+    <WeekStrip
+      v-if="week"
+      :week="week"
+      :profile="profile"
+      :can-fill="canFillWeek"
+      :filling="fillingWeek"
+      @prev="prevWeek"
+      @next="nextWeek"
+      @this-week="thisWeek"
+      @move="moveWorkout"
+      @open="openEditWorkout"
+      @fill="fillWeek"
     />
 
     <!-- Goals -->
@@ -620,9 +775,9 @@ onMounted(() => {
               {{ w.sport }} · {{ stepCount(w) }} step(s)
               <template v-if="w.date">· {{ w.date }}</template>
             </p>
-            <p v-if="adjustmentNote(w)" class="mt-1 flex items-start gap-1 text-xs text-info">
+            <p v-if="adjustmentNote(w.description)" class="mt-1 flex items-start gap-1 text-xs text-info">
               <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
-              <span>{{ adjustmentNote(w) }}</span>
+              <span>{{ adjustmentNote(w.description) }}</span>
             </p>
           </div>
           <div class="flex items-center gap-1 shrink-0">
