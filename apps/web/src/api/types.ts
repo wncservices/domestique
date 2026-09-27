@@ -882,6 +882,9 @@ export interface SessionAnalysis {
   tss?: number
   durationRatio?: number
   steps?: AnalysisStep[]
+  /** The planned workout this session was matched against, if any — absent
+   *  for an unplanned ride. */
+  workoutId?: string
 }
 
 export interface CompletedSession {

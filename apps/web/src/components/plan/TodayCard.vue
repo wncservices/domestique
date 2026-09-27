@@ -102,7 +102,11 @@ const hardStepsLine = computed(() => {
 })
 
 const resultsOpen = ref(false)
-const resultsTitle = computed(() => props.day?.planned[0]?.name ?? 'Today')
+const resultsTitle = computed(() => {
+  const workoutId = analysedSession.value?.analysis?.workoutId
+  const matched = workoutId ? props.day?.planned.find((w) => w.id === workoutId) : undefined
+  return matched?.name ?? props.day?.planned[0]?.name ?? 'Today'
+})
 
 function openResults() {
   if (!canOpenResults.value) return
@@ -142,6 +146,7 @@ function openResults() {
               v-if="analysedSession"
               type="button"
               :class="{ 'cursor-default': !canOpenResults }"
+              :disabled="!canOpenResults"
               aria-label="View ride results"
               @click="openResults"
             >
@@ -195,6 +200,7 @@ function openResults() {
             v-if="analysedSession"
             type="button"
             :class="{ 'cursor-default': !canOpenResults }"
+            :disabled="!canOpenResults"
             aria-label="View ride results"
             @click="openResults"
           >

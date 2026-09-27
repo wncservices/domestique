@@ -128,7 +128,9 @@ const resultsSteps = computed<AnalysisStep[]>(() => {
 const resultsTitle = computed(() => {
   const day = resultsDay.value
   if (!day) return ''
-  const workoutName = day.planned[0]?.name
+  const workoutId = analysedSession(day)?.analysis?.workoutId
+  const matched = workoutId ? day.planned.find((w) => w.id === workoutId) : undefined
+  const workoutName = matched?.name ?? day.planned[0]?.name
   const dateLabel = `${weekdayShort(day.date)} ${dayNumber(day.date)}`
   return workoutName ? `${workoutName} · ${dateLabel}` : dateLabel
 })
@@ -248,6 +250,7 @@ watch(
           type="button"
           class="self-start"
           :class="{ 'cursor-default': !canOpenResults(day) }"
+          :disabled="!canOpenResults(day)"
           :aria-label="`View ride results for ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
           @click.stop="openResults(day)"
         >

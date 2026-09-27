@@ -981,6 +981,7 @@ type analysisOut struct {
 	Steps         []struct {
 		Name string `json:"name"`
 	} `json:"steps"`
+	WorkoutID string `json:"workoutId"`
 }
 
 type fitnessOut struct {
@@ -1004,7 +1005,7 @@ func TestFitnessIncludesAnalysisForAnalysedSessionsOnly(t *testing.T) {
 
 	analysedID := "garmin:" + analysedDate
 	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
-		SessionID: analysedID, Rider: "wilant", Outcome: "nailed", LoadSource: "measured",
+		SessionID: analysedID, Rider: "wilant", WorkoutID: "threshold-6x3", Outcome: "nailed", LoadSource: "measured",
 		NormalizedPower: 220, IntensityFactor: 0.85, TSS: 65, DurationRatio: 1.0,
 		Steps: []workout.AnalysisStep{{Index: 0, Name: "Warmup", Target: "open", Result: "hit"}},
 	}); err != nil {
@@ -1029,6 +1030,9 @@ func TestFitnessIncludesAnalysisForAnalysedSessionsOnly(t *testing.T) {
 			}
 			if sess.Analysis.Outcome != "nailed" || sess.Analysis.TSS != 65 || sess.Analysis.NP != 220 {
 				t.Errorf("analysis = %+v", sess.Analysis)
+			}
+			if sess.Analysis.WorkoutID != "threshold-6x3" {
+				t.Errorf("workoutId = %q, want threshold-6x3", sess.Analysis.WorkoutID)
 			}
 			if len(sess.Analysis.Steps) != 1 || sess.Analysis.Steps[0].Name != "Warmup" {
 				t.Errorf("steps = %+v", sess.Analysis.Steps)

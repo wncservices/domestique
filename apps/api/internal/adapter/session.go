@@ -321,6 +321,16 @@ func struggleReason(w workout.Workout, a workout.SessionAnalysis) string {
 			hit++
 		}
 	}
+	// A session can struggle on duration alone (an endurance ride cut short,
+	// no hard interval steps to score) — total stays 0 and there is no
+	// "N of M" to report, so the "(0 of 0)" clause is dropped rather than
+	// printed nonsensically.
+	if total == 0 {
+		return fmt.Sprintf(
+			"swapped for an easy session — %s's %s was cut short, and two struggled sessions in a row call for a break before more intensity.",
+			weekday, strings.ToLower(w.Name),
+		)
+	}
 	return fmt.Sprintf(
 		"swapped for an easy session — %s's %s were under target (%d of %d), and two struggled sessions in a row call for a break before more intensity.",
 		weekday, strings.ToLower(w.Name), hit, total,

@@ -1076,13 +1076,18 @@ type sessionAnalysisDTO struct {
 	TSS           float64                `json:"tss,omitempty"`
 	DurationRatio float64                `json:"durationRatio,omitempty"`
 	Steps         []workout.AnalysisStep `json:"steps,omitempty"`
+	// WorkoutID is the planned workout this session was matched against, if
+	// any — omitted for an unplanned ride. The frontend uses it to title the
+	// step-results modal with the matched workout's own name rather than
+	// whatever else happens to be planned for that day.
+	WorkoutID string `json:"workoutId,omitempty"`
 }
 
 func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
 	return sessionAnalysisDTO{
 		Outcome: a.Outcome, LoadSource: a.LoadSource,
 		NP: a.NormalizedPower, IF: a.IntensityFactor, TSS: a.TSS, DurationRatio: a.DurationRatio,
-		Steps: a.Steps,
+		Steps: a.Steps, WorkoutID: a.WorkoutID,
 	}
 }
 

@@ -235,6 +235,33 @@ func TestLastTwoStruggledKeySessionsSwapTodaysHardSessionEvenWithMildTSB(t *test
 	}
 }
 
+// TestStruggleReasonOmitsHitCountWithNoHardSteps covers a session that
+// struggled on duration alone (an endurance ride cut short, no hard interval
+// steps to score) — struggleReason must not print the nonsensical "(0 of 0)".
+func TestStruggleReasonOmitsHitCountWithNoHardSteps(t *testing.T) {
+	ws := []workout.Workout{
+		planned("mon", "Tempo ride", "2026-03-16"),
+		planned("wed", "Long ride", "2026-03-18"),
+		planned("today", "VO2max intervals", "2026-03-19"),
+	}
+	mild := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -10}
+	analyses := map[string]workout.SessionAnalysis{
+		"mon": analysed("mon", "struggled", 70),
+		"wed": analysed("wed", "struggled", 75), // no steps at all: no hard steps to score
+	}
+
+	got := AdaptSessions(ws, nil, profileAvailable("mon", "wed", "thu", "fri"), mild, thursday, analyses)
+	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
+		t.Fatalf("changes = %+v, want today's intervals swapped for easy", got)
+	}
+	if !strings.Contains(got[0].Reason, "Wednesday's long ride was cut short") {
+		t.Errorf("reason %q must name the most recent struggled ride without a bogus hit count", got[0].Reason)
+	}
+	if strings.Contains(got[0].Reason, "of 0") {
+		t.Errorf("reason %q must never print a (0 of 0) clause", got[0].Reason)
+	}
+}
+
 func TestSevenDayOverloadedTSSSwapsTodaysHardSession(t *testing.T) {
 	// One planned+analysed hour a day at FTP (200W): estimatePlannedTSS ~=
 	// 100 each. Analysed TSS of 260 across two rides is well past 1.3x the
