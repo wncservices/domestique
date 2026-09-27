@@ -31,6 +31,14 @@ type SessionAnalysis struct {
 	PowerCurve       map[string]float64
 	Steps            []AnalysisStep
 
+	// Feel is the rider's optional 1-5 "how did it feel" rating (0 = not
+	// rated). LevelDelta is the progression-level change this ride applied
+	// (internal/progression.Delta's result) — stored so a re-rate can
+	// subtract the old change before applying the new one instead of
+	// stacking a second adjustment on top. See SetAnalysisFeel.
+	Feel       int
+	LevelDelta float64
+
 	AnalysedAt string
 }
 
@@ -56,6 +64,13 @@ type AnalysisStep struct {
 // rider's FTP changes) replaces the previous verdict rather than
 // accumulating a second row, the same upsert shape SaveProfile and
 // SavePush already use.
+//
+// feel and level_delta are deliberately excluded from the conflict
+// update: they are set only by SetAnalysisFeel, once a rider actually
+// rates the ride. A re-analysis (or a re-sync of the same ride) must not
+// wipe a rating that already happened — a.Feel/a.LevelDelta are only used
+// on the first insert of a session that has never been analysed before,
+// where there is nothing to preserve yet.
 func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
 	if a.SessionID == "" {
 		return errors.New("workout: an analysis needs a session id")
@@ -90,8 +105,9 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO session_analyses (session_id, rider, workout_id, outcome, load_source,
                     normalized_power, intensity_factor, tss, duration_ratio,
-                    power_zone_seconds, hr_zone_seconds, power_curve, steps, analysed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    power_zone_seconds, hr_zone_seconds, power_curve, steps,
+                    feel, level_delta, analysed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (session_id) DO UPDATE SET
             rider = excluded.rider, workout_id = excluded.workout_id, outcome = excluded.outcome,
             load_source = excluded.load_source, normalized_power = excluded.normalized_power,
@@ -101,7 +117,7 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
             steps = excluded.steps, analysed_at = excluded.analysed_at`),
 		a.SessionID, rider, a.WorkoutID, a.Outcome, a.LoadSource,
 		a.NormalizedPower, a.IntensityFactor, a.TSS, a.DurationRatio,
-		powerZones, hrZones, powerCurve, steps, analysedAt)
+		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, analysedAt)
 	return err
 }
 
@@ -112,7 +128,8 @@ func (d *DB) GetAnalysis(ctx context.Context, sessionID string) (SessionAnalysis
 	row := d.db.QueryRowContext(ctx, d.query(`
         SELECT session_id, rider, workout_id, outcome, load_source,
                normalized_power, intensity_factor, tss, duration_ratio,
-               power_zone_seconds, hr_zone_seconds, power_curve, steps, analysed_at
+               power_zone_seconds, hr_zone_seconds, power_curve, steps,
+               feel, level_delta, analysed_at
         FROM session_analyses WHERE session_id = ?`), sessionID)
 	a, err := scanAnalysis(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -132,7 +149,8 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT a.session_id, a.rider, a.workout_id, a.outcome, a.load_source,
                a.normalized_power, a.intensity_factor, a.tss, a.duration_ratio,
-               a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps, a.analysed_at
+               a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps,
+               a.feel, a.level_delta, a.analysed_at
         FROM session_analyses a
         JOIN completed_sessions s ON s.id = a.session_id
         WHERE a.rider = ? AND s.date >= ?
@@ -162,7 +180,8 @@ func scanAnalysis(row rowScanner) (SessionAnalysis, error) {
 	)
 	if err := row.Scan(&a.SessionID, &a.Rider, &a.WorkoutID, &a.Outcome, &a.LoadSource,
 		&a.NormalizedPower, &a.IntensityFactor, &a.TSS, &a.DurationRatio,
-		&powerZones, &hrZones, &powerCurve, &steps, &a.AnalysedAt); err != nil {
+		&powerZones, &hrZones, &powerCurve, &steps,
+		&a.Feel, &a.LevelDelta, &a.AnalysedAt); err != nil {
 		return SessionAnalysis{}, err
 	}
 	if len(powerZones) > 0 {
@@ -186,6 +205,26 @@ func scanAnalysis(row rowScanner) (SessionAnalysis, error) {
 		}
 	}
 	return a, nil
+}
+
+// SetAnalysisFeel records a rider's "how did it feel" rating and the
+// progression-level delta it produced, replacing whatever this session's
+// analysis previously recorded — a re-rate overwrites levelDelta rather
+// than the caller stacking a second adjustment on top of the first. The
+// caller (internal/progression plus the level store) is responsible for
+// working out levelDelta and for undoing the old delta before applying the
+// new one; this just persists the pair.
+func (d *DB) SetAnalysisFeel(ctx context.Context, sessionID string, feel int, levelDelta float64) error {
+	result, err := d.db.ExecContext(ctx, d.query(
+		`UPDATE session_analyses SET feel = ?, level_delta = ? WHERE session_id = ?`),
+		feel, levelDelta, sessionID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("workout: no such session %q", sessionID)
+	}
+	return nil
 }
 
 // SetSessionLoad updates a completed session's training_load to the

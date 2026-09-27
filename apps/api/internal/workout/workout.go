@@ -235,6 +235,44 @@ type WorkoutStep struct {
 	Steps  []WorkoutStep
 }
 
+// Zone is the training-load bucket a workout targets — the vocabulary
+// progression levels are tracked against (see docs/superpowers/specs's
+// progression-levels design). A structured zone names a specific intensity;
+// ZoneEndurance is the volume/easy bucket (levels are out of scope for it —
+// see that spec's "Out of scope"); "" means unknown or a row made before
+// this column existed, which scheduler.IsKeySession/IsHardSession fall back
+// to the legacy name tables for.
+type Zone string
+
+const (
+	ZoneTempo     Zone = "tempo"
+	ZoneSweetSpot Zone = "sweet_spot"
+	ZoneThreshold Zone = "threshold"
+	ZoneVO2Max    Zone = "vo2max"
+	ZoneAnaerobic Zone = "anaerobic"
+	ZoneIntervals Zone = "intervals"
+	// ZoneEndurance is the volume bucket — a long or easy day, not one of
+	// the structured zones progression levels apply to.
+	ZoneEndurance Zone = "endurance"
+)
+
+// StructuredZones is every zone a progression level applies to — everything
+// but ZoneEndurance and the unknown/legacy "" zone. Kept as a set, not a
+// slice, so IsStructuredZone is an O(1) lookup wherever a zone needs
+// classifying (scheduler.IsKeySession/IsHardSession today).
+var StructuredZones = map[Zone]bool{
+	ZoneTempo:     true,
+	ZoneSweetSpot: true,
+	ZoneThreshold: true,
+	ZoneVO2Max:    true,
+	ZoneAnaerobic: true,
+	ZoneIntervals: true,
+}
+
+// IsStructuredZone reports whether z is one of the structured zones — as
+// opposed to ZoneEndurance (volume, not intensity) or "" (unknown/legacy).
+func IsStructuredZone(z Zone) bool { return StructuredZones[z] }
+
 // Workout is one structured, riderable session.
 type Workout struct {
 	ID    string
@@ -251,8 +289,16 @@ type Workout struct {
 	Date        string
 	Description string
 	Steps       []WorkoutStep
-	CreatedAt   string
-	UpdatedAt   string
+	// Zone is this workout's training-load bucket; "" means unset (unknown,
+	// or a row made before this column existed).
+	Zone Zone
+	// Level is this workout's rung on its zone's progression ladder; 0
+	// means none (matches Zone's own "unset" convention, and is what an
+	// endurance workout — levels are out of scope for that zone — always
+	// carries).
+	Level     float64
+	CreatedAt string
+	UpdatedAt string
 }
 
 // CreateGoalRequest creates a goal. Rider must be set by the caller from the
@@ -291,6 +337,10 @@ type CreateWorkoutRequest struct {
 	Date        string
 	Description string
 	Steps       []WorkoutStep
+	// Zone and Level are "" and 0 (unset) unless the caller — the manual
+	// builder today, the scheduler once it is wired up — states them.
+	Zone  Zone
+	Level float64
 }
 
 // UpdateWorkoutRequest edits a workout. Nil fields are left alone.
@@ -301,6 +351,8 @@ type UpdateWorkoutRequest struct {
 	Date        *string
 	Description *string
 	Steps       *[]WorkoutStep
+	Zone        *Zone
+	Level       *float64
 }
 
 // FITSteps converts to the leaf-level type fitworkout.Encode takes. The one
