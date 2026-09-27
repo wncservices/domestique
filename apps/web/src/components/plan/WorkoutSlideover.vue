@@ -39,8 +39,15 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">
         <div class="sticky top-0 z-10 bg-default flex flex-col gap-1 pb-2 border-b border-default">
           <WorkoutProfile :steps="form.steps" :profile="profile" :height="64" />
-          <p class="text-xs font-mono tabular-nums text-muted">
+          <!-- With no timed steps WorkoutProfile shows its own "No timed steps"
+               placeholder; a duration/step-count line under that would read
+               as "— · 0 steps", so it only appears once there's something to
+               summarize. -->
+          <p v-if="totalSeconds > 0" class="text-xs font-mono tabular-nums text-muted">
             {{ formatDuration(totalSeconds) }} · {{ form.steps.length }} step{{ form.steps.length === 1 ? '' : 's' }}
+          </p>
+          <p v-else-if="form.steps.length > 0" class="text-xs font-mono tabular-nums text-muted">
+            {{ form.steps.length }} step{{ form.steps.length === 1 ? '' : 's' }}
           </p>
         </div>
 

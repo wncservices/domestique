@@ -3,8 +3,9 @@
 // another day (or use its own overflow menu) to move it, click one to open
 // it. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { RiderProfile, TrainingWeek, WeekDay, Workout } from '@/api/types'
+import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration } from '@/utils/workoutMath'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
 import WorkoutProfile from './WorkoutProfile.vue'
@@ -24,10 +25,6 @@ const emit = defineEmits<{
   open: [w: Workout]
   fill: []
 }>()
-
-function shortDate(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
-}
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
 const title = computed(() => (isCurrentWeek.value ? 'This week' : `${shortDate(props.week.start)} – ${shortDate(props.week.end)}`))
@@ -65,13 +62,6 @@ function tileClass(day: WeekDay): string {
   if (day.date === props.week.today) return 'border-primary ring-1 ring-primary'
   if (day.status === 'rest') return 'border-dashed text-dimmed'
   return 'border-default'
-}
-
-function weekdayShort(date: string): string {
-  return new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short' })
-}
-function dayNumber(date: string): number {
-  return new Date(`${date}T00:00:00`).getDate()
 }
 
 function otherDates(date: string): string[] {
@@ -117,6 +107,26 @@ function onDrop(e: DragEvent, date: string) {
 const canFillWeek = computed(
   () => props.canFill && !!props.week.focus && !props.week.days.some((d) => d.planned.length > 0),
 )
+
+// Mobile's horizontally-scrolling strip (the sm:grid breakpoint replaces it
+// with a grid on desktop, where this is a no-op — nothing to scroll) starts
+// scrolled to Monday, so a rider opening the page mid-week has to swipe past
+// however many days already passed just to see today. A querySelector against
+// a data attribute, rather than a per-tile template ref, sidesteps the v-for
+// ref-array staleness problem: when today drops out of the displayed week
+// (browsing to a different week) the selector simply finds nothing instead of
+// scrolling to a stale element left over from a previous week.
+const stripEl = useTemplateRef<HTMLElement>('stripEl')
+
+watch(
+  () => props.week.start,
+  async () => {
+    await nextTick()
+    const tile = stripEl.value?.querySelector<HTMLElement>(`[data-date="${props.week.today}"]`)
+    tile?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
@@ -145,10 +155,11 @@ const canFillWeek = computed(
       </div>
     </div>
 
-    <div class="mt-4 flex gap-2 overflow-x-auto pb-1 snap-x sm:grid sm:grid-cols-7 sm:overflow-visible">
+    <div ref="stripEl" class="mt-4 flex gap-2 overflow-x-auto pb-1 snap-x sm:grid sm:grid-cols-7 sm:overflow-visible">
       <div
         v-for="day in week.days"
         :key="day.date"
+        :data-date="day.date"
         class="flex min-h-28 min-w-[7.5rem] snap-start flex-col gap-1 rounded-lg border p-2 sm:min-w-0"
         :class="[tileClass(day), { 'bg-elevated': dragOverDate === day.date }]"
         @dragover="onDragOver($event, day.date)"

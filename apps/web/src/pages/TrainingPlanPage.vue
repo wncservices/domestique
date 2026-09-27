@@ -28,6 +28,7 @@ import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { usePlanGoals } from '@/composables/usePlanGoals'
+import { localDate, weekdayLong } from '@/utils/planDates'
 
 const toast = useToast()
 const route = useRoute()
@@ -213,11 +214,23 @@ async function pushWorkoutToGarmin(w: Workout) {
 const week = ref<TrainingWeek | null>(null)
 const weekStart = ref<string | undefined>(undefined)
 
+// Same reasoning as seasonRequest below: prevWeek/nextWeek/thisWeek/
+// selectSeasonWeek can all fire loadWeek again before an in-flight one
+// resolves (clicking next-week twice fast, or a save's own reload racing a
+// manual click), and nothing here cancels the earlier fetch. Without a
+// ticket, a slow response for a week the rider has already navigated away
+// from can land last and overwrite the week they're actually looking at.
+let weekRequest = 0
+
 async function loadWeek() {
+  const requestId = ++weekRequest
   try {
-    week.value = await api.trainingWeek(weekStart.value)
+    const result = await api.trainingWeek(weekStart.value)
+    if (requestId === weekRequest) week.value = result
   } catch (err) {
-    toast.add({ title: 'Could not load this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    if (requestId === weekRequest) {
+      toast.add({ title: 'Could not load this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    }
   }
 }
 
@@ -228,7 +241,7 @@ function formatYMD(d: Date): string {
 }
 
 function shiftDate(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00`)
+  const d = localDate(date)
   d.setDate(d.getDate() + days)
   return formatYMD(d)
 }
@@ -253,8 +266,7 @@ function thisWeek() {
 async function moveWorkout(w: Workout, date: string) {
   try {
     await api.updateWorkout(w.id, { date })
-    const weekday = new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long' })
-    toast.add({ title: `Moved ${w.name} to ${weekday}`, icon: 'i-lucide-calendar-check' })
+    toast.add({ title: `Moved ${w.name} to ${weekdayLong(date)}`, icon: 'i-lucide-calendar-check' })
     await loadWeek()
     await loadWorkouts()
   } catch (err) {
@@ -267,8 +279,7 @@ async function fillWeek() {
   if (!focus) return
   const g = goals.value.find((x) => x.id === focus.goalId)
   if (!g) return
-  await scheduleGoal(g)
-  await loadWeek()
+  await scheduleGoal(g) // already reloads the week (usePlanGoals.scheduleGoal) — a second call here just re-fetched the same week twice.
 }
 const fillingWeek = computed(() => !!week.value?.focus && schedulingGoal.value === week.value.focus.goalId)
 
