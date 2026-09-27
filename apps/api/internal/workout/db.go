@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS workouts (
     date         TEXT NOT NULL DEFAULT '',
     description  TEXT NOT NULL DEFAULT '',
     steps        %[1]s NOT NULL,
+    zone         TEXT NOT NULL DEFAULT '',
+    level        DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
@@ -159,6 +161,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addEstimatedColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addZoneLevelColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	return store, nil
 }
 
@@ -175,6 +180,30 @@ func (d *DB) addEstimatedColumns() error {
 		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN ftp_estimated %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
 		`ALTER TABLE rider_profiles ADD COLUMN estimated_fields TEXT NOT NULL DEFAULT ''`,
 		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN auto_push_workouts %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
+	} {
+		_, err := d.db.Exec(stmt)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+// addZoneLevelColumns adds zone/level to a workouts table that predates
+// them — the same "table exists, column doesn't" situation
+// addEstimatedColumns already handles for rider_profiles, using the same
+// tolerant-of-either-engine's-already-exists-wording approach. Defaulting
+// to ""/0 is correct for every pre-existing row: scheduler.IsKeySession and
+// IsHardSession fall back to the legacy name tables for exactly that case.
+func (d *DB) addZoneLevelColumns() error {
+	for _, stmt := range []string{
+		`ALTER TABLE workouts ADD COLUMN zone TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN level DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -441,7 +470,7 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -461,7 +490,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -481,12 +510,14 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		w     Workout
 		sport string
 		steps []byte
+		zone  string
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
+	w.Zone = Zone(zone)
 	if len(steps) > 0 {
 		if err := json.Unmarshal(steps, &w.Steps); err != nil {
 			return Workout{}, fmt.Errorf("workout: decode steps for %s: %w", w.ID, err)
@@ -525,9 +556,9 @@ func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Worko
 
 	ts := timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
-        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, ts, ts)
+        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, ts, ts)
 	if err != nil {
 		return Workout{}, err
 	}
@@ -561,6 +592,12 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 		}
 		current.Steps = *req.Steps
 	}
+	if req.Zone != nil {
+		current.Zone = *req.Zone
+	}
+	if req.Level != nil {
+		current.Level = *req.Level
+	}
 
 	steps, err := json.Marshal(current.Steps)
 	if err != nil {
@@ -568,10 +605,10 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 	}
 
 	_, err = d.db.ExecContext(ctx, d.query(`
-        UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, updated_at=?
+        UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?, updated_at=?
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
-		steps, timestamp(), id)
+		steps, string(current.Zone), current.Level, timestamp(), id)
 	if err != nil {
 		return Workout{}, err
 	}

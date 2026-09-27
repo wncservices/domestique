@@ -156,6 +156,11 @@ type workoutDTO struct {
 	Date        string           `json:"date,omitempty"`
 	Description string           `json:"description,omitempty"`
 	Steps       []workoutStepDTO `json:"steps"`
+	// Zone and Level are omitted when unset — "" and 0 — matching every
+	// other optional field on this DTO, and are what a workout made before
+	// this column existed always carries.
+	Zone  string  `json:"zone,omitempty"`
+	Level float64 `json:"level,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -166,6 +171,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 	dto := workoutDTO{
 		ID: w.ID, Sport: string(w.Sport), Name: w.Name, GoalID: w.GoalID, Date: w.Date,
 		Description: w.Description, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
+		Zone: string(w.Zone), Level: w.Level,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
 		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
 	}
@@ -840,6 +846,8 @@ type workoutRequestBody struct {
 	Date        string           `json:"date"`
 	Description string           `json:"description"`
 	Steps       []workoutStepDTO `json:"steps"`
+	Zone        string           `json:"zone"`
+	Level       float64          `json:"level"`
 }
 
 func stepsFromDTOs(dtos []workoutStepDTO) []workout.WorkoutStep {
@@ -865,6 +873,7 @@ func (s *Server) handleCreateWorkout(w http.ResponseWriter, r *http.Request) {
 	wk, err := s.Training.CreateWorkout(r.Context(), workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.Sport(body.Sport), Name: body.Name, GoalID: body.GoalID,
 		Date: body.Date, Description: body.Description, Steps: stepsFromDTOs(body.Steps),
+		Zone: workout.Zone(body.Zone), Level: body.Level,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -899,6 +908,8 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		Date        *string           `json:"date"`
 		Description *string           `json:"description"`
 		Steps       *[]workoutStepDTO `json:"steps"`
+		Zone        *string           `json:"zone"`
+		Level       *float64          `json:"level"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
@@ -907,6 +918,7 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 
 	req := workout.UpdateWorkoutRequest{
 		Name: body.Name, GoalID: body.GoalID, Date: body.Date, Description: body.Description,
+		Level: body.Level,
 	}
 	if body.Sport != nil {
 		sport := model.Sport(*body.Sport)
@@ -915,6 +927,10 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 	if body.Steps != nil {
 		steps := stepsFromDTOs(*body.Steps)
 		req.Steps = &steps
+	}
+	if body.Zone != nil {
+		zone := workout.Zone(*body.Zone)
+		req.Zone = &zone
 	}
 
 	updated, err := s.Training.UpdateWorkout(r.Context(), id, req)

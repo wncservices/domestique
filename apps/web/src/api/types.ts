@@ -819,6 +819,11 @@ export interface Workout {
   date?: string
   description?: string
   steps: WorkoutStep[]
+  /** Training-load bucket - a structured zone (e.g. "threshold", "vo2max")
+   *  or "endurance"; omitted for an unset/legacy workout. */
+  zone?: string
+  /** Rung on this workout's zone's progression ladder; omitted when 0/unset. */
+  level?: number
   /** How long the step list is meant to take, in seconds — time steps
    *  only; 0 means unknown (open/distance-only steps have no honest
    *  duration). See workout.PlannedSeconds. */

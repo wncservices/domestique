@@ -334,6 +334,43 @@ func TestCreateWorkoutRoundTripsNestedRepeatSteps(t *testing.T) {
 	}
 }
 
+type workoutDTOWithZone struct {
+	ID    string  `json:"id"`
+	Zone  string  `json:"zone"`
+	Level float64 `json:"level"`
+}
+
+func TestCreateAndUpdateWorkoutRoundTripZoneAndLevel(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts", `{
+		"sport": "cycling", "name": "Threshold 6x3", "zone": "threshold", "level": 4,
+		"steps": [{"name": "Ride", "duration": "open", "target": "open"}]
+	}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created workoutDTOWithZone
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Zone != "threshold" || created.Level != 4 {
+		t.Fatalf("created = %+v, want zone=threshold level=4", created)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+created.ID, `{"zone": "vo2max", "level": 6}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200", resp.StatusCode)
+	}
+	var updated workoutDTOWithZone
+	if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Zone != "vo2max" || updated.Level != 6 {
+		t.Fatalf("updated = %+v, want zone=vo2max level=6", updated)
+	}
+}
+
 func TestDownloadWorkoutFIT(t *testing.T) {
 	h := newTrainingHarness(t)
 

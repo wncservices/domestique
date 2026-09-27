@@ -43,14 +43,29 @@ var hardNames = map[string]bool{
 	"VO2max intervals": true, "Interval session": true,
 }
 
-// IsKeySession reports whether w is a long, tempo or interval session.
-func IsKeySession(w workout.Workout) bool { return keyNames[w.Name] }
+// IsKeySession reports whether w is a long, tempo or interval session. A
+// structured zone (threshold, vo2max, ...) decides this outright; a workout
+// with no zone — ZoneEndurance or "" — falls back to keyNames, which covers
+// both a legacy row made before the zone column existed and a long/easy day
+// that is key by being the week's volume, not its intensity.
+func IsKeySession(w workout.Workout) bool {
+	if workout.IsStructuredZone(w.Zone) {
+		return true
+	}
+	return keyNames[w.Name]
+}
 
 // IsHardSession reports whether w is a tempo or interval session — the ones
 // worth swapping for something easy when a rider is carrying a lot of
 // fatigue. A long ride is key but not hard: it is the volume, and easy
-// pacing is already how it is meant to be ridden.
-func IsHardSession(w workout.Workout) bool { return hardNames[w.Name] }
+// pacing is already how it is meant to be ridden. Same zone-first,
+// name-fallback shape as IsKeySession.
+func IsHardSession(w workout.Workout) bool {
+	if workout.IsStructuredZone(w.Zone) {
+		return true
+	}
+	return hardNames[w.Name]
+}
 
 // EasyVariant builds the easy session that replaces w: the same sport and
 // the same targets the plan would give any easy day, a fifth shorter than

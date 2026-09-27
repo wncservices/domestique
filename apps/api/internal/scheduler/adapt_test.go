@@ -30,6 +30,33 @@ func TestKeyAndHardNamesMatchWhatTheSchedulerProduces(t *testing.T) {
 	}
 }
 
+// A workout's zone, when set, decides key/hard status outright — the name
+// tables above are only ever consulted for a row with no zone (made before
+// this column existed, or a rider's own hand-built workout that never set
+// one).
+func TestKeyAndHardSessionReadZoneWithNameFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		w    workout.Workout
+		key  bool
+		hard bool
+	}{
+		{"structured zone alone is key and hard", workout.Workout{Zone: workout.ZoneThreshold, Name: "Whatever"}, true, true},
+		{"endurance zone falls back to the name table (long)", workout.Workout{Zone: workout.ZoneEndurance, Name: "Long ride"}, true, false},
+		{"legacy row with no zone falls back to the name table (tempo)", workout.Workout{Zone: "", Name: "Tempo ride"}, true, true},
+		{"a rider's own hand-built workout with no zone is neither", workout.Workout{Zone: "", Name: "Hill repeats"}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsKeySession(tc.w); got != tc.key {
+				t.Errorf("IsKeySession = %v, want %v", got, tc.key)
+			}
+			if got := IsHardSession(tc.w); got != tc.hard {
+				t.Errorf("IsHardSession = %v, want %v", got, tc.hard)
+			}
+		})
+	}
+}
+
 func TestOnlyUnadjustedGeneratedWorkoutsMayBeAdapted(t *testing.T) {
 	gen := workout.Workout{GoalID: "g", Description: GeneratedDescription}
 	if !IsGenerated(gen) {

@@ -364,7 +364,7 @@ func TestEachEngine(t *testing.T) {
 
 				w, err := db.CreateWorkout(ctx, CreateWorkoutRequest{
 					Rider: "wilant", Sport: model.SportCycling, Name: "Threshold 6x3",
-					Date: "2026-03-02", Steps: exampleSteps(),
+					Date: "2026-03-02", Steps: exampleSteps(), Zone: ZoneThreshold, Level: 4,
 				})
 				if err != nil {
 					t.Fatalf("create workout: %v", err)
@@ -378,6 +378,9 @@ func TestEachEngine(t *testing.T) {
 				if w.Steps[1].Steps[0].TargetLow != 280 {
 					t.Errorf("nested target = %+v", w.Steps[1].Steps[0])
 				}
+				if w.Zone != ZoneThreshold || w.Level != 4 {
+					t.Errorf("zone/level = %q/%v, want %q/4", w.Zone, w.Level, ZoneThreshold)
+				}
 
 				fetched, err := db.GetWorkout(ctx, w.ID)
 				if err != nil {
@@ -386,10 +389,16 @@ func TestEachEngine(t *testing.T) {
 				if len(fetched.Steps) != 3 || fetched.Steps[1].Steps[1].Name != "Off" {
 					t.Errorf("round trip steps = %+v", fetched.Steps)
 				}
+				if fetched.Zone != ZoneThreshold || fetched.Level != 4 {
+					t.Errorf("fetched zone/level = %q/%v", fetched.Zone, fetched.Level)
+				}
 
 				list, err := db.ListWorkouts(ctx, "wilant")
 				if err != nil || len(list) != 1 {
 					t.Fatalf("list = %+v, err %v", list, err)
+				}
+				if list[0].Zone != ZoneThreshold || list[0].Level != 4 {
+					t.Errorf("listed zone/level = %q/%v", list[0].Zone, list[0].Level)
 				}
 
 				newDate := "2026-03-09"
@@ -403,12 +412,37 @@ func TestEachEngine(t *testing.T) {
 				if len(updated.Steps) != 3 {
 					t.Errorf("steps not preserved by a date-only update: %+v", updated.Steps)
 				}
+				if updated.Zone != ZoneThreshold || updated.Level != 4 {
+					t.Errorf("zone/level not preserved by a date-only update: %q/%v", updated.Zone, updated.Level)
+				}
+
+				newZone, newLevel := ZoneVO2Max, 6.0
+				rezoned, err := db.UpdateWorkout(ctx, w.ID, UpdateWorkoutRequest{Zone: &newZone, Level: &newLevel})
+				if err != nil {
+					t.Fatalf("update zone/level: %v", err)
+				}
+				if rezoned.Zone != ZoneVO2Max || rezoned.Level != 6 {
+					t.Errorf("rezoned = %q/%v, want %q/6", rezoned.Zone, rezoned.Level, ZoneVO2Max)
+				}
 
 				if err := db.DeleteWorkout(ctx, w.ID); err != nil {
 					t.Fatalf("delete workout: %v", err)
 				}
 				if _, err := db.GetWorkout(ctx, w.ID); err != ErrWorkoutNotFound {
 					t.Errorf("get after delete: %v", err)
+				}
+			})
+
+			t.Run("a workout with no zone defaults to empty/0, never NULL", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				w, err := db.CreateWorkout(ctx, CreateWorkoutRequest{Rider: "wilant", Name: "Hill repeats"})
+				if err != nil {
+					t.Fatalf("create workout: %v", err)
+				}
+				if w.Zone != "" || w.Level != 0 {
+					t.Errorf("zone/level = %q/%v, want empty/0", w.Zone, w.Level)
 				}
 			})
 
@@ -607,6 +641,71 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// TestWorkoutsTableGainsZoneAndLevelColumns simulates a database created
+// before zone/level existed — the same "predates the column" situation
+// addEstimatedColumns already handles for rider_profiles — and checks UseDB
+// adds them rather than requiring a fresh database.
+func TestWorkoutsTableGainsZoneAndLevelColumns(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	// The pre-migration shape of the workouts table, minus zone/level.
+	if _, err := src.Conn().Exec(`
+CREATE TABLE workouts (
+    id           TEXT PRIMARY KEY,
+    rider        TEXT NOT NULL,
+    sport        TEXT NOT NULL DEFAULT 'cycling',
+    name         TEXT NOT NULL,
+    goal_id      TEXT NOT NULL DEFAULT '',
+    date         TEXT NOT NULL DEFAULT '',
+    description  TEXT NOT NULL DEFAULT '',
+    steps        BLOB NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`
+INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, created_at, updated_at)
+VALUES ('old-workout', 'wilant', 'cycling', 'Old Session', '', '', '', '[]', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+
+	old, err := db.GetWorkout(t.Context(), "old-workout")
+	if err != nil {
+		t.Fatalf("get pre-existing row after migration: %v", err)
+	}
+	if old.Zone != "" || old.Level != 0 {
+		t.Errorf("pre-existing row zone/level = %q/%v, want empty/0", old.Zone, old.Level)
+	}
+
+	// The migration must also leave the store usable for new rows carrying
+	// a real zone and level, not just tolerate the old ones.
+	created, err := db.CreateWorkout(t.Context(), CreateWorkoutRequest{
+		Rider: "wilant", Name: "New Session", Zone: ZoneThreshold, Level: 3,
+	})
+	if err != nil {
+		t.Fatalf("create workout after migration: %v", err)
+	}
+	if created.Zone != ZoneThreshold || created.Level != 3 {
+		t.Errorf("created zone/level = %q/%v", created.Zone, created.Level)
+	}
+
+	// UseDB must also be idempotent — a second call against an
+	// already-migrated database (a second process startup) must not error.
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
 	}
 }
 
