@@ -1106,16 +1106,25 @@ func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]
 // id, so handleGetFitness and handleTrainingWeek can each attach analysis to
 // every session in their response with a map lookup instead of one
 // GetAnalysis call per session.
-func (s *Server) analysesSince(ctx context.Context, rider, sinceDate string) (map[string]workout.SessionAnalysis, error) {
+//
+// A ListAnalyses failure never fails the caller's request: both endpoints
+// worked before analyses existed and must keep working when analysis
+// storage has a bad day — the same "only a problem with our own storage
+// fails the request" trade-off adaptRider's own ListAnalyses call makes
+// (see adaptation.go). The rider just gets sessions back with no analysis
+// attached, logged at Warn per AGENTS.md's new-guard logging rule: the
+// request still succeeds, degraded rather than broken.
+func (s *Server) analysesSince(ctx context.Context, rider, sinceDate string) map[string]workout.SessionAnalysis {
 	list, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
-		return nil, err
+		s.logger().Warn("reading ride analyses failed", "rider", rider, "err", err)
+		return nil
 	}
 	out := make(map[string]workout.SessionAnalysis, len(list))
 	for _, a := range list {
 		out[a.SessionID] = a
 	}
-	return out, nil
+	return out
 }
 
 type fitnessSnapshotDTO struct {
@@ -1156,7 +1165,8 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One ListAnalyses call for the whole response, covering every session
-	// date about to be returned — see analysesSince's own doc comment.
+	// date about to be returned — see analysesSince's own doc comment on why
+	// a failure here degrades rather than failing the request.
 	var analyses map[string]workout.SessionAnalysis
 	if len(sessions) > 0 {
 		sinceDate := sessions[0].Date
@@ -1165,11 +1175,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 				sinceDate = sess.Date
 			}
 		}
-		analyses, err = s.analysesSince(r.Context(), rider, sinceDate)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
+		analyses = s.analysesSince(r.Context(), rider, sinceDate)
 	}
 
 	dto := fitnessResponseDTO{

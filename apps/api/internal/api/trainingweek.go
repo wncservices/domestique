@@ -84,12 +84,9 @@ func (s *Server) handleTrainingWeek(w http.ResponseWriter, r *http.Request) {
 	}
 	// One ListAnalyses call for the whole week, covering every date the days
 	// loop below can show (start onward) — see analysesSince's own doc
-	// comment on why this beats a per-session lookup.
-	analyses, err := s.analysesSince(ctx, rider, start.Format(dateLayout))
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	// comment on why a failure here degrades (no analysis attached) rather
+	// than failing the whole week.
+	analyses := s.analysesSince(ctx, rider, start.Format(dateLayout))
 	plannedBy := map[string][]workout.Workout{}
 	for _, wk := range workouts {
 		if wk.Date != "" {

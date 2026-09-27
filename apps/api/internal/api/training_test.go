@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,10 @@ type trainingHarness struct {
 	base   string
 	store  *workout.DB
 	srv    *api.Server
+	// conn is the same *sql.DB workout.UseDB wraps — kept only so a test can
+	// break the session_analyses table on its own (see breakAnalysisStorage)
+	// to prove the degrade path, without a production-only test hook.
+	conn *sql.DB
 }
 
 func newTrainingHarness(t *testing.T) *trainingHarness {
@@ -58,7 +63,21 @@ func newTrainingHarness(t *testing.T) *trainingHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, srv: srv}
+	return &trainingHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, srv: srv, conn: db.Conn()}
+}
+
+// breakAnalysisStorage drops session_analyses out from under the store —
+// the seam this test package has for making ListAnalyses fail without a
+// production-only hook: it is the same *sql.DB workout.UseDB wraps, just
+// reached directly. ListSessions/ListWorkouts read other tables, so the
+// rest of a fitness/week request still succeeds; only the analysis
+// attachment degrades, which is exactly what
+// TestFitness/TrainingWeekDegradesWhenAnalysisStorageFails is checking.
+func (h *trainingHarness) breakAnalysisStorage() {
+	h.t.Helper()
+	if _, err := h.conn.Exec("DROP TABLE session_analyses"); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 // seedSession records one completed session directly through the store —
@@ -1046,5 +1065,31 @@ func TestFitnessAnalysisIsOwnerOnly(t *testing.T) {
 	}
 	if out.Sessions[0].Analysis != nil {
 		t.Errorf("analysis = %+v, want nil — wilant has no analysis of their own", out.Sessions[0].Analysis)
+	}
+}
+
+// TestFitnessDegradesWhenAnalysisStorageFails is the fix-round-1 case: a
+// ListAnalyses failure must not take the whole endpoint down with it — the
+// fitness list worked before analyses existed and has to keep working when
+// analysis storage alone has a bad day. See analysesSince's own doc comment.
+func TestFitnessDegradesWhenAnalysisStorageFails(t *testing.T) {
+	h := newTrainingHarness(t)
+	date := time.Now().Format("2006-01-02")
+	h.seedSession("wilant", date, 1)
+	h.breakAnalysisStorage()
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 even though analysis storage is broken", resp.StatusCode)
+	}
+	var out fitnessOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 — the session itself must still come back", len(out.Sessions))
+	}
+	if out.Sessions[0].Analysis != nil {
+		t.Errorf("analysis = %+v, want nil — analysis storage is broken, so nothing to attach", out.Sessions[0].Analysis)
 	}
 }
