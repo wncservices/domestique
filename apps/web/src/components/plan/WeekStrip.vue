@@ -4,13 +4,14 @@
 // it. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
-import type { AnalysisStep, RiderProfile, TrainingWeek, WeekDay, Workout } from '@/api/types'
+import type { AnalysisStep, RiderProfile, SessionAnalysis, TrainingWeek, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
 import StepResultsTable from './StepResultsTable.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
+import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
 const props = defineProps<{
   week: TrainingWeek
@@ -26,6 +27,9 @@ const emit = defineEmits<{
   move: [w: Workout, date: string]
   open: [w: Workout]
   fill: []
+  // See TodayCard.vue's own 'rated' emit — a feel rating can move a
+  // progression level, and the week/level state lives on the page.
+  rated: []
 }>()
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
@@ -144,6 +148,14 @@ function openResults(day: WeekDay) {
   resultsDay.value = day
 }
 
+const resultsSessionId = computed(() => (resultsDay.value ? analysedSession(resultsDay.value)?.id : undefined))
+const resultsFeel = computed(() => (resultsDay.value ? analysedSession(resultsDay.value)?.analysis?.feel : undefined))
+
+function onRated(analysis: SessionAnalysis) {
+  void analysis
+  emit('rated')
+}
+
 const canFillWeek = computed(
   () => props.canFill && !!props.week.focus && !props.week.days.some((d) => d.planned.length > 0),
 )
@@ -234,6 +246,7 @@ watch(
             </UDropdownMenu>
           </div>
           <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
+          <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
           <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
           <UTooltip v-if="adjustmentNote(w.description)" :text="adjustmentNote(w.description)">
             <UIcon name="i-lucide-wand-sparkles" class="size-3 text-info" />
@@ -266,6 +279,13 @@ watch(
       <p class="text-xs text-muted">Builds this week's sessions from your plan.</p>
     </div>
 
-    <StepResultsTable v-model:open="resultsOpen" :title="resultsTitle" :steps="resultsSteps" />
+    <StepResultsTable
+      v-model:open="resultsOpen"
+      :title="resultsTitle"
+      :steps="resultsSteps"
+      :session-id="resultsSessionId"
+      :feel="resultsFeel"
+      @rated="onRated"
+    />
   </UCard>
 </template>

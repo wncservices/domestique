@@ -4,15 +4,21 @@
 // table rather than UTable: the actual column needs a second, muted line
 // for a fallback-scored step's in-range percentage (see AnalysisStep's own
 // doc comment), which UTable's single-string cell doesn't fit cleanly.
-import type { AnalysisStep, StepResult } from '@/api/types'
+import type { AnalysisStep, SessionAnalysis, StepResult } from '@/api/types'
 import { formatPace } from '@/utils/fitnessMath'
+import FeelRating from './FeelRating.vue'
 
 defineProps<{
   open: boolean
   title: string
   steps: AnalysisStep[]
+  // Absent for a day/tile with no matching session at all (resultsDay can
+  // be set before any completed session exists) — FeelRating only renders
+  // once there's a real session to rate.
+  sessionId?: string
+  feel?: number
 }>()
-const emit = defineEmits<{ 'update:open': [boolean] }>()
+const emit = defineEmits<{ 'update:open': [boolean]; rated: [analysis: SessionAnalysis] }>()
 
 const RESULT_META: Record<StepResult, { label: string; icon: string; color: 'success' | 'warning' }> = {
   hit: { label: 'Hit', icon: 'i-lucide-check', color: 'success' },
@@ -76,6 +82,13 @@ function formatActual(step: AnalysisStep): string {
           </tbody>
         </table>
       </div>
+      <FeelRating
+        v-if="sessionId"
+        class="mt-4"
+        :session-id="sessionId"
+        :feel="feel"
+        @rated="(analysis: SessionAnalysis) => emit('rated', analysis)"
+      />
     </template>
   </UModal>
 </template>

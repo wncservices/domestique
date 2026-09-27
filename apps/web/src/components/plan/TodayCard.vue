@@ -5,12 +5,14 @@
 // (TrainingPlanPage.vue looks up `day`/`yesterday` from `week.today`).
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
-import type { RiderProfile, WeekDay, Workout, WorkoutStep } from '@/api/types'
+import type { RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import FeelRating from './FeelRating.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
+import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
 const props = defineProps<{
   day?: WeekDay
@@ -24,6 +26,11 @@ const emit = defineEmits<{
   push: [w: Workout]
   edit: [w: Workout]
   move: [w: Workout, date: string]
+  // A feel rating can change the ride's own progression-level change (see
+  // api.setSessionFeel's own doc comment) — the level and week state live on
+  // the page, not here, so this just asks it to reload both rather than
+  // this card trying to patch props it doesn't own.
+  rated: []
 }>()
 
 const eyebrow = computed(() => (props.day ? `Today · ${weekdayDateShort(props.day.date)}` : 'Today'))
@@ -112,6 +119,11 @@ function openResults() {
   if (!canOpenResults.value) return
   resultsOpen.value = true
 }
+
+function onRated(analysis: SessionAnalysis) {
+  void analysis
+  emit('rated')
+}
 </script>
 
 <template>
@@ -154,12 +166,22 @@ function openResults() {
             </button>
           </div>
           <p v-if="hardStepsLine" class="text-xs text-muted">{{ hardStepsLine }}</p>
+          <FeelRating
+            v-if="analysedSession?.analysis"
+            class="mt-2"
+            :session-id="analysedSession.id"
+            :feel="analysedSession.analysis.feel"
+            @rated="onRated"
+          />
         </div>
 
         <!-- Planned -->
         <div v-else-if="firstWorkout" class="mt-2 flex flex-col gap-3">
           <div>
-            <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
+              <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
+            </div>
             <p class="font-mono tabular-nums text-sm text-muted">
               {{ formatDuration(firstWorkout.plannedSeconds) }}
               <template v-if="firstWorkoutTarget"> · {{ firstWorkoutTarget }}</template>
@@ -221,6 +243,9 @@ function openResults() {
       v-model:open="resultsOpen"
       :title="resultsTitle"
       :steps="analysedSession?.analysis?.steps ?? []"
+      :session-id="analysedSession?.id"
+      :feel="analysedSession?.analysis?.feel"
+      @rated="onRated"
     />
   </div>
 </template>
