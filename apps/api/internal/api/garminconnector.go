@@ -51,6 +51,11 @@ type GarminConnector interface {
 	// why this needed its own client method (activitylist-service, not
 	// course-service) and its own research pass.
 	ListActivities(ctx context.Context, consumer GarminConsumer, session garmin.Session) ([]garmin.Activity, error)
+	// ActivityFIT downloads one activity's original FIT file — the
+	// per-second stream internal/rideanalysis scores a completed ride
+	// against its planned workout with. See garmin.Client.ActivityFIT's
+	// own doc comment for the zip-or-bare-FIT shape and the size cap.
+	ActivityFIT(ctx context.Context, consumer GarminConsumer, session garmin.Session, activityID string) ([]byte, error)
 	// PushWorkout creates a structured workout on a connected account and
 	// returns Garmin's id for it — the workout-builder counterpart to
 	// Courses, and not folded into that same method: a course push goes
@@ -187,6 +192,15 @@ func (l LiveGarmin) ListActivities(ctx context.Context, consumer GarminConsumer,
 		return nil, err
 	}
 	return client.Activities(ctx, 0)
+}
+
+// ActivityFIT downloads one activity's original FIT file.
+func (l LiveGarmin) ActivityFIT(ctx context.Context, consumer GarminConsumer, session garmin.Session, activityID string) ([]byte, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return nil, err
+	}
+	return client.ActivityFIT(ctx, activityID)
 }
 
 // PushWorkout creates a structured workout on a connected account.
