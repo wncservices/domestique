@@ -20,6 +20,7 @@ device and workouts appear — sits on top. Where the code lives:
 | Narration, free-text profile and goal suggestions | `internal/narration` |
 | Profile auto-fill (Garmin biometrics + inferred pattern) | `internal/autoprofile`, `internal/garmin/biometrics.go` |
 | Garmin workout push, calendar placement, push tracking | `internal/garmin/workout.go`, `schedule.go`; `internal/api/workoutpush.go` |
+| Fitness page: form status (intervals.icu TSB bands), chart ranges, training zones | `apps/web/src/utils/fitnessMath.ts`, `apps/web/src/components/fitness/`; Plan is the default Training tab |
 
 **How it runs unattended.** One loop (`RunAutoScheduleLoop`, every 30 minutes, behind the
 admin's `auto_schedule` flag, under one advisory lock) does, in order: sync every connected
