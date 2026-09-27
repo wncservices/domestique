@@ -890,6 +890,20 @@ export interface SessionAnalysis {
   /** The planned workout this session was matched against, if any — absent
    *  for an unplanned ride. */
   workoutId?: string
+  /** The rider's own optional 1-5 "how did it feel" rating — absent when
+   *  never rated. Set (or replaced) via PUT /api/training/sessions/{id}/feel. */
+  feel?: number
+}
+
+/** One rider's current level in one sport/zone — mirrors
+ *  apps/api/internal/api's progressionLevelDTO. See
+ *  docs/superpowers/specs/2026-09-27-progression-levels-design.md. */
+export interface ProgressionLevel {
+  sport: Sport
+  zone: string
+  level: number
+  reason?: string
+  updatedAt?: string
 }
 
 export interface CompletedSession {

@@ -66,6 +66,11 @@ const overloadLookbackDays = 7
 // overloadLookbackDays before it counts as overload fatigue.
 const overloadRatioTrigger = 1.3
 
+// stepDownWindowDays is the spec's own "within the next 7 days" — both how
+// recent a struggled key session must be to trigger a step-down, and how far
+// ahead of it the next same-zone workout may sit to be the one stepped down.
+const stepDownWindowDays = 7
+
 // defaultPlannedIF is the intensity factor estimatePlannedTSS assumes for a
 // workout with no power-target step (an open-ended endurance ride, say) — a
 // deliberately easy default rather than a guess at a harder one.
@@ -81,6 +86,13 @@ type Change struct {
 	ReplaceWorkoutID string
 	// Downgrade is set when the workout should be replaced by an easy one.
 	Downgrade bool
+	// StepDown is set when the workout should be replaced by the next rung
+	// down on its own zone's ladder — a struggled key session's own zone
+	// stepping back a level, distinct from Downgrade's whole-plan fatigue
+	// swap to an easy session. The caller (internal/api's adaptRider) is the
+	// one that actually picks the lower rung, via workoutlib — this package
+	// only decides which workout it should happen to.
+	StepDown bool
 	// Reason is shown to the rider.
 	Reason string
 }
@@ -154,7 +166,69 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 			})
 		}
 	}
+
+	if src, target, ok := stepDownTarget(ordered, analyses, today); ok {
+		changes = append(changes, Change{
+			WorkoutID: target.ID, StepDown: true,
+			Reason: stepDownReason(src),
+		})
+	}
 	return changes
+}
+
+// stepDownTarget looks for the most recent analysed, generated key session
+// in a structured zone that struggled within stepDownWindowDays of today,
+// and the next still-untouched generated workout in that same zone dated
+// after it — within stepDownWindowDays of the struggled session itself —
+// the one the spec says to step down a level (docs/superpowers/specs's
+// progression-levels design, "Struggled -> step down"). False when there is
+// no recent struggle to react to, or nothing left in that zone to step down.
+func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time) (workout.Workout, workout.Workout, bool) {
+	var source workout.Workout
+	found := false
+	for _, w := range ordered {
+		if !scheduler.IsGenerated(w) || !scheduler.IsKeySession(w) || w.Date == "" || !workout.IsStructuredZone(w.Zone) {
+			continue
+		}
+		a, ok := analyses[w.ID]
+		if !ok || a.Outcome != string(outcomeStruggled) || !withinDays(w.Date, today, stepDownWindowDays) {
+			continue
+		}
+		if !found || w.Date > source.Date {
+			source, found = w, true
+		}
+	}
+	if !found {
+		return workout.Workout{}, workout.Workout{}, false
+	}
+
+	sourceDate, err := time.Parse("2006-01-02", source.Date)
+	if err != nil {
+		return workout.Workout{}, workout.Workout{}, false
+	}
+	for _, w := range ordered {
+		if w.Date <= source.Date || w.Zone != source.Zone || !scheduler.IsGenerated(w) {
+			continue
+		}
+		d, err := time.Parse("2006-01-02", w.Date)
+		if err != nil || d.Sub(sourceDate) > stepDownWindowDays*24*time.Hour {
+			continue
+		}
+		return source, w, true
+	}
+	return workout.Workout{}, workout.Workout{}, false
+}
+
+// stepDownReason names the struggled session that triggered the step-down,
+// in the spec's own shape: weekday, then the zone label — "Stepped down
+// after Tuesday's threshold session was under target."
+func stepDownReason(w workout.Workout) string {
+	weekday := w.Date
+	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
+		weekday = d.Weekday().String()
+	}
+	zone := strings.ReplaceAll(string(w.Zone), "_", " ")
+	return fmt.Sprintf("Stepped down after %s's %s session was under target", weekday, zone)
 }
 
 // done reports whether the rider did this session. A ride-analysis outcome
