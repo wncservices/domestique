@@ -450,6 +450,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/training/workouts/{id}/push/garmin", s.handlePushWorkoutToGarmin)
 	mux.HandleFunc("POST /api/training/sync", s.handleSyncTrainingMetrics)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
+	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/tests/ftp", s.handleBuildFTPTest)
 	mux.HandleFunc("POST /api/training/tests/max-hr", s.handleBuildMaxHRTest)
 

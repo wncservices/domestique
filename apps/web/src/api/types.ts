@@ -819,6 +819,10 @@ export interface Workout {
   date?: string
   description?: string
   steps: WorkoutStep[]
+  /** How long the step list is meant to take, in seconds — time steps
+   *  only; 0 means unknown (open/distance-only steps have no honest
+   *  duration). See workout.PlannedSeconds. */
+  plannedSeconds: number
   createdAt: string
   updatedAt: string
 }
@@ -895,6 +899,48 @@ export interface PeriodizationWeek {
    *  training — see PeriodizationPlan.adjustment. Never true for the
    *  current week, or for a Peak/Taper week. */
   adjusted?: boolean
+}
+
+// ---------- Training week (Plan page) ----------
+
+export type DayStatus = 'done' | 'partial' | 'missed' | 'rest' | 'upcoming' | 'unplanned'
+
+/** The goal the Plan page's header talks about this week — the most
+ *  important one whose periodized plan covers it. See
+ *  internal/api/trainingweek.go's weekFocus. */
+export interface WeekFocus {
+  goalId: string
+  name: string
+  priority: GoalPriority
+  sport: Sport
+  eventDate?: string
+  daysToEvent?: number
+  weekNumber?: number
+  totalWeeks?: number
+  phase?: PeriodizationPhase
+  recovery?: boolean
+  targetHours?: number
+}
+
+export interface WeekDay {
+  date: string
+  status: DayStatus
+  planned: Workout[]
+  completed: CompletedSession[]
+}
+
+/** One Monday-Sunday week of planned vs completed training — the Plan
+ *  page's one read. See GET /api/training/week. */
+export interface TrainingWeek {
+  start: string
+  end: string
+  today: string
+  focus?: WeekFocus
+  days: WeekDay[]
+  totals: {
+    plannedSeconds: number
+    completedSeconds: number
+  }
 }
 
 export interface PeriodizationPlan {

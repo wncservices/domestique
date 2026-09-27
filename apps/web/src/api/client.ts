@@ -63,6 +63,7 @@ import type {
   FitnessResponse,
   GoalProposal,
   SyncMetricsResult,
+  TrainingWeek,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -738,6 +739,10 @@ export const api = {
    *  was computed from — read-only, reflects whatever syncTrainingMetrics
    *  last recorded. */
   fitness: () => request<FitnessResponse>('/api/training/fitness'),
+  /** One Monday–Sunday week of planned vs completed training — see
+   *  internal/api/trainingweek.go. start snaps to its Monday server-side. */
+  trainingWeek: (start?: string) =>
+    request<TrainingWeek>(`/api/training/week${start ? `?start=${encodeURIComponent(start)}` : ''}`),
   /** Builds and persists the classic 20-minute FTP test as an ordinary,
    *  plannable workout — see internal/fitnesstest for why this is the
    *  answer when there isn't enough synced data to estimate FTP from. */
