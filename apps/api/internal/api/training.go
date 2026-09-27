@@ -1145,13 +1145,17 @@ type sessionAnalysisDTO struct {
 	// step-results modal with the matched workout's own name rather than
 	// whatever else happens to be planned for that day.
 	WorkoutID string `json:"workoutId,omitempty"`
+	// Feel is the rider's optional 1-5 "how did it feel" rating, 0 (omitted)
+	// when never rated — see workout.SessionAnalysis.Feel and
+	// handleSetSessionFeel (progression.go).
+	Feel int `json:"feel,omitempty"`
 }
 
 func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
 	return sessionAnalysisDTO{
 		Outcome: a.Outcome, LoadSource: a.LoadSource,
 		NP: a.NormalizedPower, IF: a.IntensityFactor, TSS: a.TSS, DurationRatio: a.DurationRatio,
-		Steps: a.Steps, WorkoutID: a.WorkoutID,
+		Steps: a.Steps, WorkoutID: a.WorkoutID, Feel: a.Feel,
 	}
 }
 

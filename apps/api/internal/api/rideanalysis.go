@@ -11,6 +11,7 @@ import (
 	"github.com/muktihari/fit/profile/filedef"
 
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/progression"
 	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -201,6 +202,17 @@ func (s *Server) analyseNewSessions(
 			continue
 		}
 
+		// A level move only happens here, right after an analysis is saved
+		// for the first time — analyseNewSessions' own candidates filter
+		// (analyzedIDs) never re-analyses a session that already has one, so
+		// this can never run twice for the same ride: that is what keeps a
+		// level move idempotent across syncs, with no extra bookkeeping
+		// needed here. A failure here is a Warn — the sync as a whole still
+		// succeeds, the ride's own analysis already saved.
+		if err := s.applyProgressionForAnalysis(ctx, rider, profile, matched, sess.ID, sa.Outcome); err != nil {
+			s.logger().Warn("ride analysis: applying the progression level change failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", err)
+		}
+
 		if err := s.Training.SetSessionLoad(ctx, sess.ID, analysis.Load); err != nil {
 			s.logger().Warn("ride analysis: updating the session's training load failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", err)
 			continue
@@ -296,6 +308,42 @@ func powerCurveDTO(curve map[int]float64) map[string]float64 {
 		out[strconv.Itoa(seconds)] = watts
 	}
 	return out
+}
+
+// applyProgressionForAnalysis moves the rider's progression level for the
+// analysed ride's zone, following the "levels move after every analysed
+// ride" table in docs/superpowers/specs/2026-09-27-progression-levels-design.md.
+// Only for a ride that matched a planned workout (matched != nil) whose zone
+// is one of the structured ones and whose level is real (> 0) — an
+// unplanned ride, or one matched to an endurance workout, has no ladder rung
+// to measure against and moves nothing.
+//
+// feel is always 0 here: this is the first, automatic application from a
+// fresh sync, before the rider has had any chance to rate how the ride
+// felt. PUT /api/training/sessions/{id}/feel (handleSetSessionFeel,
+// progression.go) is what recomputes with a real feel later, replacing —
+// not stacking onto — the delta this call stores via SetAnalysisFeel.
+func (s *Server) applyProgressionForAnalysis(ctx context.Context, rider string, profile workout.RiderProfile, matched *workout.Workout, sessionID, outcome string) error {
+	if matched == nil || !workout.IsStructuredZone(matched.Zone) || matched.Level <= 0 {
+		return nil
+	}
+
+	levels, err := s.levelsFor(ctx, rider, profile, matched.Sport)
+	if err != nil {
+		return err
+	}
+	cur := levels[string(matched.Zone)]
+
+	delta := progression.Delta(cur, matched.Level, outcome, 0)
+	newLevel := progression.Apply(cur, delta)
+	reason := progression.Reason(matched.Name, string(matched.Zone), matched.Level, cur, newLevel, outcome)
+
+	if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
+		Rider: rider, Sport: matched.Sport, Zone: matched.Zone, Level: newLevel, Reason: reason,
+	}); err != nil {
+		return err
+	}
+	return s.Training.SetAnalysisFeel(ctx, sessionID, 0, delta)
 }
 
 // analysisStepsDTO mirrors rideanalysis.StepResult into

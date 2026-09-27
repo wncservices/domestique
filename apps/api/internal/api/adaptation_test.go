@@ -118,6 +118,88 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 	}
 }
 
+// TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown is the server-side
+// half of the spec's "Struggled -> step down": adapter.AdaptSessions
+// decides which workout to step down (see internal/adapter's own test for
+// that), this proves adaptRider/applyStepDown actually rebuild it as the
+// rung one level lower on the same ladder, same date and goal, via
+// workoutlib — not just leave a Change unapplied.
+func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) } // Thursday
+
+	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
+		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 5,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ListAnalyses (which adaptRider reads from) joins session_analyses to
+	// completed_sessions for its date — an analysis with no matching
+	// completed session behind it is invisible to that join, so the ride
+	// itself has to be recorded too, not just its analysis.
+	sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "6400", Sport: "cycling",
+		Date: "2026-03-17", DurationSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sess.ID, Rider: "wilant", WorkoutID: struggledWorkout.ID, Outcome: "struggled",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	nextThreshold, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
+		Date: "2026-03-21", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AdaptWorkouts(ctx)
+
+	stepped, err := h.store.GetWorkout(ctx, nextThreshold.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepped.Level != 3 {
+		t.Errorf("stepped-down workout level = %v, want 3 (one rung below its own level 4)", stepped.Level)
+	}
+	if stepped.Date != "2026-03-21" || stepped.GoalID != goal.ID {
+		t.Errorf("stepped-down workout date/goal = %s/%s, want unchanged (2026-03-21/%s)", stepped.Date, stepped.GoalID, goal.ID)
+	}
+	if !strings.Contains(stepped.Description, scheduler.AdjustedMarker) || !strings.Contains(stepped.Description, "Stepped down") {
+		t.Errorf("description = %q, want the adjustment marker and a step-down reason", stepped.Description)
+	}
+	if scheduler.IsGenerated(stepped) {
+		t.Error("a stepped-down workout must not be eligible for a second automatic adjustment")
+	}
+
+	// The struggled session's own workout is untouched — only the *next*
+	// workout in its zone steps down, never the one that was actually rated.
+	untouched, err := h.store.GetWorkout(ctx, struggledWorkout.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untouched.Level != 5 || untouched.Name != "Threshold 3x12" {
+		t.Errorf("the struggled session's own workout changed: %+v", untouched)
+	}
+}
+
 func TestARidersOwnWorkoutsAreNeverAdapted(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()
