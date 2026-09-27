@@ -1053,14 +1053,69 @@ type completedSessionDTO struct {
 	AvgHR           int     `json:"avgHr,omitempty"`
 	AvgPowerWatts   float64 `json:"avgPowerWatts,omitempty"`
 	TrainingLoad    float64 `json:"trainingLoad"`
+	// Analysis is rideanalysis's verdict on this session — nil for a session
+	// that has not been analysed yet (not yet synced with a FIT source, or
+	// older than the analysis window; see analyseNewSessions). Zones and the
+	// power curve are deliberately left out of this DTO: the UI this feeds
+	// only needs the summary numbers and per-step results, and both of those
+	// are sized for a full ride's worth of raw samples, not worth shipping
+	// on every fitness/week response.
+	Analysis *sessionAnalysisDTO `json:"analysis,omitempty"`
 }
 
-func completedSessionDTOFrom(sess workout.CompletedSession) completedSessionDTO {
-	return completedSessionDTO{
+// sessionAnalysisDTO mirrors workout.SessionAnalysis's summary fields —
+// omitting PowerZoneSeconds/HRZoneSeconds/PowerCurve, see completedSessionDTO's
+// own doc comment on why. Steps reuses workout.AnalysisStep directly: its
+// json tags already match the shape the frontend wants (see
+// apps/web/src/api/types.ts's AnalysisStep), so there is nothing to mirror.
+type sessionAnalysisDTO struct {
+	Outcome       string                 `json:"outcome"`
+	LoadSource    string                 `json:"loadSource"`
+	NP            float64                `json:"np,omitempty"`
+	IF            float64                `json:"if,omitempty"`
+	TSS           float64                `json:"tss,omitempty"`
+	DurationRatio float64                `json:"durationRatio,omitempty"`
+	Steps         []workout.AnalysisStep `json:"steps,omitempty"`
+}
+
+func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
+	return sessionAnalysisDTO{
+		Outcome: a.Outcome, LoadSource: a.LoadSource,
+		NP: a.NormalizedPower, IF: a.IntensityFactor, TSS: a.TSS, DurationRatio: a.DurationRatio,
+		Steps: a.Steps,
+	}
+}
+
+// completedSessionDTOFrom attaches sess's analysis, if any, from analyses —
+// a map built once per request (see analysesSince) rather than a per-session
+// store lookup, since a fitness/week response can list dozens of sessions.
+func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]workout.SessionAnalysis) completedSessionDTO {
+	dto := completedSessionDTO{
 		ID: sess.ID, Provider: sess.Provider, Sport: sess.Sport, Date: sess.Date,
 		DurationSeconds: sess.DurationSeconds, DistanceM: sess.DistanceM,
 		AvgHR: sess.AvgHR, AvgPowerWatts: sess.AvgPowerWatts, TrainingLoad: sess.TrainingLoad,
 	}
+	if a, ok := analyses[sess.ID]; ok {
+		sa := sessionAnalysisDTOFrom(a)
+		dto.Analysis = &sa
+	}
+	return dto
+}
+
+// analysesSince loads a rider's ride analyses once and keys them by session
+// id, so handleGetFitness and handleTrainingWeek can each attach analysis to
+// every session in their response with a map lookup instead of one
+// GetAnalysis call per session.
+func (s *Server) analysesSince(ctx context.Context, rider, sinceDate string) (map[string]workout.SessionAnalysis, error) {
+	list, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]workout.SessionAnalysis, len(list))
+	for _, a := range list {
+		out[a.SessionID] = a
+	}
+	return out, nil
 }
 
 type fitnessSnapshotDTO struct {
@@ -1100,6 +1155,23 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One ListAnalyses call for the whole response, covering every session
+	// date about to be returned — see analysesSince's own doc comment.
+	var analyses map[string]workout.SessionAnalysis
+	if len(sessions) > 0 {
+		sinceDate := sessions[0].Date
+		for _, sess := range sessions[1:] {
+			if sess.Date < sinceDate {
+				sinceDate = sess.Date
+			}
+		}
+		analyses, err = s.analysesSince(r.Context(), rider, sinceDate)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
 	dto := fitnessResponseDTO{
 		Snapshots: make([]fitnessSnapshotDTO, 0, len(snapshots)),
 		Sessions:  make([]completedSessionDTO, 0, len(sessions)),
@@ -1108,7 +1180,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 		dto.Snapshots = append(dto.Snapshots, fitnessSnapshotDTO{Date: snap.Date, CTL: snap.CTL, ATL: snap.ATL, TSB: snap.TSB})
 	}
 	for _, sess := range sessions {
-		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess))
+		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess, analyses))
 	}
 	writeJSON(w, http.StatusOK, dto)
 }

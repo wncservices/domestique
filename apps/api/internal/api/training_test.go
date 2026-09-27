@@ -948,3 +948,103 @@ func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
 		t.Errorf("goals = %v, want none — a proposal must not create anything", goals)
 	}
 }
+
+// analysisOut mirrors sessionAnalysisDTO's JSON shape (see training.go) —
+// same pattern as goalDTOOut/weekOut: a local struct in the test package
+// rather than importing the unexported DTO.
+type analysisOut struct {
+	Outcome       string  `json:"outcome"`
+	LoadSource    string  `json:"loadSource"`
+	NP            float64 `json:"np"`
+	IF            float64 `json:"if"`
+	TSS           float64 `json:"tss"`
+	DurationRatio float64 `json:"durationRatio"`
+	Steps         []struct {
+		Name string `json:"name"`
+	} `json:"steps"`
+}
+
+type fitnessOut struct {
+	Sessions []struct {
+		ID       string       `json:"id"`
+		Date     string       `json:"date"`
+		Analysis *analysisOut `json:"analysis"`
+	} `json:"sessions"`
+}
+
+// TestFitnessIncludesAnalysisForAnalysedSessionsOnly is Task 7's own RED
+// case: /api/training/fitness must carry each analysed session's verdict
+// and omit it for a session nobody has analysed yet.
+func TestFitnessIncludesAnalysisForAnalysedSessionsOnly(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	analysedDate := time.Now().Format("2006-01-02")
+	plainDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	h.seedSession("wilant", analysedDate, 1)
+	h.seedSession("wilant", plainDate, 1)
+
+	analysedID := "garmin:" + analysedDate
+	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
+		SessionID: analysedID, Rider: "wilant", Outcome: "nailed", LoadSource: "measured",
+		NormalizedPower: 220, IntensityFactor: 0.85, TSS: 65, DurationRatio: 1.0,
+		Steps: []workout.AnalysisStep{{Index: 0, Name: "Warmup", Target: "open", Result: "hit"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out fitnessOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(out.Sessions))
+	}
+	for _, sess := range out.Sessions {
+		if sess.ID == analysedID {
+			if sess.Analysis == nil {
+				t.Fatalf("analysed session %s: analysis = nil, want present", sess.ID)
+			}
+			if sess.Analysis.Outcome != "nailed" || sess.Analysis.TSS != 65 || sess.Analysis.NP != 220 {
+				t.Errorf("analysis = %+v", sess.Analysis)
+			}
+			if len(sess.Analysis.Steps) != 1 || sess.Analysis.Steps[0].Name != "Warmup" {
+				t.Errorf("steps = %+v", sess.Analysis.Steps)
+			}
+		} else if sess.Analysis != nil {
+			t.Errorf("unanalysed session %s: analysis = %+v, want nil", sess.ID, sess.Analysis)
+		}
+	}
+}
+
+// A different rider's analysis must never leak onto this rider's own
+// session list — the same owner-only rule every other training endpoint
+// follows (isOwnTraining), here enforced by ListAnalyses' own rider filter.
+func TestFitnessAnalysisIsOwnerOnly(t *testing.T) {
+	h := newTrainingHarness(t)
+	date := time.Now().Format("2006-01-02")
+	h.seedSession("wilant", date, 1)
+	otherDate := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+	h.seedSession("other", otherDate, 1)
+
+	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
+		SessionID: "garmin:" + otherDate, Rider: "other", Outcome: "nailed", LoadSource: "measured",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/fitness", "")
+	var out fitnessOut
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 (owner-only)", len(out.Sessions))
+	}
+	if out.Sessions[0].Analysis != nil {
+		t.Errorf("analysis = %+v, want nil — wilant has no analysis of their own", out.Sessions[0].Analysis)
+	}
+}

@@ -82,6 +82,14 @@ func (s *Server) handleTrainingWeek(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	// One ListAnalyses call for the whole week, covering every date the days
+	// loop below can show (start onward) — see analysesSince's own doc
+	// comment on why this beats a per-session lookup.
+	analyses, err := s.analysesSince(ctx, rider, start.Format(dateLayout))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	plannedBy := map[string][]workout.Workout{}
 	for _, wk := range workouts {
 		if wk.Date != "" {
@@ -113,7 +121,7 @@ func (s *Server) handleTrainingWeek(w http.ResponseWriter, r *http.Request) {
 			dto.Totals.PlannedSeconds += d.PlannedSeconds
 		}
 		for _, sess := range doneBy[date] {
-			day.Completed = append(day.Completed, completedSessionDTOFrom(sess))
+			day.Completed = append(day.Completed, completedSessionDTOFrom(sess, analyses))
 			dto.Totals.CompletedSeconds += sess.DurationSeconds
 		}
 		dto.Days = append(dto.Days, day)

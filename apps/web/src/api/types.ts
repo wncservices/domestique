@@ -847,6 +847,43 @@ export interface UpdateWorkoutRequest {
 
 // ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------
 
+/** rideanalysis's verdict on one planned step, scored against what the
+ *  rider actually did — mirrors apps/api/internal/workout.AnalysisStep. */
+export type StepResult = 'hit' | 'under' | 'over'
+
+export interface AnalysisStep {
+  index: number
+  name: string
+  target: string
+  low: number
+  high: number
+  actual: number
+  result: StepResult
+  inTargetPct?: number
+  /** See workout.AnalysisStep.Hard's own doc comment — a scored step is not
+   *  necessarily a "hard" one. */
+  hard?: boolean
+}
+
+/** How a completed session compares against what was planned for it — see
+ *  apps/api/internal/rideanalysis's own doc comment for what each outcome
+ *  means. 'unplanned' is a session with no matching workout to compare
+ *  against. */
+export type Outcome = 'nailed' | 'completed' | 'struggled' | 'incomplete' | 'unplanned'
+
+/** rideanalysis's summary verdict on a completed session — mirrors
+ *  apps/api/internal/api's sessionAnalysisDTO. Zones and the power curve are
+ *  deliberately not carried here; see that DTO's own doc comment. */
+export interface SessionAnalysis {
+  outcome: Outcome
+  loadSource: string
+  np?: number
+  if?: number
+  tss?: number
+  durationRatio?: number
+  steps?: AnalysisStep[]
+}
+
 export interface CompletedSession {
   id: string
   provider: string
@@ -857,6 +894,10 @@ export interface CompletedSession {
   avgHr?: number
   avgPowerWatts?: number
   trainingLoad: number
+  /** Present once rideanalysis has scored this session — absent for a
+   *  session not yet synced with a FIT source, or older than the analysis
+   *  window. */
+  analysis?: SessionAnalysis
 }
 
 export interface FitnessSnapshot {
