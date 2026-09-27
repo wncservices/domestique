@@ -5,7 +5,7 @@
 // doc's "Workout builder" section. The page still owns workoutForm/saveWorkout;
 // this only renders it and emits back — see forms.ts for the WorkoutForm shape.
 import { computed } from 'vue'
-import type { RiderProfile, Sport } from '@/api/types'
+import type { RiderProfile, Sport, WorkoutStep } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { sports } from '@/components/plan/forms'
@@ -53,23 +53,23 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
 
         <div class="grid grid-cols-2 gap-4">
           <UFormField label="Name">
-            <UInput :model-value="form.name" placeholder="Threshold 6x3" class="w-full" @update:model-value="(v) => set('name', String(v))" />
+            <UInput :model-value="form.name" placeholder="Threshold 6x3" class="w-full" @update:model-value="(v: string | number) => set('name', String(v))" />
           </UFormField>
           <UFormField label="Sport">
-            <USelect :model-value="form.sport" :items="sports" value-key="value" class="w-full" @update:model-value="(v) => set('sport', v as Sport)" />
+            <USelect :model-value="form.sport" :items="sports" value-key="value" class="w-full" @update:model-value="(v: string) => set('sport', v as Sport)" />
           </UFormField>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <UFormField label="Date (optional)">
-            <UInput :model-value="form.date" type="date" class="w-full" @update:model-value="(v) => set('date', String(v))" />
+            <UInput :model-value="form.date" type="date" class="w-full" @update:model-value="(v: string | number) => set('date', String(v))" />
           </UFormField>
           <UFormField label="Goal (optional)">
-            <USelect :model-value="form.goalId" :items="goalOptions" value-key="value" class="w-full" @update:model-value="(v) => set('goalId', String(v))" />
+            <USelect :model-value="form.goalId" :items="goalOptions" value-key="value" class="w-full" @update:model-value="(v: string) => set('goalId', String(v))" />
           </UFormField>
         </div>
 
         <UFormField label="Steps">
-          <WorkoutStepEditor :model-value="form.steps" :profile="profile" :sport="form.sport" @update:model-value="(v) => set('steps', v)" />
+          <WorkoutStepEditor :model-value="form.steps" :profile="profile" :sport="form.sport" @update:model-value="(v: WorkoutStep[]) => set('steps', v)" />
         </UFormField>
 
         <div class="flex justify-end gap-2">

@@ -57,11 +57,11 @@ const priorities: { value: GoalPriority; label: string }[] = [
           <p v-if="explanation" class="mt-2 text-sm text-muted italic">{{ explanation }}</p>
         </div>
         <UFormField label="Name">
-          <UInput :model-value="form.name" placeholder="Local Gran Fondo" class="w-full" @update:model-value="(v) => set('name', String(v))" />
+          <UInput :model-value="form.name" placeholder="Local Gran Fondo" class="w-full" @update:model-value="(v: string | number) => set('name', String(v))" />
         </UFormField>
         <div class="grid grid-cols-2 gap-4">
           <UFormField label="Sport">
-            <USelect :model-value="form.sport" :items="sports" value-key="value" class="w-full" @update:model-value="(v) => set('sport', v as Sport)" />
+            <USelect :model-value="form.sport" :items="sports" value-key="value" class="w-full" @update:model-value="(v: string) => set('sport', v as Sport)" />
           </UFormField>
           <UFormField label="Priority">
             <USelect
@@ -69,12 +69,12 @@ const priorities: { value: GoalPriority; label: string }[] = [
               :items="priorities"
               value-key="value"
               class="w-full"
-              @update:model-value="(v) => set('priority', v as GoalPriority)"
+              @update:model-value="(v: string) => set('priority', v as GoalPriority)"
             />
           </UFormField>
         </div>
         <UFormField label="Event date" help="Leave empty if there is no event — you get a rolling general fitness plan.">
-          <UInput :model-value="form.eventDate" type="date" class="w-full" @update:model-value="(v) => set('eventDate', String(v))" />
+          <UInput :model-value="form.eventDate" type="date" class="w-full" @update:model-value="(v: string | number) => set('eventDate', String(v))" />
         </UFormField>
         <div class="grid grid-cols-2 gap-4">
           <UFormField label="Target distance (km)">
@@ -82,7 +82,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
               :model-value="form.targetDistanceKm"
               type="number"
               class="w-full"
-              @update:model-value="(v) => set('targetDistanceKm', String(v))"
+              @update:model-value="(v: string | number) => set('targetDistanceKm', String(v))"
             />
           </UFormField>
           <UFormField label="Target elevation (m)">
@@ -90,12 +90,12 @@ const priorities: { value: GoalPriority; label: string }[] = [
               :model-value="form.targetElevationM"
               type="number"
               class="w-full"
-              @update:model-value="(v) => set('targetElevationM', String(v))"
+              @update:model-value="(v: string | number) => set('targetElevationM', String(v))"
             />
           </UFormField>
         </div>
         <UFormField label="Notes">
-          <UTextarea :model-value="form.notes" class="w-full" @update:model-value="(v) => set('notes', String(v))" />
+          <UTextarea :model-value="form.notes" class="w-full" @update:model-value="(v: string) => set('notes', String(v))" />
         </UFormField>
         <div class="flex justify-end gap-2">
           <UButton color="neutral" variant="ghost" @click="open = false">Cancel</UButton>
