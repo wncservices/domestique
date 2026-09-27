@@ -27,11 +27,12 @@ func IsGenerated(w workout.Workout) bool {
 		!strings.Contains(w.Description, AdjustedMarker)
 }
 
-// keyNames are the sessions a week is built around — the long day and the
-// harder mid-week one — as opposed to easy days, which nothing is lost by
-// skipping. Kept beside sessionLabel, which names them, so a rename there
-// cannot silently stop a missed key session from being noticed; the test in
-// adapt_test.go fails if the two drift.
+// keyNames are the legacy session names IsKeySession/IsHardSession fall back
+// to for a workout with no zone — a row made before the zone column
+// existed, when this package still built exactly these four fixed session
+// types (see enduranceName for the long/easy names it still produces
+// today). A workout with a zone is classified from that instead; see
+// IsKeySession's own doc comment.
 var keyNames = map[string]bool{
 	"Long ride": true, "Long run": true,
 	"Tempo ride": true, "Tempo run": true,
@@ -68,15 +69,15 @@ func IsHardSession(w workout.Workout) bool {
 }
 
 // EasyVariant builds the easy session that replaces w: the same sport and
-// the same targets the plan would give any easy day, a fifth shorter than
-// what it replaces — a rider swapped off a hard day because they are tired
-// should not also be handed a long one.
+// the same targets the plan would give any easy day (zone endurance, no
+// level), a fifth shorter than what it replaces — a rider swapped off a hard
+// day because they are tired should not also be handed a long one.
 func EasyVariant(w workout.Workout, profile workout.RiderProfile) workout.CreateWorkoutRequest {
 	hours := workout.PlannedSeconds(w.Steps) * 0.8 / 3600
 	if hours <= 0 {
 		hours = 1
 	}
-	return buildSession(sessionEasy, hours, w.Sport, profile)
+	return buildEnduranceSession(hours, false, w.Sport, profile)
 }
 
 var movedFromRE = regexp.MustCompile(`moved from (\d{4}-\d{2}-\d{2})`)

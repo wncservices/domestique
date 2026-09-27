@@ -7,21 +7,21 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
-// The key-session table is written out by name, so it must track the names
-// sessionLabel actually produces — or a rename would quietly stop missed
-// long rides being noticed.
+// The legacy name table is written out by hand, so it must track the names
+// enduranceName actually produces for the long day — or a rename there would
+// quietly stop a missed long ride/run (made before the zone column existed)
+// being noticed. Every current structured session carries a real zone and
+// so is classified by that instead (see TestKeyAndHardSessionReadZoneWithNameFallback).
 func TestKeyAndHardNamesMatchWhatTheSchedulerProduces(t *testing.T) {
 	for _, sport := range []model.Sport{model.SportCycling, model.SportRunning} {
 		for _, tc := range []struct {
-			kind      sessionType
+			long      bool
 			key, hard bool
 		}{
-			{sessionEasy, false, false},
-			{sessionLong, true, false},
-			{sessionTempo, true, true},
-			{sessionInterval, true, true},
+			{false, false, false},
+			{true, true, false},
 		} {
-			name, _ := sessionLabel(tc.kind, sport)
+			name := enduranceName(tc.long, sport)
 			w := workout.Workout{Name: name}
 			if IsKeySession(w) != tc.key || IsHardSession(w) != tc.hard {
 				t.Errorf("%s/%q: key=%v hard=%v, want key=%v hard=%v", sport, name, IsKeySession(w), IsHardSession(w), tc.key, tc.hard)
@@ -75,7 +75,7 @@ func TestOnlyUnadjustedGeneratedWorkoutsMayBeAdapted(t *testing.T) {
 }
 
 func TestBuiltSessionsCarryTheGeneratedDescription(t *testing.T) {
-	req := buildSession(sessionEasy, 1, model.SportCycling, workout.RiderProfile{})
+	req := buildEnduranceSession(1, false, model.SportCycling, workout.RiderProfile{})
 	if req.Description != GeneratedDescription {
 		t.Errorf("description = %q — IsGenerated would stop recognising the scheduler's own output", req.Description)
 	}
