@@ -188,6 +188,15 @@ func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
 	if scheduler.IsGenerated(stepped) {
 		t.Error("a stepped-down workout must not be eligible for a second automatic adjustment")
 	}
+	// Round 2's fix: the rider-visible text — everything after
+	// scheduler.AdjustedMarker, the same slice the frontend's own
+	// adjustmentNote() takes — must be just the reason, never the
+	// step-down source marker or the struggled workout's own id. The
+	// source note has to sit *before* the marker in the description for
+	// that to hold, while hasStepDownSource can still find it anywhere.
+	if visible := riderVisibleAdjustmentText(stepped.Description); strings.Contains(visible, "source:") || strings.Contains(visible, struggledWorkout.ID) {
+		t.Errorf("rider-visible adjustment text = %q, want no step-down source marker or workout id leaking into it", visible)
+	}
 
 	// The struggled session's own workout is untouched — only the *next*
 	// workout in its zone steps down, never the one that was actually rated.
@@ -198,6 +207,19 @@ func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
 	if untouched.Level != 5 || untouched.Name != "Threshold 3x12" {
 		t.Errorf("the struggled session's own workout changed: %+v", untouched)
 	}
+}
+
+// riderVisibleAdjustmentText mirrors apps/web/src/utils/workoutMath.ts's own
+// adjustmentNote(): everything after scheduler.AdjustedMarker, trimmed —
+// exactly what a rider actually reads for "why was this changed." Kept here
+// rather than imported since it lives in the frontend, but the slicing
+// logic has to match byte for byte for this test to mean anything.
+func riderVisibleAdjustmentText(description string) string {
+	at := strings.Index(description, scheduler.AdjustedMarker)
+	if at < 0 {
+		return ""
+	}
+	return strings.TrimSpace(description[at+len(scheduler.AdjustedMarker):])
 }
 
 // TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle

@@ -180,11 +180,15 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 	}
 
 	req := workoutlib.Instantiate(ladder, rung, profile)
-	// The source marker is what stops a later adaptation pass (every 30
-	// minutes) from stepping down a second same-zone workout off the exact
-	// same struggle, once this one is no longer IsGenerated — see
-	// adapter.StepDownSourceNote's own doc comment.
-	description := wk.Description + " " + adapter.Note(c) + " " + adapter.StepDownSourceNote(c.StepDownSourceID)
+	// The source marker goes *before* scheduler.AdjustedMarker, not after
+	// adapter.Note(c) — the frontend's adjustmentNote() (workoutMath.ts)
+	// shows a rider everything past "Adjusted automatically:" verbatim as
+	// the reason, so a marker appended after it ("...was under target
+	// step-down source: <id>") would leak straight into that text. Placing
+	// it here keeps it out of what a rider ever reads, while
+	// hasStepDownSource can still find it — it just searches the whole
+	// description, position included.
+	description := wk.Description + " " + adapter.StepDownSourceNote(c.StepDownSourceID) + " " + adapter.Note(c)
 	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
 		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
 	})
