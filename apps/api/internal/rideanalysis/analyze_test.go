@@ -268,6 +268,14 @@ func TestAnalyzeNoLapsMainStep80PercentInRangeIsNailed(t *testing.T) {
 	if a.Steps[0].Result != "hit" {
 		t.Errorf("main step result = %q, want hit", a.Steps[0].Result)
 	}
+	// Actual is always the physical-unit average, never a percentage — the
+	// ride here is 2880 s at 200 W and 720 s at 100 W: (2880*200+720*100)/3600 = 180.
+	if want := 180.0; math.Abs(a.Steps[0].Actual-want) > 0.01 {
+		t.Errorf("Actual = %v, want %v (ride's average power, not a percentage)", a.Steps[0].Actual, want)
+	}
+	if want := 80.0; math.Abs(a.Steps[0].InTargetPct-want) > 0.01 {
+		t.Errorf("InTargetPct = %v, want %v", a.Steps[0].InTargetPct, want)
+	}
 	if a.Outcome != OutcomeNailed {
 		t.Errorf("Outcome = %q, want %q", a.Outcome, OutcomeNailed)
 	}
@@ -291,6 +299,13 @@ func TestAnalyzeNoLapsMainStep60PercentInRangeIsStruggled(t *testing.T) {
 
 	if len(a.Steps) != 1 || a.Steps[0].Result != "under" {
 		t.Errorf("Steps = %+v, want a single under", a.Steps)
+	}
+	// (2160*200+1440*100)/3600 = 160 W, not a percentage.
+	if want := 160.0; math.Abs(a.Steps[0].Actual-want) > 0.01 {
+		t.Errorf("Actual = %v, want %v (ride's average power)", a.Steps[0].Actual, want)
+	}
+	if want := 60.0; math.Abs(a.Steps[0].InTargetPct-want) > 0.01 {
+		t.Errorf("InTargetPct = %v, want %v", a.Steps[0].InTargetPct, want)
 	}
 	if a.Outcome != OutcomeStruggled {
 		t.Errorf("Outcome = %q, want %q", a.Outcome, OutcomeStruggled)
@@ -401,6 +416,73 @@ func TestAnalyzeNilActivityUsesSummaryMetricsAndScoresMainStep(t *testing.T) {
 	// step hit -> nailed.
 	if a.Outcome != OutcomeNailed {
 		t.Errorf("Outcome = %q, want %q", a.Outcome, OutcomeNailed)
+	}
+}
+
+// TestAnalyzeMainStepScoredByTimeWhenOnlyOtherStepsHaveLaps covers the
+// ruling that the whole-ride time-in-range fallback applies whenever no lap
+// maps to the *main* step specifically — not only when no lap scored
+// anything at all. Here a lap scores the warmup (an open-target step, so it
+// is never actually scored) and the device never laps the main step, so the
+// only lap in the ride carries no scorable target: the main step must still
+// get a time-in-range score across the whole ride, not be left unscored.
+func TestAnalyzeMainStepScoredByTimeWhenOnlyOtherStepsHaveLaps(t *testing.T) {
+	w := &workout.Workout{Steps: []workout.WorkoutStep{
+		{Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime, Seconds: 300, Target: workout.TargetOpen},
+		{Name: "Endurance", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3300, Target: workout.TargetPower, TargetLow: 180, TargetHigh: 220},
+	}}
+	// 80% of the non-warmup ride in range, one lap covering only the
+	// warmup (step index 0, open target, never scored by scoreLaps).
+	var samples []fixture
+	sec := 0
+	add := func(seconds, watts int) {
+		for i := 0; i < seconds; i++ {
+			samples = append(samples, fixture{Sec: sec, Power: watts})
+			sec++
+		}
+	}
+	add(300, 100)  // warmup
+	add(2640, 200) // in range: 80% of 3300
+	add(660, 100)  // out of range: 20% of 3300
+	act := buildActivity(t, samples, []lapFixture{{StartSec: 0, EndSec: 300, StepIndex: 0}})
+
+	a := Analyze(Input{Activity: act, Planned: w, Profile: fullProfile()})
+
+	if len(a.Steps) != 1 {
+		t.Fatalf("Steps = %+v, want a single main-step time-in-range score (the warmup lap scores nothing)", a.Steps)
+	}
+	if a.Steps[0].Index != 1 {
+		t.Errorf("Steps[0].Index = %d, want 1 (the Endurance/main step)", a.Steps[0].Index)
+	}
+	if a.Steps[0].Result != "hit" {
+		t.Errorf("Steps[0].Result = %q, want hit (80%% in range)", a.Steps[0].Result)
+	}
+	if a.Outcome != OutcomeNailed {
+		t.Errorf("Outcome = %q, want %q", a.Outcome, OutcomeNailed)
+	}
+}
+
+// TestAnalyzeNoHardStepsUsesMainStepForNailed exercises the no-hard-steps
+// rule directly: the only step with a target is a cooldown, which
+// isHardStep never counts as hard (intensity is neither interval nor
+// active) — the outcome still reaches "nailed" through the main-step
+// substitution the resolution describes, not through any hard-step count.
+func TestAnalyzeNoHardStepsUsesMainStepForNailed(t *testing.T) {
+	w := &workout.Workout{Steps: []workout.WorkoutStep{
+		{Name: "Easy spin", Intensity: workout.IntensityCooldown, Duration: workout.DurationTime, Seconds: 3600, Target: workout.TargetPower, TargetLow: 100, TargetHigh: 140},
+	}}
+	act := buildActivity(t, constantPower(3600, 120), []lapFixture{{StartSec: 0, EndSec: 3600, StepIndex: 0}})
+
+	a := Analyze(Input{Activity: act, Planned: w, Profile: fullProfile()})
+
+	if len(a.Steps) != 1 || a.Steps[0].Result != "hit" {
+		t.Fatalf("Steps = %+v, want a single hit", a.Steps)
+	}
+	if isHardStep(FlattenSteps(w.Steps)[0]) {
+		t.Fatal("test setup error: the only step must not count as hard")
+	}
+	if a.Outcome != OutcomeNailed {
+		t.Errorf("Outcome = %q, want %q (no hard steps, main step hit, ratio >= 0.9)", a.Outcome, OutcomeNailed)
 	}
 }
 

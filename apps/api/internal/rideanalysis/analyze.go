@@ -35,16 +35,21 @@ const (
 
 // StepResult is one planned step scored against what the ride actually did.
 // Target is the step's workout.TargetType as a string ("power" etc.); Low/
-// High are that target's planned range; Actual is the lap's (or, in the
-// no-laps fallback, the whole ride's) measured value in the same units.
+// High are that target's planned range. Actual is always in the target's
+// own physical unit (W, bpm, m/s) — a lap's average for a lap-scored step,
+// or the whole ride's average (over samples that carry the metric) for the
+// no-laps fallback, never a percentage. InTargetPct is that fallback's own
+// number, the percentage of ride time spent inside [Low, High]; it is 0 for
+// a lap-scored step, which is judged by average rather than by time.
 type StepResult struct {
-	Index  int
-	Name   string
-	Target string
-	Low    float64
-	High   float64
-	Actual float64
-	Result string // "hit" | "under" | "over"
+	Index       int
+	Name        string
+	Target      string
+	Low         float64
+	High        float64
+	Actual      float64
+	InTargetPct float64
+	Result      string // "hit" | "under" | "over"
 }
 
 // Summary is a provider's own ride summary numbers — present even when no
@@ -322,23 +327,41 @@ func scoreLaps(act *filedef.Activity, samples []Sample, flattened []workout.Work
 	return out
 }
 
-// scoreMainStepByTime is the spec's "no step laps" fallback: a single score
-// for the whole ride against the main step's target, by time in range
-// rather than by average.
+// stepScored reports whether some StepResult already scored the flattened
+// step at idx — used to decide whether the main-step time-in-range fallback
+// still needs to run alongside laps that scored other steps.
+func stepScored(steps []StepResult, idx int) bool {
+	for _, s := range steps {
+		if s.Index == idx {
+			return true
+		}
+	}
+	return false
+}
+
+// scoreMainStepByTime is the spec's "no step laps" fallback — also used
+// whenever no lap mapped to the main step specifically, even if other laps
+// scored other steps, so a planned workout is scored whenever it has
+// anything to score at all. The hit rule is time in range (InTargetPct >=
+// mainStepHitFraction), but Actual still reports the ride's average of the
+// target metric in its own physical unit, matching every other StepResult —
+// only InTargetPct carries the percentage this fallback actually judges by.
 func scoreMainStepByTime(samples []Sample, idx int, step workout.WorkoutStep) StepResult {
 	frac := timeInRangeFraction(samples, step.TargetLow, step.TargetHigh, step.Target)
+	actual := averageOverRange(samples, 0, len(samples), step.Target)
 	result := "under"
 	if frac >= mainStepHitFraction {
 		result = "hit"
 	}
 	return StepResult{
-		Index:  idx,
-		Name:   step.Name,
-		Target: string(step.Target),
-		Low:    step.TargetLow,
-		High:   step.TargetHigh,
-		Actual: frac * 100,
-		Result: result,
+		Index:       idx,
+		Name:        step.Name,
+		Target:      string(step.Target),
+		Low:         step.TargetLow,
+		High:        step.TargetHigh,
+		Actual:      actual,
+		InTargetPct: frac * 100,
+		Result:      result,
 	}
 }
 
@@ -396,9 +419,10 @@ func hitFraction(steps []StepResult, flattened []workout.WorkoutStep, mainIdx in
 			return 0, true
 		}
 	}
-	// The main step exists but nothing scored it (no matching lap, and the
-	// lap pass found other laps so the no-laps fallback never ran) — there
-	// is nothing to judge it by, so it does not participate.
+	// Analyze always appends a main-step score (by lap, or by the
+	// whole-ride time-in-range fallback) whenever main exists, so this is
+	// unreached in practice — kept as a safe default rather than a panic
+	// for a caller that builds Analysis some other way.
 	return 0, false
 }
 
@@ -492,8 +516,14 @@ func Analyze(in Input) Analysis {
 	switch {
 	case in.Activity != nil:
 		a.Steps = scoreLaps(in.Activity, samples, flattened)
-		if len(a.Steps) == 0 && main != nil {
-			a.Steps = []StepResult{scoreMainStepByTime(samples, mainIdx, *main)}
+		// Score the main step whenever no lap mapped to it specifically —
+		// not only when no lap scored anything at all. A device that ran
+		// the workout but only lapped the warmup, say, still leaves the
+		// main step itself unscored by any lap, and the ruling is that a
+		// planned workout is scored whenever it has anything to score,
+		// rather than only in the all-or-nothing "free ride" case.
+		if main != nil && !stepScored(a.Steps, mainIdx) {
+			a.Steps = append(a.Steps, scoreMainStepByTime(samples, mainIdx, *main))
 		}
 	case main != nil:
 		a.Steps = []StepResult{scoreMainStepBySummary(in.Summary, mainIdx, *main)}
