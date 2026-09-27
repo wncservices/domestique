@@ -64,6 +64,13 @@ type AnalysisStep struct {
 // rider's FTP changes) replaces the previous verdict rather than
 // accumulating a second row, the same upsert shape SaveProfile and
 // SavePush already use.
+//
+// feel and level_delta are deliberately excluded from the conflict
+// update: they are set only by SetAnalysisFeel, once a rider actually
+// rates the ride. A re-analysis (or a re-sync of the same ride) must not
+// wipe a rating that already happened — a.Feel/a.LevelDelta are only used
+// on the first insert of a session that has never been analysed before,
+// where there is nothing to preserve yet.
 func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
 	if a.SessionID == "" {
 		return errors.New("workout: an analysis needs a session id")
@@ -107,8 +114,7 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
             intensity_factor = excluded.intensity_factor, tss = excluded.tss,
             duration_ratio = excluded.duration_ratio, power_zone_seconds = excluded.power_zone_seconds,
             hr_zone_seconds = excluded.hr_zone_seconds, power_curve = excluded.power_curve,
-            steps = excluded.steps, feel = excluded.feel, level_delta = excluded.level_delta,
-            analysed_at = excluded.analysed_at`),
+            steps = excluded.steps, analysed_at = excluded.analysed_at`),
 		a.SessionID, rider, a.WorkoutID, a.Outcome, a.LoadSource,
 		a.NormalizedPower, a.IntensityFactor, a.TSS, a.DurationRatio,
 		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, analysedAt)

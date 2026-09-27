@@ -160,6 +160,49 @@ func TestProgressionLevelsEachEngine(t *testing.T) {
 					t.Error("expected an error rating a session that does not exist")
 				}
 			})
+
+			t.Run("re-saving an analysis after a rating must not wipe the rating", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				session, err := db.UpsertSession(ctx, UpsertSessionRequest{
+					Rider: "wilant", Provider: "garmin", ExternalID: "feel-2", Sport: "cycling",
+					Date: "2026-03-03", DurationSeconds: 3600, TrainingLoad: 60,
+				})
+				if err != nil {
+					t.Fatalf("upsert session: %v", err)
+				}
+				if err := db.SaveAnalysis(ctx, SessionAnalysis{
+					SessionID: session.ID, Rider: "wilant", WorkoutID: "threshold-3x12", Outcome: "nailed",
+				}); err != nil {
+					t.Fatalf("save analysis: %v", err)
+				}
+				if err := db.SetAnalysisFeel(ctx, session.ID, 4, 0.5); err != nil {
+					t.Fatalf("set analysis feel: %v", err)
+				}
+
+				// A re-analysis (re-sync, FTP change, whatever triggers it)
+				// carries no feel/delta of its own — SaveAnalysis must leave
+				// the rider's rating and the ride's recorded level change
+				// alone rather than overwriting them back to zero.
+				if err := db.SaveAnalysis(ctx, SessionAnalysis{
+					SessionID: session.ID, Rider: "wilant", WorkoutID: "threshold-3x12",
+					Outcome: "nailed", TSS: 95,
+				}); err != nil {
+					t.Fatalf("re-save analysis: %v", err)
+				}
+
+				a, ok, err := db.GetAnalysis(ctx, session.ID)
+				if err != nil || !ok {
+					t.Fatalf("get analysis: ok=%v err=%v", ok, err)
+				}
+				if a.Feel != 4 || a.LevelDelta != 0.5 {
+					t.Fatalf("feel/delta after re-save = %d/%v, want unchanged 4/0.5", a.Feel, a.LevelDelta)
+				}
+				if a.TSS != 95 {
+					t.Errorf("re-save should still update other columns: tss = %v, want 95", a.TSS)
+				}
+			})
 		})
 	}
 }
