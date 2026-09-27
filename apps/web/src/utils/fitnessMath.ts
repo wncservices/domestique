@@ -197,7 +197,7 @@ export function powerZones(ftpWatts?: number): Zone[] | null {
 
 // 5-zone % max HR model. Bounded top and bottom — there is no "below Z1" or
 // "above Z5" band, unlike the power and pace models.
-const HR_ZONE_NAMES = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
+const HR_ZONE_NAMES = ['Z1 Recovery', 'Z2 Endurance', 'Z3 Tempo', 'Z4 Threshold', 'Z5 VO2max']
 const HR_ZONE_EDGES = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
 export function hrZones(maxHr?: number): Zone[] | null {
@@ -218,8 +218,11 @@ export function paceZones(thresholdPaceSecPerKm?: number): Zone[] | null {
 }
 
 export function formatPace(metersPerSecond: number): string {
-  const secPerKm = 1000 / metersPerSecond
-  const minutes = Math.floor(secPerKm / 60)
-  const secs = Math.round(secPerKm % 60)
+  // Round the total seconds first, then split — rounding minutes and
+  // seconds independently can produce e.g. "3:60" when the leftover
+  // seconds round up to 60 instead of carrying into the minute.
+  const totalSeconds = Math.round(1000 / metersPerSecond)
+  const minutes = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
   return `${minutes}:${String(secs).padStart(2, '0')} /km`
 }
