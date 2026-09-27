@@ -3,7 +3,7 @@
 // relative effort — for a workout card/detail view. Deliberately simpler
 // than FitnessChart.vue's own line chart: bars, no axis, no hover; this is
 // meant to read at a glance in a list of workouts, not to be studied.
-import { computed, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import type { RiderProfile, WorkoutStep } from '@/api/types'
 import { flattenSteps, formatDuration } from '@/utils/workoutMath'
 
@@ -18,9 +18,32 @@ const props = withDefaults(defineProps<{ steps: WorkoutStep[]; profile?: RiderPr
 // desktop one.
 const WIDTH = ref(320)
 const svgEl = useTemplateRef<SVGSVGElement>('svgEl')
-onMounted(() => {
-  if (svgEl.value) WIDTH.value = svgEl.value.clientWidth || 320
-})
+
+// A one-shot mounted measure is enough for a plain card, but inside a
+// USlideover the panel is still mid-transition when this component mounts,
+// so clientWidth here captures a transitional (narrow) width rather than the
+// slideover's final rendered one. A ResizeObserver keeps WIDTH tracking the
+// real size as the transition finishes — the immediate watch's own read
+// stays as the first value so there's no flash of the 320 fallback before it
+// fires. Watching svgEl rather than using onMounted also covers the "no
+// timed steps yet" case: the <svg> is behind a v-else, so it doesn't exist
+// at mount and only appears once the rider adds a first timed step.
+let observer: ResizeObserver | null = null
+watch(
+  svgEl,
+  (el) => {
+    observer?.disconnect()
+    if (!el) return
+    WIDTH.value = el.clientWidth || 320
+    observer = new ResizeObserver(([entry]) => {
+      const width = entry?.contentRect.width
+      if (width) WIDTH.value = width
+    })
+    observer.observe(el)
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => observer?.disconnect())
 
 const flat = computed(() => flattenSteps(props.steps, props.profile))
 const totalSeconds = computed(() => flat.value.reduce((sum, s) => sum + s.seconds, 0))
