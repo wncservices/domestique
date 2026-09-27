@@ -1,8 +1,10 @@
 package wahoo
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -485,5 +487,75 @@ func TestCreateRouteRejectsAResponseWithNoID(t *testing.T) {
 	})
 	if _, err := c.CreateRoute(t.Context(), "at", aRouteRequest()); err == nil {
 		t.Fatal("expected an error when the response carries no id")
+	}
+}
+
+// Route.FileURL, same as workout_summary.file.url, is a pre-signed CDN link
+// with an access token in its query string — an ordinary network failure
+// must not leak it via a wrapped *url.Error.
+func TestDownloadRouteDoesNotLeakTheQueryStringOnANetworkFailure(t *testing.T) {
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	closed.Close()
+
+	c := New(Config{ClientID: "id", ClientSecret: "secret", RedirectURL: "https://app.example.test/callback"})
+	c.APIBase = closed.URL
+
+	fileURL := closed.URL + "/v1/routes/5/file?token=SECRET-TOKEN-VALUE"
+	_, err := c.DownloadRoute(t.Context(), "at", fileURL)
+	if err == nil {
+		t.Fatal("expected an error for a connection to a closed server")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN-VALUE") {
+		t.Errorf("error leaked the query string: %v", err)
+	}
+}
+
+func TestDownloadRouteDoesNotLeakTheQueryStringOnAnUnparsableURL(t *testing.T) {
+	c := New(Config{ClientID: "id", ClientSecret: "secret", RedirectURL: "https://app.example.test/callback"})
+	c.APIBase = "https://api.example.test"
+
+	fileURL := "https://api.example.test/v1/routes/5/file?token=SECRET-TOKEN-VALUE\n"
+	_, err := c.DownloadRoute(t.Context(), "at", fileURL)
+	if err == nil {
+		t.Fatal("expected an error for an unparsable URL")
+	}
+	if strings.Contains(err.Error(), "SECRET-TOKEN-VALUE") {
+		t.Errorf("error leaked the query string: %v", err)
+	}
+}
+
+func TestScrubURLStripsQueryAndFragment(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"https://cdn.wahooligan.com/f.fit?token=secret", "https://cdn.wahooligan.com/f.fit"},
+		{"https://cdn.wahooligan.com/f.fit#frag", "https://cdn.wahooligan.com/f.fit"},
+		{"https://cdn.wahooligan.com/f.fit?token=secret#frag", "https://cdn.wahooligan.com/f.fit"},
+		{"https://cdn.wahooligan.com/f.fit", "https://cdn.wahooligan.com/f.fit"},
+	} {
+		if got := scrubURL(tc.in); got != tc.want {
+			t.Errorf("scrubURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// wrapURLErr rebuilds the message but must not break errors.Is/As against
+// the underlying cause — a caller distinguishing a timeout from any other
+// failure still needs that to work.
+func TestWrapURLErrPreservesTheUnderlyingCause(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+
+	c := New(Config{ClientID: "id", ClientSecret: "secret", RedirectURL: "https://app.example.test/callback"})
+	c.APIBase = "https://api.wahooligan.com"
+
+	_, err := c.DownloadRoute(ctx, "at", "https://api.wahooligan.com/v1/routes/5/file?token=secret")
+	if err == nil {
+		t.Fatal("expected an error for an already-expired context")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("errors.Is(err, context.DeadlineExceeded) = false, err = %v", err)
+	}
+	if strings.Contains(err.Error(), "token=secret") {
+		t.Errorf("error leaked the query string: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/source"
@@ -26,7 +27,7 @@ func openStore(t *testing.T, dsn string) *DB {
 		t.Fatal(err)
 	}
 	// Postgres tests share a database; start clean.
-	for _, table := range []string{"goals", "rider_profiles", "workouts"} {
+	for _, table := range []string{"goals", "rider_profiles", "workouts", "completed_sessions", "session_analyses", "fitness_snapshots"} {
 		if _, err := src.Conn().Exec(`DELETE FROM ` + table); err != nil {
 			t.Fatal(err)
 		}
@@ -449,6 +450,157 @@ func TestEachEngine(t *testing.T) {
 				})
 				if err == nil {
 					t.Fatalf("expected an error for an empty repeat block")
+				}
+			})
+
+			t.Run("session analysis saves, round-trips, upserts, filters by rider and date, and feeds fitness", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				session, err := db.UpsertSession(ctx, UpsertSessionRequest{
+					Rider: "wilant", Provider: "garmin", ExternalID: "123", Sport: "cycling",
+					Date: "2026-03-01", DurationSeconds: 3600, DistanceM: 30000,
+					AvgHR: 150, AvgPowerWatts: 200, TrainingLoad: 60,
+				})
+				if err != nil {
+					t.Fatalf("upsert session: %v", err)
+				}
+
+				analysis := SessionAnalysis{
+					SessionID: session.ID, Rider: "Wilant", WorkoutID: "threshold-6x3",
+					Outcome: "struggled", LoadSource: "power",
+					NormalizedPower: 245.5, IntensityFactor: 0.98, TSS: 92.3, DurationRatio: 1.02,
+					PowerZoneSeconds: []int{100, 200, 900, 1200, 800, 400},
+					HRZoneSeconds:    []int{300, 600, 1500, 900, 300},
+					PowerCurve:       map[string]float64{"5": 550, "60": 400, "300": 260, "1200": 230},
+					Steps: []AnalysisStep{
+						{Index: 0, Name: "Warmup", Target: "open", Actual: 150, Result: "hit"},
+						{Index: 1, Name: "On", Target: "power", Low: 280, High: 300, Actual: 275, Result: "under", InTargetPct: 62.5},
+					},
+				}
+				if err := db.SaveAnalysis(ctx, analysis); err != nil {
+					t.Fatalf("save analysis: %v", err)
+				}
+
+				fetched, ok, err := db.GetAnalysis(ctx, session.ID)
+				if err != nil || !ok {
+					t.Fatalf("get analysis: ok=%v err=%v", ok, err)
+				}
+				if fetched.Rider != "wilant" {
+					t.Errorf("rider = %q, want normalized wilant", fetched.Rider)
+				}
+				if fetched.WorkoutID != analysis.WorkoutID || fetched.Outcome != analysis.Outcome ||
+					fetched.LoadSource != analysis.LoadSource {
+					t.Errorf("fetched = %+v", fetched)
+				}
+				if fetched.NormalizedPower != analysis.NormalizedPower || fetched.IntensityFactor != analysis.IntensityFactor ||
+					fetched.TSS != analysis.TSS || fetched.DurationRatio != analysis.DurationRatio {
+					t.Errorf("fetched numbers = %+v, want %+v", fetched, analysis)
+				}
+				if len(fetched.PowerZoneSeconds) != 6 || fetched.PowerZoneSeconds[2] != 900 {
+					t.Errorf("power zone seconds = %v", fetched.PowerZoneSeconds)
+				}
+				if len(fetched.HRZoneSeconds) != 5 || fetched.HRZoneSeconds[1] != 600 {
+					t.Errorf("hr zone seconds = %v", fetched.HRZoneSeconds)
+				}
+				if fetched.PowerCurve["60"] != 400 {
+					t.Errorf("power curve = %v", fetched.PowerCurve)
+				}
+				if len(fetched.Steps) != 2 || fetched.Steps[1].InTargetPct != 62.5 || fetched.Steps[1].Low != 280 {
+					t.Errorf("steps = %+v", fetched.Steps)
+				}
+				if fetched.AnalysedAt == "" {
+					t.Error("analysed_at was not stamped")
+				}
+
+				// Upsert replaces rather than accumulating a second row.
+				analysis.Outcome = "nailed_it"
+				analysis.TSS = 95
+				if err := db.SaveAnalysis(ctx, analysis); err != nil {
+					t.Fatalf("re-save analysis: %v", err)
+				}
+				replaced, ok, err := db.GetAnalysis(ctx, session.ID)
+				if err != nil || !ok || replaced.Outcome != "nailed_it" || replaced.TSS != 95 {
+					t.Fatalf("replaced = %+v, ok=%v, err=%v, want outcome nailed_it tss 95", replaced, ok, err)
+				}
+
+				otherSession, err := db.UpsertSession(ctx, UpsertSessionRequest{
+					Rider: "other", Provider: "garmin", ExternalID: "999", Sport: "cycling",
+					Date: "2026-03-05", DurationSeconds: 1800, TrainingLoad: 40,
+				})
+				if err != nil {
+					t.Fatalf("upsert other rider's session: %v", err)
+				}
+				if err := db.SaveAnalysis(ctx, SessionAnalysis{
+					SessionID: otherSession.ID, Rider: "other", Outcome: "completed",
+				}); err != nil {
+					t.Fatalf("save other rider's analysis: %v", err)
+				}
+
+				list, err := db.ListAnalyses(ctx, "WILANT", "2026-01-01")
+				if err != nil {
+					t.Fatalf("list analyses: %v", err)
+				}
+				if len(list) != 1 || list[0].SessionID != session.ID {
+					t.Errorf("list = %+v, want only wilant's session", list)
+				}
+
+				// sinceDate excludes sessions before it.
+				if none, err := db.ListAnalyses(ctx, "wilant", "2026-04-01"); err != nil || len(none) != 0 {
+					t.Errorf("list since a future date = %+v, err %v, want none", none, err)
+				}
+
+				// GetAnalysis for a session that was never analysed.
+				if _, ok, err := db.GetAnalysis(ctx, "garmin:does-not-exist"); err != nil || ok {
+					t.Errorf("get missing analysis: ok=%v err=%v", ok, err)
+				}
+
+				// ComputeFitness reports a day's CTL/ATL/TSB as of *before* that
+				// day's own load is folded in (see its own doc comment), so the
+				// effect of raising the session's load only shows up starting
+				// the following day.
+				sessionDate, err := time.Parse("2006-01-02", session.Date)
+				if err != nil {
+					t.Fatalf("parse session date: %v", err)
+				}
+				nextDate := sessionDate.AddDate(0, 0, 1).Format("2006-01-02")
+
+				if err := db.RecomputeFitnessSnapshots(ctx, "wilant"); err != nil {
+					t.Fatalf("recompute before SetSessionLoad: %v", err)
+				}
+				before, err := db.ListFitnessSnapshots(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("list snapshots: %v", err)
+				}
+				var beforeCTL float64
+				for _, s := range before {
+					if s.Date == nextDate {
+						beforeCTL = s.CTL
+					}
+				}
+
+				if err := db.SetSessionLoad(ctx, session.ID, 300); err != nil {
+					t.Fatalf("set session load: %v", err)
+				}
+				if err := db.RecomputeFitnessSnapshots(ctx, "wilant"); err != nil {
+					t.Fatalf("recompute after SetSessionLoad: %v", err)
+				}
+				after, err := db.ListFitnessSnapshots(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("list snapshots after: %v", err)
+				}
+				var afterCTL float64
+				for _, s := range after {
+					if s.Date == nextDate {
+						afterCTL = s.CTL
+					}
+				}
+				if afterCTL <= beforeCTL {
+					t.Errorf("CTL on %s after raising load = %v, want greater than before (%v)", nextDate, afterCTL, beforeCTL)
+				}
+
+				if err := db.SetSessionLoad(ctx, "garmin:does-not-exist", 100); err == nil {
+					t.Error("expected an error setting load on a session that does not exist")
 				}
 			})
 		})

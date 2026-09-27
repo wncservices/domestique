@@ -441,6 +441,47 @@ func (c *Client) ListRoutes(ctx context.Context, accessToken string) ([]Route, e
 	return routes, nil
 }
 
+// scrubURL strips a URL's query string and fragment, leaving
+// scheme://host/path — safe to put in an error message or a log line.
+//
+// A route or workout file URL (Route.FileURL, workout_summary.file.url) is a
+// pre-signed CDN link with an access token baked into its query string, not
+// this app's own credential but a real one all the same. Plain string
+// splitting rather than url.Parse on purpose: the two places this matters
+// most are exactly the ones where the URL may have already failed to parse,
+// or where a *url.Error is being rebuilt from a failure that also carries
+// the URL — see wrapURLErr.
+func scrubURL(raw string) string {
+	if i := strings.IndexAny(raw, "?#"); i >= 0 {
+		return raw[:i]
+	}
+	return raw
+}
+
+// wrapURLErr turns a request-building or request-sending failure into a
+// message safe to log.
+//
+// http.NewRequestWithContext and http.Client.Do both fail, for a URL-shaped
+// problem or a network one respectively, with a *url.Error — and
+// (*url.Error).Error() renders the *full* URL it was given, query string
+// included. Wrapping that error directly with %w, as every other error in
+// this package does, would put a pre-signed file URL's access token
+// straight into a log line. Rebuilt here from the *url.Error's own Op and
+// Err instead, with the URL scrubbed, and %w on Err rather than the
+// reconstructed message — so errors.Is/As against the underlying cause
+// (context.DeadlineExceeded, a *net.OpError, ...) still works, it is only
+// the outer *url.Error's own rendering that is bypassed.
+//
+// A non-*url.Error is wrapped exactly as before; nothing here changes for a
+// failure that never carried a URL to begin with.
+func wrapURLErr(site string, err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return fmt.Errorf("wahoo: %s: %s %q: %w", site, uerr.Op, scrubURL(uerr.URL), uerr.Err)
+	}
+	return fmt.Errorf("wahoo: %s: %w", site, err)
+}
+
 // DownloadRoute fetches the FIT course for one route, from the CDN url
 // ListRoutes returned in Route.FileURL.
 //
@@ -463,7 +504,7 @@ func (c *Client) DownloadRoute(ctx context.Context, accessToken, fileURL string)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("wahoo: building route download request: %w", err)
+		return nil, wrapURLErr("building route download request", err)
 	}
 	if onAPIHost {
 		req.Header.Set("Authorization", "Bearer "+accessToken)
@@ -471,7 +512,7 @@ func (c *Client) DownloadRoute(ctx context.Context, accessToken, fileURL string)
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("wahoo: download route: %w", err)
+		return nil, wrapURLErr("download route", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -504,7 +545,7 @@ func (c *Client) DownloadRoute(ctx context.Context, accessToken, fileURL string)
 func (c *Client) allowedFileHost(fileURL string) (onAPIHost bool, err error) {
 	target, err := url.Parse(fileURL)
 	if err != nil {
-		return false, fmt.Errorf("wahoo: unusable route file URL %q: %w", fileURL, err)
+		return false, wrapURLErr("unusable route file URL", err)
 	}
 
 	if api, err := url.Parse(c.APIBase); err == nil &&
