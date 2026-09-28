@@ -460,7 +460,7 @@ onMounted(() => {
       v-if="!loadingGoals && goals.length === 0"
       :narration-enabled="!!me?.narrationEnabled"
       :starting="startingGeneralPlan"
-      @describe="openCreateGoal"
+      @goal="openCreateGoal"
       @from-route="fromRoute"
       @general="startGeneralPlan"
     />
