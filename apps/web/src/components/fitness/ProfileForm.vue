@@ -184,6 +184,25 @@ const experienceItems = computed(() => {
         </UFormField>
         <UFormField>
           <template #label>
+            Threshold heart rate (bpm)
+            <UBadge v-if="isEstimated('threshold_hr')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          </template>
+          <UInput
+            type="number"
+            :model-value="profile.thresholdHr"
+            class="w-full"
+            @update:model-value="(v: string | number) => update({ thresholdHr: numberOrUndefined(v) })"
+          />
+          <p v-if="!profile.thresholdHr" class="text-xs text-muted mt-1">
+            No threshold heart rate yet — it is detected from your best 20-minute effort in synced
+            rides (or read from Garmin's lactate threshold). Heart-rate zones use it once it is known.
+          </p>
+          <p v-if="isEstimated('threshold_hr') && provenance('threshold_hr')" class="text-xs text-dimmed mt-1">
+            {{ provenance('threshold_hr') }}
+          </p>
+        </UFormField>
+        <UFormField>
+          <template #label>
             Resting heart rate (bpm)
             <UBadge v-if="isEstimated('resting_hr')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
           </template>
