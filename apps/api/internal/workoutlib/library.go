@@ -117,43 +117,61 @@ func workIntensity(zone string) workout.Intensity {
 	}
 }
 
-// Instantiate turns one rung into a structured workout request: a 10-minute
-// warmup ramping 50->65%, the rung's work (a plain step for a single-rep
-// rung, a repeat block otherwise), and a 10-minute cooldown at 45-55%. The
-// caller sets GeneratedDescription, GoalID and Date — Instantiate only knows
-// about the rung and the rider's profile, not why this workout is being
-// built or when it lands.
-func Instantiate(l Ladder, r Rung, profile workout.RiderProfile) workout.CreateWorkoutRequest {
-	// Warmup, cooldown and the rest step between reps are all the same easy
-	// effort regardless of which zone the work is in — zoneHRRange's own
-	// "default" bucket, named explicitly here rather than via zoneHRRange(l.Zone)
-	// so a work zone (e.g. anaerobic's 93-100%) never leaks into them.
+// WarmupCooldownSeconds is the library's fixed 10-minute warmup plus
+// 10-minute cooldown, in seconds — every structured rung carries it (via
+// Instantiate) and so does an endurance/long session built directly from
+// the library (scheduler.buildEnduranceSession), so the two warm up and cool
+// down exactly the same way.
+const WarmupCooldownSeconds = warmupSeconds + cooldownSeconds
+
+// Warmup builds the library's 10-minute warmup: two 5-minute steps ramping
+// 50->65% of FTP/threshold pace (or the equivalent heart-rate fraction),
+// shared by Instantiate and by scheduler.buildEnduranceSession — exported
+// rather than duplicated so an endurance day warms up exactly the way a
+// structured one does.
+func Warmup(sport model.Sport, profile workout.RiderProfile) []workout.WorkoutStep {
 	easyHRLow, easyHRHigh := zoneHRRange("")
+	t1, low1, high1 := target(sport, profile, 0.50, 0.55, easyHRLow, easyHRHigh)
+	t2, low2, high2 := target(sport, profile, 0.60, 0.65, easyHRLow, easyHRHigh)
+	return []workout.WorkoutStep{
+		{
+			Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime,
+			Seconds: 5 * minute, Target: t1, TargetLow: low1, TargetHigh: high1,
+		},
+		{
+			Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime,
+			Seconds: 5 * minute, Target: t2, TargetLow: low2, TargetHigh: high2,
+		},
+	}
+}
 
-	warmup1Type, warmup1Low, warmup1High := target(l.Sport, profile, 0.50, 0.55, easyHRLow, easyHRHigh)
-	warmup2Type, warmup2Low, warmup2High := target(l.Sport, profile, 0.60, 0.65, easyHRLow, easyHRHigh)
-	cooldownType, cooldownLow, cooldownHigh := target(l.Sport, profile, 0.45, 0.55, easyHRLow, easyHRHigh)
+// Cooldown builds the library's 10-minute cooldown at 45-55%. See Warmup's
+// own comment on why this is exported rather than duplicated.
+func Cooldown(sport model.Sport, profile workout.RiderProfile) workout.WorkoutStep {
+	easyHRLow, easyHRHigh := zoneHRRange("")
+	t, low, high := target(sport, profile, 0.45, 0.55, easyHRLow, easyHRHigh)
+	return workout.WorkoutStep{
+		Name: "Cooldown", Intensity: workout.IntensityCooldown, Duration: workout.DurationTime,
+		Seconds: cooldownSeconds, Target: t, TargetLow: low, TargetHigh: high,
+	}
+}
 
+// Instantiate turns one rung into a structured workout request: the
+// library's 10-minute warmup, the rung's work (a plain step for a
+// single-rep rung, a repeat block otherwise), and its 10-minute cooldown.
+// The caller sets GeneratedDescription, GoalID and Date — Instantiate only
+// knows about the rung and the rider's profile, not why this workout is
+// being built or when it lands.
+func Instantiate(l Ladder, r Rung, profile workout.RiderProfile) workout.CreateWorkoutRequest {
 	workHRLow, workHRHigh := zoneHRRange(l.Zone)
 	workType, workLow, workHigh := target(l.Sport, profile, r.LowPct, r.HighPct, workHRLow, workHRHigh)
 	rp := restPercent(l.Sport)
 	restType, restLow, restHigh := target(l.Sport, profile, rp, rp, 0.50, 0.60)
 
-	steps := []workout.WorkoutStep{
-		{
-			Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime,
-			Seconds: 5 * minute, Target: warmup1Type, TargetLow: warmup1Low, TargetHigh: warmup1High,
-		},
-		{
-			Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime,
-			Seconds: 5 * minute, Target: warmup2Type, TargetLow: warmup2Low, TargetHigh: warmup2High,
-		},
+	steps := append(Warmup(l.Sport, profile),
 		workStep(l, r, workType, workLow, workHigh, restType, restLow, restHigh),
-		{
-			Name: "Cooldown", Intensity: workout.IntensityCooldown, Duration: workout.DurationTime,
-			Seconds: cooldownSeconds, Target: cooldownType, TargetLow: cooldownLow, TargetHigh: cooldownHigh,
-		},
-	}
+		Cooldown(l.Sport, profile),
+	)
 
 	return workout.CreateWorkoutRequest{
 		Sport: l.Sport,

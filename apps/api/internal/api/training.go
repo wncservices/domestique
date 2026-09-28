@@ -14,6 +14,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/progression"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -458,6 +459,48 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, scheduledWorkoutsDTO{GoalID: g.ID, Created: dtos, Skipped: skipped})
 }
 
+// levelsFor returns rider's zone -> level map for sport, for
+// scheduler.WeekWorkouts/NextWorkouts to pick structured sessions from. The
+// first time a goal for this sport is scheduled, the rider has no levels
+// saved yet — this is where they are initialised, from
+// progression.Initial(profile.ExperienceLevel, sport), and persisted via
+// SaveLevel, so a rider's levels start somewhere sensible and stay there
+// across every subsequent schedule call rather than being recomputed (and
+// silently drifting) each time.
+func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.RiderProfile, sport model.Sport) (map[string]float64, error) {
+	existing, err := s.Training.ListLevels(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
+
+	levels := make(map[string]float64)
+	found := false
+	for _, l := range existing {
+		if l.Sport != sport {
+			continue
+		}
+		levels[string(l.Zone)] = l.Level
+		found = true
+	}
+	if found {
+		return levels, nil
+	}
+
+	for _, l := range progression.Initial(profile.ExperienceLevel, sport) {
+		if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
+			Rider:  rider,
+			Sport:  sport,
+			Zone:   workout.Zone(l.Zone),
+			Level:  l.Value,
+			Reason: "Starting level from your experience",
+		}); err != nil {
+			return nil, err
+		}
+		levels[l.Zone] = l.Value
+	}
+	return levels, nil
+}
+
 // scheduleGoal turns g's current plan week into concrete, dated workouts
 // and persists them — internal/scheduler.NextWorkouts wired to storage, on
 // top of the same reconciled plan handleGoalPeriodization shows a rider
@@ -477,7 +520,12 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Wo
 		return nil, 0, err
 	}
 
-	requests, err := scheduler.NextWorkouts(plan, profile, g.Rider, g.ID, g.Sport, s.now())
+	levels, err := s.levelsFor(ctx, g.Rider, profile, g.Sport)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	requests, err := scheduler.NextWorkouts(plan, profile, levels, g.Rider, g.ID, g.Sport, s.now())
 	if err != nil {
 		return nil, 0, err
 	}
