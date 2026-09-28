@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -26,26 +27,23 @@ import (
 //     to go is let go too, never stacked on top of another. "Missed" itself
 //     comes from ride-analysis when an analysis exists — see done's own
 //     comment — and falls back to the ≥ 50 % time rule when it does not.
-//   - A hard session is swapped for an easy one when form (TSB) is very
-//     negative. TrainingPeaks' Performance Management Chart treats roughly
-//     −30 and below as the high-risk zone where more intensity buys injury
-//     and illness, not fitness.
-//   - The same swap happens on two ride-analysis signals that say the same
-//     thing TSB does without needing a fitness snapshot: the last two
-//     analysed key sessions both came back struggled, or the last week rode
-//     noticeably harder than the plan called for. See detectFatigue.
+//   - A hard session is swapped for an easy one on two ride-analysis signals:
+//     the last two analysed key sessions both came back struggled, or the
+//     last week rode noticeably harder than the plan called for. See
+//     detectFatigue. Form (TSB) below −30 used to be a third signal here;
+//     it now lives in internal/readiness alongside HRV, sleep and resting
+//     heart rate — see the readiness rule below, and
+//     docs/superpowers/specs/2026-09-28-readiness-design.md.
+//   - Readiness's own verdict for *today* eases (never worsens) today's
+//     generated, untouched hard session: rest swaps it for an easy one the
+//     same way detectFatigue's swap does, caution steps it down one rung on
+//     its own zone's ladder. See the readiness Verdict switch in
+//     AdaptSessions.
 //
 // Only workouts the scheduler generated and nobody has touched are ever
 // changed (scheduler.IsGenerated), and each is changed once: the note left in
 // its description both tells the rider why and stops a second adjustment.
 // Pure, like Reconcile: workouts, history and a clock in, changes out.
-
-// fatigueTSB is the form below which hard sessions are swapped for easy ones.
-const fatigueTSB = -30.0
-
-// freshSnapshotDays is how old the latest fitness snapshot may be before it
-// is not trusted to describe how the rider feels today.
-const freshSnapshotDays = 2
 
 // completedFraction is how much of a planned session's time counts as having
 // done it. A rider who cut a ride short at 60% did the session; one who
@@ -105,19 +103,27 @@ type Change struct {
 	Reason string
 }
 
-// AdaptSessions decides what to change this week. latest may be nil when the
-// rider has no fitness history. analyses is ride-analysis's verdict on
-// completed sessions, keyed by the planned workout id they matched — set
-// only for a ride that actually matched a planned workout, never for an
-// unplanned one, so a lookup by workout id is exactly "was this planned
-// session analysed, and how did it go."
-func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSession, profile workout.RiderProfile, latest *workout.FitnessSnapshot, today time.Time, analyses map[string]workout.SessionAnalysis) []Change {
+// AdaptSessions decides what to change this week. analyses is ride-analysis's
+// verdict on completed sessions, keyed by the planned workout id they
+// matched — set only for a ride that actually matched a planned workout,
+// never for an unplanned one, so a lookup by workout id is exactly "was this
+// planned session analysed, and how did it go." assessment is today's
+// readiness verdict (internal/readiness.Assess's result, built from Garmin
+// wellness, form and load by the caller) — see the readiness.Verdict switch
+// below for what it does to today's hard session; a zero-value Assessment
+// (Verdict "") behaves exactly like Ready: no readiness-driven change.
+func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSession, profile workout.RiderProfile, today time.Time, analyses map[string]workout.SessionAnalysis, assessment readiness.Assessment) []Change {
 	day := func(t time.Time) string { return t.Format("2006-01-02") }
 	todayStr := day(today)
 	weekStart := day(mondayOf(today))
 	weekEnd := day(mondayOf(today).AddDate(0, 0, 6))
 
-	fatigue := detectFatigue(workouts, profile, latest, analyses, today)
+	fatigue := detectFatigue(workouts, profile, analyses, today)
+	// tired gates the missed-session catch-up below: a rest verdict means the
+	// rider is not in a state to make up a missed session either, the same
+	// intent the old TSB < −30 branch of detectFatigue used to cover before
+	// that rule moved into internal/readiness.
+	tired := fatigue.active || assessment.Verdict == readiness.Rest
 
 	taken := map[string]bool{}
 	for _, w := range workouts {
@@ -153,7 +159,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		case w.Date >= weekStart && w.Date < todayStr && scheduler.IsKeySession(w):
 			// A tired rider does not make up a missed session; rest is the
 			// right answer to whatever made them miss it.
-			if fatigue.active {
+			if tired {
 				continue
 			}
 			if next, ok := nextFreeDay(today, weekEnd, available, taken); ok {
@@ -187,6 +193,41 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		}
 	}
 
+	// Readiness eases (never worsens) today's own generated, still-untouched
+	// hard session — checked before stepDownTarget below so a rest verdict's
+	// Downgrade claims that workout first when the two would otherwise pick
+	// the same one (a struggled key session's next same-zone workout landing
+	// on today), rather than the milder struggle-driven StepDown winning by
+	// running last. Ready never changes anything: readiness only ever makes a
+	// day easier.
+	reasons := strings.Join(assessment.Reasons, "; ")
+	switch assessment.Verdict {
+	case readiness.Rest:
+		// A downgrade replaces the workout wholesale with an easy variant
+		// (scheduler.EasyVariant) — that works for a legacy zone-less hard
+		// workout just as well as a structured one, so rest does not need
+		// the structured-zone restriction caution's step-down does.
+		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, false); ok {
+			claimed[w.ID] = true
+			changes = append(changes, Change{
+				WorkoutID: w.ID, Downgrade: true,
+				Reason: "Swapped for an easy ride — " + reasons,
+			})
+		}
+	case readiness.Caution:
+		// A step-down needs a rung on its own zone's ladder (workoutlib) —
+		// a legacy hard workout with no zone has no ladder to step down on,
+		// the same reason stepDownTarget itself requires
+		// workout.IsStructuredZone.
+		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, true); ok {
+			claimed[w.ID] = true
+			changes = append(changes, Change{
+				WorkoutID: w.ID, StepDown: true, StepDownSourceID: readinessSourceID(today),
+				Reason: "Eased one level — " + reasons,
+			})
+		}
+	}
+
 	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed); ok {
 		changes = append(changes, Change{
 			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
@@ -194,6 +235,35 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		})
 	}
 	return changes
+}
+
+// readinessSourceID is the StepDownSourceID a readiness-driven caution
+// step-down carries — "readiness:<date>" rather than a struggled workout's
+// own id, so hasStepDownSource can tell the two kinds of step-down apart and
+// this one is still recognisable as coming from today's readiness verdict,
+// not a struggled key session.
+func readinessSourceID(today time.Time) string {
+	return "readiness:" + today.Format("2006-01-02")
+}
+
+// readinessTarget is today's generated, untouched, hard, not-yet-done
+// workout — the one readiness's own rest/caution verdict may ease. Unlike
+// detectFatigue's swap, this never reaches into tomorrow: readiness only
+// ever speaks to how the rider is today. requireStructuredZone is set for
+// caution's step-down, which needs a zone with a ladder to step down on
+// (see stepDownTarget); rest's downgrade replaces the workout wholesale and
+// has no such requirement.
+func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool, requireStructuredZone bool) (workout.Workout, bool) {
+	for _, w := range ordered {
+		if w.Date != todayStr || claimed[w.ID] || !scheduler.IsGenerated(w) || !scheduler.IsHardSession(w) || done(w, sessions, analyses) {
+			continue
+		}
+		if requireStructuredZone && !workout.IsStructuredZone(w.Zone) {
+			continue
+		}
+		return w, true
+	}
+	return workout.Workout{}, false
 }
 
 // stepDownSourceMarker prefixes the note recording which struggled session
@@ -372,21 +442,15 @@ type fatigueSignal struct {
 	reason string
 }
 
-// detectFatigue looks for any of three independent signs that the rider is
-// carrying too much fatigue for more intensity, checked in order and
-// returning the first that fires: very negative form (TSB), the last two
-// analysed key sessions both coming back struggled, or the last week's
-// analysed load running well ahead of what was planned. Any one is enough —
-// they are different ways of noticing the same thing, and a rider who has
-// no fitness snapshot but two rough rides in a row should not have to wait
-// for TSB to catch up before getting a break.
-func detectFatigue(workouts []workout.Workout, profile workout.RiderProfile, latest *workout.FitnessSnapshot, analyses map[string]workout.SessionAnalysis, today time.Time) fatigueSignal {
-	if latest != nil && latest.TSB < fatigueTSB && withinDays(latest.Date, today, freshSnapshotDays) {
-		return fatigueSignal{active: true, reason: fmt.Sprintf(
-			"swapped for an easy session — your form is %.0f, well into the fatigued zone, and a hard day now would cost more than it earns.",
-			latest.TSB,
-		)}
-	}
+// detectFatigue looks for either of two independent ride-analysis signs that
+// the rider is carrying too much fatigue for more intensity, checked in
+// order and returning the first that fires: the last two analysed key
+// sessions both coming back struggled, or the last week's analysed load
+// running well ahead of what was planned. Any one is enough. Form (TSB)
+// below −30 used to be a third signal checked first here; it now lives in
+// internal/readiness, alongside HRV, sleep and resting heart rate — see
+// AdaptSessions' own readiness.Verdict switch for what replaces it.
+func detectFatigue(workouts []workout.Workout, profile workout.RiderProfile, analyses map[string]workout.SessionAnalysis, today time.Time) fatigueSignal {
 	if w, a, ok := lastTwoStruggledKeySessions(workouts, analyses, today); ok {
 		return fatigueSignal{active: true, reason: struggleReason(w, a)}
 	}

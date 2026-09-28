@@ -209,6 +209,9 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		var changed []string
 		profile, changed = autoprofile.Apply(profile, suggestion)
 		autoFilled = append(autoFilled, changed...)
+
+		consumer, _ := s.garminConsumer()
+		s.syncRiderWellness(ctx, rider, consumer, garminSession)
 	}
 
 	if garminConnected {

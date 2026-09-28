@@ -78,6 +78,12 @@ type GarminConnector interface {
 	// garmin.Client.Biometrics for why a partial result comes back alongside
 	// an error.
 	Biometrics(ctx context.Context, consumer GarminConsumer, session garmin.Session, now time.Time) (garmin.Biometrics, error)
+	// Wellness reads HRV, sleep, Training Readiness and resting heart rate for
+	// one calendar date — what internal/readiness assesses today against. See
+	// garmin.Client.Wellness's own doc comment for why a single signal
+	// failing only shows up in the result's own Partial field rather than as
+	// an error.
+	Wellness(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (garmin.Wellness, error)
 	// UpdateWorkout replaces a workout PushWorkout created; it fails with
 	// garmin.ErrWorkoutGone when the rider has since deleted it in Connect.
 	UpdateWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, remoteID, name, sport string, steps []fitworkout.Step) error
@@ -229,6 +235,16 @@ func (l LiveGarmin) Biometrics(ctx context.Context, consumer GarminConsumer, ses
 		return garmin.Biometrics{}, err
 	}
 	return client.Biometrics(ctx, now)
+}
+
+// Wellness fetches one day's HRV, sleep, Training Readiness and resting
+// heart rate from a connected account.
+func (l LiveGarmin) Wellness(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (garmin.Wellness, error) {
+	client, err := l.resume(consumer, session)
+	if err != nil {
+		return garmin.Wellness{}, err
+	}
+	return client.Wellness(ctx, date)
 }
 
 // UpdateWorkout replaces a workout already on a connected account.
