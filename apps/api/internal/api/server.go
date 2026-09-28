@@ -32,6 +32,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -84,6 +85,12 @@ type Server struct {
 	// the UI. Nil disables connecting, but not the environment-configured
 	// Komoot client.
 	Links *providerlink.Store
+
+	// GarminMFA holds a Garmin two-factor challenge between the sign-in that
+	// hit it and the request that answers it. Nil, or without a key, means
+	// step one keeps answering a bare 409 as it did before there was a step
+	// two.
+	GarminMFA *garminmfa.Store
 
 	// Connector signs riders in to Komoot and resumes their stored sessions.
 	Connector KomootConnector
@@ -247,6 +254,14 @@ type Server struct {
 	// redeploying to change a limit.
 	ConnectLimiter *ratelimit.Limiter
 
+	// GarminMFALimiter throttles the second step of a Garmin two-factor
+	// sign-in, per rider, on its own budget. It must not draw on
+	// ConnectLimiter: a rider's five tries at a code plus a restart from step
+	// one have to fit, and step one already spent a slot. The attempt cap on
+	// the challenge itself is the brute-force control; this bounds how much
+	// this server can be made to ask Garmin.
+	GarminMFALimiter *ratelimit.Limiter
+
 	// AuthActionLimiter throttles a rider's own self-service Auth0
 	// Management API actions — a password-reset email
 	// (handleSelfPasswordReset) and an MFA enrollment ticket
@@ -385,6 +400,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/garmin/connection", s.handleGarminConnection)
 	mux.HandleFunc("POST /api/garmin/connection", s.handleGarminConnect)
+	mux.HandleFunc("POST /api/garmin/connection/mfa", s.handleGarminConnectMFA)
 	mux.HandleFunc("DELETE /api/garmin/connection", s.handleGarminDisconnect)
 	mux.HandleFunc("GET /api/garmin/devices", s.handleGarminDevices)
 	mux.HandleFunc("GET /api/garmin/courses", s.handleGarminCourseList)

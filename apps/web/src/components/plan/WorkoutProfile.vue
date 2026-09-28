@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // A miniature interval-profile chart — one bar per timed step, height by
 // relative effort — for a workout card/detail view. Deliberately simpler
-// than FitnessChart.vue's own line chart: bars, no axis, no hover; this is
-// meant to read at a glance in a list of workouts, not to be studied.
+// than FitnessChart.vue's own line chart: bars, no axis. The tiny week-strip
+// copies stay glanceable; the larger ones (the day card, the editor) pass
+// `interactive` so hovering a bar says which step it is and what it asks for.
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import type { RiderProfile, WorkoutStep } from '@/api/types'
-import { flattenSteps, formatDuration } from '@/utils/workoutMath'
+import { describeTarget, flattenSteps, formatClock, formatDuration } from '@/utils/workoutMath'
 
-const props = withDefaults(defineProps<{ steps: WorkoutStep[]; profile?: RiderProfile; height?: number }>(), {
-  height: 48,
-})
+const props = withDefaults(
+  defineProps<{ steps: WorkoutStep[]; profile?: RiderProfile; height?: number; interactive?: boolean }>(),
+  { height: 48, interactive: false },
+)
 
 // Coordinate space tracks the SVG's own real rendered width — same
 // reasoning as FitnessChart.vue's WIDTH ref: a fixed arbitrary unit count
@@ -63,10 +65,40 @@ const bars = computed(() => {
       width,
       height: barHeight,
       color: colorFor(step.intensity),
+      label: labelFor(step.step, step.seconds),
     }
     x += (step.seconds / total) * WIDTH.value
     return bar
   })
+})
+
+// "Warmup · 5:00 · 85–94 W · 50–55% FTP" — the same target wording the
+// step rows use, so the chart and the list never disagree.
+function labelFor(step: WorkoutStep, seconds: number): string {
+  const target = describeTarget(step, props.profile ?? {})
+  return [step.name || 'Step', formatClock(seconds), target].filter(Boolean).join(' · ')
+}
+
+// Hover (and touch-drag) picks the bar under the pointer by x alone, so a
+// short recovery bar is as easy to hit as a tall interval one.
+const hovered = ref<number | null>(null)
+
+function onPointerMove(e: PointerEvent) {
+  const el = svgEl.value
+  if (!props.interactive || !el) return
+  const x = e.clientX - el.getBoundingClientRect().left
+  const i = bars.value.findIndex((b) => x >= b.x && x < b.x + b.width + GAP)
+  hovered.value = i >= 0 ? i : null
+}
+
+const tooltip = computed(() => {
+  const i = hovered.value
+  if (i === null) return null
+  const bar = bars.value[i]
+  if (!bar) return null
+  // Clamp so the label never hangs off either edge of the card.
+  const center = bar.x + bar.width / 2
+  return { text: bar.label, left: Math.min(Math.max(center, 80), WIDTH.value - 80) }
 })
 
 function colorFor(intensity: WorkoutStep['intensity']): string {
@@ -80,23 +112,36 @@ function colorFor(intensity: WorkoutStep['intensity']): string {
   <p v-if="totalSeconds === 0" class="text-xs text-dimmed border-t border-dashed border-default pt-2">
     No timed steps
   </p>
-  <svg
-    v-else
-    ref="svgEl"
-    role="img"
-    :viewBox="`0 0 ${WIDTH} ${height}`"
-    class="w-full"
-    :style="{ height: `${height}px` }"
-  >
-    <title>Workout profile, {{ formatDuration(totalSeconds) }}</title>
-    <rect
-      v-for="(bar, i) in bars"
-      :key="i"
-      :x="bar.x"
-      :y="bar.y"
-      :width="bar.width"
-      :height="bar.height"
-      :fill="bar.color"
-    />
-  </svg>
+  <div v-else class="relative" @pointerleave="hovered = null">
+    <svg
+      ref="svgEl"
+      role="img"
+      :viewBox="`0 0 ${WIDTH} ${height}`"
+      class="w-full"
+      :class="{ 'cursor-crosshair': interactive }"
+      :style="{ height: `${height}px` }"
+      @pointermove="onPointerMove"
+    >
+      <title>Workout profile, {{ formatDuration(totalSeconds) }}</title>
+      <rect
+        v-for="(bar, i) in bars"
+        :key="i"
+        :x="bar.x"
+        :y="bar.y"
+        :width="bar.width"
+        :height="bar.height"
+        :fill="bar.color"
+        :opacity="interactive && hovered !== null && hovered !== i ? 0.45 : 1"
+      >
+        <title v-if="interactive">{{ bar.label }}</title>
+      </rect>
+    </svg>
+    <div
+      v-if="tooltip"
+      class="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-default bg-default px-2 py-1 font-mono text-xs tabular-nums text-highlighted shadow-sm"
+      :style="{ left: `${tooltip.left}px` }"
+    >
+      {{ tooltip.text }}
+    </div>
+  </div>
 </template>

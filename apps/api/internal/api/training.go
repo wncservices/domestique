@@ -126,6 +126,7 @@ type riderProfileDTO struct {
 	FTPEstimated          bool     `json:"ftpEstimated,omitempty"`
 	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm,omitempty"`
 	MaxHR                 int      `json:"maxHr,omitempty"`
+	ThresholdHR           int      `json:"thresholdHr,omitempty"`
 	RestingHR             int      `json:"restingHr,omitempty"`
 	AvailableDays         []string `json:"availableDays,omitempty"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay,omitempty"`
@@ -143,7 +144,7 @@ type riderProfileDTO struct {
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 	return riderProfileDTO{
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
-		MaxHR: p.MaxHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
+		MaxHR: p.MaxHR, ThresholdHR: p.ThresholdHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
 		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, UpdatedAt: p.UpdatedAt,
 	}
@@ -742,7 +743,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		// RiderProfile.FTPEstimated's own doc comment on why those only
 		// ever mean "not yet looked at and confirmed."
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
-		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
+		MaxHR: body.MaxHR, ThresholdHR: body.ThresholdHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
 		AutoPushWorkouts: body.AutoPushWorkouts,
 	})

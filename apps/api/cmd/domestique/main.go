@@ -36,6 +36,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
@@ -829,6 +830,9 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// (its own auth, its own API) is deliberately not limited here too
 		// — that belongs to Traefik/Cloudflare in front of it, not this.
 		ConnectLimiter: ratelimit.New(5, 15*time.Minute),
+		// Step two of a Garmin two-factor sign-in: its own budget, see
+		// GarminMFALimiter.
+		GarminMFALimiter: ratelimit.New(10, 15*time.Minute),
 		// A separate instance from ConnectLimiter — see AuthActionLimiter's
 		// own doc comment for why the two must not share one budget.
 		AuthActionLimiter: ratelimit.New(5, 15*time.Minute),
@@ -889,6 +893,15 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 	srv.Links = links
+
+	// Holds a Garmin two-factor challenge between the sign-in and the code.
+	// Same key as the sign-ins themselves, so no key means no challenge and
+	// step one falls back to its bare 409.
+	garminMFA, err := garminmfa.UseDB(src.Conn(), src.DSN(), box)
+	if err != nil {
+		return err
+	}
+	srv.GarminMFA = garminMFA
 
 	// Deployment-wide settings an admin can change from the UI. Same key as
 	// the sign-ins, so a deployment without one stores neither.

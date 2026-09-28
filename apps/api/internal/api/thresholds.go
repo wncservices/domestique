@@ -117,7 +117,7 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 		}
 		rides = append(rides, thresholds.Ride{
 			SessionID: a.SessionID, Date: sess.Date, Sport: sess.Sport,
-			PowerCurve: curve, MaxHR: a.MaxHR,
+			PowerCurve: curve, MaxHR: a.MaxHR, BestHR1200: a.BestHR1200,
 			BestSpeed1200: a.BestSpeed1200, BestSpeed1800: a.BestSpeed1800,
 		})
 		if sess.Sport == "cycling" && sess.Date >= ftpCutoff && (curve[1200] > 0 || curve[3600] > 0) {
@@ -129,6 +129,7 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 		FTPWatts: profile.FTPWatts, FTPEstimated: profile.FTPEstimated,
 		MaxHR: profile.MaxHR, MaxHREstimated: profile.IsEstimated(workout.FieldMaxHR),
 		ThresholdPaceSecPerKM: profile.ThresholdPaceSecPerKM, PaceEstimated: profile.IsEstimated(workout.FieldThresholdPace),
+		ThresholdHR: profile.ThresholdHR, ThresholdHREstimated: profile.IsEstimated(workout.FieldThresholdHR),
 	}
 
 	result := thresholdDetectionResult{Profile: profile, HasFTPPowerCurve: hasFTPPowerCurve}
@@ -145,6 +146,8 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 				sugg.MaxHR = int(math.Round(f.Value))
 			case workout.FieldThresholdPace:
 				sugg.ThresholdPaceSecPerKM = f.Value
+			case workout.FieldThresholdHR:
+				sugg.ThresholdHR = int(math.Round(f.Value))
 			}
 			var changed []string
 			result.Profile, changed = autoprofile.Apply(result.Profile, sugg)
@@ -184,7 +187,7 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 // thresholdFields is every field internal/thresholds.Detect can report on,
 // in Detect's own fixed order — what the stale-suggestion cleanup above
 // walks to find a field with nothing to say this pass.
-var thresholdFields = []string{"ftp", workout.FieldMaxHR, workout.FieldThresholdPace}
+var thresholdFields = []string{"ftp", workout.FieldMaxHR, workout.FieldThresholdPace, workout.FieldThresholdHR}
 
 // upsertThresholdSuggestion stores f as a pending suggestion, unless the
 // most recently dismissed suggestion for this rider/field/*direction* says
@@ -217,9 +220,9 @@ func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f 
 // thresholdMovedFurther is the dismissed-suggestion gate's margin check:
 // given a same-direction dismissal (the caller already scoped
 // LatestDismissedSuggestion to f.Direction), has f moved at least the
-// spec's own further-margin beyond it (3%, or 1 bpm for max HR)?
+// spec's own further-margin beyond it (3%, or 1 bpm for max HR and threshold HR)?
 func thresholdMovedFurther(f thresholds.Finding, dismissed workout.ThresholdSuggestion) bool {
-	if f.Field == workout.FieldMaxHR {
+	if f.Field == workout.FieldMaxHR || f.Field == workout.FieldThresholdHR {
 		if f.Direction == "up" {
 			return f.Value >= dismissed.Value+1
 		}
@@ -250,6 +253,9 @@ func applyAcceptedThreshold(p workout.RiderProfile, s workout.ThresholdSuggestio
 	case workout.FieldThresholdPace:
 		p.ThresholdPaceSecPerKM = s.Value
 		p.Estimated = removeEstimatedField(p.Estimated, workout.FieldThresholdPace)
+	case workout.FieldThresholdHR:
+		p.ThresholdHR = int(math.Round(s.Value))
+		p.Estimated = removeEstimatedField(p.Estimated, workout.FieldThresholdHR)
 	}
 	return p
 }

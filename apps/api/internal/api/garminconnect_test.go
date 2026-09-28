@@ -35,6 +35,14 @@ type fakeGarmin struct {
 	// sign-in failures are the point of most of these tests.
 	err error
 
+	// Second step of an MFA sign-in: what it was asked, and how it answers.
+	resumeCalls      int
+	resumedChallenge garmin.MFAChallenge
+	resumedCode      string
+	wantCode         string
+	resumeErr        error
+	resumeDelay      time.Duration
+
 	// devices is what Devices hands back, and devicesErr what it fails with.
 	devices    []garmin.Device
 	devicesErr error
@@ -255,6 +263,41 @@ func (f *fakeGarmin) DownloadGPX(_ context.Context, _ api.GarminConsumer, sessio
 		return nil, f.downloadGPXErr
 	}
 	return f.gpxByID[courseID], nil
+}
+
+// ResumeMFA answers a challenge. wantCode, when set, is the only code it
+// accepts; anything else is garmin.ErrMFACodeRejected together with a
+// refreshed challenge (rotated CSRF, moved cookie), as the real client returns
+// after Garmin re-renders the page. resumeErr overrides both. resumeDelay
+// holds each call open, so a test can make requests genuinely overlap.
+func (f *fakeGarmin) ResumeMFA(_ context.Context, consumer api.GarminConsumer, ch garmin.MFAChallenge, code string) (garmin.Session, garmin.MFAChallenge, error) {
+	f.mu.Lock()
+	f.consumer = consumer
+	f.resumeCalls++
+	f.resumedChallenge, f.resumedCode = ch, code
+	calls, delay, resumeErr := f.resumeCalls, f.resumeDelay, f.resumeErr
+	f.mu.Unlock()
+
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	if resumeErr != nil {
+		return garmin.Session{}, ch, resumeErr
+	}
+	if f.wantCode != "" && code != f.wantCode {
+		next := ch
+		next.CSRF = fmt.Sprintf("csrf-refreshed-%d", calls)
+		next.Cookies = map[string][]*http.Cookie{
+			"https://sso.garmin.com/sso": {{Name: "GARMIN-SSO", Value: fmt.Sprintf("cookie-refreshed-%d", calls)}},
+		}
+		return garmin.Session{}, next, garmin.ErrMFACodeRejected
+	}
+	return garmin.Session{
+		OAuth1Token:  "garmin-token-mfa",
+		OAuth1Secret: "garmin-secret-mfa",
+		DisplayName:  "Wilant N",
+		ObtainedAt:   time.Now().UTC(),
+	}, garmin.MFAChallenge{}, nil
 }
 
 func (f *fakeGarmin) Connect(_ context.Context, consumer api.GarminConsumer, email, password string) (garmin.Session, error) {

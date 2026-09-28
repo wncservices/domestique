@@ -213,6 +213,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 			FTPWatts:              bio.biometrics.CyclingFTPWatts,
 			MaxHR:                 bio.biometrics.MaxHR,
 			ThresholdPaceSecPerKM: bio.biometrics.ThresholdPaceSecPerKM,
+			ThresholdHR:           bio.biometrics.ThresholdHR,
 			RestingHR:             bio.restingHR,
 		}
 		restingHR = bio.restingHR
