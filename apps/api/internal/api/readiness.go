@@ -1,9 +1,14 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -50,9 +55,22 @@ type readinessTodayDTO struct {
 	Wellness *dailyWellnessDTO `json:"wellness,omitempty"`
 }
 
+// tomorrowForecastDTO is the look-ahead for tomorrow's hard session — only
+// present when tomorrow has an eligible workout and the forecast is not
+// ready. Reasons are the plain form the rules give them; the UI words the
+// form reason in the future tense itself.
+type tomorrowForecastDTO struct {
+	Date        string   `json:"date"`
+	Risk        string   `json:"risk"`
+	Reasons     []string `json:"reasons,omitempty"`
+	WorkoutID   string   `json:"workoutId"`
+	WorkoutName string   `json:"workoutName"`
+}
+
 type readinessResponseDTO struct {
-	Today readinessTodayDTO  `json:"today"`
-	Days  []dailyWellnessDTO `json:"days"`
+	Today    readinessTodayDTO    `json:"today"`
+	Days     []dailyWellnessDTO   `json:"days"`
+	Tomorrow *tomorrowForecastDTO `json:"tomorrow,omitempty"`
 }
 
 // readinessDisplayDays is how many of the most recent daily_wellness rows
@@ -69,20 +87,20 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rider := auth.FromContext(r.Context()).User
+	today, ok := parseTodayParam(w, r, s.now())
+	if !ok {
+		return
+	}
 
 	sessions, err := s.Training.ListSessions(r.Context(), rider)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	snapshots, err := s.Training.ListFitnessSnapshots(r.Context(), rider)
+	latest, err := s.latestFitness(r.Context(), rider)
 	if err != nil {
 		s.fail(w, err)
 		return
-	}
-	var latest *workout.FitnessSnapshot
-	if len(snapshots) > 0 {
-		latest = &snapshots[len(snapshots)-1]
 	}
 
 	assessment := s.assessReadiness(r.Context(), rider, sessions, latest)
@@ -107,5 +125,128 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 			out.Today.Wellness = &today
 		}
 	}
+
+	forecast, target, ok, err := s.tomorrowFor(r.Context(), rider, today, sessions, latest)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if ok && forecast.Verdict != readiness.Ready {
+		out.Tomorrow = &tomorrowForecastDTO{
+			Date: today.AddDate(0, 0, 1).Format(dateFormat), Risk: string(forecast.Verdict),
+			Reasons: forecast.Reasons, WorkoutID: target.ID, WorkoutName: target.Name,
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// parseTodayParam reads ?today=YYYY-MM-DD, the caller's own idea of today —
+// the same precedent handleUpcomingRides sets for ?from=, for the same
+// reason: the browser always knows its local day and the server's process
+// zone is no guarantee. Omitted, it falls back to the server's UTC today. A
+// malformed value is a 400 and ok is false.
+func parseTodayParam(w http.ResponseWriter, r *http.Request, fallback time.Time) (time.Time, bool) {
+	raw := r.URL.Query().Get("today")
+	if raw == "" {
+		return calendarDay(fallback.UTC()), true
+	}
+	t, err := time.Parse(dateFormat, raw)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "today must be a date in YYYY-MM-DD form"})
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func (s *Server) latestFitness(ctx context.Context, rider string) (*workout.FitnessSnapshot, error) {
+	snapshots, err := s.Training.ListFitnessSnapshots(ctx, rider)
+	if err != nil || len(snapshots) == 0 {
+		return nil, err
+	}
+	return &snapshots[len(snapshots)-1], nil
+}
+
+// tomorrowFor reads what forecastTomorrow needs and runs it — fresh each
+// time, anchored to today (the caller's day), never a cached shape. Both the
+// GET banner and the ease action go through here so they cannot disagree
+// about what tomorrow looks like.
+func (s *Server) tomorrowFor(ctx context.Context, rider string, today time.Time, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot) (readiness.Assessment, workout.Workout, bool, error) {
+	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		return readiness.Assessment{}, workout.Workout{}, false, err
+	}
+	profile, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		return readiness.Assessment{}, workout.Workout{}, false, err
+	}
+	todayAssessment := s.assessReadinessAt(ctx, rider, sessions, latest, today)
+	forecast, target, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
+	return forecast, target, ok, nil
+}
+
+// easeTomorrowRefusedMessage is what a rider sees when the fresh forecast no
+// longer calls for easing, or tomorrow's session is no longer one this may
+// touch. One plain message for every such case: the rider's next step is the
+// same (reload and look), and the server does not need to explain which of
+// its internal checks tripped.
+const easeTomorrowRefusedMessage = "Tomorrow's session no longer needs easing, or has already been changed — nothing was changed."
+
+// handleEaseTomorrow applies the forecast: it recomputes it from scratch
+// (never trusting what the banner showed when the page loaded — training
+// data moves), and if tomorrow's session is still at risk eases that one
+// workout through the same Downgrade/StepDown application today's readiness
+// uses. It refuses with 409 rather than improvise when there is nothing
+// eligible or the fresh forecast is ready. Tomorrow only: the target comes
+// from forecastTomorrow, which only ever looks at tomorrow's date.
+func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+	today, ok := parseTodayParam(w, r, s.now())
+	if !ok {
+		return
+	}
+
+	sessions, err := s.Training.ListSessions(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	latest, err := s.latestFitness(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	forecast, target, ok, err := s.tomorrowFor(r.Context(), rider, today, sessions, latest)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !ok || forecast.Verdict == readiness.Ready {
+		s.logger().Warn("ease tomorrow refused: nothing to ease", "rider", rider, "eligible", ok)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": easeTomorrowRefusedMessage})
+		return
+	}
+
+	profile, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	reason := "Eased ahead of time — " + strings.Join(forecast.Reasons, "; ")
+	change := adapter.Change{WorkoutID: target.ID, Reason: reason}
+	if forecast.Verdict == readiness.Rest {
+		change.Downgrade = true
+	} else {
+		change.StepDown = true
+		change.StepDownSourceID = "readiness-forecast:" + target.Date
+	}
+	what, err := s.applyChange(r.Context(), rider, target, map[string]workout.Workout{target.ID: target}, profile, change)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.logger().Info("tomorrow's workout eased by the rider", "workout", target.ID, "rider", rider, "change", what)
+	writeJSON(w, http.StatusOK, map[string]string{"reason": reason})
 }

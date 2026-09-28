@@ -1,6 +1,9 @@
 package readiness
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // TomorrowInput is what ForecastTomorrow needs — gathered by the caller
 // (internal/api), same division of labour assessReadiness already draws
@@ -56,4 +59,12 @@ func ForecastTomorrow(in TomorrowInput) Assessment {
 	default:
 		return Assessment{Verdict: Ready}
 	}
+}
+
+// ACWR is the acute:chronic load ratio Assess uses, for a caller that has
+// to build the loads itself — the forecast counts today's own load, which
+// Assess's caller may not have logged yet. referenceDate is reduced to its
+// calendar date, so a caller's time-of-day or zone never moves the window.
+func ACWR(loads []Load, referenceDate time.Time) (float64, bool) {
+	return acwr(loads, dateOnly(referenceDate))
 }

@@ -365,6 +365,13 @@ func stepDownReason(w workout.Workout) string {
 // detectFatigue), not a reason to make it up again — and everything else
 // ("nailed", "completed") is plainly done. Without an analysis, the ≥ 50 %
 // time rule is the only signal available and remains the fallback.
+// WorkoutDone is done without any ride analysis — for a caller looking at a
+// day no analysis can exist for yet (tomorrow's session), where the ≥ 50 %
+// time rule is the whole test.
+func WorkoutDone(w workout.Workout, sessions []workout.CompletedSession) bool {
+	return done(w, sessions, nil)
+}
+
 func done(w workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis) bool {
 	if a, ok := analyses[w.ID]; ok {
 		return a.Outcome != string(outcomeIncomplete)
@@ -582,6 +589,14 @@ func estimatePlannedTSS(w workout.Workout, ftpWatts float64) float64 {
 		intensity = mid / ftpWatts
 	}
 	return hours * intensity * intensity * 100
+}
+
+// EstimatePlannedTSS is estimatePlannedTSS for a caller outside this
+// package — the readiness forecast estimates a planned session's load the
+// same way overloadedWeek does, rather than carrying its own copy of the
+// formula.
+func EstimatePlannedTSS(w workout.Workout, ftpWatts float64) float64 {
+	return estimatePlannedTSS(w, ftpWatts)
 }
 
 // firstPowerTargetMid returns the midpoint of the first power-target step

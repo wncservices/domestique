@@ -119,50 +119,71 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		appliedFor[c.WorkoutID] = true
 		wk := byID[c.WorkoutID]
 
-		// A step-down replaces the workout's own content (name, steps,
-		// level) rather than moving or downgrading it wholesale — see
-		// applyStepDown.
-		if c.StepDown {
-			if err := s.applyStepDown(ctx, wk, profile, c); err != nil {
-				s.logger().Warn("adapt: could not step a workout down", "workout", wk.ID, "rider", rider, "err", err)
-				continue
-			}
-			s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "stepped down", "reason", c.Reason)
-			continue
-		}
-
-		description := wk.Description + " " + adapter.Note(c)
-		req := workout.UpdateWorkoutRequest{Description: &description}
-
-		what := "rescheduled"
-		if c.NewDate != "" {
-			req.Date = &c.NewDate
-		}
-		if c.Downgrade {
-			easy := scheduler.EasyVariant(wk, profile)
-			description += fmt.Sprintf(" Replaces: %s.", wk.Name)
-			req.Name, req.Steps = &easy.Name, &easy.Steps
-			what = "downgraded"
-		}
-
-		// The easy day the missed session is taking over is given up first,
-		// off the rider's watch as well as out of the plan — and only then is
-		// the missed one moved onto it, so a failure part-way never leaves two
-		// sessions on one day.
-		if c.ReplaceWorkoutID != "" {
-			gone := byID[c.ReplaceWorkoutID]
-			s.removeWorkoutFromGarmin(ctx, gone)
-			if err := s.Training.DeleteWorkout(ctx, gone.ID); err != nil {
-				s.logger().Warn("adapt: could not remove the easy day being replaced", "workout", gone.ID, "rider", rider, "err", err)
-				continue
-			}
-		}
-		if _, err := s.Training.UpdateWorkout(ctx, wk.ID, req); err != nil {
-			s.logger().Warn("adapt: could not update a workout", "workout", wk.ID, "rider", rider, "err", err)
+		what, err := s.applyChange(ctx, rider, wk, byID, profile, c)
+		if err != nil {
+			// applyChange has already logged which step failed.
 			continue
 		}
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "reason", c.Reason)
 	}
+
+	s.logTomorrowAdvisory(ctx, rider, sessions, latest, assessment, profile)
+}
+
+// applyChange writes one adapter.Change to the store and returns what kind
+// of change it was, for the caller's log line. It is the one place a Change
+// (reschedule, downgrade or step-down) becomes a stored workout, shared by
+// adaptRider and the "ease tomorrow" action, so both append
+// scheduler.AdjustedMarker through the same code. That marker is what makes
+// a workout no longer scheduler.IsGenerated, which is the whole
+// one-change-per-workout guard: a second implementation of it would be a
+// second way to get it wrong.
+//
+// On failure it logs which step failed (Warn: the rest of an adaptation
+// pass still runs) and returns the error, so an HTTP caller can answer with
+// it as well.
+func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Workout, byID map[string]workout.Workout, profile workout.RiderProfile, c adapter.Change) (string, error) {
+	// A step-down replaces the workout's own content (name, steps, level)
+	// rather than moving or downgrading it wholesale — see applyStepDown.
+	if c.StepDown {
+		if err := s.applyStepDown(ctx, wk, profile, c); err != nil {
+			s.logger().Warn("adapt: could not step a workout down", "workout", wk.ID, "rider", rider, "err", err)
+			return "", err
+		}
+		return "stepped down", nil
+	}
+
+	description := wk.Description + " " + adapter.Note(c)
+	req := workout.UpdateWorkoutRequest{Description: &description}
+
+	what := "rescheduled"
+	if c.NewDate != "" {
+		req.Date = &c.NewDate
+	}
+	if c.Downgrade {
+		easy := scheduler.EasyVariant(wk, profile)
+		description += fmt.Sprintf(" Replaces: %s.", wk.Name)
+		req.Name, req.Steps = &easy.Name, &easy.Steps
+		what = "downgraded"
+	}
+
+	// The easy day the missed session is taking over is given up first,
+	// off the rider's watch as well as out of the plan — and only then is
+	// the missed one moved onto it, so a failure part-way never leaves two
+	// sessions on one day.
+	if c.ReplaceWorkoutID != "" {
+		gone := byID[c.ReplaceWorkoutID]
+		s.removeWorkoutFromGarmin(ctx, gone)
+		if err := s.Training.DeleteWorkout(ctx, gone.ID); err != nil {
+			s.logger().Warn("adapt: could not remove the easy day being replaced", "workout", gone.ID, "rider", rider, "err", err)
+			return "", err
+		}
+	}
+	if _, err := s.Training.UpdateWorkout(ctx, wk.ID, req); err != nil {
+		s.logger().Warn("adapt: could not update a workout", "workout", wk.ID, "rider", rider, "err", err)
+		return "", err
+	}
+	return what, nil
 }
 
 // applyStepDown replaces wk with the rung one level below its own on the
@@ -224,7 +245,13 @@ const readinessHistoryDays = 29
 // whatever else is available) rather than aborting the whole adaptation pass
 // for a rider whose only problem is an unreadable wellness table.
 func (s *Server) assessReadiness(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot) readiness.Assessment {
-	now := s.now()
+	return s.assessReadinessAt(ctx, rider, sessions, latest, s.now())
+}
+
+// assessReadinessAt is assessReadiness for a caller-chosen "now": the
+// tomorrow forecast anchors to the browser's own day (?today=), and the
+// verdict feeding it has to describe that same day.
+func (s *Server) assessReadinessAt(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time) readiness.Assessment {
 	todayStr := now.Format("2006-01-02")
 	sinceDate := now.AddDate(0, 0, -readinessHistoryDays).Format("2006-01-02")
 
