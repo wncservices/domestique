@@ -14,20 +14,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
-// thresholdHistoryWindowDays mirrors internal/thresholds' own (unexported)
-// historyWindowDays — the down-direction rule's 90-day lookback. This
-// package cannot reference that constant directly, so the value is kept in
-// sync here; see thresholds.Detect's own doc comment and the design spec's
-// "When a value changes" table for what 90 days means and why.
-const thresholdHistoryWindowDays = 90
-
-// thresholdFTPWindowDays mirrors thresholds' own detectionWindowDays — the
-// window eFTP is judged over. Used only to decide whether
-// fitnesstest.EstimateFTP's cruder whole-ride-average fallback should still
-// run (see detectThresholds' own HasFTPPowerCurve), never to filter what is
-// handed to Detect itself, which does its own windowing.
-const thresholdFTPWindowDays = 42
-
 // ---------- DTOs ----------
 //
 // Mirrored by hand in apps/web/src/api/types.ts — change them together.
@@ -84,7 +70,7 @@ type thresholdDetectionResult struct {
 // joined here to each analysis for the Sport/Date thresholds.Ride needs,
 // since session_analyses itself carries neither.
 func (s *Server) detectThresholds(ctx context.Context, rider string, profile workout.RiderProfile, sessions []workout.CompletedSession, now time.Time) (thresholdDetectionResult, error) {
-	sinceDate := now.AddDate(0, 0, -thresholdHistoryWindowDays).Format("2006-01-02")
+	sinceDate := now.AddDate(0, 0, -thresholds.HistoryWindowDays).Format("2006-01-02")
 	analyses, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
 		return thresholdDetectionResult{}, err
@@ -95,7 +81,7 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 		sessionByID[sess.ID] = sess
 	}
 
-	ftpCutoff := now.AddDate(0, 0, -thresholdFTPWindowDays).Format("2006-01-02")
+	ftpCutoff := now.AddDate(0, 0, -thresholds.DetectionWindowDays).Format("2006-01-02")
 	var rides []thresholds.Ride
 	hasFTPPowerCurve := false
 	for _, a := range analyses {
@@ -131,7 +117,10 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 	}
 
 	result := thresholdDetectionResult{Profile: profile, HasFTPPowerCurve: hasFTPPowerCurve}
-	for _, f := range thresholds.Detect(rides, tp, now) {
+	findings := thresholds.Detect(rides, tp, now)
+	foundField := make(map[string]bool, len(findings))
+	for _, f := range findings {
+		foundField[f.Field] = true
 		if f.Auto {
 			sugg := autoprofile.Suggestion{}
 			switch f.Field {
@@ -155,15 +144,44 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 			return thresholdDetectionResult{}, err
 		}
 	}
+
+	// Stale-suggestion cleanup: a field this pass found nothing to say about
+	// — the rider already typed a value close enough, the ride evidence that
+	// produced an earlier suggestion has aged out of the window, whatever —
+	// must not leave an outdated pending suggestion sitting in the Fitness
+	// banner forever. Only fields with NO finding at all this pass are
+	// touched; a field that did produce a finding (Auto or not) is already
+	// handled above (Auto never leaves a suggestion behind, and
+	// upsertThresholdSuggestion's own CreateSuggestion replaces any existing
+	// pending row for that field with the fresh one).
+	for _, field := range thresholdFields {
+		if foundField[field] {
+			continue
+		}
+		if err := s.Training.DeletePendingSuggestion(ctx, rider, field); err != nil {
+			return thresholdDetectionResult{}, err
+		}
+	}
+
 	return result, nil
 }
 
+// thresholdFields is every field internal/thresholds.Detect can report on,
+// in Detect's own fixed order — what the stale-suggestion cleanup above
+// walks to find a field with nothing to say this pass.
+var thresholdFields = []string{"ftp", workout.FieldMaxHR, workout.FieldThresholdPace}
+
 // upsertThresholdSuggestion stores f as a pending suggestion, unless the
-// most recently dismissed suggestion for this rider/field says otherwise —
-// spec: "a dismissed suggestion reappears only if a later estimate moves at
-// least a further 3% beyond the dismissed value (1 bpm for max HR)."
+// most recently dismissed suggestion for this rider/field/*direction* says
+// otherwise — spec: "a dismissed suggestion reappears only if a later
+// estimate moves at least a further 3% beyond the dismissed value (1 bpm
+// for max HR)." The lookup itself is direction-scoped — LatestDismissedSuggestion
+// only ever returns a same-direction row — so an up finding is never held
+// back by a dismissed *down* suggestion, or vice versa: those describe
+// unrelated claims ("FTP dropped" and "FTP rose" are not the same estimate
+// moving further, one replacing a dismissal of the other would be a bug).
 func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f thresholds.Finding) error {
-	dismissed, ok, err := s.Training.LatestDismissedSuggestion(ctx, rider, f.Field)
+	dismissed, ok, err := s.Training.LatestDismissedSuggestion(ctx, rider, f.Field, f.Direction)
 	if err != nil {
 		return err
 	}
@@ -172,7 +190,7 @@ func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f 
 	}
 
 	if _, err := s.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
-		Rider: rider, Field: f.Field, Value: f.Value, Previous: f.Previous,
+		Rider: rider, Field: f.Field, Value: f.Value, Previous: f.Previous, Direction: f.Direction,
 		SourceSessionID: f.SourceSessionID, SourceDate: f.SourceDate, Reason: f.Reason,
 	}); err != nil {
 		return err
@@ -181,9 +199,10 @@ func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f 
 	return nil
 }
 
-// thresholdMovedFurther is the dismissed-suggestion gate itself: whether f
-// continues moving in the same direction it was dismissed at, by at least
-// the spec's own margin (3%, or 1 bpm for max HR).
+// thresholdMovedFurther is the dismissed-suggestion gate's margin check:
+// given a same-direction dismissal (the caller already scoped
+// LatestDismissedSuggestion to f.Direction), has f moved at least the
+// spec's own further-margin beyond it (3%, or 1 bpm for max HR)?
 func thresholdMovedFurther(f thresholds.Finding, dismissed workout.ThresholdSuggestion) bool {
 	if f.Field == workout.FieldMaxHR {
 		if f.Direction == "up" {

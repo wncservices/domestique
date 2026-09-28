@@ -1,6 +1,11 @@
 package workout
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/wncservices/domestique/apps/api/internal/source"
+)
 
 // TestThresholdSuggestionsEachEngine mirrors TestEachEngine's own
 // SQLite-and-PostgreSQL structure (see db_test.go) for the
@@ -145,7 +150,7 @@ func TestThresholdSuggestionsEachEngine(t *testing.T) {
 					t.Fatalf("create: %v", err)
 				}
 
-				if _, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", FieldMaxHR); err != nil || ok {
+				if _, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", FieldMaxHR, "up"); err != nil || ok {
 					t.Fatalf("before dismiss: ok=%v err=%v, want none yet", ok, err)
 				}
 
@@ -153,7 +158,7 @@ func TestThresholdSuggestionsEachEngine(t *testing.T) {
 					t.Fatalf("dismiss: %v", err)
 				}
 
-				dismissed, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", FieldMaxHR)
+				dismissed, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", FieldMaxHR, "up")
 				if err != nil || !ok {
 					t.Fatalf("latest dismissed: ok=%v err=%v", ok, err)
 				}
@@ -190,9 +195,89 @@ func TestThresholdSuggestionsEachEngine(t *testing.T) {
 				// sync's re-suggest gate reads, not something CreateSuggestion
 				// ever overwrites (only a *pending* row for the same field is
 				// replaced).
-				stillDismissed, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", "ftp")
+				stillDismissed, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", "ftp", "up")
 				if err != nil || !ok || stillDismissed.ID != sug.ID {
 					t.Fatalf("latest dismissed after fresh create = %+v ok=%v err=%v", stillDismissed, ok, err)
+				}
+			})
+
+			t.Run("direction round-trips and defaults to up when not set", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				withDirection, err := db.CreateSuggestion(ctx, ThresholdSuggestion{
+					Rider: "wilant", Field: "ftp", Value: 240, Previous: 260, Direction: "down",
+				})
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				if withDirection.Direction != "down" {
+					t.Errorf("direction = %q, want down", withDirection.Direction)
+				}
+				got, err := db.GetSuggestion(ctx, withDirection.ID)
+				if err != nil || got.Direction != "down" {
+					t.Fatalf("get = %+v, err=%v, want direction=down", got, err)
+				}
+
+				defaulted, err := db.CreateSuggestion(ctx, ThresholdSuggestion{Rider: "wilant", Field: FieldMaxHR, Value: 191})
+				if err != nil {
+					t.Fatalf("create without direction: %v", err)
+				}
+				if defaulted.Direction != "up" {
+					t.Errorf("direction = %q, want the default up", defaulted.Direction)
+				}
+			})
+
+			t.Run("LatestDismissedSuggestion is scoped to direction — an opposite-direction dismissal is invisible", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				down, err := db.CreateSuggestion(ctx, ThresholdSuggestion{
+					Rider: "wilant", Field: "ftp", Value: 240, Previous: 260, Direction: "down",
+				})
+				if err != nil {
+					t.Fatalf("create down: %v", err)
+				}
+				if err := db.MarkSuggestionDismissed(ctx, down.ID); err != nil {
+					t.Fatalf("dismiss down: %v", err)
+				}
+
+				// An up lookup must not find the dismissed down suggestion —
+				// review round 1's fix: a dismissal only gates a finding in
+				// the SAME direction it was itself dismissed at.
+				if _, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", "ftp", "up"); err != nil || ok {
+					t.Fatalf("up lookup found a down dismissal: ok=%v err=%v", ok, err)
+				}
+				// The matching direction still finds it.
+				found, ok, err := db.LatestDismissedSuggestion(ctx, "wilant", "ftp", "down")
+				if err != nil || !ok || found.ID != down.ID {
+					t.Fatalf("down lookup = %+v ok=%v err=%v, want the dismissed down suggestion", found, ok, err)
+				}
+			})
+
+			t.Run("DeletePendingSuggestion removes a pending row and no-ops when there is none", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				sug, err := db.CreateSuggestion(ctx, ThresholdSuggestion{Rider: "wilant", Field: "ftp", Value: 260})
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+
+				if err := db.DeletePendingSuggestion(ctx, "wilant", "ftp"); err != nil {
+					t.Fatalf("delete: %v", err)
+				}
+				if _, err := db.GetSuggestion(ctx, sug.ID); err != ErrThresholdSuggestionNotFound {
+					t.Errorf("get after delete: err = %v, want ErrThresholdSuggestionNotFound", err)
+				}
+
+				// A second delete, or one for a field with nothing pending,
+				// is a no-op rather than an error.
+				if err := db.DeletePendingSuggestion(ctx, "wilant", "ftp"); err != nil {
+					t.Errorf("delete again: %v, want no error", err)
+				}
+				if err := db.DeletePendingSuggestion(ctx, "wilant", FieldMaxHR); err != nil {
+					t.Errorf("delete for a field with nothing pending: %v, want no error", err)
 				}
 			})
 
@@ -208,5 +293,65 @@ func TestThresholdSuggestionsEachEngine(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// TestThresholdSuggestionsTableGainsDirectionColumn mirrors
+// TestSessionAnalysesTableGainsFeelAndLevelDeltaColumns's own migration
+// shape (see progression_db_test.go): a pre-existing threshold_suggestions
+// table without direction must migrate cleanly, defaulting existing rows to
+// 'up', and UseDB must stay idempotent against an already-migrated database.
+func TestThresholdSuggestionsTableGainsDirectionColumn(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	// The pre-migration shape of threshold_suggestions, minus direction.
+	if _, err := src.Conn().Exec(`
+CREATE TABLE threshold_suggestions (
+    id                 TEXT PRIMARY KEY,
+    rider              TEXT NOT NULL,
+    field              TEXT NOT NULL,
+    value              DOUBLE PRECISION NOT NULL DEFAULT 0,
+    previous           DOUBLE PRECISION NOT NULL DEFAULT 0,
+    source_session_id  TEXT NOT NULL DEFAULT '',
+    source_date        TEXT NOT NULL DEFAULT '',
+    reason             TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'pending',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`
+INSERT INTO threshold_suggestions (id, rider, field, value, previous, status, created_at, updated_at)
+VALUES ('old-sug', 'wilant', 'ftp', 260, 250, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+
+	old, err := db.GetSuggestion(t.Context(), "old-sug")
+	if err != nil {
+		t.Fatalf("get pre-existing row after migration: %v", err)
+	}
+	if old.Direction != "up" {
+		t.Errorf("pre-existing row direction = %q, want the default up", old.Direction)
+	}
+
+	// The migrated column is fully usable — a direction-scoped lookup finds
+	// the backfilled row under "up".
+	pending, err := db.ListPendingSuggestions(t.Context(), "wilant")
+	if err != nil || len(pending) != 1 || pending[0].Direction != "up" {
+		t.Fatalf("pending after migration = %+v, err=%v", pending, err)
+	}
+
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
 	}
 }

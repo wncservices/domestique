@@ -55,17 +55,22 @@ type Finding struct {
 	Auto bool
 }
 
-// detectionWindowDays is the window "What is detected" reads rides from:
-// rides dated within the 42 days up to and including today.
-const detectionWindowDays = 42
+// DetectionWindowDays is the window "What is detected" reads rides from:
+// rides dated within the 42 days up to and including today. Exported so a
+// caller building the Ride slice Detect is handed (internal/api's own
+// detectThresholds) can size its own query/eligibility windows from the
+// same number, rather than keeping a second copy of 42 in sync by hand.
+const DetectionWindowDays = 42
 
-// historyWindowDays is how far back the down-direction rule looks, both for
+// HistoryWindowDays is how far back the down-direction rule looks, both for
 // "does enough history exist to trust silence" and for "did anything in
 // that stretch come close" — see the spec's "When a value changes" table
 // and this task's resolution: "the rider has analysed rides dated >= 90
 // days ago AND none within the last 90 days reaches 95% of the current
-// value."
-const historyWindowDays = 90
+// value." Exported for the same reason as DetectionWindowDays: a caller
+// loading rides for Detect needs to know how far back "enough history"
+// reaches without duplicating the number.
+const HistoryWindowDays = 90
 
 // upFactor / downFactor are the FTP and threshold-pace thresholds: an
 // estimate has to beat the current value by 3% to count as a real
@@ -262,7 +267,7 @@ func hasFTPHistoryBefore(rides []Ride, today time.Time, days int) bool {
 }
 
 func detectFTP(rides []Ride, p Profile, today time.Time) (Finding, bool) {
-	if c, source, found := bestFTPInWindow(rides, today, detectionWindowDays); found &&
+	if c, source, found := bestFTPInWindow(rides, today, DetectionWindowDays); found &&
 		c.value >= p.FTPWatts*upFactor {
 		return Finding{
 			Field:           "ftp",
@@ -283,14 +288,14 @@ func detectFTP(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	if p.FTPWatts <= 0 {
 		return Finding{}, false
 	}
-	if !hasFTPHistoryBefore(rides, today, historyWindowDays) {
+	if !hasFTPHistoryBefore(rides, today, HistoryWindowDays) {
 		return Finding{}, false
 	}
 	// A down finding needs an actual recent effort to point to — "reaches
 	// back 90 days but the rider hasn't ridden at all lately" is a real
 	// gap, but it is not evidence the rider's FTP has *dropped*, so it must
 	// not manufacture a Value of 0.
-	recent, source, recentFound := bestFTPInWindow(rides, today, historyWindowDays)
+	recent, source, recentFound := bestFTPInWindow(rides, today, HistoryWindowDays)
 	if !recentFound || recent.value >= p.FTPWatts*downFactor {
 		return Finding{}, false
 	}
@@ -312,7 +317,7 @@ func detectMaxHR(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	found := false
 	for _, r := range rides {
 		d, ok := parseDate(r.Date)
-		if !ok || !inWindow(d, today, detectionWindowDays) {
+		if !ok || !inWindow(d, today, DetectionWindowDays) {
 			continue
 		}
 		if r.MaxHR <= 0 || r.MaxHR > maxHRSpikeThreshold {
@@ -435,7 +440,7 @@ func formatPaceMinSec(secPerKM float64) string {
 func detectPace(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	currentSpeed := currentPaceSpeed(p.ThresholdPaceSecPerKM)
 
-	if c, source, found := bestPaceInWindow(rides, today, detectionWindowDays); found &&
+	if c, source, found := bestPaceInWindow(rides, today, DetectionWindowDays); found &&
 		c.speed >= currentSpeed*upFactor {
 		return Finding{
 			Field:           "threshold_pace",
@@ -452,12 +457,12 @@ func detectPace(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	if p.ThresholdPaceSecPerKM <= 0 {
 		return Finding{}, false
 	}
-	if !hasPaceHistoryBefore(rides, today, historyWindowDays) {
+	if !hasPaceHistoryBefore(rides, today, HistoryWindowDays) {
 		return Finding{}, false
 	}
 	// As with FTP: no qualifying recent run means no evidence of a decline,
 	// not a Value of 0 to suggest.
-	recent, source, recentFound := bestPaceInWindow(rides, today, historyWindowDays)
+	recent, source, recentFound := bestPaceInWindow(rides, today, HistoryWindowDays)
 	if !recentFound || recent.speed >= currentSpeed*downFactor {
 		return Finding{}, false
 	}

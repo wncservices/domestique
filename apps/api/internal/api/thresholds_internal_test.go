@@ -130,6 +130,46 @@ func TestUpsertThresholdSuggestionWithNoDismissalAlwaysCreates(t *testing.T) {
 	}
 }
 
+// TestUpsertThresholdSuggestionOppositeDirectionDismissalDoesNotGate is
+// review round 1's fix #1: a dismissed *up* suggestion must never hold back
+// a genuine *down* finding (or vice versa) — those are unrelated claims
+// ("FTP rose" vs "FTP dropped"), not the same estimate moving further in
+// one direction. Before the fix, LatestDismissedSuggestion ignored
+// direction entirely, so this down finding would have been compared against
+// the up dismissal's value and very likely swallowed.
+func TestUpsertThresholdSuggestionOppositeDirectionDismissalDoesNotGate(t *testing.T) {
+	s := newThresholdTestServer(t)
+	ctx := t.Context()
+
+	dismissedUp, err := s.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
+		Rider: "wilant", Field: "ftp", Value: 268, Previous: 250, Direction: "up",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.Training.MarkSuggestionDismissed(ctx, dismissedUp.ID); err != nil {
+		t.Fatalf("dismiss: %v", err)
+	}
+
+	// 260 is deliberately chosen so a direction-blind comparison against the
+	// *up* dismissal's value (268) would say "not moved far enough" (260 is
+	// not <= 268*0.97 = 259.96) and wrongly suppress this — while a
+	// correctly direction-scoped lookup finds no down dismissal at all and
+	// creates it unconditionally.
+	if err := s.upsertThresholdSuggestion(ctx, "wilant", thresholds.Finding{
+		Field: "ftp", Direction: "down", Value: 260, Previous: 250, Reason: "no effort near 250 W in the last 90 days",
+	}); err != nil {
+		t.Fatalf("upsert down: %v", err)
+	}
+	pending, err := s.Training.ListPendingSuggestions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(pending) != 1 || pending[0].Direction != "down" || pending[0].Value != 260 {
+		t.Fatalf("pending = %+v, err=%v, want one down suggestion at 260", pending, err)
+	}
+}
+
 // TestDetectThresholdsAppliesAutoFindingToAnEmptyField drives
 // detectThresholds directly: a rider with no FTP, one analysed cycling ride
 // with a 20-minute power-curve entry well above zero produces an Auto
@@ -246,5 +286,89 @@ func TestDetectThresholdsHasFTPPowerCurveFalseWithoutOne(t *testing.T) {
 	}
 	if len(result.Detected) != 0 {
 		t.Errorf("detected = %+v, want none", result.Detected)
+	}
+}
+
+// TestDetectThresholdsDeletesAStalePendingSuggestionForAFieldWithNoFinding is
+// review round 1's fix #2: a field that produces no finding at all this
+// pass — the evidence aged out of the window, or the rider typed a value
+// close enough that nothing qualifies any more — must not leave an earlier
+// pending suggestion sitting around showing an outdated number.
+func TestDetectThresholdsDeletesAStalePendingSuggestionForAFieldWithNoFinding(t *testing.T) {
+	s := newThresholdTestServer(t)
+	ctx := t.Context()
+
+	if _, err := s.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
+		Rider: "wilant", Field: workout.FieldMaxHR, Value: 191, Previous: 188, Direction: "up",
+	}); err != nil {
+		t.Fatalf("seed stale suggestion: %v", err)
+	}
+
+	// No analysed rides at all this pass, so none of the three fields
+	// produce a finding — max_hr's stale suggestion above must be cleared.
+	if _, err := s.detectThresholds(ctx, "wilant", workout.RiderProfile{Rider: "wilant"}, nil, fixedNow); err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+
+	pending, err := s.Training.ListPendingSuggestions(ctx, "wilant")
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending = %+v, err=%v, want none — the stale max_hr suggestion should be cleared", pending, err)
+	}
+}
+
+// TestDetectThresholdsLeavesAFieldsPendingSuggestionAloneWhenItStillFinds
+// confirms the cleanup is per-field, not all-or-nothing: a field that DOES
+// still produce a finding this pass keeps its own suggestion handling
+// (upsertThresholdSuggestion's own replace-on-create), untouched by the
+// stale-cleanup pass running for its sibling fields.
+func TestDetectThresholdsLeavesAFieldsPendingSuggestionAloneWhenItStillFinds(t *testing.T) {
+	s := newThresholdTestServer(t)
+	ctx := t.Context()
+
+	// A stale max_hr suggestion with nothing backing it this pass...
+	if _, err := s.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
+		Rider: "wilant", Field: workout.FieldMaxHR, Value: 191, Previous: 188, Direction: "up",
+	}); err != nil {
+		t.Fatalf("seed stale max_hr suggestion: %v", err)
+	}
+
+	// ...alongside a real, currently-analysed cycling ride that still
+	// produces an FTP finding this pass, for a rider-typed (never
+	// overwritten) FTP.
+	session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "d3", Sport: "cycling",
+		Date: "2026-03-10", DurationSeconds: 1200,
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: session.ID, Rider: "wilant", Outcome: "unplanned",
+		PowerCurve: map[string]float64{"1200": 300},
+	}); err != nil {
+		t.Fatalf("save analysis: %v", err)
+	}
+	sessions, err := s.Training.ListSessions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+
+	if _, err := s.detectThresholds(ctx, "wilant", workout.RiderProfile{Rider: "wilant", FTPWatts: 250}, sessions, fixedNow); err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+
+	pending, err := s.Training.ListPendingSuggestions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	fields := map[string]bool{}
+	for _, p := range pending {
+		fields[p.Field] = true
+	}
+	if fields[workout.FieldMaxHR] {
+		t.Errorf("pending = %+v, want the stale max_hr suggestion gone", pending)
+	}
+	if !fields["ftp"] {
+		t.Errorf("pending = %+v, want an ftp suggestion — that field still produced a finding", pending)
 	}
 }

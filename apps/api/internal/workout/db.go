@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS threshold_suggestions (
     field              TEXT NOT NULL,
     value              DOUBLE PRECISION NOT NULL DEFAULT 0,
     previous           DOUBLE PRECISION NOT NULL DEFAULT 0,
+    direction          TEXT NOT NULL DEFAULT 'up',
     source_session_id  TEXT NOT NULL DEFAULT '',
     source_date        TEXT NOT NULL DEFAULT '',
     reason             TEXT NOT NULL DEFAULT '',
@@ -237,6 +238,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addThresholdColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.addThresholdSuggestionDirectionColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
@@ -342,6 +346,27 @@ func (d *DB) addThresholdColumns() error {
 		return err
 	}
 	return nil
+}
+
+// addThresholdSuggestionDirectionColumn adds direction to a
+// threshold_suggestions table that predates it — the same "table exists,
+// column doesn't" situation addThresholdColumns already handles. Defaulting
+// to 'up' is correct for the near-totality of pre-existing rows (Auto
+// findings, which are always up-direction, were never stored here at all;
+// every stored suggestion up to this point came overwhelmingly from an up
+// finding), and safe even for the rare pre-migration down suggestion: it is
+// only briefly mis-scoped for the dismissed-suggestion gate, corrected the
+// next time that field produces a fresh finding.
+func (d *DB) addThresholdSuggestionDirectionColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE threshold_suggestions ADD COLUMN direction TEXT NOT NULL DEFAULT 'up'`)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
 }
 
 func (d *DB) query(q string) string { return d.dialect.Rebind(q) }

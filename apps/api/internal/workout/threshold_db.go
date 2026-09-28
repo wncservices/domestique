@@ -38,11 +38,20 @@ var ErrThresholdSuggestionNotFound = errors.New("no such threshold suggestion")
 // (for the latter two) this package's own FieldMaxHR/FieldThresholdPace
 // constants.
 type ThresholdSuggestion struct {
-	ID              string
-	Rider           string
-	Field           string
-	Value           float64
-	Previous        float64
+	ID       string
+	Rider    string
+	Field    string
+	Value    float64
+	Previous float64
+	// Direction is "up" or "down", matching thresholds.Finding.Direction —
+	// what tells the dismissed-suggestion gate an up finding apart from a
+	// down dismissal, and vice versa: those are unrelated claims ("FTP
+	// rose" and "FTP dropped"), never the same estimate moving further in
+	// one direction. A row written before this column existed backfills to
+	// "up" (see addThresholdDirectionColumn) — the common case, and safe
+	// either way: at worst a pre-migration down suggestion is briefly
+	// treated as an up one for gating purposes until it is next replaced.
+	Direction       string
 	SourceSessionID string
 	SourceDate      string
 	Reason          string
@@ -86,17 +95,20 @@ func (d *DB) CreateSuggestion(ctx context.Context, s ThresholdSuggestion) (Thres
 	}
 	ts := thresholdTimestamp()
 
-	if _, err := d.db.ExecContext(ctx, d.query(
-		`DELETE FROM threshold_suggestions WHERE rider = ? AND field = ? AND status = ?`),
-		rider, s.Field, ThresholdPending); err != nil {
+	direction := s.Direction
+	if direction == "" {
+		direction = "up"
+	}
+
+	if err := d.DeletePendingSuggestion(ctx, rider, s.Field); err != nil {
 		return ThresholdSuggestion{}, err
 	}
 
 	_, err = d.db.ExecContext(ctx, d.query(`
-        INSERT INTO threshold_suggestions (id, rider, field, value, previous, source_session_id,
+        INSERT INTO threshold_suggestions (id, rider, field, value, previous, direction, source_session_id,
                     source_date, reason, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, s.Field, s.Value, s.Previous, s.SourceSessionID, s.SourceDate, s.Reason,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, rider, s.Field, s.Value, s.Previous, direction, s.SourceSessionID, s.SourceDate, s.Reason,
 		ThresholdPending, ts, ts)
 	if err != nil {
 		return ThresholdSuggestion{}, err
@@ -104,10 +116,22 @@ func (d *DB) CreateSuggestion(ctx context.Context, s ThresholdSuggestion) (Thres
 	return d.GetSuggestion(ctx, id)
 }
 
+// DeletePendingSuggestion removes a rider's pending suggestion for field, if
+// any — the sync's own stale-suggestion cleanup, called directly when a
+// detection pass finds nothing at all to say about a field, and indirectly
+// by CreateSuggestion's own "a newer pending replaces the older" rule. A
+// no-op (not an error) when nothing is pending for that field.
+func (d *DB) DeletePendingSuggestion(ctx context.Context, rider, field string) error {
+	_, err := d.db.ExecContext(ctx, d.query(
+		`DELETE FROM threshold_suggestions WHERE rider = ? AND field = ? AND status = ?`),
+		normalizeRider(rider), field, ThresholdPending)
+	return err
+}
+
 // GetSuggestion returns one suggestion by id, or ErrThresholdSuggestionNotFound.
 func (d *DB) GetSuggestion(ctx context.Context, id string) (ThresholdSuggestion, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, field, value, previous, source_session_id, source_date, reason,
+        SELECT id, rider, field, value, previous, direction, source_session_id, source_date, reason,
                status, created_at, updated_at
         FROM threshold_suggestions WHERE id = ?`), id)
 	s, err := scanThresholdSuggestion(row)
@@ -121,7 +145,7 @@ func (d *DB) GetSuggestion(ctx context.Context, id string) (ThresholdSuggestion,
 // first — GET /api/training/thresholds' own shape.
 func (d *DB) ListPendingSuggestions(ctx context.Context, rider string) ([]ThresholdSuggestion, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, field, value, previous, source_session_id, source_date, reason,
+        SELECT id, rider, field, value, previous, direction, source_session_id, source_date, reason,
                status, created_at, updated_at
         FROM threshold_suggestions WHERE rider = ? AND status = ?
         ORDER BY created_at DESC, id`), normalizeRider(rider), ThresholdPending)
@@ -142,14 +166,18 @@ func (d *DB) ListPendingSuggestions(ctx context.Context, rider string) ([]Thresh
 }
 
 // LatestDismissedSuggestion returns the most recently updated dismissed
-// suggestion for (rider, field), if any — what the sync's "don't re-suggest
-// unless it moved a further 3%" rule reads before creating a new one.
-func (d *DB) LatestDismissedSuggestion(ctx context.Context, rider, field string) (ThresholdSuggestion, bool, error) {
+// suggestion for (rider, field) in the given direction, if any — what the
+// sync's "don't re-suggest unless it moved a further 3%" rule reads before
+// creating a new one. Scoped to direction deliberately: a dismissed "FTP
+// dropped to 240" suggestion must never gate a fresh "FTP rose to 270"
+// finding, or vice versa — those are different claims, not the same
+// estimate moving further in one direction.
+func (d *DB) LatestDismissedSuggestion(ctx context.Context, rider, field, direction string) (ThresholdSuggestion, bool, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, field, value, previous, source_session_id, source_date, reason,
+        SELECT id, rider, field, value, previous, direction, source_session_id, source_date, reason,
                status, created_at, updated_at
-        FROM threshold_suggestions WHERE rider = ? AND field = ? AND status = ?
-        ORDER BY updated_at DESC, id DESC LIMIT 1`), normalizeRider(rider), field, ThresholdDismissed)
+        FROM threshold_suggestions WHERE rider = ? AND field = ? AND direction = ? AND status = ?
+        ORDER BY updated_at DESC, id DESC LIMIT 1`), normalizeRider(rider), field, direction, ThresholdDismissed)
 	s, err := scanThresholdSuggestion(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ThresholdSuggestion{}, false, nil
@@ -194,7 +222,7 @@ func (d *DB) markSuggestion(ctx context.Context, id, status string) error {
 
 func scanThresholdSuggestion(row rowScanner) (ThresholdSuggestion, error) {
 	var s ThresholdSuggestion
-	if err := row.Scan(&s.ID, &s.Rider, &s.Field, &s.Value, &s.Previous, &s.SourceSessionID,
+	if err := row.Scan(&s.ID, &s.Rider, &s.Field, &s.Value, &s.Previous, &s.Direction, &s.SourceSessionID,
 		&s.SourceDate, &s.Reason, &s.Status, &s.CreatedAt, &s.UpdatedAt); err != nil {
 		return ThresholdSuggestion{}, err
 	}
