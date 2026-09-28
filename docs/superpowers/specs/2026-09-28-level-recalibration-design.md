@@ -65,9 +65,9 @@ matters.
 
 ## When it fires
 
-- **Trigger:** the rider's FTP rises to at least 1.03× the FTP levels were
-  last calibrated against (`RiderProfile.FTPLevelsCalibratedAt` — new field,
-  0 meaning "never calibrated"; see Data). 1.03 is the same up-factor
+- **Trigger:** the rider's FTP rises to at least 1.03× and at most 1.25× the
+  FTP levels were last calibrated against (`RiderProfile.FTPLevelsCalibratedAt`
+  — new field, 0 meaning "never calibrated"; see Data). 1.03 is the same up-factor
   `internal/thresholds` already uses for "a real improvement, not noise" —
   mirrored by hand into `internal/progression`, the same
   package-independence convention `progression.Outcome`'s own doc comment
@@ -83,13 +83,20 @@ matters.
   a rider's own manual profile save. The over-reach risk is identical
   regardless of which of these produced the new number, so there is no
   case among them worth excluding.
-- **The marker only ratchets up.** `FTPLevelsCalibratedAt` is set to the new
-  FTP every time recalibration actually runs, and is never moved down by an
-  FTP decrease (which never recalibrates in the first place). A rider whose
-  FTP drifts down and back up without ever exceeding the last calibration
-  point by 3% triggers nothing on the way back up either — correctly:
-  levels were already lowered for the higher point once, and the rider
-  hasn't yet re-earned anything past it.
+- **Typo guard: a rise of more than 25% never recalibrates.** A jump that
+  large (255 → 2550, or 255 → 350) is far likelier a correction or a typo
+  than a month of fitness, and lowering every level for it would punish the
+  rider for a mistake. Nothing moves, and the helper logs at Info with the
+  field name only (no watt values, per the health-values-out-of-logs rule).
+  This holds for every source, not just manual saves — a bad auto-detection
+  is no more real a rise than a mistyped one.
+- **The marker follows FTP in both directions.** `FTPLevelsCalibratedAt` is
+  set to the new FTP on *every* FTP change — rise, drop, typo or not —
+  while levels move only for a qualifying rise (≥ 3% and ≤ 25%). A
+  ratchet-up-only marker would, after 255 → 2550 → 255, hold 2550 and block
+  every future recalibration until FTP passed 2550. Following the FTP down
+  means a later genuine rise (say 255 → 268) is measured against the right
+  base. A drop never moves levels (see above), only the marker.
 - **First save ever** (`FTPLevelsCalibratedAt == 0`, e.g. a brand-new
   profile): the marker is seeded to the FTP being saved and nothing
   recalibrates — there are no levels earned against a stale FTP to protect
@@ -109,8 +116,15 @@ bounding case — which fixes the scale: a full doubling costs all 10 levels.
 Anything smaller scales logarithmically between those two points:
 
 ```
-delta = -10 * log2(newFTP / oldFTP)
+delta = max(-RecalibrationMaxDrop, -RecalibrationLevelsPerDoubling * log2(newFTP / oldFTP))
 ```
+
+with named constants in `internal/progression`: `RecalibrationLevelsPerDoubling
+= 10` (the one tunable — see Package) and `RecalibrationMaxDrop = 2.0`, a cap
+on how far any single recalibration may move a level. The cap is a safety
+net inside the 3–25% band: the raw formula exceeds 2.0 levels once
+`log2(r) > 0.2`, i.e. a rise past about 14.9% (`r > 1.1487`), so the cap
+matters for rises between ~14.9% and 25%.
 
 applied identically to every structured cycling zone the rider already has a
 level for — the ratio is the same for all of them, since none of the
@@ -120,12 +134,22 @@ feeds the same `progression.Apply(cur, delta)` every other level change
 already goes through — no new rounding or clamping: still one decimal,
 still clamped to [1.0, 10.0].
 
-**Worked example:** FTP 255 W → 268 W (a 5.1% rise, the exact example this
+**Worked example.** FTP 255 W → 268 W (a 5.1% rise, the exact example this
 codebase already uses for a threshold-detection toast). `r = 268/255 =
 1.0510`, `log2(r) = 0.0718`, `delta = -0.718`. A rider at threshold level 5.3
 becomes `Apply(5.3, -0.718) = 4.6`. Every other structured cycling zone the
 rider has a level for drops by the same ~0.7 (clamped/rounded per zone,
 so a zone already near the floor stops at 1.0 rather than going negative).
+
+Cap and guard, same base of 255 W:
+
+| New FTP | Ratio | Raw delta | Result |
+|---|---|---|---|
+| 268 W | 1.051 | -0.72 | -0.7 |
+| 280.5 W (+10%) | 1.10 | -1.38 | -1.4 |
+| 306 W (+20%) | 1.20 | -2.63 | **capped at -2.0** |
+| 318.75 W (+25%) | 1.25 | -3.22 | **capped at -2.0** |
+| 2550 W | 10.0 | n/a | **no recalibration** (over 25%; marker still moves) |
 
 This is a deliberately simple, monotonic approximation, not an exact inverse
 of the ladder tables (which are hand-authored and not smooth — an exact
@@ -138,15 +162,18 @@ progression-levels design already relies on for every other misestimate.
 ## Idempotency
 
 `FTPLevelsCalibratedAt` (new `rider_profiles` column, watts, 0 = never) is
-the single guard: recalibration runs at most once per FTP rise past it, and
-is set to the new FTP the moment it runs, before the per-zone level writes.
-A process crash between that profile write and the level writes leaves the
-marker moved but one or more zones unadjusted for that rise — the same kind
-of narrow, undo-nothing race `handleResolveThreshold`'s own accept path
-already accepts for suggestion status vs. profile write (see that handler's
-comment on why there is nothing to roll back). Acceptable here for the same
-reason: the next FTP rise, or an ordinary struggled/incomplete session,
-converges it regardless.
+the single guard, and it tracks the current FTP: writing the same FTP twice
+gives ratio 1, which is under the 1.03 trigger, so nothing recalibrates a
+second time. The helper compares the new FTP against the *marker*, not
+against `before.FTPWatts`, so re-detected or dismissed-then-accepted findings
+cannot double-count a rise. The marker is written with the profile in the
+same `SaveProfile` call; the per-zone level writes follow. A process crash
+between the two leaves the marker moved but one or more zones unadjusted for
+that rise — the same narrow, undo-nothing race `handleResolveThreshold`'s
+own accept path already accepts for suggestion status vs. profile write (see
+that handler's comment on why there is nothing to roll back). Acceptable for
+the same reason: the next qualifying rise, or an ordinary struggled/incomplete
+session, converges it regardless.
 
 ## How the rider is told
 
@@ -199,15 +226,21 @@ established "offer, don't force" for the adjacent case of an FTP change.
 `internal/progression` (pure, no new dependency):
 
 ```go
-const RecalibrationUpFactor = 1.03 // mirrors thresholds.upFactor by hand
+const (
+	RecalibrationUpFactor          = 1.03 // mirrors thresholds.upFactor by hand
+	RecalibrationMaxFactor         = 1.25 // above this a rise is a typo/correction, not fitness
+	RecalibrationLevelsPerDoubling = 10   // the tunable: levels a full FTP doubling would cost
+	RecalibrationMaxDrop           = 2.0  // cap on any single recalibration
+)
 
 func RecalibrationDelta(oldFTP, newFTP float64) float64
 func RecalibrationReason(oldFTP, newFTP, from, to float64) string
 ```
 
-`RecalibrationDelta` returns the formula's result unconditionally; the
-caller (API layer) is the one that checks `newFTP >= oldFTP *
-RecalibrationUpFactor` before calling it at all — the same split
+`RecalibrationDelta` returns the capped formula's result unconditionally
+(the cap is part of the delta, so no caller can forget it); the caller (API
+layer) is the one that checks `oldFTP * RecalibrationUpFactor <= newFTP <=
+oldFTP * RecalibrationMaxFactor` before calling it at all — the same split
 `thresholds.Detect` vs. its caller already uses (the pure package computes,
 the API layer decides whether the trigger condition holds and persists).
 
@@ -227,27 +260,32 @@ change and be persisted — `syncRiderMetrics` (after its own `SaveProfile`,
 this save (already loaded at every one of those three call sites for other
 reasons); the helper re-reads the just-saved profile for the new FTP rather
 than trusting a caller-passed "after" value, so it can never recalibrate
-against a number that didn't actually make it to storage. It loads the
+against a number that didn't actually make it to storage. It always
+moves the marker to the new FTP; only when the rise is inside the 3–25% band
+does it also touch levels, and a rise over 25% logs Info (field only) and
+stops. It loads the
 rider's existing cycling structured-zone levels via `ListLevels`, computes
 `RecalibrationDelta` once, and writes each affected zone via `SaveLevel`
-with `RecalibrationReason`, then saves the bumped
-`FTPLevelsCalibratedAt` back onto the profile. Owner-only by construction —
+with `RecalibrationReason`. Owner-only by construction —
 `rider` always comes from the session at every one of the three call sites,
 never a request body, same as every other training write.
 
 ## Testing
 
-- `progression`: `RecalibrationDelta` at the 3% boundary (exactly 1.03×:
-  fires; just under: the API layer's own gate, not this function, decides
-  not to call it) and the 255→268 worked example to the stated 0.1
-  precision; a decrease or unchanged FTP produces a delta the caller must
+- `progression`: the 255→268 worked example to the stated 0.1 precision;
+  the cap: `RecalibrationDelta(255, 306)` is exactly `-2.0` (raw -2.63) and
+  `RecalibrationDelta(255, 280.5)` is about `-1.375` (uncapped); a decrease or unchanged FTP produces a delta the caller must
   not apply (tested by the caller-side gate, not by this pure function
   refusing — it is intentionally unconditional); clamping at both ends
   (level already at 1.0 through a huge FTP jump stays at 1.0, never
   negative).
-- `recalibrateLevelsForFTP`: fires exactly once per qualifying rise
-  (idempotency via `FTPLevelsCalibratedAt`); never fires on a decrease or a
-  rise under 3%; only touches zones with an existing row; leaves running
+- `recalibrateLevelsForFTP`: fires exactly once per qualifying rise (same FTP
+  written twice: no second move); never moves levels on a decrease or a rise
+  under 3%; 255→2550 changes no level (typo guard, Info logged) but does move
+  the marker; 255→2550→255 followed by 255→268 still recalibrates (marker
+  followed both ways); a 20% rise (255→306) moves levels by exactly -2.0
+  (capped from -2.63); exactly 1.25× recalibrates and just over does not; a
+  drop moves the marker down and no level; only touches zones with an existing row; leaves running
   zones untouched; first-ever save seeds the marker without moving any
   level; storage under `TestEachEngine`.
 - Acceptance: all three triggers (sync auto-apply, threshold accept, manual
@@ -263,6 +301,6 @@ never a request body, same as every other training write.
 
 Recalibrating running zones after a threshold-pace change (the same
 mechanism, a different trigger field — a natural follow-up, not folded in
-here); recalibrating on a decrease; an exact per-rung inversion of the
+here); recalibrating on a decrease or on a rise over 25%; an exact per-rung inversion of the
 ladder tables; surfacing `FTPLevelsCalibratedAt` itself anywhere in the UI;
 any change to already-generated (past or already-scheduled) workouts.
