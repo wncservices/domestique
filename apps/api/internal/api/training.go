@@ -728,6 +728,11 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rider := auth.FromContext(r.Context()).User
+	before, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	saved, err := s.Training.SaveProfile(r.Context(), workout.RiderProfile{
 		// FTPEstimated and Estimated are deliberately not read from body:
 		// this is the manual save form, and a rider willing to click Save
@@ -738,10 +743,16 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
 		AutoPushWorkouts: body.AutoPushWorkouts,
+		// Not in the form: the FTP the levels were last calibrated against
+		// is bookkeeping, and a fresh struct would otherwise reset it to 0.
+		FTPLevelsCalibratedAt: before.FTPLevelsCalibratedAt,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	if _, _, err := s.recalibrateLevelsForFTP(r.Context(), rider, before); err != nil {
+		s.logger().Error("level recalibration failed", "rider", rider, "err", err)
 	}
 
 	s.logger().Info("rider profile saved", "rider", rider)

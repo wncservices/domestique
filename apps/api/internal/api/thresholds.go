@@ -337,10 +337,18 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		profile.Rider = sug.Rider
+		before := profile
 		profile = applyAcceptedThreshold(profile, sug)
 		if _, err := s.Training.SaveProfile(r.Context(), profile); err != nil {
 			s.fail(w, err)
 			return
+		}
+		if sug.Field == "ftp" {
+			// The accepted FTP is already stored; a failure to adjust
+			// levels is logged, not surfaced as a failed accept.
+			if _, _, err := s.recalibrateLevelsForFTP(r.Context(), sug.Rider, before); err != nil {
+				s.logger().Error("level recalibration failed", "rider", sug.Rider, "err", err)
+			}
 		}
 		// The profile write above has already landed by the time a race
 		// could lose here — a second request that resolved this same
