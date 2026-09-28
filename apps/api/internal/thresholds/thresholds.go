@@ -286,21 +286,23 @@ func detectFTP(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	if !hasFTPHistoryBefore(rides, today, historyWindowDays) {
 		return Finding{}, false
 	}
-	recent, _, recentFound := bestFTPInWindow(rides, today, historyWindowDays)
-	if recentFound && recent.value >= p.FTPWatts*downFactor {
+	// A down finding needs an actual recent effort to point to — "reaches
+	// back 90 days but the rider hasn't ridden at all lately" is a real
+	// gap, but it is not evidence the rider's FTP has *dropped*, so it must
+	// not manufacture a Value of 0.
+	recent, source, recentFound := bestFTPInWindow(rides, today, historyWindowDays)
+	if !recentFound || recent.value >= p.FTPWatts*downFactor {
 		return Finding{}, false
 	}
-	recentValue := 0.0
-	if recentFound {
-		recentValue = recent.value
-	}
 	return Finding{
-		Field:     "ftp",
-		Value:     roundInt(recentValue),
-		Previous:  p.FTPWatts,
-		Direction: "down",
-		Reason:    fmt.Sprintf("no effort near %d W in the last 90 days", int(roundInt(p.FTPWatts))),
-		Auto:      false,
+		Field:           "ftp",
+		Value:           roundInt(recent.value),
+		Previous:        p.FTPWatts,
+		Direction:       "down",
+		SourceSessionID: source.SessionID,
+		SourceDate:      source.Date,
+		Reason:          fmt.Sprintf("no effort near %d W in the last 90 days", int(roundInt(p.FTPWatts))),
+		Auto:            false,
 	}, true
 }
 
@@ -418,6 +420,18 @@ func speedToPaceSecPerKM(speed float64) float64 {
 	return 1000 / speed
 }
 
+// formatPaceMinSec renders a sec/km pace as "m:ss/km", the shape a rider
+// reads a pace in (never raw seconds) — rounded to the nearest second first,
+// with the usual minutes/seconds carry so e.g. 239.6 renders "4:00", not
+// "3:60".
+func formatPaceMinSec(secPerKM float64) string {
+	total := int(roundInt(secPerKM))
+	if total < 0 {
+		total = 0
+	}
+	return fmt.Sprintf("%d:%02d", total/60, total%60)
+}
+
 func detectPace(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	currentSpeed := currentPaceSpeed(p.ThresholdPaceSecPerKM)
 
@@ -441,20 +455,20 @@ func detectPace(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	if !hasPaceHistoryBefore(rides, today, historyWindowDays) {
 		return Finding{}, false
 	}
-	recent, _, recentFound := bestPaceInWindow(rides, today, historyWindowDays)
-	if recentFound && recent.speed >= currentSpeed*downFactor {
+	// As with FTP: no qualifying recent run means no evidence of a decline,
+	// not a Value of 0 to suggest.
+	recent, source, recentFound := bestPaceInWindow(rides, today, historyWindowDays)
+	if !recentFound || recent.speed >= currentSpeed*downFactor {
 		return Finding{}, false
 	}
-	recentPace := 0.0
-	if recentFound {
-		recentPace = speedToPaceSecPerKM(recent.speed)
-	}
 	return Finding{
-		Field:     "threshold_pace",
-		Value:     roundInt(recentPace),
-		Previous:  p.ThresholdPaceSecPerKM,
-		Direction: "down",
-		Reason:    fmt.Sprintf("no effort near %d sec/km in the last 90 days", int(roundInt(p.ThresholdPaceSecPerKM))),
-		Auto:      false,
+		Field:           "threshold_pace",
+		Value:           roundInt(speedToPaceSecPerKM(recent.speed)),
+		Previous:        p.ThresholdPaceSecPerKM,
+		Direction:       "down",
+		SourceSessionID: source.SessionID,
+		SourceDate:      source.Date,
+		Reason:          fmt.Sprintf("no run near %s /km in the last 90 days", formatPaceMinSec(p.ThresholdPaceSecPerKM)),
+		Auto:            false,
 	}, true
 }

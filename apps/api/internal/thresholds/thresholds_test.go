@@ -273,6 +273,9 @@ func TestFTPDownWhenNothingRecentReachesCurrent(t *testing.T) {
 	if want := "no effort near 255 W in the last 90 days"; f.Reason != want {
 		t.Errorf("reason = %q, want %q", f.Reason, want)
 	}
+	if f.SourceSessionID != "recent" || f.SourceDate != daysAgo(30) {
+		t.Errorf("source = %q/%q, want recent/%s (the ride that produced the recent estimate)", f.SourceSessionID, f.SourceDate, daysAgo(30))
+	}
 }
 
 func TestFTPDownAutoFalseEvenWhenEstimated(t *testing.T) {
@@ -291,16 +294,14 @@ func TestFTPDownAutoFalseEvenWhenEstimated(t *testing.T) {
 	}
 }
 
-func TestFTPDownWithNoRecentRidesAtAll(t *testing.T) {
+func TestFTPDownWithNoRecentRidesAtAllProducesNoFinding(t *testing.T) {
+	// History reaches back 90 days, but nothing at all in the last 90 days
+	// is not evidence of a decline — just a gap. Must not suggest 0 W.
 	rides := []Ride{cyclingRide("old", 100, map[int]float64{3600: 260})}
 	p := Profile{FTPWatts: 255}
 	got := Detect(rides, p, today)
-	f, ok := findField(t, got, "ftp")
-	if !ok {
-		t.Fatal("want a down ftp finding when there is history but nothing recent at all")
-	}
-	if f.Value != 0 {
-		t.Errorf("value = %v, want 0 (no recent estimate to report)", f.Value)
+	if f, ok := findField(t, got, "ftp"); ok {
+		t.Errorf("want no ftp finding with no qualifying recent effort, got %+v", f)
 	}
 }
 
@@ -511,25 +512,42 @@ func TestPaceDownWhenNothingRecentReachesCurrent(t *testing.T) {
 	if f.Auto {
 		t.Error("auto must be false for down")
 	}
-	if want := "no effort near 300 sec/km in the last 90 days"; f.Reason != want {
+	// current pace 300 sec/km renders as "5:00" -- reason must show m:ss/km,
+	// never raw seconds.
+	if want := "no run near 5:00 /km in the last 90 days"; f.Reason != want {
 		t.Errorf("reason = %q, want %q", f.Reason, want)
 	}
 	wantValue := roundInt(1000 / 3.0)
 	if f.Value != wantValue {
 		t.Errorf("value = %v, want %v", f.Value, wantValue)
 	}
+	if f.SourceSessionID != "recent" || f.SourceDate != daysAgo(30) {
+		t.Errorf("source = %q/%q, want recent/%s (the ride that produced the recent estimate)", f.SourceSessionID, f.SourceDate, daysAgo(30))
+	}
 }
 
-func TestPaceDownWithNoRecentRunsAtAll(t *testing.T) {
+func TestPaceDownWithNoRecentRunsAtAllProducesNoFinding(t *testing.T) {
+	// As with FTP: history reaches back 90 days, but nothing at all in the
+	// last 90 days is not evidence of a decline. Must not suggest 0.
 	rides := []Ride{runningRide("old", 100, 0, 4.0)}
 	p := Profile{ThresholdPaceSecPerKM: 300}
 	got := Detect(rides, p, today)
-	f, ok := findField(t, got, "threshold_pace")
-	if !ok {
-		t.Fatal("want a down finding")
+	if f, ok := findField(t, got, "threshold_pace"); ok {
+		t.Errorf("want no threshold_pace finding with no qualifying recent run, got %+v", f)
 	}
-	if f.Value != 0 {
-		t.Errorf("value = %v, want 0", f.Value)
+}
+
+func TestFormatPaceMinSecRoundsWithCorrectCarry(t *testing.T) {
+	// 239.6 rounds to 240 seconds, which must carry into a whole minute
+	// ("4:00"), not render as "3:60".
+	if got, want := formatPaceMinSec(239.6), "4:00"; got != want {
+		t.Errorf("formatPaceMinSec(239.6) = %q, want %q", got, want)
+	}
+	if got, want := formatPaceMinSec(250), "4:10"; got != want {
+		t.Errorf("formatPaceMinSec(250) = %q, want %q", got, want)
+	}
+	if got, want := formatPaceMinSec(65), "1:05"; got != want {
+		t.Errorf("formatPaceMinSec(65) = %q, want %q", got, want)
 	}
 }
 
