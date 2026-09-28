@@ -43,8 +43,9 @@ onMounted(async () => {
 
 // Four categorical accents (docs/design-system.md) — one per feature, purely
 // to help the eye separate four different ideas at a glance. Not semantic;
-// swapping the order just recolors which feature gets which accent.
-const features = [
+// swapping the order just recolors which feature gets which accent. Each row
+// of four (routes, training) reuses the same four accents in the same order.
+const routeFeatures = [
   {
     icon: 'i-lucide-upload',
     color: 'primary',
@@ -69,6 +70,40 @@ const features = [
     title: 'Yours to run',
     body: 'Free software under the AGPL. Host it yourself, read every line, and keep your routes in your own database.',
   },
+]
+
+// Only what has shipped — this page is a promise to someone deciding whether
+// to sign up, so an in-progress feature does not belong here until it's live.
+const trainingFeatures = [
+  {
+    icon: 'i-lucide-flag',
+    color: 'primary',
+    title: 'A plan toward your goal',
+    body: 'Set an event, start from a route, or just keep training. Domestique builds the weeks and puts each workout on your Garmin calendar.',
+  },
+  {
+    icon: 'i-lucide-activity',
+    color: 'ember',
+    title: 'Every ride read',
+    body: 'Rides from Garmin and Wahoo are analysed from the file itself: power, load, time in zone, and whether each interval landed.',
+  },
+  {
+    icon: 'i-lucide-battery-medium',
+    color: 'sky',
+    title: 'Adapts to how you recovered',
+    body: 'Sleep, HRV and resting heart rate ease a hard day when you need it, and progression levels move with how your rides actually went.',
+  },
+  {
+    icon: 'i-lucide-gauge',
+    color: 'violet',
+    title: 'Thresholds that keep up',
+    body: 'FTP, max heart rate and threshold pace are picked up from your rides, so every target stays right as you get fitter.',
+  },
+]
+
+const sections = [
+  { id: 'routes', title: 'Routes', lead: 'One library for the whole crew, on every device.', features: routeFeatures },
+  { id: 'training', title: 'Training', lead: 'A coach that reads every ride and adjusts the next one.', features: trainingFeatures },
 ]
 </script>
 
@@ -100,12 +135,13 @@ const features = [
         <h1
           class="font-display max-w-2xl text-4xl font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-6xl"
         >
-          One route library.<br />Every head unit.
+          Your routes. Your training.<br />Every head unit.
         </h1>
 
         <p class="mt-6 max-w-xl text-lg text-muted">
           You ride a Garmin, your mate rides a Wahoo. Add a route once and it turns up on
-          both — no exporting, no cables, no “which file was the latest one?”
+          both. Training for something? Domestique builds the plan, reads every ride and
+          adjusts what comes next.
         </p>
 
         <div class="mt-8 flex flex-wrap items-center gap-3">
@@ -129,19 +165,26 @@ const features = [
         </p>
       </section>
 
-      <section class="grid gap-4 pb-16 sm:grid-cols-2 lg:grid-cols-4">
-        <div v-for="feature in features" :key="feature.title" class="app-card p-5">
-          <span
-            class="flex size-9 items-center justify-center rounded-lg"
-            :style="{
-              backgroundColor: `var(--app-accent-${feature.color}-soft)`,
-              color: `var(--app-accent-${feature.color})`,
-            }"
-          >
-            <UIcon :name="feature.icon" class="size-5" />
-          </span>
-          <h2 class="mt-3 font-medium text-highlighted">{{ feature.title }}</h2>
-          <p class="mt-1 text-sm text-muted">{{ feature.body }}</p>
+      <section v-for="section in sections" :key="section.id" class="pb-16" :aria-labelledby="`section-${section.id}`">
+        <h2 :id="`section-${section.id}`" class="font-display text-2xl font-semibold tracking-tight text-highlighted">
+          {{ section.title }}
+        </h2>
+        <p class="mt-1 text-muted">{{ section.lead }}</p>
+
+        <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div v-for="feature in section.features" :key="feature.title" class="app-card p-5">
+            <span
+              class="flex size-9 items-center justify-center rounded-lg"
+              :style="{
+                backgroundColor: `var(--app-accent-${feature.color}-soft)`,
+                color: `var(--app-accent-${feature.color})`,
+              }"
+            >
+              <UIcon :name="feature.icon" class="size-5" />
+            </span>
+            <h3 class="mt-3 font-medium text-highlighted">{{ feature.title }}</h3>
+            <p class="mt-1 text-sm text-muted">{{ feature.body }}</p>
+          </div>
         </div>
       </section>
 

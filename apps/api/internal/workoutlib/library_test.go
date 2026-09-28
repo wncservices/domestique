@@ -502,3 +502,126 @@ func TestInstantiateNameContainsMultiplicationSign(t *testing.T) {
 		t.Errorf("Name %q does not contain ×", req.Name)
 	}
 }
+
+// --- Friel %LTHR heart-rate targets (threshold HR known) ---
+
+func approx(a, b float64) bool { d := a - b; return d < 1e-9 && d > -1e-9 }
+
+func TestHRRangeUsesFrielTableWhenThresholdHRKnown(t *testing.T) {
+	cases := []struct {
+		sport             model.Sport
+		zone              string
+		wantLow, wantHigh float64
+	}{
+		{model.SportCycling, "", 0.70, 0.81},
+		{model.SportCycling, "endurance", 0.81, 0.89},
+		{model.SportCycling, "tempo", 0.90, 0.93},
+		{model.SportCycling, "sweet_spot", 0.92, 0.96},
+		{model.SportCycling, "threshold", 0.94, 0.99},
+		{model.SportCycling, "vo2max", 1.03, 1.06},
+		{model.SportCycling, "intervals", 1.03, 1.06},
+		{model.SportCycling, "anaerobic", 1.07, 1.10},
+		{model.SportRunning, "", 0.72, 0.85},
+		{model.SportRunning, "endurance", 0.85, 0.89},
+		{model.SportRunning, "tempo", 0.90, 0.94},
+		{model.SportRunning, "sweet_spot", 0.92, 0.96},
+		{model.SportRunning, "threshold", 0.95, 0.99},
+		{model.SportRunning, "vo2max", 1.03, 1.06},
+		{model.SportRunning, "intervals", 1.03, 1.06},
+		{model.SportRunning, "anaerobic", 1.07, 1.10},
+	}
+	profile := workout.RiderProfile{ThresholdHR: 160}
+	for _, c := range cases {
+		low, high, ok := HRRange(c.sport, profile, c.zone)
+		if !ok || !approx(low, 160*c.wantLow) || !approx(high, 160*c.wantHigh) {
+			t.Errorf("%s %q: got [%v, %v] ok=%v, want [%v, %v]", c.sport, c.zone, low, high, ok, 160*c.wantLow, 160*c.wantHigh)
+		}
+	}
+}
+
+func TestHRRangeCapsAtMaxHR(t *testing.T) {
+	// LTHR 170 x 1.07..1.10 = 181.9..187 -> high capped at 185.
+	low, high, _ := HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 170, MaxHR: 185}, "anaerobic")
+	if !approx(low, 181.9) || high != 185 {
+		t.Errorf("got [%v, %v], want [181.9, 185]", low, high)
+	}
+	// Both ends above the ceiling: low and high each capped.
+	low, high, _ = HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 175, MaxHR: 185}, "anaerobic")
+	if low != 185 || high != 185 {
+		t.Errorf("got [%v, %v], want [185, 185]", low, high)
+	}
+	// A max HR below LTHR is stale or mistyped: skip the cap, keep Friel's targets.
+	low, high, _ = HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 170, MaxHR: 165}, "tempo")
+	if !approx(low, 170*0.90) || !approx(high, 170*0.93) {
+		t.Errorf("MaxHR < LTHR: got [%v, %v], want uncapped [%v, %v]", low, high, 170*0.90, 170*0.93)
+	}
+	// Below the ceiling nothing changes.
+	low, high, _ = HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 150, MaxHR: 190}, "tempo")
+	if !approx(low, 135) || !approx(high, 139.5) {
+		t.Errorf("got [%v, %v], want [135, 139.5]", low, high)
+	}
+}
+
+func TestHRRangeWithOnlyMaxHRKeepsTodaysNumbers(t *testing.T) {
+	profile := workout.RiderProfile{MaxHR: 200}
+	for _, c := range []struct {
+		zone              string
+		wantLow, wantHigh float64
+	}{
+		{"", 0.50, 0.60},
+		{"endurance", 0.60, 0.75},
+		{"tempo", 0.80, 0.88},
+		{"sweet_spot", 0.80, 0.88},
+		{"threshold", 0.88, 0.93},
+		{"vo2max", 0.90, 0.97},
+		{"intervals", 0.90, 0.97},
+		{"anaerobic", 0.93, 1.00},
+	} {
+		low, high, ok := HRRange(model.SportCycling, profile, c.zone)
+		if !ok || !approx(low, 200*c.wantLow) || !approx(high, 200*c.wantHigh) {
+			t.Errorf("%q: got [%v, %v] ok=%v, want [%v, %v]", c.zone, low, high, ok, 200*c.wantLow, 200*c.wantHigh)
+		}
+	}
+	if _, _, ok := HRRange(model.SportCycling, workout.RiderProfile{}, "tempo"); ok {
+		t.Error("no MaxHR and no ThresholdHR should report ok=false")
+	}
+}
+
+func TestInstantiateUsesFrielTargetsForThresholdHR(t *testing.T) {
+	profile := workout.RiderProfile{Rider: "carol", ThresholdHR: 160, MaxHR: 190}
+	l := mustLadder(t, model.SportCycling, "threshold")
+	r := l.Rungs[0]
+	req := Instantiate(l, r, profile)
+
+	warm := findStep(t, req.Steps, "Warmup")
+	if warm.Target != workout.TargetHeartRate || !approx(warm.TargetLow, 160*0.70) || !approx(warm.TargetHigh, 160*0.81) {
+		t.Errorf("warmup = %v [%v, %v], want heart_rate 0.70-0.81 x LTHR", warm.Target, warm.TargetLow, warm.TargetHigh)
+	}
+	cool := findStep(t, req.Steps, "Cooldown")
+	if cool.Target != workout.TargetHeartRate || !approx(cool.TargetLow, 160*0.70) || !approx(cool.TargetHigh, 160*0.81) {
+		t.Errorf("cooldown = %v [%v, %v]", cool.Target, cool.TargetLow, cool.TargetHigh)
+	}
+	block := findStep(t, req.Steps, l.Label)
+	work := block
+	if r.Reps >= 2 {
+		work = findStep(t, block.Steps, "Work")
+		rest := findStep(t, block.Steps, "Recovery")
+		if rest.Target != workout.TargetHeartRate || !approx(rest.TargetLow, 160*0.70) || !approx(rest.TargetHigh, 160*0.81) {
+			t.Errorf("rest = %v [%v, %v], want the easy zone off LTHR", rest.Target, rest.TargetLow, rest.TargetHigh)
+		}
+	}
+	if work.Target != workout.TargetHeartRate || !approx(work.TargetLow, 160*0.94) || !approx(work.TargetHigh, 160*0.99) {
+		t.Errorf("work = %v [%v, %v], want heart_rate 0.94-0.99 x LTHR", work.Target, work.TargetLow, work.TargetHigh)
+	}
+}
+
+func TestFTPAndPaceBranchesIgnoreThresholdHR(t *testing.T) {
+	ftp := workout.RiderProfile{FTPWatts: 250, ThresholdHR: 160, MaxHR: 190}
+	if tt, low, high := target(model.SportCycling, ftp, 0.5, 0.6, "tempo"); tt != workout.TargetPower || low != 125 || high != 150 {
+		t.Errorf("cycling with FTP = %v [%v, %v], want power 125-150", tt, low, high)
+	}
+	pace := workout.RiderProfile{ThresholdPaceSecPerKM: 300, ThresholdHR: 160}
+	if tt, _, _ := target(model.SportRunning, pace, 0.8, 0.9, "tempo"); tt != workout.TargetPace {
+		t.Errorf("running with a pace = %v, want pace", tt)
+	}
+}

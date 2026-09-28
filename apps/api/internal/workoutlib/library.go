@@ -60,14 +60,20 @@ func restPercent(sport model.Sport) float64 {
 	return 0.50
 }
 
-// zoneHRRange maps a structured zone to a fraction of max heart rate, for a
-// rider with no FTP/threshold pace set — a percentage of FTP or threshold
-// speed has no fixed heart-rate equivalent, so heart rate needs its own
-// table rather than reusing a rung's LowPct/HighPct. Mirrors
+// zoneHRRange maps a structured zone to a fraction of max HR, for a rider
+// with no FTP/threshold pace set and no threshold heart rate — a percentage
+// of FTP or threshold speed has no fixed heart-rate equivalent, so heart rate
+// needs its own table rather than reusing a rung's LowPct/HighPct. Mirrors
 // scheduler.zoneTarget's own priority chain (power -> pace -> HR -> open);
 // see this package's brief for the exact ruling on these fractions.
+//
+// "endurance" is not a ladder zone (no ladder is built for it); it is the key
+// scheduler.enduranceZoneTarget asks HRRange for, carrying that function's
+// long-standing 60-75% of max HR.
 func zoneHRRange(zone string) (low, high float64) {
 	switch zone {
+	case "endurance":
+		return 0.60, 0.75
 	case "tempo", "sweet_spot":
 		return 0.80, 0.88
 	case "threshold":
@@ -83,25 +89,93 @@ func zoneHRRange(zone string) (low, high float64) {
 	}
 }
 
+// lthrHRRange maps a zone to a fraction of threshold heart rate (LTHR) from
+// Joe Friel's %LTHR zones — one table per sport, the same edges the Fitness
+// page and rideanalysis.HRZoneSecondsLTHR use. The %MaxHR bands above are not
+// reused: their "tempo" (80-88% of max HR) sits far below Friel's tempo,
+// which is 90-93% of LTHR. The easy bucket ("") is the top half of Z1, and
+// vo2max/intervals/anaerobic are Z5b and Z5c.
+func lthrHRRange(sport model.Sport, zone string) (low, high float64) {
+	running := sport == model.SportRunning
+	switch zone {
+	case "endurance":
+		if running {
+			return 0.85, 0.89
+		}
+		return 0.81, 0.89
+	case "tempo":
+		if running {
+			return 0.90, 0.94
+		}
+		return 0.90, 0.93
+	case "sweet_spot":
+		return 0.92, 0.96
+	case "threshold":
+		if running {
+			return 0.95, 0.99
+		}
+		return 0.94, 0.99
+	case "vo2max", "intervals":
+		return 1.03, 1.06
+	case "anaerobic":
+		return 1.07, 1.10
+	default:
+		if running {
+			return 0.72, 0.85
+		}
+		return 0.70, 0.81
+	}
+}
+
+// HRRange is the heart-rate target, in bpm, for a zone: the rider's threshold
+// heart rate times the Friel table when they have one (each end capped at
+// MaxHR when that is known, so Z5c never asks for more than the rider's
+// ceiling), otherwise today's percentage-of-max-HR bands unchanged. ok is
+// false when the profile has neither, which callers treat as an open target.
+// The basis switches per rider, never globally. Exported so
+// scheduler.enduranceZoneTarget shares the one table.
+func HRRange(sport model.Sport, profile workout.RiderProfile, zone string) (low, high float64, ok bool) {
+	switch {
+	case profile.ThresholdHR > 0:
+		lowFrac, highFrac := lthrHRRange(sport, zone)
+		low = float64(profile.ThresholdHR) * lowFrac
+		high = float64(profile.ThresholdHR) * highFrac
+		// A max HR below LTHR is stale or mistyped (LTHR cannot exceed max
+		// HR), and capping at it would collapse every zone to one zero-width
+		// value, so the cap only applies when the ceiling is plausible.
+		if profile.MaxHR > 0 && profile.MaxHR >= profile.ThresholdHR {
+			ceiling := float64(profile.MaxHR)
+			low, high = math.Min(low, ceiling), math.Min(high, ceiling)
+		}
+		return low, high, true
+	case profile.MaxHR > 0:
+		lowFrac, highFrac := zoneHRRange(zone)
+		return float64(profile.MaxHR) * lowFrac, float64(profile.MaxHR) * highFrac, true
+	default:
+		return 0, 0, false
+	}
+}
+
 // target converts a percentage-of-FTP/threshold-speed range into an actual
 // step target, following the same priority order scheduler.zoneTarget uses
 // today: cycling power from FTP, running pace from threshold speed, heart
-// rate from max HR, or an open target when none of a rider's profile has
-// enough to go on. hrLow/hrHigh are the heart-rate fractions to use instead
-// of lowPct/highPct when falling through to the HR case, since a percentage
-// of FTP/pace does not translate directly to a percentage of max HR.
-func target(sport model.Sport, profile workout.RiderProfile, lowPct, highPct, hrLow, hrHigh float64) (workout.TargetType, float64, float64) {
+// rate (from threshold HR, else max HR — see HRRange), or an open target when
+// none of a rider's profile has enough to go on. hrZone names the zone whose
+// heart-rate table to use instead of lowPct/highPct when falling through to
+// the HR case, since a percentage of FTP/pace does not translate directly to
+// a heart-rate fraction.
+func target(sport model.Sport, profile workout.RiderProfile, lowPct, highPct float64, hrZone string) (workout.TargetType, float64, float64) {
 	switch {
 	case sport == model.SportCycling && profile.FTPWatts > 0:
 		return workout.TargetPower, profile.FTPWatts * lowPct, profile.FTPWatts * highPct
 	case sport == model.SportRunning && profile.ThresholdPaceSecPerKM > 0:
 		threshold := 1000 / profile.ThresholdPaceSecPerKM // m/s
 		return workout.TargetPace, threshold * lowPct, threshold * highPct
-	case profile.MaxHR > 0:
-		return workout.TargetHeartRate, float64(profile.MaxHR) * hrLow, float64(profile.MaxHR) * hrHigh
-	default:
-		return workout.TargetOpen, 0, 0
 	}
+	if low, high, ok := HRRange(sport, profile, hrZone); ok {
+		return workout.TargetHeartRate, low, high
+	}
+	return workout.TargetOpen, 0, 0
 }
 
 // workIntensity is the repeat block's (or single-rep step's) own intensity:
@@ -130,9 +204,8 @@ const WarmupCooldownSeconds = warmupSeconds + cooldownSeconds
 // rather than duplicated so an endurance day warms up exactly the way a
 // structured one does.
 func Warmup(sport model.Sport, profile workout.RiderProfile) []workout.WorkoutStep {
-	easyHRLow, easyHRHigh := zoneHRRange("")
-	t1, low1, high1 := target(sport, profile, 0.50, 0.55, easyHRLow, easyHRHigh)
-	t2, low2, high2 := target(sport, profile, 0.60, 0.65, easyHRLow, easyHRHigh)
+	t1, low1, high1 := target(sport, profile, 0.50, 0.55, "")
+	t2, low2, high2 := target(sport, profile, 0.60, 0.65, "")
 	return []workout.WorkoutStep{
 		{
 			Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime,
@@ -148,8 +221,7 @@ func Warmup(sport model.Sport, profile workout.RiderProfile) []workout.WorkoutSt
 // Cooldown builds the library's 10-minute cooldown at 45-55%. See Warmup's
 // own comment on why this is exported rather than duplicated.
 func Cooldown(sport model.Sport, profile workout.RiderProfile) workout.WorkoutStep {
-	easyHRLow, easyHRHigh := zoneHRRange("")
-	t, low, high := target(sport, profile, 0.45, 0.55, easyHRLow, easyHRHigh)
+	t, low, high := target(sport, profile, 0.45, 0.55, "")
 	return workout.WorkoutStep{
 		Name: "Cooldown", Intensity: workout.IntensityCooldown, Duration: workout.DurationTime,
 		Seconds: cooldownSeconds, Target: t, TargetLow: low, TargetHigh: high,
@@ -163,10 +235,9 @@ func Cooldown(sport model.Sport, profile workout.RiderProfile) workout.WorkoutSt
 // knows about the rung and the rider's profile, not why this workout is
 // being built or when it lands.
 func Instantiate(l Ladder, r Rung, profile workout.RiderProfile) workout.CreateWorkoutRequest {
-	workHRLow, workHRHigh := zoneHRRange(l.Zone)
-	workType, workLow, workHigh := target(l.Sport, profile, r.LowPct, r.HighPct, workHRLow, workHRHigh)
+	workType, workLow, workHigh := target(l.Sport, profile, r.LowPct, r.HighPct, l.Zone)
 	rp := restPercent(l.Sport)
-	restType, restLow, restHigh := target(l.Sport, profile, rp, rp, 0.50, 0.60)
+	restType, restLow, restHigh := target(l.Sport, profile, rp, rp, "")
 
 	steps := append(Warmup(l.Sport, profile),
 		workStep(l, r, workType, workLow, workHigh, restType, restLow, restHigh),

@@ -115,6 +115,11 @@ type RiderProfile struct {
 	// number here beyond the rider typing one in is MaxHRTestWorkout.
 	MaxHR     int
 	RestingHR int
+	// ThresholdHR is lactate threshold heart rate (LTHR), 0 when unset. It
+	// is detected from analysed rides (internal/thresholds) or read from
+	// Garmin, and is estimated-or-typed like MaxHR: Estimated lists
+	// FieldThresholdHR while it was filled in automatically.
+	ThresholdHR int
 	// AvailableDays is which weekdays the rider can train, lowercase
 	// three-letter abbreviations ("mon", "tue", ...). Nil means not stated.
 	AvailableDays []string
@@ -136,6 +141,7 @@ type RiderProfile struct {
 const (
 	FieldMaxHR                = "max_hr"
 	FieldThresholdPace        = "threshold_pace"
+	FieldThresholdHR          = "threshold_hr"
 	FieldRestingHR            = "resting_hr"
 	FieldAvailableDays        = "available_days"
 	FieldHoursPerAvailableDay = "hours_per_available_day"

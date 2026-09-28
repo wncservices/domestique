@@ -42,7 +42,7 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
     <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">
         <div class="sticky top-0 z-10 bg-default flex flex-col gap-1 pb-2 border-b border-default">
-          <WorkoutProfile :steps="form.steps" :profile="profile" :height="64" />
+          <WorkoutProfile :steps="form.steps" :profile="profile" :height="64" interactive />
           <!-- With no timed steps WorkoutProfile shows its own "No timed steps"
                placeholder; a duration/step-count line under that would read
                as "— · 0 steps", so it only appears once there's something to
