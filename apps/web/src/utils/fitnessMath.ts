@@ -226,3 +226,46 @@ export function formatPace(metersPerSecond: number): string {
   const secs = totalSeconds % 60
   return `${minutes}:${String(secs).padStart(2, '0')} /km`
 }
+
+// ---------- Threshold detection (Task 4: suggestion banner, sync toast,
+// profile provenance) ----------
+//
+// One place for "which field is this" formatting, shared by
+// ThresholdSuggestions.vue, ProfileForm.vue's provenance line and
+// TrainingFitnessPage.vue's sync toast — see DetectedThreshold/
+// ThresholdSuggestion in api/types.ts.
+export type ThresholdField = 'ftp' | 'max_hr' | 'threshold_pace'
+
+// Lowercase, mid-sentence form ("New max heart rate detected") — FTP is
+// already the right case either way.
+export function thresholdFieldLabel(field: ThresholdField): string {
+  switch (field) {
+    case 'ftp':
+      return 'FTP'
+    case 'max_hr':
+      return 'max heart rate'
+    case 'threshold_pace':
+      return 'threshold pace'
+  }
+}
+
+// Start-of-sentence form ("Max heart rate set to 191 bpm") — FTP has no
+// lowercase form to capitalise from.
+export function thresholdFieldTitle(field: ThresholdField): string {
+  const label = thresholdFieldLabel(field)
+  return label === 'FTP' ? label : label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+// A threshold's own value, in the unit that field displays elsewhere —
+// watts, bpm, or a pace string via formatPace (thresholdPaceSecPerKm is
+// stored as sec/km; formatPace wants the equivalent speed in m/s).
+export function formatThresholdValue(field: ThresholdField, value: number): string {
+  switch (field) {
+    case 'ftp':
+      return `${Math.round(value)} W`
+    case 'max_hr':
+      return `${Math.round(value)} bpm`
+    case 'threshold_pace':
+      return formatPace(1000 / value)
+  }
+}
