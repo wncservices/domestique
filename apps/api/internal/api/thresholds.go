@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"strconv"
@@ -19,17 +20,22 @@ import (
 // Mirrored by hand in apps/web/src/api/types.ts — change them together.
 
 type thresholdSuggestionDTO struct {
-	ID         string  `json:"id"`
-	Field      string  `json:"field"`
-	Value      float64 `json:"value"`
-	Previous   float64 `json:"previous,omitempty"`
-	Reason     string  `json:"reason,omitempty"`
-	SourceDate string  `json:"sourceDate,omitempty"`
+	ID       string  `json:"id"`
+	Field    string  `json:"field"`
+	Value    float64 `json:"value"`
+	Previous float64 `json:"previous,omitempty"`
+	// Direction is "up" or "down", mirroring workout.ThresholdSuggestion's
+	// own field — the UI banner (ThresholdSuggestions.vue) reads this
+	// directly rather than re-deriving it from value/previous, which broke
+	// down for a rider with no previous value on file.
+	Direction  string `json:"direction"`
+	Reason     string `json:"reason,omitempty"`
+	SourceDate string `json:"sourceDate,omitempty"`
 }
 
 func thresholdSuggestionDTOFrom(s workout.ThresholdSuggestion) thresholdSuggestionDTO {
 	return thresholdSuggestionDTO{
-		ID: s.ID, Field: s.Field, Value: s.Value, Previous: s.Previous,
+		ID: s.ID, Field: s.Field, Value: s.Value, Previous: s.Previous, Direction: s.Direction,
 		Reason: s.Reason, SourceDate: s.SourceDate,
 	}
 }
@@ -70,7 +76,16 @@ type thresholdDetectionResult struct {
 // joined here to each analysis for the Sport/Date thresholds.Ride needs,
 // since session_analyses itself carries neither.
 func (s *Server) detectThresholds(ctx context.Context, rider string, profile workout.RiderProfile, sessions []workout.CompletedSession, now time.Time) (thresholdDetectionResult, error) {
-	sinceDate := now.AddDate(0, 0, -thresholds.HistoryWindowDays).Format("2006-01-02")
+	// hasFTPHistoryBefore/hasPaceHistoryBefore need to see a ride strictly
+	// before the HistoryWindowDays window ending today — that is the whole
+	// point of the check, "does history reach back further than the window
+	// we're judging silence over." Querying only HistoryWindowDays back
+	// would never load such a ride at all (anything that old is, by
+	// definition, outside that same window), so the down-direction rule
+	// could never fire regardless of what actually happened. Querying twice
+	// as far back gives Detect something to find that proves the history
+	// exists, without needing a third window constant kept in sync by hand.
+	sinceDate := now.AddDate(0, 0, -2*thresholds.HistoryWindowDays).Format("2006-01-02")
 	analyses, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
 		return thresholdDetectionResult{}, err
@@ -136,7 +151,7 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 			if len(changed) > 0 {
 				result.AutoFields = append(result.AutoFields, changed...)
 				result.Detected = append(result.Detected, detectedThresholdDTO{Field: f.Field, Value: f.Value, Reason: f.Reason})
-				s.logger().Info("threshold auto-applied", "rider", rider, "field", f.Field, "value", f.Value)
+				s.logger().Info("threshold auto-applied", "rider", rider, "field", f.Field)
 			}
 			continue
 		}
@@ -195,7 +210,7 @@ func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f 
 	}); err != nil {
 		return err
 	}
-	s.logger().Info("threshold suggestion created", "rider", rider, "field", f.Field, "value", f.Value)
+	s.logger().Info("threshold suggestion created", "rider", rider, "field", f.Field)
 	return nil
 }
 
@@ -327,17 +342,24 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 			s.fail(w, err)
 			return
 		}
+		// The profile write above has already landed by the time a race
+		// could lose here — a second request that resolved this same
+		// suggestion between our GetSuggestion above and this Mark call.
+		// That is fine: the value just written is the pending suggestion's
+		// own value, so whichever request's Mark actually wins, the
+		// profile ends up holding the value both requests agreed on. There
+		// is nothing to roll back.
 		if err := s.Training.MarkSuggestionAccepted(r.Context(), id); err != nil {
-			s.failTrainingLookup(w, err)
+			s.failThresholdResolveRace(w, err)
 			return
 		}
-		s.logger().Info("threshold suggestion accepted", "rider", sug.Rider, "field", sug.Field, "value", sug.Value)
+		s.logger().Info("threshold suggestion accepted", "rider", sug.Rider, "field", sug.Field)
 	case "dismiss":
 		if err := s.Training.MarkSuggestionDismissed(r.Context(), id); err != nil {
-			s.failTrainingLookup(w, err)
+			s.failThresholdResolveRace(w, err)
 			return
 		}
-		s.logger().Info("threshold suggestion dismissed", "rider", sug.Rider, "field", sug.Field, "value", sug.Value)
+		s.logger().Info("threshold suggestion dismissed", "rider", sug.Rider, "field", sug.Field)
 	}
 
 	updated, err := s.Training.GetSuggestion(r.Context(), id)
@@ -346,4 +368,24 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, thresholdSuggestionDTOFrom(updated))
+}
+
+// failThresholdResolveRace maps MarkSuggestionAccepted/MarkSuggestionDismissed
+// losing the race that workout.markSuggestion's own doc comment describes:
+// this handler already fetched the suggestion and found it pending, but by
+// the time Mark ran, a second resolve of the same id got there first, so
+// zero rows matched and it came back as
+// workout.ErrThresholdSuggestionNotFound. That is not "no such suggestion"
+// — the id is real, this request has it in hand — it is "no longer
+// pending," the same 409 the earlier sug.Status check above would have
+// given if the race had lost a moment sooner. Using failTrainingLookup here
+// instead would report 404 for a suggestion this handler just read
+// successfully, which is a worse answer than the 409 a client can actually
+// act on (refresh and see the resolved status).
+func (s *Server) failThresholdResolveRace(w http.ResponseWriter, err error) {
+	if errors.Is(err, workout.ErrThresholdSuggestionNotFound) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "this suggestion is no longer pending"})
+		return
+	}
+	s.fail(w, err)
 }

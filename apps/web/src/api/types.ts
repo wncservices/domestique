@@ -1003,6 +1003,7 @@ export interface ThresholdSuggestion {
   field: 'ftp' | 'max_hr' | 'threshold_pace'
   value: number
   previous?: number
+  direction: 'up' | 'down'
   reason?: string
   sourceDate?: string
 }

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -370,5 +372,192 @@ func TestDetectThresholdsLeavesAFieldsPendingSuggestionAloneWhenItStillFinds(t *
 	}
 	if !fields["ftp"] {
 		t.Errorf("pending = %+v, want an ftp suggestion — that field still produced a finding", pending)
+	}
+}
+
+// TestDetectThresholdsLoadsEnoughHistoryForTheDownDirectionRule is the fix
+// for the bug where detectThresholds queried ListAnalyses back only
+// thresholds.HistoryWindowDays (90 days), while
+// thresholds.hasFTPHistoryBefore/hasPaceHistoryBefore need a ride strictly
+// *before* that same 90-day window to prove enough history exists to trust
+// a down-direction finding. A ride "strictly before the window" is, by
+// construction, older than the query's own cutoff — so with the old
+// sinceDate that ride could never be loaded at all, and the down rule could
+// almost never fire. This seeds exactly that shape (an old power ride ~120
+// days back — clear of the 90-day window's own start of ~89 days back — and
+// recent low-power rides inside the 42-day detection window) through the
+// real sync-time entry point, detectThresholds, and checks a pending "down"
+// ftp suggestion actually gets created. Confirmed to fail against the old
+// `now.AddDate(0, 0, -thresholds.HistoryWindowDays)` sinceDate: with that
+// query, the ~120-day-old ride is excluded from ListAnalyses entirely,
+// hasFTPHistoryBefore sees no history at all, and no suggestion is ever
+// stored.
+func TestDetectThresholdsLoadsEnoughHistoryForTheDownDirectionRule(t *testing.T) {
+	s := newThresholdTestServer(t)
+	ctx := t.Context()
+
+	// Old ride: ~120 days before fixedNow, well clear of the 90-day
+	// history window's own start (~89 days back) — this is what proves
+	// "the rider's history reaches back far enough to trust the recent
+	// silence means something," not the recent rides below.
+	oldDate := fixedNow.AddDate(0, 0, -120).Format("2006-01-02")
+	oldSession, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "old-ftp", Sport: "cycling",
+		Date: oldDate, DurationSeconds: 1200,
+	})
+	if err != nil {
+		t.Fatalf("upsert old session: %v", err)
+	}
+	if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: oldSession.ID, Rider: "wilant", Outcome: "unplanned",
+		PowerCurve: map[string]float64{"1200": 300},
+	}); err != nil {
+		t.Fatalf("save old analysis: %v", err)
+	}
+
+	// Recent ride: inside the 42-day detection window, with a best eFTP
+	// well below 285 (300 * downFactor 0.95) — the recent evidence a down
+	// finding needs to point to.
+	recentDate := fixedNow.AddDate(0, 0, -10).Format("2006-01-02")
+	recentSession, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "recent-ftp", Sport: "cycling",
+		Date: recentDate, DurationSeconds: 1200,
+	})
+	if err != nil {
+		t.Fatalf("upsert recent session: %v", err)
+	}
+	if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: recentSession.ID, Rider: "wilant", Outcome: "unplanned",
+		PowerCurve: map[string]float64{"1200": 270}, // eFTP 256.5, well under 285
+	}); err != nil {
+		t.Fatalf("save recent analysis: %v", err)
+	}
+
+	sessions, err := s.Training.ListSessions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+
+	profile := workout.RiderProfile{Rider: "wilant", FTPWatts: 300} // rider-typed
+	if _, err := s.detectThresholds(ctx, "wilant", profile, sessions, fixedNow); err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+
+	pending, err := s.Training.ListPendingSuggestions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	var found *workout.ThresholdSuggestion
+	for i := range pending {
+		if pending[i].Field == "ftp" {
+			found = &pending[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("pending = %+v, want a down ftp suggestion", pending)
+	}
+	if found.Direction != "down" {
+		t.Errorf("suggestion direction = %q, want %q", found.Direction, "down")
+	}
+	if found.Previous != 300 {
+		t.Errorf("suggestion previous = %v, want 300", found.Previous)
+	}
+}
+
+// TestDetectThresholdsLoadsEnoughHistoryForTheDownDirectionRulePace is the
+// threshold-pace equivalent of the FTP test above — same bug, same fix,
+// different field, cheap to cover since the shape is identical.
+func TestDetectThresholdsLoadsEnoughHistoryForTheDownDirectionRulePace(t *testing.T) {
+	s := newThresholdTestServer(t)
+	ctx := t.Context()
+
+	// Old run: ~120 days back, well clear of the 90-day history window.
+	oldDate := fixedNow.AddDate(0, 0, -120).Format("2006-01-02")
+	oldSession, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "old-pace", Sport: "running",
+		Date: oldDate, DurationSeconds: 1800,
+	})
+	if err != nil {
+		t.Fatalf("upsert old session: %v", err)
+	}
+	if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: oldSession.ID, Rider: "wilant", Outcome: "unplanned",
+		BestSpeed1800: 4.0, // ~4:10/km — just needs to exist, value doesn't matter
+	}); err != nil {
+		t.Fatalf("save old analysis: %v", err)
+	}
+
+	// Recent run: inside the 42-day window, clearly slower than the
+	// rider's current threshold pace — the recent evidence a down finding
+	// needs to point to. Current pace 240 sec/km == speed 1000/240 ≈
+	// 4.1667 m/s; downFactor 0.95 cutoff ≈ 3.958 m/s.
+	recentDate := fixedNow.AddDate(0, 0, -10).Format("2006-01-02")
+	recentSession, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "recent-pace", Sport: "running",
+		Date: recentDate, DurationSeconds: 1800,
+	})
+	if err != nil {
+		t.Fatalf("upsert recent session: %v", err)
+	}
+	if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: recentSession.ID, Rider: "wilant", Outcome: "unplanned",
+		BestSpeed1800: 3.5, // well below the 3.958 m/s down cutoff
+	}); err != nil {
+		t.Fatalf("save recent analysis: %v", err)
+	}
+
+	sessions, err := s.Training.ListSessions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+
+	profile := workout.RiderProfile{Rider: "wilant", ThresholdPaceSecPerKM: 240} // rider-typed
+	if _, err := s.detectThresholds(ctx, "wilant", profile, sessions, fixedNow); err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+
+	pending, err := s.Training.ListPendingSuggestions(ctx, "wilant")
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	var found *workout.ThresholdSuggestion
+	for i := range pending {
+		if pending[i].Field == workout.FieldThresholdPace {
+			found = &pending[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("pending = %+v, want a down threshold_pace suggestion", pending)
+	}
+	if found.Direction != "down" {
+		t.Errorf("suggestion direction = %q, want %q", found.Direction, "down")
+	}
+}
+
+// TestFailThresholdResolveRaceMapsNotFoundTo409 covers review round 2's fix
+// #3: handleResolveThreshold already fetched the suggestion and found it
+// pending before calling MarkSuggestionAccepted/Dismissed, so if that call
+// still comes back with workout.ErrThresholdSuggestionNotFound, it can only
+// mean a second resolve of the same id won the race in between — the row is
+// real, this request just saw it a moment too late. That is a 409 ("no
+// longer pending"), not failTrainingLookup's ordinary 404 for an id that
+// never existed at all; a 404 here would tell a client the resource
+// vanished, when actually the client's own read of it a moment ago was
+// correct and something else changed it out from under this request.
+func TestFailThresholdResolveRaceMapsNotFoundTo409(t *testing.T) {
+	s := newThresholdTestServer(t)
+
+	rec := httptest.NewRecorder()
+	s.failThresholdResolveRace(rec, workout.ErrThresholdSuggestionNotFound)
+	if rec.Code != 409 {
+		t.Errorf("status = %d, want 409 for a race against ErrThresholdSuggestionNotFound", rec.Code)
+	}
+
+	// Any other error is not this race — it falls through to the ordinary
+	// 500 path, same as every other unexpected store error.
+	rec = httptest.NewRecorder()
+	s.failThresholdResolveRace(rec, errors.New("boom"))
+	if rec.Code != 500 {
+		t.Errorf("status = %d, want 500 for an unrelated error", rec.Code)
 	}
 }
