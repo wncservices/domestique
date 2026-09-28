@@ -133,14 +133,16 @@ func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load
 // --- Garmin readiness -------------------------------------------------
 
 func readinessRestReason(d Day) (string, bool) {
-	if d.ReadinessLevel != "POOR" && !(d.ReadinessScore > 0 && d.ReadinessScore < 25) {
+	poor := d.ReadinessLevel == "POOR" || (d.ReadinessScore > 0 && d.ReadinessScore < 25)
+	if !poor {
 		return "", false
 	}
 	return readinessReason("poor", d.ReadinessScore), true
 }
 
 func readinessCautionReason(d Day) (string, bool) {
-	if d.ReadinessLevel != "LOW" && !(d.ReadinessScore >= 25 && d.ReadinessScore <= 49) {
+	low := d.ReadinessLevel == "LOW" || (d.ReadinessScore >= 25 && d.ReadinessScore <= 49)
+	if !low {
 		return "", false
 	}
 	return readinessReason("low", d.ReadinessScore), true
