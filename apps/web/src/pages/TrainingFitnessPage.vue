@@ -8,10 +8,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { FitnessResponse, Me, RiderProfile } from '@/api/types'
+import type { FitnessResponse, Me, ProgressionLevel, RiderProfile } from '@/api/types'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
+import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import SaveBar from '@/components/fitness/SaveBar.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
@@ -211,10 +212,26 @@ async function syncMetrics() {
 // rendering the chart at all until there is something to show.
 const hasFitnessHistory = computed(() => (fitness.value?.snapshots.length ?? 0) > 0)
 
+// --- progression levels (Task 6) ---
+
+const progressionLevels = ref<ProgressionLevel[]>([])
+
+async function loadProgression() {
+  try {
+    const result = await api.progression()
+    progressionLevels.value = result.levels
+  } catch {
+    // Silent: the Progression card simply hides itself with no levels — not
+    // worth a toast alongside the fitness/profile loads above, which are the
+    // page's primary content.
+  }
+}
+
 onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
   loadProfile()
   loadFitness()
+  loadProgression()
 })
 </script>
 
@@ -227,6 +244,8 @@ onMounted(() => {
       :needs-setup="needsSetup"
       @sync="syncMetrics"
     />
+
+    <ProgressionCard :levels="progressionLevels" />
 
     <UCard v-if="hasFitnessHistory" variant="outline">
       <template #header>

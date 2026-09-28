@@ -137,6 +137,8 @@ async function openEditWorkout(w: Workout) {
     goalId: w.goalId ?? NO_GOAL,
     description: w.description ?? '',
     steps: w.steps,
+    zone: w.zone,
+    level: w.level,
   }
   workoutModalOpen.value = true
 }
@@ -429,6 +431,7 @@ onMounted(() => {
         @push="pushWorkoutToGarmin"
         @edit="openEditWorkout"
         @move="moveWorkout"
+        @rated="loadWeek"
       />
 
       <WeekStrip
@@ -443,6 +446,7 @@ onMounted(() => {
         @move="moveWorkout"
         @open="openEditWorkout"
         @fill="fillWeek"
+        @rated="loadWeek"
       />
 
       <SeasonTimeline

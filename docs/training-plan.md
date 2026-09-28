@@ -22,9 +22,11 @@ device and workouts appear — sits on top. Where the code lives:
 | Garmin workout push, calendar placement, push tracking | `internal/garmin/workout.go`, `schedule.go`; `internal/api/workoutpush.go` |
 | Fitness page: form status (intervals.icu TSB bands), chart ranges, training zones | `apps/web/src/utils/fitnessMath.ts`, `apps/web/src/components/fitness/`; Plan is the default Training tab |
 | Ride analysis (FIT from Garmin/Wahoo, outcomes) | `internal/rideanalysis`, `internal/api/rideanalysis.go`, `workout.session_analyses` |
+| Progression levels (per-zone rider level, workout library at that level, struggled-zone step-down) | `internal/progression`, `internal/workoutlib`, `progression_levels` table, `GET /api/training/progression`, `PUT /api/training/sessions/{id}/feel` |
 
 For where outcome-driven adaptation goes from here, see
-`docs/superpowers/specs/2026-09-27-training-adaptation-design.md`.
+`docs/superpowers/specs/2026-09-27-training-adaptation-design.md`. For the progression-levels
+design itself, see `docs/superpowers/specs/2026-09-27-progression-levels-design.md`.
 
 **How it runs unattended.** One loop (`RunAutoScheduleLoop`, every 30 minutes, behind the
 admin's `auto_schedule` flag, under one advisory lock) does, in order: sync every connected

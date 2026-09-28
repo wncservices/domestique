@@ -10,6 +10,7 @@ import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { sports } from '@/components/plan/forms'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
+import ZoneLevelBadge from '@/components/plan/ZoneLevelBadge.vue'
 import { flattenSteps, formatDuration } from '@/utils/workoutMath'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -35,6 +36,9 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
 
 <template>
   <USlideover v-model:open="open" side="right" :title="editing ? 'Edit workout' : 'Build a workout'" :ui="{ content: 'max-w-2xl' }">
+    <template v-if="form.zone && (form.level ?? 0) > 0" #actions>
+      <ZoneLevelBadge :zone="form.zone" :level="form.level!" />
+    </template>
     <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">
         <div class="sticky top-0 z-10 bg-default flex flex-col gap-1 pb-2 border-b border-default">

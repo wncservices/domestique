@@ -31,6 +31,12 @@ export interface WorkoutForm {
   goalId: string
   description: string
   steps: WorkoutStep[]
+  /** Carried through from the workout being edited, purely for
+   *  WorkoutSlideover's header badge — never editable here and never sent
+   *  back in an UpdateWorkoutRequest (the scheduler owns these). Absent on
+   *  a fresh/create form. */
+  zone?: string
+  level?: number
 }
 
 // Reka UI's <SelectItem> forbids an empty-string value — it reserves '' to
