@@ -389,8 +389,10 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		// the EstimateFTP fallback), the over-reach risk is the same, so all
 		// of them go through the one helper. The profile write has already
 		// landed, so a failure here is logged rather than failing the sync.
-		if _, _, err := s.recalibrateLevelsForFTP(ctx, rider, before); err != nil {
-			s.logger().Error("level recalibration failed", "rider", rider, "err", err)
+		if profile.FTPWatts != before.FTPWatts {
+			if _, _, err := s.recalibrateLevelsForFTP(ctx, rider, before); err != nil {
+				s.logger().Error("level recalibration failed", "rider", rider, "err", err)
+			}
 		}
 	}
 

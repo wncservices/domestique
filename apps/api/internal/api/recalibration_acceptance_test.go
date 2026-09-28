@@ -24,8 +24,11 @@ func seedRecalRider(t *testing.T, h *metricsSyncHarness, ftp float64, estimated 
 	t.Helper()
 	ctx := context.Background()
 	if _, err := h.srv.Training.SaveProfile(ctx, workout.RiderProfile{
-		Rider: "wilant", FTPWatts: ftp, FTPEstimated: estimated, FTPLevelsCalibratedAt: ftp,
+		Rider: "wilant", FTPWatts: ftp, FTPEstimated: estimated,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.srv.Training.SetFTPCalibrated(ctx, "wilant", 0, ftp); err != nil {
 		t.Fatal(err)
 	}
 	for zone, level := range map[workout.Zone]float64{workout.ZoneThreshold: 5.3, workout.ZoneSweetSpot: 4.0} {

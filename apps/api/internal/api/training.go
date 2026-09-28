@@ -728,6 +728,8 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rider := auth.FromContext(r.Context()).User
+	// before is what recalibrateLevelsForFTP needs; the marker is not carried
+	// forward into the save below because SaveProfile never writes it.
 	before, _, err := s.Training.GetProfile(r.Context(), rider)
 	if err != nil {
 		s.fail(w, err)
@@ -743,9 +745,6 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
 		AutoPushWorkouts: body.AutoPushWorkouts,
-		// Not in the form: the FTP the levels were last calibrated against
-		// is bookkeeping, and a fresh struct would otherwise reset it to 0.
-		FTPLevelsCalibratedAt: before.FTPLevelsCalibratedAt,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

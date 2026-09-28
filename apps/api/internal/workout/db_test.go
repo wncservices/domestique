@@ -266,7 +266,7 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
-			t.Run("ftp_levels_calibrated_watts defaults 0 and round-trips", func(t *testing.T) {
+			t.Run("ftp_levels_calibrated_watts: SaveProfile never writes it, SetFTPCalibrated is a compare-and-set", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()
 
@@ -278,15 +278,52 @@ func TestEachEngine(t *testing.T) {
 					t.Errorf("FTPLevelsCalibratedAt = %v, want 0 by default", saved.FTPLevelsCalibratedAt)
 				}
 
-				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 268, FTPLevelsCalibratedAt: 255}); err != nil {
+				marker := func() float64 {
+					p, _, err := db.GetProfile(ctx, "wilant")
+					if err != nil {
+						t.Fatalf("get profile: %v", err)
+					}
+					return p.FTPLevelsCalibratedAt
+				}
+
+				// A struct carrying a marker does not write it, on insert...
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "other", FTPWatts: 250, FTPLevelsCalibratedAt: 999}); err != nil {
 					t.Fatalf("save profile: %v", err)
 				}
-				fetched, _, err := db.GetProfile(ctx, "wilant")
-				if err != nil {
-					t.Fatalf("get profile: %v", err)
+				if p, _, _ := db.GetProfile(ctx, "other"); p.FTPLevelsCalibratedAt != 0 {
+					t.Errorf("insert wrote the marker: %v", p.FTPLevelsCalibratedAt)
 				}
-				if fetched.FTPLevelsCalibratedAt != 255 {
-					t.Errorf("FTPLevelsCalibratedAt = %v, want 255", fetched.FTPLevelsCalibratedAt)
+
+				won, err := db.SetFTPCalibrated(ctx, "wilant", 0, 255)
+				if err != nil || !won {
+					t.Fatalf("first CAS 0 -> 255: won=%v err=%v", won, err)
+				}
+				if got := marker(); got != 255 {
+					t.Fatalf("marker = %v, want 255", got)
+				}
+				// ...nor on update, whatever the struct says.
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 268, FTPLevelsCalibratedAt: 0}); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if got := marker(); got != 255 {
+					t.Errorf("SaveProfile changed the marker to %v", got)
+				}
+
+				won, err = db.SetFTPCalibrated(ctx, "wilant", 255, 268)
+				if err != nil || !won {
+					t.Fatalf("CAS 255 -> 268: won=%v err=%v", won, err)
+				}
+				// A second CAS with the now-stale from loses and changes nothing.
+				won, err = db.SetFTPCalibrated(ctx, "wilant", 255, 300)
+				if err != nil || won {
+					t.Errorf("stale CAS: won=%v err=%v, want a clean loss", won, err)
+				}
+				if got := marker(); got != 268 {
+					t.Errorf("marker = %v, want 268", got)
+				}
+				// No row at all is a loss too, not an error.
+				if won, err := db.SetFTPCalibrated(ctx, "nobody", 0, 1); err != nil || won {
+					t.Errorf("CAS on a missing rider: won=%v err=%v", won, err)
 				}
 			})
 

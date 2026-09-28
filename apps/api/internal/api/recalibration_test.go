@@ -3,9 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -16,10 +18,11 @@ import (
 // recalHarness is a Server with only what recalibrateLevelsForFTP touches — a
 // real workout store on SQLite and a logger whose output the tests can read.
 type recalHarness struct {
-	t   *testing.T
-	s   *Server
-	db  *workout.DB
-	log *bytes.Buffer
+	t    *testing.T
+	s    *Server
+	db   *workout.DB
+	conn *sql.DB
+	log  *bytes.Buffer
 }
 
 func newRecalHarness(t *testing.T) *recalHarness {
@@ -35,16 +38,17 @@ func newRecalHarness(t *testing.T) *recalHarness {
 	}
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	return &recalHarness{t: t, s: &Server{Training: db, Log: logger}, db: db, log: buf}
+	return &recalHarness{t: t, s: &Server{Training: db, Log: logger}, db: db, conn: src.Conn(), log: buf}
 }
 
 // seedProfile writes a profile already calibrated against ftp, the state every
 // rider who has lived through one recalibration (or a first save) is in.
 func (h *recalHarness) seedProfile(ftp float64) {
 	h.t.Helper()
-	if _, err := h.db.SaveProfile(context.Background(), workout.RiderProfile{
-		Rider: "wilant", FTPWatts: ftp, FTPLevelsCalibratedAt: ftp,
-	}); err != nil {
+	if _, err := h.db.SaveProfile(context.Background(), workout.RiderProfile{Rider: "wilant", FTPWatts: ftp}); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.db.SetFTPCalibrated(context.Background(), "wilant", 0, ftp); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -359,9 +363,12 @@ func TestRecalibrateAProfileThatPredatesTheMarkerUsesItsOldFTP(t *testing.T) {
 func TestRecalibrateLeavesTheRestOfTheProfileAlone(t *testing.T) {
 	h := newRecalHarness(t)
 	if _, err := h.db.SaveProfile(context.Background(), workout.RiderProfile{
-		Rider: "wilant", FTPWatts: 255, FTPLevelsCalibratedAt: 255, MaxHR: 190,
+		Rider: "wilant", FTPWatts: 255, MaxHR: 190,
 		FTPEstimated: true, AvailableDays: []string{"mon", "wed"}, AutoPushWorkouts: true,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.SetFTPCalibrated(context.Background(), "wilant", 0, 255); err != nil {
 		t.Fatal(err)
 	}
 	h.seedCyclingLevels()
@@ -374,5 +381,126 @@ func TestRecalibrateLeavesTheRestOfTheProfileAlone(t *testing.T) {
 	}
 	if p.FTPWatts != 268 || p.MaxHR != 190 || !p.FTPEstimated || !p.AutoPushWorkouts || len(p.AvailableDays) != 2 {
 		t.Errorf("profile = %+v, want everything but the marker untouched", p)
+	}
+}
+
+// The exact 3% edge: 100 -> 103 must recalibrate, whatever float rounding
+// does to 100*1.03.
+func TestRecalibrateExactThreePercentEdge(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(100)
+	h.seedCyclingLevels()
+	before := h.changeFTP(103)
+	if _, changed := h.recalibrate(before); !changed {
+		t.Error("exactly +3% did not recalibrate")
+	}
+}
+
+// Two saves racing on the same rise, or a late one holding a stale before:
+// the marker CAS lets exactly one of them move levels.
+func TestRecalibrateSameRiseMovesLevelsExactlyOnce(t *testing.T) {
+	t.Run("sequential with a stale before", func(t *testing.T) {
+		h := newRecalHarness(t)
+		h.seedProfile(255)
+		h.seedCyclingLevels()
+		before := h.changeFTP(268)
+		h.recalibrate(before)
+		h.recalibrate(before)
+		h.wantLevel(model.SportCycling, workout.ZoneThreshold, 4.6)
+		h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 3.3)
+	})
+
+	t.Run("concurrent", func(t *testing.T) {
+		h := newRecalHarness(t)
+		h.seedProfile(255)
+		h.seedCyclingLevels()
+		before := h.changeFTP(268)
+
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		wins := 0
+		for range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before)
+				if err != nil {
+					t.Errorf("recalibrateLevelsForFTP: %v", err)
+				}
+				if changed {
+					mu.Lock()
+					wins++
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		if wins != 1 {
+			t.Errorf("%d callers recalibrated, want exactly 1", wins)
+		}
+		h.wantLevel(model.SportCycling, workout.ZoneThreshold, 4.6)
+		h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 3.3)
+	})
+}
+
+// A level write failing after the marker moved must give the marker back, so
+// a later sync or save retries the rise — and a retry must not lower again
+// the zones that did get written the first time.
+func TestRecalibrateRestoresTheMarkerWhenALevelWriteFails(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(255)
+	h.seedCyclingLevels() // written in zone order: sweet_spot, tempo, threshold
+
+	if _, err := h.conn.Exec(`CREATE TRIGGER recal_boom BEFORE UPDATE ON progression_levels
+		WHEN NEW.zone = 'threshold' BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	before := h.changeFTP(268)
+	if _, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before); err == nil || changed {
+		t.Fatalf("changed=%v err=%v, want the write failure reported", changed, err)
+	}
+	if got := h.marker(); got != 255 {
+		t.Fatalf("marker = %v, want it restored to 255 so the rise is retried", got)
+	}
+	if !strings.Contains(h.log.String(), "level=ERROR") {
+		t.Errorf("log = %q, want an Error line", h.log.String())
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 3.3) // already written
+
+	if _, err := h.conn.Exec(`DROP TRIGGER recal_boom`); err != nil {
+		t.Fatal(err)
+	}
+	if _, changed := h.recalibrate(before); !changed {
+		t.Fatal("the retry did not recalibrate")
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 4.6)
+	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 3.3) // not lowered twice
+	if got := h.marker(); got != 268 {
+		t.Errorf("marker = %v, want 268 after the retry", got)
+	}
+}
+
+// The consequence of leaving the marker alone on a sub-3% rise: levels
+// calibrated at 255 are measured against 255 until something recalibrates.
+func TestRecalibrateSubThreeMarkerRuleConsequence(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(255)
+	h.seedCyclingLevels()
+	// 255 -> 262 is +2.75%: nothing, marker stays 255.
+	before := h.changeFTP(262)
+	if _, changed := h.recalibrate(before); changed {
+		t.Fatal("+2.75% recalibrated")
+	}
+	// 262 -> 250 is a drop: marker follows down to 250.
+	before = h.changeFTP(250)
+	h.recalibrate(before)
+	if got := h.marker(); got != 250 {
+		t.Fatalf("marker = %v, want 250", got)
+	}
+	// 250 -> 262 is +4.8% against the marker: recalibrates, although 262 was
+	// already seen once without effect.
+	before = h.changeFTP(262)
+	if _, changed := h.recalibrate(before); !changed {
+		t.Error("255 -> 262 -> 250 -> 262: the final rise did not recalibrate")
 	}
 }
