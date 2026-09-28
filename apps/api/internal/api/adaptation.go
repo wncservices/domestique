@@ -8,6 +8,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
+	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
 
 // now is the clock adaptation reads. A field on Server rather than a bare
@@ -101,8 +102,32 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		byID[w.ID] = w
 	}
 
+	// AdaptSessions already keeps each workout to at most one Change per pass
+	// (stepDownTarget skips ids its own per-session loop has claimed — see
+	// its doc comment); this is a second, independent guard here so a bug in
+	// that bookkeeping cannot silently apply two Changes to the same workout
+	// — first one wins, and a second is loud rather than a quiet clobber.
+	appliedFor := map[string]bool{}
 	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, latest, s.now(), byWorkout) {
+		if appliedFor[c.WorkoutID] {
+			s.logger().Warn("adapt: a second change was produced for the same workout in one pass; ignoring it", "workout", c.WorkoutID, "rider", rider)
+			continue
+		}
+		appliedFor[c.WorkoutID] = true
 		wk := byID[c.WorkoutID]
+
+		// A step-down replaces the workout's own content (name, steps,
+		// level) rather than moving or downgrading it wholesale — see
+		// applyStepDown.
+		if c.StepDown {
+			if err := s.applyStepDown(ctx, wk, profile, c); err != nil {
+				s.logger().Warn("adapt: could not step a workout down", "workout", wk.ID, "rider", rider, "err", err)
+				continue
+			}
+			s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "stepped down", "reason", c.Reason)
+			continue
+		}
+
 		description := wk.Description + " " + adapter.Note(c)
 		req := workout.UpdateWorkoutRequest{Description: &description}
 
@@ -135,4 +160,48 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		}
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "reason", c.Reason)
 	}
+}
+
+// applyStepDown replaces wk with the rung one level below its own on the
+// same zone's ladder — same date, same goal — the spec's response to a
+// struggled key session in that zone (adapter.AdaptSessions' own
+// stepDownTarget picks which workout this is; this is the one place that
+// actually builds the lower rung, via workoutlib, the same library
+// scheduleGoal uses to build a workout in the first place).
+func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile workout.RiderProfile, c adapter.Change) error {
+	ladder, ok := workoutlib.LadderFor(wk.Sport, string(wk.Zone))
+	if !ok {
+		return fmt.Errorf("no workout ladder for %s/%s", wk.Sport, wk.Zone)
+	}
+
+	targetLevel := int(wk.Level) - 1
+	if targetLevel < 1 {
+		targetLevel = 1
+	}
+	var rung workoutlib.Rung
+	found := false
+	for _, r := range ladder.Rungs {
+		if r.Level == targetLevel {
+			rung, found = r, true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("no rung at level %d for %s/%s", targetLevel, wk.Sport, wk.Zone)
+	}
+
+	req := workoutlib.Instantiate(ladder, rung, profile)
+	// The source marker goes *before* scheduler.AdjustedMarker, not after
+	// adapter.Note(c) — the frontend's adjustmentNote() (workoutMath.ts)
+	// shows a rider everything past "Adjusted automatically:" verbatim as
+	// the reason, so a marker appended after it ("...was under target
+	// step-down source: <id>") would leak straight into that text. Placing
+	// it here keeps it out of what a rider ever reads, while
+	// hasStepDownSource can still find it — it just searches the whole
+	// description, position included.
+	description := wk.Description + " " + adapter.StepDownSourceNote(c.StepDownSourceID) + " " + adapter.Note(c)
+	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
+		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
+	})
+	return err
 }

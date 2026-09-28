@@ -66,6 +66,11 @@ const overloadLookbackDays = 7
 // overloadLookbackDays before it counts as overload fatigue.
 const overloadRatioTrigger = 1.3
 
+// stepDownWindowDays is the spec's own "within the next 7 days" — both how
+// recent a struggled key session must be to trigger a step-down, and how far
+// ahead of it the next same-zone workout may sit to be the one stepped down.
+const stepDownWindowDays = 7
+
 // defaultPlannedIF is the intensity factor estimatePlannedTSS assumes for a
 // workout with no power-target step (an open-ended endurance ride, say) — a
 // deliberately easy default rather than a guess at a harder one.
@@ -81,6 +86,21 @@ type Change struct {
 	ReplaceWorkoutID string
 	// Downgrade is set when the workout should be replaced by an easy one.
 	Downgrade bool
+	// StepDown is set when the workout should be replaced by the next rung
+	// down on its own zone's ladder — a struggled key session's own zone
+	// stepping back a level, distinct from Downgrade's whole-plan fatigue
+	// swap to an easy session. The caller (internal/api's adaptRider) is the
+	// one that actually picks the lower rung, via workoutlib — this package
+	// only decides which workout it should happen to.
+	StepDown bool
+	// StepDownSourceID is the id of the struggled key session that
+	// triggered this StepDown. The caller records it in the replacement
+	// workout's own description (via StepDownSourceNote) so a later
+	// adaptation pass can tell this exact struggle already produced one
+	// step-down and must not produce a second from it — see
+	// stepDownTarget's own doc comment for why that matters with more than
+	// one untouched same-zone workout in the window.
+	StepDownSourceID string
 	// Reason is shown to the rider.
 	Reason string
 }
@@ -114,6 +134,14 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Date < ordered[j].Date })
 
 	replaced := map[string]bool{}
+	// claimed holds every workout id this pass has already produced a Change
+	// for (as the changed workout itself, or as the easy slot a missed
+	// session is taking over) — stepDownTarget must not then also pick one of
+	// these as the workout it steps down, or that workout would end up with
+	// two Changes and adaptRider's own first-wins guard would silently drop
+	// one of them instead of the two rules simply not colliding in the first
+	// place.
+	claimed := map[string]bool{}
 	var changes []Change
 	for _, w := range ordered {
 		if w.Date == "" || !scheduler.IsGenerated(w) || done(w, sessions, analyses) {
@@ -130,6 +158,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 			}
 			if next, ok := nextFreeDay(today, weekEnd, available, taken); ok {
 				taken[next] = true
+				claimed[w.ID] = true
 				changes = append(changes, Change{
 					WorkoutID: w.ID, NewDate: next,
 					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s.", w.Date, next),
@@ -138,6 +167,8 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 			}
 			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced); ok {
 				replaced[slot.ID] = true
+				claimed[w.ID] = true
+				claimed[slot.ID] = true
 				changes = append(changes, Change{
 					WorkoutID: w.ID, NewDate: slot.Date, ReplaceWorkoutID: slot.ID,
 					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s in place of an easy day.", w.Date, slot.Date),
@@ -148,13 +179,111 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// whether that shows up as very negative form or as what the ride
 		// analyses themselves say (see detectFatigue).
 		case fatigue.active && scheduler.IsHardSession(w) && (w.Date == todayStr || w.Date == day(today.AddDate(0, 0, 1))):
+			claimed[w.ID] = true
 			changes = append(changes, Change{
 				WorkoutID: w.ID, Downgrade: true,
 				Reason: fatigue.reason,
 			})
 		}
 	}
+
+	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed); ok {
+		changes = append(changes, Change{
+			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
+			Reason: stepDownReason(src),
+		})
+	}
 	return changes
+}
+
+// stepDownSourceMarker prefixes the note recording which struggled session
+// caused a step-down — see StepDownSourceNote.
+const stepDownSourceMarker = "step-down source:"
+
+// StepDownSourceNote is the text internal/api's applyStepDown appends to a
+// stepped-down workout's own description, alongside the ordinary adjustment
+// marker/reason — naming the struggled session (by id) that caused it.
+// AutoScheduleTick runs every 30 minutes, and a struggled session's own
+// analysis does not change between runs, so without this a second pass
+// would otherwise see the exact same struggle and step down a *second*
+// same-zone workout too, once the first one is no longer IsGenerated —
+// hasStepDownSource is what stepDownTarget checks to refuse that.
+func StepDownSourceNote(sourceID string) string {
+	return fmt.Sprintf("%s %s", stepDownSourceMarker, sourceID)
+}
+
+// hasStepDownSource reports whether any workout already carries sourceID's
+// own StepDownSourceNote — meaning that struggled session has already
+// produced one step-down and must not produce a second one.
+func hasStepDownSource(ordered []workout.Workout, sourceID string) bool {
+	note := StepDownSourceNote(sourceID)
+	for _, w := range ordered {
+		if strings.Contains(w.Description, note) {
+			return true
+		}
+	}
+	return false
+}
+
+// stepDownTarget looks for the most recent analysed, generated key session
+// in a structured zone that struggled within stepDownWindowDays of today,
+// and the next still-untouched generated workout in that same zone dated
+// after it — within stepDownWindowDays of the struggled session itself —
+// the one the spec says to step down a level (docs/superpowers/specs's
+// progression-levels design, "Struggled -> step down"). False when there is
+// no recent struggle to react to, that struggle has already produced a
+// step-down (hasStepDownSource), or nothing is left in that zone to step
+// down. claimed holds every workout id AdaptSessions' own per-session loop
+// already produced a Change for this pass — a workout already rescheduled,
+// replaced, or downgraded this pass is skipped as a step-down target so it
+// never ends up with two Changes (a missed-session reschedule onto a
+// same-zone slot, say, followed by that same slot being stepped down).
+func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time, claimed map[string]bool) (workout.Workout, workout.Workout, bool) {
+	var source workout.Workout
+	found := false
+	for _, w := range ordered {
+		if !scheduler.IsGenerated(w) || !scheduler.IsKeySession(w) || w.Date == "" || !workout.IsStructuredZone(w.Zone) {
+			continue
+		}
+		a, ok := analyses[w.ID]
+		if !ok || a.Outcome != string(outcomeStruggled) || !withinDays(w.Date, today, stepDownWindowDays) {
+			continue
+		}
+		if !found || w.Date > source.Date {
+			source, found = w, true
+		}
+	}
+	if !found || hasStepDownSource(ordered, source.ID) {
+		return workout.Workout{}, workout.Workout{}, false
+	}
+
+	sourceDate, err := time.Parse("2006-01-02", source.Date)
+	if err != nil {
+		return workout.Workout{}, workout.Workout{}, false
+	}
+	for _, w := range ordered {
+		if w.Date <= source.Date || w.Zone != source.Zone || !scheduler.IsGenerated(w) || claimed[w.ID] {
+			continue
+		}
+		d, err := time.Parse("2006-01-02", w.Date)
+		if err != nil || d.Sub(sourceDate) > stepDownWindowDays*24*time.Hour {
+			continue
+		}
+		return source, w, true
+	}
+	return workout.Workout{}, workout.Workout{}, false
+}
+
+// stepDownReason names the struggled session that triggered the step-down,
+// in the spec's own shape: weekday, then the zone label — "Stepped down
+// after Tuesday's threshold session was under target."
+func stepDownReason(w workout.Workout) string {
+	weekday := w.Date
+	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
+		weekday = d.Weekday().String()
+	}
+	zone := strings.ReplaceAll(string(w.Zone), "_", " ")
+	return fmt.Sprintf("Stepped down after %s's %s session was under target", weekday, zone)
 }
 
 // done reports whether the rider did this session. A ride-analysis outcome

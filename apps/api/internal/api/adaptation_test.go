@@ -118,6 +118,281 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 	}
 }
 
+// TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown is the server-side
+// half of the spec's "Struggled -> step down": adapter.AdaptSessions
+// decides which workout to step down (see internal/adapter's own test for
+// that), this proves adaptRider/applyStepDown actually rebuild it as the
+// rung one level lower on the same ladder, same date and goal, via
+// workoutlib — not just leave a Change unapplied.
+func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) } // Thursday
+
+	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
+		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 5,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ListAnalyses (which adaptRider reads from) joins session_analyses to
+	// completed_sessions for its date — an analysis with no matching
+	// completed session behind it is invisible to that join, so the ride
+	// itself has to be recorded too, not just its analysis.
+	sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "6400", Sport: "cycling",
+		Date: "2026-03-17", DurationSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sess.ID, Rider: "wilant", WorkoutID: struggledWorkout.ID, Outcome: "struggled",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	nextThreshold, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
+		Date: "2026-03-21", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AdaptWorkouts(ctx)
+
+	stepped, err := h.store.GetWorkout(ctx, nextThreshold.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stepped.Level != 3 {
+		t.Errorf("stepped-down workout level = %v, want 3 (one rung below its own level 4)", stepped.Level)
+	}
+	if stepped.Date != "2026-03-21" || stepped.GoalID != goal.ID {
+		t.Errorf("stepped-down workout date/goal = %s/%s, want unchanged (2026-03-21/%s)", stepped.Date, stepped.GoalID, goal.ID)
+	}
+	if !strings.Contains(stepped.Description, scheduler.AdjustedMarker) || !strings.Contains(stepped.Description, "Stepped down") {
+		t.Errorf("description = %q, want the adjustment marker and a step-down reason", stepped.Description)
+	}
+	if scheduler.IsGenerated(stepped) {
+		t.Error("a stepped-down workout must not be eligible for a second automatic adjustment")
+	}
+	// Round 2's fix: the rider-visible text — everything after
+	// scheduler.AdjustedMarker, the same slice the frontend's own
+	// adjustmentNote() takes — must be just the reason, never the
+	// step-down source marker or the struggled workout's own id. The
+	// source note has to sit *before* the marker in the description for
+	// that to hold, while hasStepDownSource can still find it anywhere.
+	if visible := riderVisibleAdjustmentText(stepped.Description); strings.Contains(visible, "source:") || strings.Contains(visible, struggledWorkout.ID) {
+		t.Errorf("rider-visible adjustment text = %q, want no step-down source marker or workout id leaking into it", visible)
+	}
+
+	// The struggled session's own workout is untouched — only the *next*
+	// workout in its zone steps down, never the one that was actually rated.
+	untouched, err := h.store.GetWorkout(ctx, struggledWorkout.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untouched.Level != 5 || untouched.Name != "Threshold 3x12" {
+		t.Errorf("the struggled session's own workout changed: %+v", untouched)
+	}
+}
+
+// riderVisibleAdjustmentText mirrors apps/web/src/utils/workoutMath.ts's own
+// adjustmentNote(): everything after scheduler.AdjustedMarker, trimmed —
+// exactly what a rider actually reads for "why was this changed." Kept here
+// rather than imported since it lives in the frontend, but the slicing
+// logic has to match byte for byte for this test to mean anything.
+func riderVisibleAdjustmentText(description string) string {
+	at := strings.Index(description, scheduler.AdjustedMarker)
+	if at < 0 {
+		return ""
+	}
+	return strings.TrimSpace(description[at+len(scheduler.AdjustedMarker):])
+}
+
+// TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle
+// is round 1's important fix (review finding #2): AutoScheduleTick runs
+// every 30 minutes, and a struggled session's own analysis never changes
+// between runs. With two untouched same-zone workouts in the 7-day window,
+// a second AdaptWorkouts pass must not see the very same struggle again and
+// step down the second one too, now that the first is no longer
+// IsGenerated — exactly one step-down per struggle, ever, not one per pass
+// until every same-zone candidate is used up.
+func TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) } // Thursday
+
+	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
+		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 5,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "6500", Sport: "cycling",
+		Date: "2026-03-17", DurationSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sess.ID, Rider: "wilant", WorkoutID: struggledWorkout.ID, Outcome: "struggled",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two eligible same-zone, same-window targets — exactly the shape that
+	// exposed the bug: stepDownTarget always picks "the next untouched one,"
+	// so once the first is touched a naive re-run just advances to the
+	// second.
+	firstTarget, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
+		Date: "2026-03-20", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondTarget, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x6",
+		Date: "2026-03-22", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 2400}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First pass: steps down exactly the first (earliest) target.
+	h.srv.AdaptWorkouts(ctx)
+	afterFirst, err := h.store.GetWorkout(ctx, firstTarget.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFirst.Level != 3 || scheduler.IsGenerated(afterFirst) {
+		t.Fatalf("first target after pass 1 = %+v, want stepped down to level 3 and no longer generated", afterFirst)
+	}
+	stillGenerated, err := h.store.GetWorkout(ctx, secondTarget.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillGenerated.Level != 4 || !scheduler.IsGenerated(stillGenerated) {
+		t.Fatalf("second target after pass 1 = %+v, want untouched", stillGenerated)
+	}
+
+	// Second pass, same struggle, nothing new synced: the second target must
+	// stay untouched — this is the regression the fix guards.
+	h.srv.AdaptWorkouts(ctx)
+	afterSecondPass, err := h.store.GetWorkout(ctx, secondTarget.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSecondPass.Level != 4 || !scheduler.IsGenerated(afterSecondPass) {
+		t.Errorf("second target after pass 2 = %+v, want still untouched — one struggle steps down exactly one workout, ever", afterSecondPass)
+	}
+}
+
+// TestAMissedSessionRescheduledOntoAStepDownCandidateIsNotAlsoSteppedDown is
+// the end-to-end half of the final review's fix (adapter.AdaptSessions'
+// internal/adapter test covers the pure decision; this proves adaptRider's
+// own defensive first-Change-wins guard, and the fix in stepDownTarget
+// itself, hold together through the real store): a missed key session that
+// gets rescheduled this same pass would — before the fix — also have been
+// picked up as stepDownTarget's own "next untouched same-zone workout after
+// a struggled session" candidate, since its still-missed original date
+// already sits after the struggled source and in its zone. It must come out
+// of one AdaptWorkouts pass moved, at its original level, never stepped
+// down.
+func TestAMissedSessionRescheduledOntoAStepDownCandidateIsNotAlsoSteppedDown(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) } // Thursday
+
+	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", HoursPerAvailableDay: 1.5, AvailableDays: []string{"mon", "tue", "fri"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
+		Date: "2026-03-16", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 5,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "7000", Sport: "cycling",
+		Date: "2026-03-16", DurationSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sess.ID, Rider: "wilant", WorkoutID: struggledWorkout.ID, Outcome: "struggled",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Missed: Tuesday, same zone as the struggle, within the step-down
+	// window, dated after the struggled session, and never ridden — every
+	// condition stepDownTarget's own candidate search checks, on top of
+	// being this week's own missed key session.
+	missed, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
+		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
+		Zone: workout.ZoneThreshold, Level: 4,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AdaptWorkouts(ctx)
+
+	after, err := h.store.GetWorkout(ctx, missed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Date != "2026-03-20" {
+		t.Errorf("missed session date = %q, want moved to Friday 2026-03-20", after.Date)
+	}
+	if after.Level != 4 {
+		t.Errorf("missed session level = %v, want unchanged at 4 — it was rescheduled, not stepped down", after.Level)
+	}
+	if !strings.Contains(after.Description, "missed") || strings.Contains(after.Description, "Stepped down") {
+		t.Errorf("description = %q, want the missed-session reason and no step-down text", after.Description)
+	}
+}
+
 func TestARidersOwnWorkoutsAreNeverAdapted(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()

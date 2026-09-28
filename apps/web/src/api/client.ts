@@ -64,6 +64,8 @@ import type {
   GoalProposal,
   SyncMetricsResult,
   TrainingWeek,
+  ProgressionLevel,
+  SessionAnalysis,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -756,5 +758,19 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sport }),
+    }),
+  /** The rider's own progression levels, one per sport/zone — the
+   *  Progression card's own source. Initialised server-side on first read
+   *  for any sport the rider has a goal for — see handleGetProgression. */
+  progression: () => request<{ levels: ProgressionLevel[] }>('/api/training/progression'),
+  /** Rates (or re-rates) how a completed, analysed session felt, 1 (easy) to
+   *  5 (all-out) — re-applies that ride's own progression-level change with
+   *  the new feel factored in rather than stacking a second one on top. See
+   *  handleSetSessionFeel. */
+  setSessionFeel: (id: string, feel: number) =>
+    request<SessionAnalysis>(`/api/training/sessions/${encodeURIComponent(id)}/feel`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feel }),
     }),
 }

@@ -381,6 +381,184 @@ func TestEstimatePlannedTSS(t *testing.T) {
 	}
 }
 
+// structured builds a generated, structured-zone workout — the shape
+// stepDownTarget needs to recognise both the struggled source session and
+// the candidate it might step down (workout.IsStructuredZone is what makes
+// IsKeySession true regardless of name; see scheduler.IsKeySession).
+func structured(id, name, date string, zone workout.Zone, level float64) workout.Workout {
+	w := planned(id, name, date)
+	w.Zone, w.Level = zone, level
+	return w
+}
+
+func struggled(steps ...bool) workout.SessionAnalysis {
+	// steps is unused today (struggleReason's own "N of M" logic is not part
+	// of the step-down reason, which names only the weekday and zone) — kept
+	// as a no-op parameter only so a caller reads naturally; ignore it.
+	return workout.SessionAnalysis{Outcome: "struggled"}
+}
+
+func TestAStruggledKeySessionStepsDownTheNextSameZoneWorkout(t *testing.T) {
+	ws := []workout.Workout{
+		structured("tue-threshold", "Threshold 3×12", "2026-03-17", workout.ZoneThreshold, 5),
+		structured("thu-threshold", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4),
+	}
+	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
+
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+
+	var stepDowns []Change
+	for _, c := range got {
+		if c.StepDown {
+			stepDowns = append(stepDowns, c)
+		}
+	}
+	if len(stepDowns) != 1 || stepDowns[0].WorkoutID != "thu-threshold" {
+		t.Fatalf("changes = %+v, want exactly one step-down of thu-threshold", got)
+	}
+	if !strings.Contains(stepDowns[0].Reason, "Tuesday") || !strings.Contains(stepDowns[0].Reason, "threshold") {
+		t.Errorf("reason = %q, want it to name Tuesday and threshold", stepDowns[0].Reason)
+	}
+}
+
+func TestAStruggledSessionDoesNotStepDownADifferentZone(t *testing.T) {
+	ws := []workout.Workout{
+		structured("tue-threshold", "Threshold 3×12", "2026-03-17", workout.ZoneThreshold, 5),
+		structured("thu-vo2", "VO2max 5×4", "2026-03-19", workout.ZoneVO2Max, 5),
+	}
+	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
+
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+
+	for _, c := range got {
+		if c.StepDown {
+			t.Fatalf("changes = %+v, want no step-down — the only later workout is a different zone", got)
+		}
+	}
+}
+
+func TestAnAlreadyAdjustedWorkoutIsNeverStepDownTargeted(t *testing.T) {
+	touched := structured("thu-threshold", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4)
+	touched.Description += " " + scheduler.AdjustedMarker + " moved already."
+	ws := []workout.Workout{
+		structured("tue-threshold", "Threshold 3×12", "2026-03-17", workout.ZoneThreshold, 5),
+		touched,
+	}
+	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
+
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+
+	for _, c := range got {
+		if c.StepDown {
+			t.Fatalf("changes = %+v, want no step-down — the only candidate has already been adjusted", got)
+		}
+	}
+}
+
+func TestNailedOrOldStruggleTriggersNoStepDown(t *testing.T) {
+	cases := []struct {
+		name     string
+		outcome  string
+		sourceID string
+	}{
+		{"nailed", "nailed", "tue-threshold"},
+		{"struggled but 9 days ago", "struggled", "old-threshold"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			ws := []workout.Workout{
+				structured(tt.sourceID, "Threshold 3×12", "2026-03-10", workout.ZoneThreshold, 5),
+				structured("thu-threshold", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4),
+			}
+			analyses := map[string]workout.SessionAnalysis{tt.sourceID: {Outcome: tt.outcome}}
+			// "nailed" case uses a recent date; override to match the table.
+			if tt.name == "nailed" {
+				ws[0].Date = "2026-03-17"
+			}
+
+			got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+			for _, c := range got {
+				if c.StepDown {
+					t.Fatalf("changes = %+v, want no step-down for %s", got, tt.name)
+				}
+			}
+		})
+	}
+}
+
+// TestAFatigueSwapTargetIsNeverAlsoStepDownTargeted is the final review's
+// fix for the bug the brief describes: a workout can be both the fatigue
+// swap's target (today's hard session, Downgrade) and stepDownTarget's own
+// candidate (the next untouched same-zone workout after a struggled
+// session) — before the fix, AdaptSessions handed that one workout two
+// Changes in the same pass, and adaptRider applied them against a snapshot
+// taken before the loop, so the later write silently clobbered the earlier
+// one. Now stepDownTarget must skip any workout id the per-session loop
+// already claimed this pass.
+func TestAFatigueSwapTargetIsNeverAlsoStepDownTargeted(t *testing.T) {
+	ws := []workout.Workout{
+		structured("tue-threshold", "Threshold 3×12", "2026-03-17", workout.ZoneThreshold, 5),
+		structured("thu-threshold", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4),
+	}
+	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
+	// Deep fatigue (fresh, very negative TSB) makes thu-threshold — dated
+	// today and a hard/structured-zone session — a fatigue-swap Downgrade
+	// target too, on top of already being stepDownTarget's own candidate for
+	// the Tuesday struggle.
+	tired := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -34}
+
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, tired, thursday, analyses)
+
+	var forThursday []Change
+	for _, c := range got {
+		if c.WorkoutID == "thu-threshold" {
+			forThursday = append(forThursday, c)
+		}
+	}
+	if len(forThursday) != 1 {
+		t.Fatalf("changes for thu-threshold = %+v, want exactly one", forThursday)
+	}
+	if !forThursday[0].Downgrade || forThursday[0].StepDown {
+		t.Errorf("change = %+v, want the fatigue Downgrade, not also a StepDown", forThursday[0])
+	}
+}
+
+// TestAMissedSessionRescheduledOntoASameZoneSlotIsNotAlsoSteppedDown is the
+// other half of the same fix: a missed key session gets rescheduled within
+// this same pass, landing (by its *original*, still-missed date, which is
+// what stepDownTarget's own candidate search still sees) as the next
+// untouched same-zone workout after a struggled session — it must keep its
+// single reschedule Change, not pick up a second StepDown Change too.
+func TestAMissedSessionRescheduledOntoASameZoneSlotIsNotAlsoSteppedDown(t *testing.T) {
+	source := structured("mon-threshold", "Threshold 3×12", "2026-03-16", workout.ZoneThreshold, 5)
+	missed := structured("tue-threshold", "Threshold 3×8", "2026-03-17", workout.ZoneThreshold, 4)
+	ws := []workout.Workout{source, missed}
+	analyses := map[string]workout.SessionAnalysis{"mon-threshold": struggled()}
+
+	// today is Thursday the 19th; Tuesday's threshold session is this week,
+	// already over, and nothing else is planned, so Friday is free to make
+	// it up on.
+	got := AdaptSessions(ws, nil, profileAvailable("fri"), nil, thursday, analyses)
+
+	var forTuesday []Change
+	for _, c := range got {
+		if c.WorkoutID == "tue-threshold" {
+			forTuesday = append(forTuesday, c)
+		}
+	}
+	if len(forTuesday) != 1 {
+		t.Fatalf("changes for tue-threshold = %+v, want exactly one", forTuesday)
+	}
+	if forTuesday[0].NewDate == "" || forTuesday[0].StepDown {
+		t.Errorf("change = %+v, want only the missed-session reschedule, not also a StepDown", forTuesday[0])
+	}
+	for _, c := range got {
+		if c.StepDown {
+			t.Errorf("changes = %+v, want no StepDown at all: the only same-zone candidate was already claimed by the reschedule", got)
+		}
+	}
+}
+
 func TestNoteCarriesTheMarkerThatPreventsASecondAdjustment(t *testing.T) {
 	c := Change{Reason: "moved from 2026-03-17 — missed."}
 	w := workout.Workout{GoalID: "g", Description: scheduler.GeneratedDescription + " " + Note(c)}

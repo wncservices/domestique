@@ -28,6 +28,23 @@ type Level struct {
 	Reason string
 }
 
+// Outcome is a ride's rideanalysis verdict, as Delta and Reason see it. It
+// mirrors rideanalysis.Outcome's own string values by hand rather than
+// importing that package — the same reasoning workout.SessionAnalysis's own
+// doc comment gives, and internal/adapter's own outcome type gives too: this
+// package stays free of the rideanalysis dependency, so a caller that holds
+// a plain string (as workout.SessionAnalysis.Outcome is stored) converts
+// with Outcome(s).
+type Outcome string
+
+const (
+	OutcomeNailed     Outcome = "nailed"
+	OutcomeCompleted  Outcome = "completed"
+	OutcomeStruggled  Outcome = "struggled"
+	OutcomeIncomplete Outcome = "incomplete"
+	OutcomeUnplanned  Outcome = "unplanned"
+)
+
 // cyclingZones and runningZones are the structured zones progression levels
 // apply to, per sport — the spec's "Levels" list. Endurance/easy/long
 // sessions stay volume-sized and carry no level (out of scope). These
@@ -78,11 +95,11 @@ func Initial(experience string, sport model.Sport) []Level {
 //
 // The result is a delta, not a new level: Apply(cur, Delta(...)) is the new
 // level, clamped and rounded.
-func Delta(cur, workoutLevel float64, outcome string, feel int) float64 {
+func Delta(cur, workoutLevel float64, outcome Outcome, feel int) float64 {
 	diff := workoutLevel - cur
 
 	switch outcome {
-	case "nailed":
+	case OutcomeNailed:
 		if diff >= -0.5 {
 			bump := 0.3 + feelAdjustment(feel)
 			if bump < 0.1 {
@@ -93,18 +110,18 @@ func Delta(cur, workoutLevel float64, outcome string, feel int) float64 {
 		}
 		return 0.1
 
-	case "completed":
+	case OutcomeCompleted:
 		if diff >= 0 {
 			return 0.1
 		}
 		return 0
 
-	case "struggled":
+	case OutcomeStruggled:
 		// The adapter steps the next workout down instead; the level
 		// itself does not move on a struggled session.
 		return 0
 
-	case "incomplete":
+	case OutcomeIncomplete:
 		if diff <= 0 {
 			return -0.3
 		}
@@ -151,11 +168,11 @@ func Apply(cur, delta float64) float64 {
 // Reason's leading word — "the same word rideanalysis already uses for the
 // outcome, just capitalised for a sentence" rather than a separate
 // vocabulary.
-var outcomeVerbs = map[string]string{
-	"nailed":     "Nailed",
-	"completed":  "Completed",
-	"struggled":  "Struggled",
-	"incomplete": "Incomplete",
+var outcomeVerbs = map[Outcome]string{
+	OutcomeNailed:     "Nailed",
+	OutcomeCompleted:  "Completed",
+	OutcomeStruggled:  "Struggled",
+	OutcomeIncomplete: "Incomplete",
 }
 
 // Reason builds the human-readable text recorded alongside a level change,
@@ -168,12 +185,12 @@ var outcomeVerbs = map[string]string{
 // signature — the spec's example text embeds the zone label ("threshold"
 // after the em dash), which has no other source once Delta has already
 // collapsed cur/workoutLevel into a single number.
-func Reason(workoutName, zone string, workoutLevel, from, to float64, outcome string) string {
+func Reason(workoutName, zone string, workoutLevel, from, to float64, outcome Outcome) string {
 	verb, ok := outcomeVerbs[outcome]
 	if !ok {
-		verb = outcome
+		verb = string(outcome)
 		if len(outcome) > 0 {
-			verb = strings.ToUpper(outcome[:1]) + outcome[1:]
+			verb = strings.ToUpper(verb[:1]) + verb[1:]
 		}
 	}
 	return fmt.Sprintf("%s %s (%.1f) — %s %.1f → %.1f", verb, workoutName, workoutLevel, zone, from, to)
