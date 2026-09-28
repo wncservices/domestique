@@ -38,7 +38,12 @@ var (
 	mfaMethodPattern = regexp.MustCompile(`(?i)mfaMethod['"]?\s*[:=]\s*['"]([A-Za-z_ -]+)['"]`)
 	// Markers of a page that is still asking for a code. A disjunction on
 	// purpose, not one string: see ResumeMFA.
-	mfaStillPattern = regexp.MustCompile(`(?i)mfa-code|mfa-verification-code|mfaMethod|customerGuid`)
+	//
+	// An input by that name, not script vars: a page that only mentions the
+	// MFA method or customer could be anything, and mistaking it for a wrong
+	// code would cost the rider an attempt for our parsing gap.
+	mfaStillPattern = regexp.MustCompile(`(?i)<input[^>]+name=["']mfa-(?:verification-)?code["']`)
+	mfaAppPattern   = regexp.MustCompile(`(?i)\bapp\b`)
 )
 
 // mfaMethodOf maps the page's own word for how the code was sent onto the
@@ -54,7 +59,7 @@ func mfaMethodOf(page []byte) string {
 		return "email"
 	case strings.Contains(raw, "sms"), strings.Contains(raw, "phone"), strings.Contains(raw, "text"):
 		return "sms"
-	case strings.Contains(raw, "totp"), strings.Contains(raw, "authenticator"), strings.Contains(raw, "app"):
+	case strings.Contains(raw, "totp"), strings.Contains(raw, "authenticator"), mfaAppPattern.MatchString(raw):
 		return "totp"
 	}
 	return ""
@@ -129,6 +134,12 @@ func (c *Client) ImportCookies(cookies map[string][]*http.Cookie) {
 // that returned the challenge, with the consumer set (SetConsumer): it is the
 // same OAuth1 pair that signs the exchange, so it is not a parameter here.
 //
+// On ErrMFACodeRejected the returned challenge is the one to keep: the
+// re-rendered page carries a fresh CSRF token (Garmin's widget rotates it) and
+// the jar has moved on, so the next attempt on the same challenge needs both.
+// A page with no token keeps the old one. Every other outcome returns the
+// challenge unchanged.
+//
 // The response is classified in this order, stopping at the first match:
 //
 //  1. Cloudflare's block page, or a 429: ErrBlocked. It says nothing about
@@ -140,12 +151,12 @@ func (c *Client) ImportCookies(cookies map[string][]*http.Cookie) {
 //  4. Anything else: a plain error carrying a fingerprint (title, size, field
 //     names — never the body, which echoes the form). Not ErrMFACodeRejected:
 //     the rider did nothing wrong and must not lose an attempt to our gap.
-func (c *Client) ResumeMFA(ctx context.Context, ch MFAChallenge, code string) (Session, error) {
+func (c *Client) ResumeMFA(ctx context.Context, ch MFAChallenge, code string) (Session, MFAChallenge, error) {
 	if code == "" {
-		return Session{}, errors.New("garmin: a two-factor code is required")
+		return Session{}, ch, errors.New("garmin: a two-factor code is required")
 	}
 	if ch.CSRF == "" {
-		return Session{}, errors.New("garmin: the challenge has no CSRF token to resume with")
+		return Session{}, ch, errors.New("garmin: the challenge has no CSRF token to resume with")
 	}
 
 	c.ImportCookies(ch.Cookies)
@@ -169,25 +180,39 @@ func (c *Client) ResumeMFA(ctx context.Context, ch MFAChallenge, code string) (S
 	body, status, err := c.do(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()),
 		"application/x-www-form-urlencoded", header{"Referer", challengePage})
 	if err != nil {
-		return Session{}, fmt.Errorf("garmin: submitting the two-factor code: %w", err)
+		return Session{}, ch, fmt.Errorf("garmin: submitting the two-factor code: %w", err)
 	}
 
 	if status == http.StatusTooManyRequests || blocked(status, body) {
-		return Session{}, ErrBlocked
+		return Session{}, ch, ErrBlocked
 	}
 
 	if match := ticketPattern.FindSubmatch(body); match != nil {
 		if err := c.exchangeTicket(ctx, string(match[1])); err != nil {
-			return Session{}, err
+			return Session{}, ch, err
 		}
 		c.session.ObtainedAt = c.now()
-		return c.session, nil
+		return c.session, MFAChallenge{}, nil
 	}
 
 	if mfaPattern.Match(body) || mfaStillPattern.Match(body) {
-		return Session{}, ErrMFACodeRejected
+		return Session{}, c.refreshed(ch, body), ErrMFACodeRejected
 	}
 
-	return Session{}, fmt.Errorf("garmin: the two-factor code was answered with an unrecognised page (status %d, %s)",
+	return Session{}, ch, fmt.Errorf("garmin: the two-factor code was answered with an unrecognised page (status %d, %s)",
 		status, fingerprint(body))
+}
+
+// refreshed is ch with the state the re-rendered challenge page moved on:
+// its own CSRF token if it has one, and the current cookies.
+func (c *Client) refreshed(ch MFAChallenge, page []byte) MFAChallenge {
+	out := ch
+	if m := csrfPattern.FindSubmatch(page); m != nil {
+		out.CSRF = string(m[1])
+	}
+	out.Cookies = c.ExportCookies()
+	if method := mfaMethodOf(page); method != "" {
+		out.Method = method
+	}
+	return out
 }

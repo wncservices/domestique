@@ -50,9 +50,14 @@ type fakeConnect struct {
 	verifyRef    string
 	// verifyBlocked answers the verify POST with Cloudflare's block page.
 	verifyBlocked bool
-	wrongPass     bool
-	oauth1Calls   int
-	oauth2Calls   int
+	// mfaCSRF is the only _csrf the verify endpoint accepts. Every render of
+	// an MFA page after the first rotates it, as a real widget does, so a
+	// client that keeps the stale one fails.
+	mfaCSRF     string
+	mfaRenders  int
+	wrongPass   bool
+	oauth1Calls int
+	oauth2Calls int
 	// lastAuth is the Authorization header of the most recent signed request.
 	lastAuth string
 	lastURL  string
@@ -60,7 +65,7 @@ type fakeConnect struct {
 
 func newFakeConnect(t *testing.T) (*Client, *fakeConnect) {
 	t.Helper()
-	fake := &fakeConnect{}
+	fake := &fakeConnect{mfaCSRF: testMFACSRF}
 
 	mux := http.NewServeMux()
 
@@ -120,7 +125,7 @@ func newFakeConnect(t *testing.T) (*Client, *fakeConnect) {
 			fmt.Fprint(w, `<html><title>Session expired</title></html>`)
 			return
 		}
-		if r.PostForm.Get("_csrf") != testMFACSRF {
+		if r.PostForm.Get("_csrf") != fake.mfaCSRF {
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, `<html><title>Forbidden</title>bad csrf</html>`)
 			return
@@ -135,15 +140,26 @@ func newFakeConnect(t *testing.T) (*Client, *fakeConnect) {
 				testTicket)
 			return
 		}
+		// Re-rendering the challenge rotates the CSRF token and sets a
+		// step cookie; both must reach the next attempt.
+		fake.mfaRenders++
+		fresh := fmt.Sprintf("%s-%d", testMFACSRF, fake.mfaRenders+1)
 		switch fake.wrongCodePage {
-		case "verification-input":
-			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/><input name="mfa-verification-code"/></form></html>`, testMFACSRF)
-		case "vars":
-			fmt.Fprint(w, `<html><script>var mfaMethod = 'email'; var customerGuid = 'g-1';</script></html>`)
 		case "unknown":
 			fmt.Fprint(w, `<html><title>Scheduled maintenance</title>Back soon</html>`)
+		case "vars":
+			// Script vars alone are not a code prompt.
+			fmt.Fprint(w, `<html><script>var mfaMethod = 'email'; var customerGuid = 'g-1';</script></html>`)
+		case "no-csrf":
+			fmt.Fprint(w, `<html><form><input name="mfa-code"/></form> Wrong code</html>`)
+		case "verification-input":
+			fake.mfaCSRF = fresh
+			http.SetCookie(w, &http.Cookie{Name: "MFA-STEP", Value: fmt.Sprint(fake.mfaRenders), Path: "/"})
+			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/><input name="mfa-verification-code"/></form></html>`, fresh)
 		default:
-			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/><input name="mfa-code"/></form> Wrong code</html>`, testMFACSRF)
+			fake.mfaCSRF = fresh
+			http.SetCookie(w, &http.Cookie{Name: "MFA-STEP", Value: fmt.Sprint(fake.mfaRenders), Path: "/"})
+			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/><input name="mfa-code"/></form> Wrong code</html>`, fresh)
 		}
 	})
 

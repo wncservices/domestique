@@ -111,7 +111,7 @@ func TestResumeMFACompletesTheSignInFromAnotherClient(t *testing.T) {
 	ch := through(t, mfaLogin(t, c))
 
 	other := freshClient(c)
-	session, err := other.ResumeMFA(t.Context(), ch, testMFACode)
+	session, _, err := other.ResumeMFA(t.Context(), ch, testMFACode)
 	if err != nil {
 		t.Fatalf("ResumeMFA: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestResumeMFASendsWhatGarminExpects(t *testing.T) {
 	fake.mfa = true
 	ch := mfaLogin(t, c)
 
-	if _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); err != nil {
+	if _, _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); err != nil {
 		t.Fatal(err)
 	}
 
@@ -166,13 +166,13 @@ func TestResumeMFASendsWhatGarminExpects(t *testing.T) {
 
 // Two different re-rendered pages, so no single string is load-bearing.
 func TestWrongCodeIsRecognisedByAnyMFAMarker(t *testing.T) {
-	for _, page := range []string{"input", "verification-input", "vars"} {
+	for _, page := range []string{"input", "verification-input", "no-csrf"} {
 		t.Run(page, func(t *testing.T) {
 			c, fake := newFakeConnect(t)
 			fake.mfa, fake.wrongCodePage = true, page
 			ch := mfaLogin(t, c)
 
-			_, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
+			_, _, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
 			if !errors.Is(err, ErrMFACodeRejected) {
 				t.Errorf("error = %v, want ErrMFACodeRejected", err)
 			}
@@ -186,7 +186,7 @@ func TestUnrecognisedVerifyPageIsAPlainError(t *testing.T) {
 	fake.mfa, fake.wrongCodePage = true, "unknown"
 	ch := mfaLogin(t, c)
 
-	_, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
+	_, _, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
 	if err == nil {
 		t.Fatal("no error")
 	}
@@ -206,7 +206,7 @@ func TestVerifyBlockedAndRateLimited(t *testing.T) {
 		c, fake := newFakeConnect(t)
 		fake.mfa, fake.verifyBlocked = true, true
 		ch := mfaLogin(t, c)
-		if _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); !errors.Is(err, ErrBlocked) {
+		if _, _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); !errors.Is(err, ErrBlocked) {
 			t.Errorf("error = %v, want ErrBlocked", err)
 		}
 	})
@@ -214,7 +214,7 @@ func TestVerifyBlockedAndRateLimited(t *testing.T) {
 		c, fake := newFakeConnect(t)
 		fake.mfa, fake.verifyStatus = true, http.StatusTooManyRequests
 		ch := mfaLogin(t, c)
-		if _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); !errors.Is(err, ErrBlocked) {
+		if _, _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); !errors.Is(err, ErrBlocked) {
 			t.Errorf("error = %v, want ErrBlocked", err)
 		}
 	})
@@ -225,11 +225,11 @@ func TestResumeMFARequiresACodeAndACSRF(t *testing.T) {
 	fake.mfa = true
 	ch := mfaLogin(t, c)
 
-	if _, err := freshClient(c).ResumeMFA(t.Context(), ch, ""); err == nil {
+	if _, _, err := freshClient(c).ResumeMFA(t.Context(), ch, ""); err == nil {
 		t.Error("an empty code was accepted")
 	}
 	ch.CSRF = ""
-	if _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); err == nil {
+	if _, _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); err == nil {
 		t.Error("a challenge without a CSRF token was accepted")
 	}
 	if fake.verifyCalls != 0 {
@@ -288,5 +288,82 @@ func TestCookiesForOtherHostsNeverLeaveOrEnter(t *testing.T) {
 	}
 	if got := b.HTTP.Jar.Cookies(sso); len(got) != 1 {
 		t.Errorf("import dropped the legitimate cookie: %v", got)
+	}
+}
+
+// Script vars without a code input are not a code prompt: a page that only
+// mentions the MFA method could be anything, and must not cost the rider an
+// attempt.
+func TestScriptVarsAloneAreNotAWrongCode(t *testing.T) {
+	c, fake := newFakeConnect(t)
+	fake.mfa, fake.wrongCodePage = true, "vars"
+	ch := mfaLogin(t, c)
+
+	_, _, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
+	if err == nil || errors.Is(err, ErrMFACodeRejected) {
+		t.Errorf("error = %v, want a plain error", err)
+	}
+}
+
+// After a wrong code the re-rendered page carries a fresh CSRF token and the
+// jar has moved on; the caller must get both back, or the next attempt on the
+// same challenge is refused for a stale token.
+func TestRejectedCodeReturnsARefreshedChallenge(t *testing.T) {
+	c, fake := newFakeConnect(t)
+	fake.mfa, fake.mfaMethod = true, "email"
+	ch := through(t, mfaLogin(t, c))
+
+	_, refreshed, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
+	if !errors.Is(err, ErrMFACodeRejected) {
+		t.Fatalf("error = %v, want ErrMFACodeRejected", err)
+	}
+	if refreshed.CSRF == ch.CSRF || refreshed.CSRF != fake.mfaCSRF {
+		t.Errorf("refreshed CSRF = %q, want the re-rendered page's %q (old %q)", refreshed.CSRF, fake.mfaCSRF, ch.CSRF)
+	}
+	if refreshed.Email != ch.Email || refreshed.Method != "email" {
+		t.Errorf("refreshed = %+v, want email and method carried over", refreshed)
+	}
+	var step string
+	for _, cookies := range refreshed.Cookies {
+		for _, ck := range cookies {
+			if ck.Name == "MFA-STEP" {
+				step = ck.Value
+			}
+		}
+	}
+	if step == "" {
+		t.Errorf("refreshed cookies %+v lack the cookie the re-rendered page set", refreshed.Cookies)
+	}
+
+	// The same challenge, refreshed, still works with the right code — and
+	// the stale one is what the fake would have refused.
+	if _, _, err := freshClient(c).ResumeMFA(t.Context(), through(t, refreshed), testMFACode); err != nil {
+		t.Fatalf("right code on the refreshed challenge: %v", err)
+	}
+	if _, _, err := freshClient(c).ResumeMFA(t.Context(), ch, testMFACode); err == nil {
+		t.Error("the stale challenge was accepted; the fake should have refused its CSRF")
+	}
+}
+
+func TestRejectedCodeWithoutACSRFKeepsTheOldOne(t *testing.T) {
+	c, fake := newFakeConnect(t)
+	fake.mfa, fake.wrongCodePage = true, "no-csrf"
+	ch := mfaLogin(t, c)
+
+	_, refreshed, err := freshClient(c).ResumeMFA(t.Context(), ch, "000000")
+	if !errors.Is(err, ErrMFACodeRejected) {
+		t.Fatalf("error = %v", err)
+	}
+	if refreshed.CSRF != ch.CSRF {
+		t.Errorf("refreshed CSRF = %q, want the old %q kept", refreshed.CSRF, ch.CSRF)
+	}
+}
+
+func TestMethodAppMatchUsesWordBoundaries(t *testing.T) {
+	for raw, want := range map[string]string{"happy": "", "mobile-app": "totp", "app": "totp", "wrapped": ""} {
+		page := []byte("var mfaMethod = '" + raw + "';")
+		if got := mfaMethodOf(page); got != want {
+			t.Errorf("method %q -> %q, want %q", raw, got, want)
+		}
 	}
 }
