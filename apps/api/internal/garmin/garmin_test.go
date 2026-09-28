@@ -21,8 +21,12 @@ const (
 	testPassword = "hunter2"
 	testCSRF     = "csrf-token-abc"
 	testTicket   = "ST-12345-abcde-cas"
-	testKey      = "consumer-key"
-	testSecret   = "consumer-secret"
+	// The MFA challenge page carries its own CSRF token, distinct from the
+	// sign-in page's, so a client that reuses the wrong one fails the fake.
+	testMFACSRF = "csrf-mfa-xyz"
+	testMFACode = "123456"
+	testKey     = "consumer-key"
+	testSecret  = "consumer-secret"
 )
 
 // fakeConnect stands in for Garmin: the SSO pages, the OAuth1 exchange and the
@@ -30,10 +34,25 @@ const (
 type fakeConnect struct {
 	server *httptest.Server
 
-	mfa         bool
-	wrongPass   bool
-	oauth1Calls int
-	oauth2Calls int
+	mfa bool
+	// mfaMethod is what the challenge page's script vars claim.
+	mfaMethod string
+	// wrongCodePage picks how the fake re-renders after a wrong code:
+	// "input" (a code input), "verification-input" (the other field name),
+	// "vars" (script vars only), "unknown" (a page nobody expected).
+	wrongCodePage string
+	// verifyStatus, when non-zero, answers the verify POST with that status
+	// and an empty body.
+	verifyStatus int
+	verifyCalls  int
+	verifyForm   url.Values
+	verifyQuery  url.Values
+	verifyRef    string
+	// verifyBlocked answers the verify POST with Cloudflare's block page.
+	verifyBlocked bool
+	wrongPass     bool
+	oauth1Calls   int
+	oauth2Calls   int
 	// lastAuth is the Authorization header of the most recent signed request.
 	lastAuth string
 	lastURL  string
@@ -52,6 +71,7 @@ func newFakeConnect(t *testing.T) (*Client, *fakeConnect) {
 			if r.URL.Query().Get("service") == "" {
 				t.Error("sign-in page requested without a service parameter")
 			}
+			http.SetCookie(w, &http.Cookie{Name: "GARMIN-SSO-SESSION", Value: "sso-cookie-secret", Path: "/"})
 			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/></form></html>`, testCSRF)
 			return
 		}
@@ -65,12 +85,65 @@ func newFakeConnect(t *testing.T) (*Client, *fakeConnect) {
 
 		switch {
 		case fake.mfa:
-			fmt.Fprint(w, `<html>Enter your verificationCode</html>`)
+			fmt.Fprintf(w, `<html><script>var mfaMethod = '%s'; var customerGuid = 'g-1';</script>`+
+				`<form>Enter your verificationCode <input name="_csrf" value="%s"/>`+
+				`<input name="mfa-code"/></form></html>`, fake.mfaMethod, testMFACSRF)
 		case fake.wrongPass || r.PostForm.Get("password") != testPassword:
 			fmt.Fprint(w, `<html>Invalid username or password</html>`)
 		default:
 			fmt.Fprintf(w, `<html><a href="https://sso.garmin.com/sso/embed?ticket=%s">go</a></html>`,
 				testTicket)
+		}
+	})
+
+	mux.HandleFunc("/sso/verifyMFA/loginEnterMfaCode", func(w http.ResponseWriter, r *http.Request) {
+		fake.verifyCalls++
+		if r.Method != http.MethodPost {
+			t.Errorf("verify method = %s, want POST", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		fake.verifyForm, fake.verifyQuery, fake.verifyRef = r.PostForm, r.URL.Query(), r.Header.Get("Referer")
+
+		if fake.verifyBlocked {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `<html><title>Attention Required! | Cloudflare</title>cf-wrapper</html>`)
+			return
+		}
+		if fake.verifyStatus != 0 {
+			w.WriteHeader(fake.verifyStatus)
+			return
+		}
+		// A resumed login only works with the cookies of the first one.
+		if ck, err := r.Cookie("GARMIN-SSO-SESSION"); err != nil || ck.Value != "sso-cookie-secret" {
+			fmt.Fprint(w, `<html><title>Session expired</title></html>`)
+			return
+		}
+		if r.PostForm.Get("_csrf") != testMFACSRF {
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `<html><title>Forbidden</title>bad csrf</html>`)
+			return
+		}
+		// Either field name is accepted, as Garmin's widget is believed to.
+		code := r.PostForm.Get("mfa-code")
+		if code == "" {
+			code = r.PostForm.Get("mfa-verification-code")
+		}
+		if code == testMFACode {
+			fmt.Fprintf(w, `<html><title>Success</title><script>var response_url = 'https://sso.garmin.com/sso/embed?ticket=%s';</script></html>`,
+				testTicket)
+			return
+		}
+		switch fake.wrongCodePage {
+		case "verification-input":
+			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/><input name="mfa-verification-code"/></form></html>`, testMFACSRF)
+		case "vars":
+			fmt.Fprint(w, `<html><script>var mfaMethod = 'email'; var customerGuid = 'g-1';</script></html>`)
+		case "unknown":
+			fmt.Fprint(w, `<html><title>Scheduled maintenance</title>Back soon</html>`)
+		default:
+			fmt.Fprintf(w, `<html><form><input name="_csrf" value="%s"/><input name="mfa-code"/></form> Wrong code</html>`, testMFACSRF)
 		}
 	})
 
@@ -110,7 +183,7 @@ func newFakeConnect(t *testing.T) (*Client, *fakeConnect) {
 func TestLoginExchangesThePasswordForTokens(t *testing.T) {
 	c, fake := newFakeConnect(t)
 
-	if err := c.Login(t.Context(), testEmail, testPassword); err != nil {
+	if _, err := c.Login(t.Context(), testEmail, testPassword); err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
 
@@ -132,7 +205,7 @@ func TestLoginDistinguishesMFAFromBadCredentials(t *testing.T) {
 	t.Run("mfa", func(t *testing.T) {
 		c, fake := newFakeConnect(t)
 		fake.mfa = true
-		if err := c.Login(t.Context(), testEmail, testPassword); !errors.Is(err, ErrMFARequired) {
+		if _, err := c.Login(t.Context(), testEmail, testPassword); !errors.Is(err, ErrMFARequired) {
 			t.Errorf("error = %v, want ErrMFARequired", err)
 		}
 	})
@@ -140,7 +213,7 @@ func TestLoginDistinguishesMFAFromBadCredentials(t *testing.T) {
 	t.Run("bad password", func(t *testing.T) {
 		c, fake := newFakeConnect(t)
 		fake.wrongPass = true
-		if err := c.Login(t.Context(), testEmail, testPassword); !errors.Is(err, ErrBadCredentials) {
+		if _, err := c.Login(t.Context(), testEmail, testPassword); !errors.Is(err, ErrBadCredentials) {
 			t.Errorf("error = %v, want ErrBadCredentials", err)
 		}
 	})
@@ -148,10 +221,10 @@ func TestLoginDistinguishesMFAFromBadCredentials(t *testing.T) {
 
 func TestLoginRequiresBothFields(t *testing.T) {
 	c, _ := newFakeConnect(t)
-	if err := c.Login(t.Context(), "", testPassword); err == nil {
+	if _, err := c.Login(t.Context(), "", testPassword); err == nil {
 		t.Error("an empty email was accepted")
 	}
-	if err := c.Login(t.Context(), testEmail, ""); err == nil {
+	if _, err := c.Login(t.Context(), testEmail, ""); err == nil {
 		t.Error("an empty password was accepted")
 	}
 }
@@ -163,7 +236,7 @@ func TestBearerIsCachedThenRefreshed(t *testing.T) {
 	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	c.Now = func() time.Time { return now }
 
-	if err := c.Login(t.Context(), testEmail, testPassword); err != nil {
+	if _, err := c.Login(t.Context(), testEmail, testPassword); err != nil {
 		t.Fatal(err)
 	}
 
@@ -217,7 +290,7 @@ func TestMissingConsumerIsNamed(t *testing.T) {
 	t.Setenv(EnvConsumerKey, "")
 	t.Setenv(EnvConsumerSecret, "")
 
-	err := c.Login(t.Context(), testEmail, testPassword)
+	_, err := c.Login(t.Context(), testEmail, testPassword)
 	if !errors.Is(err, ErrNoConsumer) {
 		t.Errorf("error = %v, want ErrNoConsumer", err)
 	}
@@ -244,7 +317,7 @@ func TestConsumerComesFromTheEnvironment(t *testing.T) {
 // verify it the way the server would rather than trusting it by inspection.
 func TestOAuth1SignatureVerifies(t *testing.T) {
 	c, fake := newFakeConnect(t)
-	if err := c.Login(t.Context(), testEmail, testPassword); err != nil {
+	if _, err := c.Login(t.Context(), testEmail, testPassword); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,7 +468,7 @@ func TestCloudflareBlockIsItsOwnError(t *testing.T) {
 			client.SSOBase, client.APIBase, client.WebBase = server.URL, server.URL, server.URL
 			client.SetConsumer("k", "s")
 
-			err := client.Login(t.Context(), "rider@example.com", "pw")
+			_, err := client.Login(t.Context(), "rider@example.com", "pw")
 			if !errors.Is(err, ErrBlocked) {
 				t.Errorf("Login error = %v, want ErrBlocked", err)
 			}
@@ -422,7 +495,7 @@ func TestPlainRejectionIsStillBadCredentials(t *testing.T) {
 	client.SSOBase, client.APIBase, client.WebBase = server.URL, server.URL, server.URL
 	client.SetConsumer("k", "s")
 
-	if err := client.Login(t.Context(), "rider@example.com", "pw"); !errors.Is(err, ErrBadCredentials) {
+	if _, err := client.Login(t.Context(), "rider@example.com", "pw"); !errors.Is(err, ErrBadCredentials) {
 		t.Errorf("Login error = %v, want ErrBadCredentials", err)
 	}
 }
@@ -443,7 +516,7 @@ func TestLoginLoadsTheWidgetFirst(t *testing.T) {
 	client := New()
 	client.SSOBase, client.APIBase, client.WebBase = server.URL, server.URL, server.URL
 	client.SetConsumer("k", "s")
-	_ = client.Login(t.Context(), "rider@example.com", "pw")
+	_, _ = client.Login(t.Context(), "rider@example.com", "pw")
 
 	if len(order) == 0 || !strings.HasSuffix(order[0], "/embed") {
 		t.Errorf("request order = %v, want the widget loaded first", order)
@@ -470,7 +543,7 @@ func TestRejectedCredentialsInEitherDialect(t *testing.T) {
 			client.SSOBase, client.APIBase, client.WebBase = server.URL, server.URL, server.URL
 			client.SetConsumer("k", "s")
 
-			if err := client.Login(t.Context(), "rider@example.com", "pw"); !errors.Is(err, ErrBadCredentials) {
+			if _, err := client.Login(t.Context(), "rider@example.com", "pw"); !errors.Is(err, ErrBadCredentials) {
 				t.Errorf("Login error = %v, want ErrBadCredentials", err)
 			}
 		})
