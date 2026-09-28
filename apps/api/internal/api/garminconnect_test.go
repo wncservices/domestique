@@ -35,6 +35,13 @@ type fakeGarmin struct {
 	// sign-in failures are the point of most of these tests.
 	err error
 
+	// Second step of an MFA sign-in: what it was asked, and how it answers.
+	resumeCalls      int
+	resumedChallenge garmin.MFAChallenge
+	resumedCode      string
+	wantCode         string
+	resumeErr        error
+
 	// devices is what Devices hands back, and devicesErr what it fails with.
 	devices    []garmin.Device
 	devicesErr error
@@ -255,6 +262,29 @@ func (f *fakeGarmin) DownloadGPX(_ context.Context, _ api.GarminConsumer, sessio
 		return nil, f.downloadGPXErr
 	}
 	return f.gpxByID[courseID], nil
+}
+
+// ResumeMFA answers a challenge. wantCode, when set, is the only code it
+// accepts; anything else is garmin.ErrMFACodeRejected, as Garmin's own
+// re-rendered challenge page is. resumeErr overrides both.
+func (f *fakeGarmin) ResumeMFA(_ context.Context, consumer api.GarminConsumer, ch garmin.MFAChallenge, code string) (garmin.Session, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.consumer = consumer
+	f.resumeCalls++
+	f.resumedChallenge, f.resumedCode = ch, code
+	if f.resumeErr != nil {
+		return garmin.Session{}, f.resumeErr
+	}
+	if f.wantCode != "" && code != f.wantCode {
+		return garmin.Session{}, garmin.ErrMFACodeRejected
+	}
+	return garmin.Session{
+		OAuth1Token:  "garmin-token-mfa",
+		OAuth1Secret: "garmin-secret-mfa",
+		DisplayName:  "Wilant N",
+		ObtainedAt:   time.Now().UTC(),
+	}, nil
 }
 
 func (f *fakeGarmin) Connect(_ context.Context, consumer api.GarminConsumer, email, password string) (garmin.Session, error) {

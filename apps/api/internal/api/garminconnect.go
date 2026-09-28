@@ -11,6 +11,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
@@ -96,10 +97,11 @@ func (s *Server) garminConnectionDTO(r *http.Request) garminConnectionDTO {
 	return dto
 }
 
-// handleGarminConnect signs in and stores the session.
-func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
+// garminConnectReady runs the checks both sign-in steps share, before a
+// password or a code is read, let alone sent. It writes the refusal itself.
+func (s *Server) garminConnectReady(w http.ResponseWriter, r *http.Request) (GarminConsumer, bool) {
 	if !s.require(w, r, auth.PermManageAccounts) {
-		return
+		return GarminConsumer{}, false
 	}
 	if s.Garmin == nil {
 		// Error, not warn: main.go wires srv.Garmin unconditionally, so nil
@@ -108,7 +110,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
 			"error": "this deployment has no Garmin sign-in configured",
 		})
-		return
+		return GarminConsumer{}, false
 	}
 	consumer, _ := s.garminConsumer()
 	if !consumer.Configured() {
@@ -117,7 +119,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": garmin.ErrNoConsumer.Error(),
 		})
-		return
+		return GarminConsumer{}, false
 	}
 	if !s.Links.CanStore() {
 		// Refusing is the whole point: without a key the only way to honour
@@ -126,6 +128,18 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment cannot store a Garmin connection: " + secrets.ErrNoKey.Error(),
 		})
+		return GarminConsumer{}, false
+	}
+	return consumer, true
+}
+
+// handleGarminConnect signs in and stores the session.
+//
+// For an account with two-factor on this is only the first of two requests:
+// it answers 409 with a challenge id, and handleGarminConnectMFA finishes it.
+func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := s.garminConnectReady(w, r)
+	if !ok {
 		return
 	}
 
@@ -160,10 +174,17 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 
 	session, err := s.Garmin.Connect(r.Context(), consumer, body.Email, body.Password)
 	if err != nil {
-		s.writeGarminLoginError(w, rider, err)
+		s.writeGarminLoginError(w, r, rider, err)
 		return
 	}
 
+	s.completeGarminConnect(w, r, rider, body.Email, session)
+}
+
+// completeGarminConnect stores a signed-in session and links the head unit —
+// the one success path both sign-in steps end in, so a code-completed sign-in
+// cannot drift from a password-only one.
+func (s *Server) completeGarminConnect(w http.ResponseWriter, r *http.Request, rider, email string, session garmin.Session) {
 	// The session is two tokens plus when they were issued, so it is stored as
 	// JSON rather than as one opaque string. providerlink neither knows nor
 	// cares what is inside.
@@ -177,7 +198,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.Links.Save(garminProvider, rider, providerlink.Connection{
-		Email:       body.Email,
+		Email:       email,
 		DisplayName: session.DisplayName,
 		Secret:      string(sealed),
 	}); err != nil {
@@ -204,7 +225,7 @@ func (s *Server) handleGarminConnect(w http.ResponseWriter, r *http.Request) {
 // reached Garmin, so it says nothing about the account. Anything else is
 // Garmin having a bad day. Reporting them all as "sign-in failed" is how
 // somebody ends up resetting a password that was never wrong.
-func (s *Server) writeGarminLoginError(w http.ResponseWriter, rider string, err error) {
+func (s *Server) writeGarminLoginError(w http.ResponseWriter, r *http.Request, rider string, err error) {
 	// Logged without the password and without the upstream body, which can
 	// echo the request. The error text is safe and worth having: `reason` is
 	// one of four words, and on its own it cannot say whether "credentials"
@@ -224,10 +245,7 @@ func (s *Server) writeGarminLoginError(w http.ResponseWriter, rider string, err 
 			"blocked": true,
 		})
 	case errors.Is(err, garmin.ErrMFARequired):
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error": "This Garmin account uses two-factor authentication, which this sign-in cannot complete.",
-			"mfa":   true,
-		})
+		s.writeGarminMFARequired(w, r, rider, err)
 	case errors.Is(err, garmin.ErrBadCredentials):
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"error": "Garmin did not accept those details",
@@ -241,8 +259,58 @@ func (s *Server) writeGarminLoginError(w http.ResponseWriter, rider string, err 
 	}
 }
 
+// mfaRequiredMessage is today's dead-end copy. It stays until the two-factor
+// flow has been checked against a real account (see the design's release
+// gate); the UI keys off the JSON flags, not this text.
+const mfaRequiredMessage = "This Garmin account uses two-factor authentication, which this sign-in cannot complete."
+
+// writeGarminMFARequired answers step one when Garmin asked for a code: it
+// keeps the mid-flight state (never the password) behind an opaque id and
+// hands the id back. With nothing to resume from — no store, no key, or state
+// Garmin's page did not give enough of — it is the bare 409 it always was.
+func (s *Server) writeGarminMFARequired(w http.ResponseWriter, r *http.Request, rider string, err error) {
+	bare := func() {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": mfaRequiredMessage, "mfa": true})
+	}
+
+	var challenged *GarminMFAChallengeError
+	if !errors.As(err, &challenged) || challenged.Challenge.CSRF == "" || !s.GarminMFA.CanStore() {
+		bare()
+		return
+	}
+
+	id, createErr := s.GarminMFA.Create(r.Context(), rider, challenged.Challenge, garminmfa.DefaultTTL)
+	switch {
+	case errors.Is(createErr, garminmfa.ErrTooLarge):
+		// Size only: the state is cookies from a third party.
+		s.logger().Warn("garmin mfa challenge refused: state too large", "rider", rider, "detail", createErr.Error())
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "Garmin could not be signed in to just now — try again later",
+		})
+		return
+	case createErr != nil:
+		s.logger().Error("storing the garmin mfa challenge failed", "rider", rider, "err", createErr)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "could not start the two-factor sign-in",
+		})
+		return
+	}
+
+	// Info: the regular, expected path for any two-factor account. The id is
+	// not logged — it is the bearer value for the second step.
+	s.logger().Info("garmin mfa challenge created", "rider", rider, "method", challenged.Challenge.Method)
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":     mfaRequiredMessage,
+		"mfa":       true,
+		"challenge": id,
+		"method":    challenged.Challenge.Method,
+	})
+}
+
 func classifyGarminError(err error) string {
 	switch {
+	case errors.Is(err, garmin.ErrMFACodeRejected):
+		return "mfa-wrong"
 	case errors.Is(err, garmin.ErrBlocked):
 		return "blocked"
 	case errors.Is(err, garmin.ErrMFARequired):
@@ -366,4 +434,112 @@ func (s *Server) handleGarminDevices(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, devices)
+}
+
+// handleGarminConnectMFA is the second step of a two-factor sign-in: the
+// rider's code, and the challenge id step one handed back.
+//
+// The challenge is only ever the caller's own — the rider comes from the
+// session, and someone else's id is a 404, the same answer as an id that never
+// existed. Nothing here logs the code, a cookie or the challenge id.
+func (s *Server) handleGarminConnectMFA(w http.ResponseWriter, r *http.Request) {
+	consumer, ok := s.garminConnectReady(w, r)
+	if !ok {
+		return
+	}
+	if !s.GarminMFA.CanStore() {
+		s.logger().Warn("garmin mfa code submitted but this deployment cannot hold a challenge")
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment cannot complete a two-factor sign-in",
+		})
+		return
+	}
+
+	var body struct {
+		Challenge string `json:"challenge"`
+		Code      string `json:"code"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	body.Code = strings.TrimSpace(body.Code)
+	if body.Challenge == "" || body.Code == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "the challenge and the code are both required",
+		})
+		return
+	}
+
+	rider := auth.FromContext(r.Context()).User
+	if rider == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "no rider in the session to attach the connection to",
+		})
+		return
+	}
+	if !s.rateLimitConnect(w, rider) {
+		return
+	}
+
+	ctx := r.Context()
+	challenge, err := s.GarminMFA.Resolve(ctx, rider, body.Challenge)
+	switch {
+	case errors.Is(err, garminmfa.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such sign-in in progress"})
+		return
+	case errors.Is(err, garminmfa.ErrExpired):
+		s.logger().Warn("garmin mfa challenge expired before the code arrived", "rider", rider, "reason", "mfa-expired")
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "this code has expired — sign in again"})
+		return
+	case err != nil:
+		s.logger().Error("reading the garmin mfa challenge failed", "rider", rider, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the sign-in in progress"})
+		return
+	}
+
+	session, err := s.Garmin.ResumeMFA(ctx, consumer, challenge, body.Code)
+	if errors.Is(err, garmin.ErrMFACodeRejected) {
+		s.writeGarminMFAWrongCode(w, r, rider, body.Challenge)
+		return
+	}
+	if err != nil {
+		// Blocked, an unrecognised page, an outage: none of them is the
+		// rider's mistake, so none of them costs an attempt.
+		s.writeGarminLoginError(w, r, rider, err)
+		return
+	}
+
+	// Spent the moment it works, before anything that could fail, so a
+	// challenge can never sign in twice.
+	if err := s.GarminMFA.Consume(ctx, body.Challenge); err != nil {
+		s.logger().Warn("deleting a used garmin mfa challenge failed", "rider", rider, "err", err)
+	}
+	s.completeGarminConnect(w, r, rider, challenge.Email, session)
+}
+
+// writeGarminMFAWrongCode counts the attempt and answers 422 with the same
+// challenge id so the UI keeps the code field open, or 409 once the budget is
+// spent and the challenge is gone.
+func (s *Server) writeGarminMFAWrongCode(w http.ResponseWriter, r *http.Request, rider, id string) {
+	s.logger().Warn("garmin mfa code rejected", "rider", rider, "reason", classifyGarminError(garmin.ErrMFACodeRejected))
+
+	used, err := s.GarminMFA.RecordAttempt(r.Context(), id)
+	switch {
+	case errors.Is(err, garminmfa.ErrAttemptsExhausted):
+		s.logger().Warn("garmin mfa attempts exhausted", "rider", rider)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "too many wrong codes — sign in again"})
+	case errors.Is(err, garminmfa.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such sign-in in progress"})
+	case err != nil:
+		s.logger().Error("recording a garmin mfa attempt failed", "rider", rider, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the sign-in in progress"})
+	default:
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error":             "That code didn't work — check it and try again",
+			"mfaInvalid":        true,
+			"challenge":         id,
+			"attemptsRemaining": garminmfa.MaxAttempts - used,
+		})
+	}
 }

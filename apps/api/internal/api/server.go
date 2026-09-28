@@ -32,6 +32,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -84,6 +85,12 @@ type Server struct {
 	// the UI. Nil disables connecting, but not the environment-configured
 	// Komoot client.
 	Links *providerlink.Store
+
+	// GarminMFA holds a Garmin two-factor challenge between the sign-in that
+	// hit it and the request that answers it. Nil, or without a key, means
+	// step one keeps answering a bare 409 as it did before there was a step
+	// two.
+	GarminMFA *garminmfa.Store
 
 	// Connector signs riders in to Komoot and resumes their stored sessions.
 	Connector KomootConnector
@@ -385,6 +392,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/garmin/connection", s.handleGarminConnection)
 	mux.HandleFunc("POST /api/garmin/connection", s.handleGarminConnect)
+	mux.HandleFunc("POST /api/garmin/connection/mfa", s.handleGarminConnectMFA)
 	mux.HandleFunc("DELETE /api/garmin/connection", s.handleGarminDisconnect)
 	mux.HandleFunc("GET /api/garmin/devices", s.handleGarminDevices)
 	mux.HandleFunc("GET /api/garmin/courses", s.handleGarminCourseList)
