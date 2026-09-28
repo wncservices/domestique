@@ -643,6 +643,22 @@ export interface GarminConnection {
   consumer?: GarminConsumer
 }
 
+/**
+ * What the Garmin sign-in answers when the account wants a two-factor code
+ * (409 from the first step) or the code was wrong (422 from the second).
+ * Mirrors `internal/api/garminconnect.go` by hand, like every DTO here.
+ */
+export interface GarminConnectMFA {
+  mfa?: boolean
+  /** Opaque id of the sign-in in progress; absent when the server could not keep one. */
+  challenge?: string
+  /** How Garmin sent the code, when it said. */
+  method?: 'email' | 'sms' | 'totp' | ''
+  /** Set on a wrong code: the challenge is still open. */
+  mfaInvalid?: boolean
+  attemptsRemaining?: number
+}
+
 /** One route already on the rider's own Wahoo account — sync-back, the
  *  reverse direction from pushing. */
 export interface WahooRoute {
