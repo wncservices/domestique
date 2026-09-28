@@ -30,7 +30,7 @@ const MFA_RELEASED = false
 function codeStepEnabled(): boolean {
   if (MFA_RELEASED) return true
   try {
-    return new URLSearchParams(window.location.search).has('garminMfa')
+    return new URLSearchParams(window.location.search).get('garminMfa') === '1'
   } catch {
     return false
   }
