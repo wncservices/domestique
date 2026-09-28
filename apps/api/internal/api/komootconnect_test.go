@@ -18,6 +18,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
@@ -73,6 +74,7 @@ type connectHarness struct {
 	client    *http.Client
 	base      string
 	links     *providerlink.Store
+	mfa       *garminmfa.Store
 	connector *fakeConnector
 	garmin    *fakeGarmin
 	settings  *settings.Store
@@ -119,6 +121,10 @@ func newConnectHarness(t *testing.T, withKey bool, opts ...func(*api.Server)) *c
 	if err != nil {
 		t.Fatal(err)
 	}
+	mfaStore, err := garminmfa.UseDB(db.Conn(), db.DSN(), box)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	authenticator, err := auth.New(auth.Config{
 		Mode:  auth.ModeProxy,
@@ -149,6 +155,7 @@ func newConnectHarness(t *testing.T, withKey bool, opts ...func(*api.Server)) *c
 		Auth:          authenticator,
 		Accounts:      accountStore,
 		Links:         links,
+		GarminMFA:     mfaStore,
 		Connector:     connector,
 		Garmin:        garminConnector,
 		Settings:      appSettings,
@@ -163,7 +170,7 @@ func newConnectHarness(t *testing.T, withKey bool, opts ...func(*api.Server)) *c
 	t.Cleanup(server.Close)
 
 	return &connectHarness{t: t, client: server.Client(), base: server.URL,
-		links: links, connector: connector, garmin: garminConnector,
+		links: links, mfa: mfaStore, connector: connector, garmin: garminConnector,
 		settings: appSettings, accounts: accountStore, db: db, store: store, srv: srv}
 }
 
