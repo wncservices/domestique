@@ -170,7 +170,7 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		}
 
 		for _, g := range goals {
-			created, skipped, err := s.scheduleGoal(ctx, g)
+			created, skipped, err := s.scheduleGoal(ctx, g, "")
 			if err != nil {
 				// ErrEventInThePast is not a real problem — a rider's own
 				// goal simply outlived its event and nobody has deleted it

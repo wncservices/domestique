@@ -30,6 +30,9 @@ const emit = defineEmits<{
   // See TodayCard.vue's own 'rated' emit — a feel rating can move a
   // progression level, and the week/level state lives on the page.
   rated: []
+  // Opens TrainingPlanPage.vue's own confirm modal — this component never
+  // calls the API itself, same as fill/move/open above.
+  replan: []
 }>()
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
@@ -209,11 +212,23 @@ watch(
         </span>
       </div>
 
-      <div class="flex min-w-[10rem] flex-col items-end gap-1">
-        <span class="font-mono tabular-nums text-sm text-muted">
-          {{ doneHours.toFixed(1) }} / {{ targetHours.toFixed(1) }} h
-        </span>
-        <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-32" />
+      <div class="flex items-center gap-3">
+        <UButton
+          v-if="isCurrentWeek"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-refresh-ccw"
+          @click="emit('replan')"
+        >
+          Replan
+        </UButton>
+        <div class="flex min-w-[10rem] flex-col items-end gap-1">
+          <span class="font-mono tabular-nums text-sm text-muted">
+            {{ doneHours.toFixed(1) }} / {{ targetHours.toFixed(1) }} h
+          </span>
+          <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-32" />
+        </div>
       </div>
     </div>
 

@@ -1039,6 +1039,18 @@ export interface TrainingWeek {
   }
 }
 
+/** POST /api/training/replan's response — see internal/api/replan.go.
+ *  Rebuilds today through Sunday from the rider's current levels,
+ *  availability, goal phase and readiness; `week` is the same shape
+ *  GET /api/training/week returns, so the caller can repaint the strip
+ *  from this one response instead of a second round trip. */
+export interface ReplanResult {
+  removed: number
+  created: number
+  adjusted: number
+  week: TrainingWeek
+}
+
 export interface PeriodizationPlan {
   goalId: string
   weeks: PeriodizationWeek[]

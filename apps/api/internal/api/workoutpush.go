@@ -178,45 +178,64 @@ func (s *Server) autoPushWorkouts(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		session, ok := s.garminSessionForRider(rider)
-		if !ok {
-			continue
-		}
-		workouts, err := s.Training.ListWorkouts(ctx, rider)
-		if err != nil {
-			s.logger().Warn("auto-push: listing workouts failed", "rider", rider, "err", err)
-			continue
-		}
-
-		pushed := 0
-		for _, wk := range workouts {
-			if wk.Date == "" || wk.Date < today || wk.Date > horizon {
-				continue
-			}
-			_, have, err := s.Training.GetPush(ctx, wk.ID, garminProvider)
-			if err != nil {
-				s.logger().Warn("auto-push: reading push state failed", "workout", wk.ID, "err", err)
-				continue
-			}
-			if !have && wk.GoalID == "" {
-				continue
-			}
-			res, err := s.syncWorkoutToGarmin(ctx, session, wk)
-			if err != nil {
-				// One failure ends this rider's pass, not the whole tick:
-				// the likely causes (a lapsed session, Garmin being down)
-				// hit every remaining workout the same way, and retrying
-				// each would only hammer an account that is refusing us.
-				// The next tick tries again.
-				s.logger().Warn("auto-push to garmin failed", "rider", rider, "workout", wk.ID, "err", err)
-				break
-			}
-			if res.Outcome != pushUnchanged {
-				pushed++
-			}
-		}
-		if pushed > 0 {
+		if pushed := s.pushWorkoutsForRider(ctx, rider, today, horizon); pushed > 0 {
 			s.logger().Info("auto-pushed workouts to garmin", "rider", rider, "changed", pushed)
 		}
 	}
+}
+
+// pushWorkoutsForRider is autoPushWorkouts' own per-rider body, factored
+// out so handleReplan (see replan.go) can push one rider's week right after
+// replanning it — via the same idempotent syncWorkoutToGarmin, the same
+// "only what's inside the window and either already pushed or came from a
+// goal" rule — without a second copy of this loop to keep in sync with the
+// unattended one. today/horizon are passed in rather than read from
+// time.Now() here so a caller with a fixed clock (a test, or replan's own
+// s.now()) controls the window the same way it controls everything else.
+//
+// Every failure is logged and swallowed, never returned: a lapsed Garmin
+// session or a provider outage pushing nothing must not fail the caller —
+// an unattended tick already treats this as best-effort, and AGENTS.md's
+// own reasoning for handleReplan says the same ("a Garmin removal/push
+// failure is Warn and doesn't fail the replan"). Returns how many workouts
+// actually changed on the account, for the caller's own logging.
+func (s *Server) pushWorkoutsForRider(ctx context.Context, rider, today, horizon string) int {
+	session, ok := s.garminSessionForRider(rider)
+	if !ok {
+		return 0
+	}
+	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		s.logger().Warn("auto-push: listing workouts failed", "rider", rider, "err", err)
+		return 0
+	}
+
+	pushed := 0
+	for _, wk := range workouts {
+		if wk.Date == "" || wk.Date < today || wk.Date > horizon {
+			continue
+		}
+		_, have, err := s.Training.GetPush(ctx, wk.ID, garminProvider)
+		if err != nil {
+			s.logger().Warn("auto-push: reading push state failed", "workout", wk.ID, "err", err)
+			continue
+		}
+		if !have && wk.GoalID == "" {
+			continue
+		}
+		res, err := s.syncWorkoutToGarmin(ctx, session, wk)
+		if err != nil {
+			// One failure ends this rider's pass, not the whole tick:
+			// the likely causes (a lapsed session, Garmin being down)
+			// hit every remaining workout the same way, and retrying
+			// each would only hammer an account that is refusing us.
+			// The next tick (or replan) tries again.
+			s.logger().Warn("auto-push to garmin failed", "rider", rider, "workout", wk.ID, "err", err)
+			break
+		}
+		if res.Outcome != pushUnchanged {
+			pushed++
+		}
+	}
+	return pushed
 }
