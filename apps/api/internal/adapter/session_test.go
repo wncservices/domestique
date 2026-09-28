@@ -168,6 +168,68 @@ func TestReadyAssessmentChangesNothing(t *testing.T) {
 	}
 }
 
+// TestCautionStepsDownTodaysStructuredHardWorkout is the caution half of the
+// readiness.Verdict switch: today's structured hard workout, still
+// untouched, gets stepped down one rung — not downgraded to easy — with the
+// readiness:<date> source marker and the "Eased one level" reason.
+func TestCautionStepsDownTodaysStructuredHardWorkout(t *testing.T) {
+	ws := []workout.Workout{
+		structured("today", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4),
+		structured("next-week", "Threshold 3×8", "2026-03-26", workout.ZoneThreshold, 4),
+	}
+	caution := readiness.Assessment{Verdict: readiness.Caution, Reasons: []string{"HRV is unbalanced today"}}
+
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, nil, caution)
+
+	if len(got) != 1 {
+		t.Fatalf("changes = %+v, want exactly one", got)
+	}
+	c := got[0]
+	if c.WorkoutID != "today" || !c.StepDown || c.Downgrade {
+		t.Fatalf("change = %+v, want today's workout stepped down, not downgraded", c)
+	}
+	if c.StepDownSourceID != "readiness:2026-03-19" {
+		t.Errorf("StepDownSourceID = %q, want readiness:2026-03-19", c.StepDownSourceID)
+	}
+	if !strings.HasPrefix(c.Reason, "Eased one level — ") || !strings.Contains(c.Reason, "HRV is unbalanced today") {
+		t.Errorf("reason = %q, want it to start with 'Eased one level — ' and carry the assessment's reasons", c.Reason)
+	}
+}
+
+// TestCautionChangesNothingOnASecondSamedayPass mirrors the rest of the
+// package's own "once is enough" guarantee: a workout readiness has already
+// stepped down (marked exactly the way applyStepDown leaves it — the
+// adjustment marker in its description) is no longer scheduler.IsGenerated,
+// so a second pass the same day — same caution Assessment, nothing else
+// changed — produces nothing at all for it.
+func TestCautionChangesNothingOnASecondSamedayPass(t *testing.T) {
+	already := structured("today", "Threshold 3×6", "2026-03-19", workout.ZoneThreshold, 3)
+	already.Description += " " + scheduler.AdjustedMarker + " Eased one level — HRV is unbalanced today."
+	caution := readiness.Assessment{Verdict: readiness.Caution, Reasons: []string{"HRV is unbalanced today"}}
+
+	got := AdaptSessions([]workout.Workout{already}, nil, workout.RiderProfile{}, thursday, nil, caution)
+	if len(got) != 0 {
+		t.Errorf("changes = %+v, want none: this workout already carries today's readiness step-down", got)
+	}
+}
+
+// TestCautionSkipsALegacyZonelessHardWorkout is the fix for the review
+// finding: a caution step-down needs a rung on its own zone's ladder
+// (workoutlib), so a legacy hard workout with no zone — which
+// scheduler.IsHardSession still recognises by name — must not be claimed
+// and then silently produce nothing further down the line. Unlike caution,
+// rest's downgrade replaces the workout wholesale and has no such
+// restriction — see TestAHardSessionIsSwappedForAnEasyOneWhenVeryFatigued.
+func TestCautionSkipsALegacyZonelessHardWorkout(t *testing.T) {
+	ws := []workout.Workout{planned("today", "Interval session", "2026-03-19")}
+	caution := readiness.Assessment{Verdict: readiness.Caution, Reasons: []string{"HRV is unbalanced today"}}
+
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, nil, caution)
+	if len(got) != 0 {
+		t.Errorf("changes = %+v, want none: a zone-less legacy hard workout has no ladder to step down on", got)
+	}
+}
+
 func TestNothingElseIsEverTouched(t *testing.T) {
 	hand := planned("mine", "VO2max intervals", "2026-03-17")
 	hand.Description = "my own session"

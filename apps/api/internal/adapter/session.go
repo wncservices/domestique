@@ -200,16 +200,26 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 	// on today), rather than the milder struggle-driven StepDown winning by
 	// running last. Ready never changes anything: readiness only ever makes a
 	// day easier.
-	if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed); ok {
-		reasons := strings.Join(assessment.Reasons, "; ")
-		switch assessment.Verdict {
-		case readiness.Rest:
+	reasons := strings.Join(assessment.Reasons, "; ")
+	switch assessment.Verdict {
+	case readiness.Rest:
+		// A downgrade replaces the workout wholesale with an easy variant
+		// (scheduler.EasyVariant) — that works for a legacy zone-less hard
+		// workout just as well as a structured one, so rest does not need
+		// the structured-zone restriction caution's step-down does.
+		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, false); ok {
 			claimed[w.ID] = true
 			changes = append(changes, Change{
 				WorkoutID: w.ID, Downgrade: true,
 				Reason: "Swapped for an easy ride — " + reasons,
 			})
-		case readiness.Caution:
+		}
+	case readiness.Caution:
+		// A step-down needs a rung on its own zone's ladder (workoutlib) —
+		// a legacy hard workout with no zone has no ladder to step down on,
+		// the same reason stepDownTarget itself requires
+		// workout.IsStructuredZone.
+		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, true); ok {
 			claimed[w.ID] = true
 			changes = append(changes, Change{
 				WorkoutID: w.ID, StepDown: true, StepDownSourceID: readinessSourceID(today),
@@ -239,10 +249,16 @@ func readinessSourceID(today time.Time) string {
 // readinessTarget is today's generated, untouched, hard, not-yet-done
 // workout — the one readiness's own rest/caution verdict may ease. Unlike
 // detectFatigue's swap, this never reaches into tomorrow: readiness only
-// ever speaks to how the rider is today.
-func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool) (workout.Workout, bool) {
+// ever speaks to how the rider is today. requireStructuredZone is set for
+// caution's step-down, which needs a zone with a ladder to step down on
+// (see stepDownTarget); rest's downgrade replaces the workout wholesale and
+// has no such requirement.
+func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool, requireStructuredZone bool) (workout.Workout, bool) {
 	for _, w := range ordered {
 		if w.Date != todayStr || claimed[w.ID] || !scheduler.IsGenerated(w) || !scheduler.IsHardSession(w) || done(w, sessions, analyses) {
+			continue
+		}
+		if requireStructuredZone && !workout.IsStructuredZone(w.Zone) {
 			continue
 		}
 		return w, true

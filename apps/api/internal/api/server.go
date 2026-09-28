@@ -62,6 +62,11 @@ type Server struct {
 	// background sync ticks — see biometricsCache. Zero value is ready to use.
 	biometrics biometricsCache
 
+	// wellnessBackfill caps how often a rider with no daily_wellness rows is
+	// even considered for the 28-day backfill — see wellnessBackfillCache's
+	// own doc comment. Zero value is ready to use.
+	wellnessBackfill wellnessBackfillCache
+
 	// Clock, when set, replaces time.Now for the parts of training that
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time

@@ -81,6 +81,74 @@ func TestWellnessSyncBackfillsOnceForANewRider(t *testing.T) {
 	}
 }
 
+// TestWellnessSyncFailingGarminNeverRepeatsTheBackfill is the fix for the
+// bug the review reproduced: a rider whose Garmin session always fails
+// (expired token, unrecognised display name — whatever it is, every date
+// fails the same way) must not have the full 28-day backfill re-fire on
+// every single sync tick forever, since daily_wellness for that rider stays
+// empty no matter how many times it is tried. Both today's and yesterday's
+// fetches failing skips the backfill outright (rule a) — this asserts the
+// second sync costs exactly the same 2 calls as the first, not 2+29.
+func TestWellnessSyncFailingGarminNeverRepeatsTheBackfill(t *testing.T) {
+	fake := &fakeGarmin{wellnessErr: context.DeadlineExceeded}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
+
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if len(fake.wellnessCalls) != 2 {
+		t.Fatalf("wellness calls after first sync = %d, want 2 (today, yesterday; both fail, backfill skipped)", len(fake.wellnessCalls))
+	}
+
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if len(fake.wellnessCalls) != 4 {
+		t.Fatalf("wellness calls after second sync = %d, want 4 (2 more, still no backfill — not 2+29)", len(fake.wellnessCalls))
+	}
+}
+
+// TestWellnessSyncBackfillCooldownExpires is rule (b)'s own cap: a backfill
+// is considered at most once per rider per 24h regardless of outcome. While
+// the rider's Garmin keeps failing within that window, nothing changes; once
+// both the cooldown has passed *and* Garmin starts answering again, the
+// backfill is attempted again.
+func TestWellnessSyncBackfillCooldownExpires(t *testing.T) {
+	fake := &fakeGarmin{wellnessErr: context.DeadlineExceeded}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	start := time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC)
+	h.srv.Clock = func() time.Time { return start }
+
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if len(fake.wellnessCalls) != 2 {
+		t.Fatalf("wellness calls after first sync = %d, want 2", len(fake.wellnessCalls))
+	}
+
+	// Still within the 24h cooldown, and Garmin is still failing — rows.
+	// stay empty, so without the cooldown this would try the backfill
+	// again; the cooldown holds it back regardless.
+	h.srv.Clock = func() time.Time { return start.Add(1 * time.Hour) }
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if len(fake.wellnessCalls) != 4 {
+		t.Fatalf("wellness calls after second sync (within cooldown) = %d, want 4 (2 more, no backfill yet)", len(fake.wellnessCalls))
+	}
+	rows, err := h.srv.Training.ListWellness(context.Background(), "wilant", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("wellness rows within the cooldown = %d, want 0 — Garmin is still failing every call", len(rows))
+	}
+
+	// Past the cooldown, with Garmin now answering: the backfill is
+	// attempted again.
+	h.srv.Clock = func() time.Time { return start.Add(25 * time.Hour) }
+	fake.wellnessErr = nil
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if len(fake.wellnessCalls) != 4+2+27 {
+		t.Fatalf("wellness calls after the cooldown passed = %d, want %d (2 more + a full 27-day backfill)", len(fake.wellnessCalls), 4+2+27)
+	}
+}
+
 // TestWellnessSyncGarminFailureIsNotAWarning mirrors
 // TestSyncGarminRestingHeartRateFailureIsNotAWarning: the wellness endpoints
 // are the same kind of undocumented, best-effort lookup, so a failure must
