@@ -134,6 +134,14 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Date < ordered[j].Date })
 
 	replaced := map[string]bool{}
+	// claimed holds every workout id this pass has already produced a Change
+	// for (as the changed workout itself, or as the easy slot a missed
+	// session is taking over) — stepDownTarget must not then also pick one of
+	// these as the workout it steps down, or that workout would end up with
+	// two Changes and adaptRider's own first-wins guard would silently drop
+	// one of them instead of the two rules simply not colliding in the first
+	// place.
+	claimed := map[string]bool{}
 	var changes []Change
 	for _, w := range ordered {
 		if w.Date == "" || !scheduler.IsGenerated(w) || done(w, sessions, analyses) {
@@ -150,6 +158,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 			}
 			if next, ok := nextFreeDay(today, weekEnd, available, taken); ok {
 				taken[next] = true
+				claimed[w.ID] = true
 				changes = append(changes, Change{
 					WorkoutID: w.ID, NewDate: next,
 					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s.", w.Date, next),
@@ -158,6 +167,8 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 			}
 			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced); ok {
 				replaced[slot.ID] = true
+				claimed[w.ID] = true
+				claimed[slot.ID] = true
 				changes = append(changes, Change{
 					WorkoutID: w.ID, NewDate: slot.Date, ReplaceWorkoutID: slot.ID,
 					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s in place of an easy day.", w.Date, slot.Date),
@@ -168,6 +179,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// whether that shows up as very negative form or as what the ride
 		// analyses themselves say (see detectFatigue).
 		case fatigue.active && scheduler.IsHardSession(w) && (w.Date == todayStr || w.Date == day(today.AddDate(0, 0, 1))):
+			claimed[w.ID] = true
 			changes = append(changes, Change{
 				WorkoutID: w.ID, Downgrade: true,
 				Reason: fatigue.reason,
@@ -175,7 +187,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		}
 	}
 
-	if src, target, ok := stepDownTarget(ordered, analyses, today); ok {
+	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed); ok {
 		changes = append(changes, Change{
 			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
 			Reason: stepDownReason(src),
@@ -221,8 +233,12 @@ func hasStepDownSource(ordered []workout.Workout, sourceID string) bool {
 // progression-levels design, "Struggled -> step down"). False when there is
 // no recent struggle to react to, that struggle has already produced a
 // step-down (hasStepDownSource), or nothing is left in that zone to step
-// down.
-func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time) (workout.Workout, workout.Workout, bool) {
+// down. claimed holds every workout id AdaptSessions' own per-session loop
+// already produced a Change for this pass — a workout already rescheduled,
+// replaced, or downgraded this pass is skipped as a step-down target so it
+// never ends up with two Changes (a missed-session reschedule onto a
+// same-zone slot, say, followed by that same slot being stepped down).
+func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time, claimed map[string]bool) (workout.Workout, workout.Workout, bool) {
 	var source workout.Workout
 	found := false
 	for _, w := range ordered {
@@ -246,7 +262,7 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 		return workout.Workout{}, workout.Workout{}, false
 	}
 	for _, w := range ordered {
-		if w.Date <= source.Date || w.Zone != source.Zone || !scheduler.IsGenerated(w) {
+		if w.Date <= source.Date || w.Zone != source.Zone || !scheduler.IsGenerated(w) || claimed[w.ID] {
 			continue
 		}
 		d, err := time.Parse("2006-01-02", w.Date)

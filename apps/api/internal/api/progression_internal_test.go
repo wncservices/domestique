@@ -3,6 +3,9 @@ package api
 import (
 	"math"
 	"testing"
+
+	"github.com/wncservices/domestique/apps/api/internal/progression"
+	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 )
 
 // TestRoundLevelDeltaNeverReturnsNegativeZero is round 2's minor fix
@@ -39,4 +42,57 @@ func TestRoundLevelDeltaNeverReturnsNegativeZero(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRideAnalysisOutcomesConvertToRecognisedProgressionOutcomes guards
+// progression.Outcome and rideanalysis.Outcome staying in step by hand: the
+// two packages deliberately don't import each other (progression.Outcome's
+// own doc comment), so every rideanalysis.Outcome constant that means
+// something to progression.Delta must have a matching progression.Outcome
+// constant with the identical string value — this package is the one place
+// that can see both and check it. OutcomeUnplanned is excluded: "no zone to
+// move" is the one outcome progression.Delta's default branch is *supposed*
+// to catch, not a case it should recognise.
+func TestRideAnalysisOutcomesConvertToRecognisedProgressionOutcomes(t *testing.T) {
+	// cur/workoutLevel is chosen per outcome so that Delta's own dedicated
+	// branch for it produces a nonzero move — the point being to prove each
+	// converted outcome actually reached that branch rather than falling
+	// through to the default (unrecognised-outcome) branch, which always
+	// returns 0. Struggled is the one deliberate exception: its own branch
+	// returns 0 by design (the adapter steps the workout down instead), so
+	// it is checked separately, by the delta at cur == workoutLevel matching
+	// struggled's documented zero rather than by nonzero-ness.
+	cases := []struct {
+		outcome           rideanalysis.Outcome
+		cur, workoutLevel float64
+	}{
+		{rideanalysis.OutcomeNailed, 5.0, 5.0},     // diff=0 >= -0.5: nonzero bump
+		{rideanalysis.OutcomeCompleted, 5.0, 5.0},  // diff=0 >= 0: flat +0.1
+		{rideanalysis.OutcomeIncomplete, 5.0, 4.0}, // diff=-1 <= 0: flat -0.3
+	}
+	for _, c := range cases {
+		t.Run(string(c.outcome), func(t *testing.T) {
+			converted := progression.Outcome(c.outcome)
+			got := progression.Delta(c.cur, c.workoutLevel, converted, 0)
+			if got == 0 {
+				t.Errorf("progression.Delta(%v, %v, %q, 0) = 0, want a nonzero move — %q fell into Delta's default (unrecognised) branch", c.cur, c.workoutLevel, converted, converted)
+			}
+		})
+	}
+
+	t.Run(string(rideanalysis.OutcomeStruggled), func(t *testing.T) {
+		converted := progression.Outcome(rideanalysis.OutcomeStruggled)
+		if converted != progression.OutcomeStruggled {
+			t.Fatalf("progression.Outcome(rideanalysis.OutcomeStruggled) = %q, want %q", converted, progression.OutcomeStruggled)
+		}
+		// Struggled's own branch and the default branch both return 0 for
+		// this input, so 0 alone doesn't prove it took the dedicated branch
+		// — but a diff that would make every *other* recognised branch
+		// nonzero (workoutLevel above cur) still yields 0 here only because
+		// struggled is handled explicitly; confirm via the sibling
+		// progression package's own struggled test coverage instead.
+		if got := progression.Delta(5.0, 6.0, converted, 0); got != 0 {
+			t.Errorf("progression.Delta(5.0, 6.0, %q, 0) = %v, want 0 (struggled never moves the level itself)", converted, got)
+		}
+	})
 }
