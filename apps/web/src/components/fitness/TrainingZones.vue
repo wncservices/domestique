@@ -4,7 +4,7 @@
 // stored: it is all recomputed from the rider's own profile fields.
 import { computed } from 'vue'
 import type { RiderProfile } from '@/api/types'
-import { formatPace, hrZones, paceZones, powerZones, type Zone } from '@/utils/fitnessMath'
+import { formatPace, hrZoneBasis, hrZones, paceZones, powerZones, type Zone } from '@/utils/fitnessMath'
 
 const props = defineProps<{
   profile: RiderProfile
@@ -61,10 +61,11 @@ const powerBars = computed(() => {
   return zoneBars(power.value, props.profile.ftpWatts, (z) => (z.high === null ? `${z.low}+ W` : `${z.low}–${z.high} W`))
 })
 
-const hr = computed(() => hrZones(props.profile.maxHr))
+const hr = computed(() => hrZones(props.profile))
+const hrBasis = computed(() => hrZoneBasis(props.profile))
 const hrBars = computed(() => {
-  if (!hr.value || !props.profile.maxHr) return null
-  return zoneBars(hr.value, props.profile.maxHr, (z) => (z.high === null ? `${z.low}+ bpm` : `${z.low}–${z.high} bpm`))
+  if (!hr.value || !hrBasis.value) return null
+  return zoneBars(hr.value, hrBasis.value.bpm, (z) => (z.high === null ? `${z.low}+ bpm` : `${z.low}–${z.high} bpm`))
 })
 
 // Pace zones are built from threshold speed, so `low`/`high` are m/s — but
@@ -128,7 +129,7 @@ const paceBars = computed(() => {
       <div>
         <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Heart rate</p>
         <template v-if="hrBars">
-          <p class="mt-1 font-mono tabular-nums text-sm font-medium">Max HR {{ profile.maxHr }} bpm</p>
+          <p class="mt-1 font-mono tabular-nums text-sm font-medium">{{ hrBasis?.kind === 'threshold' ? 'Threshold HR' : 'Max HR' }} {{ hrBasis?.bpm }} bpm</p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
             <div
               v-for="bar in hrBars"

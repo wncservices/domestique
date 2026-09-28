@@ -2,7 +2,13 @@ package rideanalysis
 
 import (
 	"math"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 func TestResampleFillsShortGapsAndZeroesLongOnes(t *testing.T) {
@@ -325,5 +331,92 @@ func TestBestHRUnaffectedBySingleSpike(t *testing.T) {
 	samples := Resample(buildActivity(t, fixtures, nil).Records)
 	if got := BestHR(samples); got != 150 {
 		t.Errorf("BestHR = %d, want 150 (spike must not move a 20-minute mean)", got)
+	}
+}
+
+func TestHRZoneSecondsLTHRUsesFrielEdgesPerSport(t *testing.T) {
+	// LTHR 100 makes bpm equal percent. One second at each of: 80 (Z1),
+	// 81 (Z2 start, cycling), 84 (Z1 running), 85 (Z2 running), 90 (Z3),
+	// 94 (Z4 cycling), 95 (Z4 running), 99, 100 (Z5), 110.
+	var s []Sample
+	for _, bpm := range []int{80, 81, 84, 85, 90, 94, 95, 99, 100, 110} {
+		s = append(s, Sample{Seconds: len(s), HeartRate: float64(bpm), HasHR: true})
+	}
+	cyc := HRZoneSecondsLTHR(s, 100, "cycling")
+	if want := [5]int{1, 3, 1, 3, 2}; cyc != want {
+		t.Errorf("cycling zones = %v, want %v", cyc, want)
+	}
+	run := HRZoneSecondsLTHR(s, 100, "running")
+	if want := [5]int{3, 1, 2, 2, 2}; run != want {
+		t.Errorf("running zones = %v, want %v", run, want)
+	}
+	// Unknown sport falls back to the cycling table; zero LTHR puts
+	// everything in Z1 rather than dividing by zero.
+	if got := HRZoneSecondsLTHR(s, 100, ""); got != cyc {
+		t.Errorf("unknown sport = %v, want the cycling table %v", got, cyc)
+	}
+	if got := HRZoneSecondsLTHR(s, 0, "cycling"); got != [5]int{len(s), 0, 0, 0, 0} {
+		t.Errorf("zero LTHR = %v, want everything in Z1", got)
+	}
+}
+
+// TestLTHREdgesMatchTheFitnessPageTable pins the Go edges to the frontend's
+// LTHR_*_EDGES in fitnessMath.ts: a ride's stored zone-seconds must mean the
+// same "Z3" as the zone list the page draws (review focus 4).
+func TestLTHREdgesMatchTheFitnessPageTable(t *testing.T) {
+	src, err := os.ReadFile("../../../web/src/utils/fitnessMath.ts")
+	if err != nil {
+		t.Fatalf("read fitnessMath.ts: %v", err)
+	}
+	for sport, edges := range lthrZoneEdges {
+		name := "LTHR_" + strings.ToUpper(sport) + "_EDGES"
+		m := regexp.MustCompile(name + `\s*=\s*\[([^\]]+)\]`).FindSubmatch(src)
+		if m == nil {
+			t.Fatalf("%s not found in fitnessMath.ts", name)
+		}
+		var ts []float64
+		for _, f := range strings.Split(string(m[1]), ",") {
+			v, err := strconv.ParseFloat(strings.TrimSpace(f), 64)
+			if err != nil {
+				t.Fatalf("%s: parse %q: %v", name, f, err)
+			}
+			ts = append(ts, v)
+		}
+		// The TS array leads with 0 (Z1's floor) and ends at 1 (Z5a's start);
+		// the four in between and the top are the Go edges.
+		if len(ts) != 5 || ts[0] != 0 {
+			t.Fatalf("%s = %v, want [0, e1, e2, e3, e4]", name, ts)
+		}
+		for i, e := range edges {
+			if ts[i+1] != e {
+				t.Errorf("%s edge %d: TS %v, Go %v", sport, i, ts[i+1], e)
+			}
+		}
+	}
+}
+
+func TestAnalyzeHRZonesFollowThresholdHRAndSport(t *testing.T) {
+	// 100 s at 90 bpm, then 1400 s at 150: with MaxHR 190 both are low
+	// %MaxHR; with LTHR 150 the second block sits at 100 % (Z5).
+	fixtures := constantHR(100, 90)
+	for i := 0; i < 1400; i++ {
+		fixtures = append(fixtures, fixture{Sec: 100 + i, HR: 150})
+	}
+	act := buildActivity(t, fixtures, nil)
+
+	withLTHR := Analyze(Input{Activity: act, Sport: "cycling", Profile: workout.RiderProfile{MaxHR: 190, ThresholdHR: 150}})
+	if withLTHR.HRZoneSeconds[4] != 1400 || withLTHR.HRZoneSeconds[0] != 100 {
+		t.Errorf("LTHR zones = %v, want 100 in Z1 and 1400 in Z5", withLTHR.HRZoneSeconds)
+	}
+	maxOnly := Analyze(Input{Activity: act, Sport: "cycling", Profile: workout.RiderProfile{MaxHR: 190}})
+	// 150/190 = 0.79 -> Z3 (0.70-0.80) under today's %MaxHR table.
+	if maxOnly.HRZoneSeconds[2] != 1400 {
+		t.Errorf("max HR zones = %v, want 1400 in Z3 (unchanged)", maxOnly.HRZoneSeconds)
+	}
+	// 150/180 = 0.833: Z2 under cycling's 0.81 edge, still Z1 under running's 0.85.
+	cyc := Analyze(Input{Activity: act, Sport: "cycling", Profile: workout.RiderProfile{ThresholdHR: 180}})
+	run := Analyze(Input{Activity: act, Sport: "running", Profile: workout.RiderProfile{ThresholdHR: 180}})
+	if cyc.HRZoneSeconds[1] != 1400 || run.HRZoneSeconds[0] != 1500 {
+		t.Errorf("cycling zones = %v, running zones = %v, want the sport's own edges", cyc.HRZoneSeconds, run.HRZoneSeconds)
 	}
 }

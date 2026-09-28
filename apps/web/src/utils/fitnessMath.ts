@@ -1,7 +1,7 @@
 // Pure math for the Fitness page redesign: form status, CTL/ATL/TSB deltas,
 // weekly training hours, the chart's range filter, and the three training
 // zone sets. No Vue, no API calls — Tasks 3-4 build UI on these exports.
-import type { CompletedSession, FitnessSnapshot } from '@/api/types'
+import type { CompletedSession, FitnessSnapshot, RiderProfile } from '@/api/types'
 
 // ---------- Local date helpers ----------
 // Snapshot/session dates are plain 'YYYY-MM-DD' strings with no timezone of
@@ -200,9 +200,37 @@ export function powerZones(ftpWatts?: number): Zone[] | null {
 const HR_ZONE_NAMES = ['Z1 Recovery', 'Z2 Endurance', 'Z3 Tempo', 'Z4 Threshold', 'Z5 VO2max']
 const HR_ZONE_EDGES = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
-export function hrZones(maxHr?: number): Zone[] | null {
-  if (!maxHr) return null
-  return buildZones(maxHr, HR_ZONE_NAMES, HR_ZONE_EDGES, false)
+// Friel's %LTHR zones collapsed to the five bands this page shows (his Z5a-c
+// together, >= 100 %), per sport. Each array is Z1's floor (0 — Friel gives
+// none), then the four zone boundaries; Z5 is open-ended. Mirrored by
+// lthrZoneEdges in apps/api/internal/rideanalysis/metrics.go, which counts a
+// ride's stored time-in-zone against the same edges — a Go test reads these
+// two constants, so keep the `NAME = [...]` shape.
+export const LTHR_CYCLING_EDGES = [0, 0.81, 0.9, 0.94, 1.0]
+export const LTHR_RUNNING_EDGES = [0, 0.85, 0.9, 0.95, 1.0]
+
+type HrProfile = Pick<RiderProfile, 'thresholdHr' | 'maxHr' | 'ftpWatts' | 'thresholdPaceSecPerKm'>
+
+// What the HR zones are a percentage of: threshold HR when the rider has one
+// (the Friel table), max HR otherwise (today's table). Switches per rider.
+export function hrZoneBasis(profile: HrProfile): { kind: 'threshold' | 'max'; bpm: number } | null {
+  if (profile.thresholdHr) return { kind: 'threshold', bpm: profile.thresholdHr }
+  if (profile.maxHr) return { kind: 'max', bpm: profile.maxHr }
+  return null
+}
+
+// The profile carries no sport, so the running table is used only for a
+// rider with a threshold pace and no FTP — anyone else gets the cycling one.
+export function hrZonesSport(profile: HrProfile): 'cycling' | 'running' {
+  return profile.thresholdPaceSecPerKm && !profile.ftpWatts ? 'running' : 'cycling'
+}
+
+export function hrZones(profile: HrProfile): Zone[] | null {
+  const basis = hrZoneBasis(profile)
+  if (!basis) return null
+  if (basis.kind === 'max') return buildZones(basis.bpm, HR_ZONE_NAMES, HR_ZONE_EDGES, false)
+  const edges = hrZonesSport(profile) === 'running' ? LTHR_RUNNING_EDGES : LTHR_CYCLING_EDGES
+  return buildZones(basis.bpm, HR_ZONE_NAMES, edges, true)
 }
 
 // 5-zone % threshold speed model. Threshold speed (m/s) is the inverse of
