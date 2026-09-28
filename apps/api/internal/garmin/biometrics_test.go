@@ -73,6 +73,61 @@ func TestBiometricsDecodesAllThree(t *testing.T) {
 	if got.CyclingFTPWatts != 255 {
 		t.Errorf("FTP = %v, want the most recent reading, 255", got.CyclingFTPWatts)
 	}
+	if got.ThresholdHR != 171 {
+		t.Errorf("ThresholdHR = %d, want 171 from the object that carried the speed", got.ThresholdHR)
+	}
+}
+
+func TestBiometricsThresholdHRAcceptsBothKeySpellings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{"heartRate", `{"speed":0.3611,"heartRate":171}`, 171},
+		{"the reference's hearRate typo", `{"speed":0.3611,"hearRate":168}`, 168},
+		{"only from the object that supplied the speed", `[{"speed":0.3611,"hearRate":171},{"heartRate":150}]`, 171},
+		{"an object with no speed is not used", `[{"heartRate":150}]`, 0},
+		{"below range fails closed", `{"speed":0.3611,"heartRate":60}`, 0},
+		{"above range fails closed", `{"speed":0.3611,"heartRate":250}`, 0},
+		{"absent", `{"speed":0.3611}`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := biometricsFake(t, map[string]biometricResponse{
+				lactateThresholdPath: {http.StatusOK, tc.body},
+			})
+			got, _ := c.Biometrics(t.Context(), time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))
+			if got.ThresholdHR != tc.want {
+				t.Errorf("ThresholdHR = %d, want %d", got.ThresholdHR, tc.want)
+			}
+		})
+	}
+}
+
+func TestBiometricsThresholdHRMakesNoExtraRequest(t *testing.T) {
+	calls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth-service/oauth/exchange/user/2.0", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"access_token":"bearer-1","expires_in":3600}`)
+	})
+	mux.HandleFunc(lactateThresholdPath, func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		fmt.Fprint(w, `{"speed":0.3611,"heartRate":171}`)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	c := New()
+	c.APIBase = server.URL
+	c.SetConsumer(testKey, testSecret)
+	c.Resume(Session{OAuth1Token: "tok-1", OAuth1Secret: "sec-1", DisplayName: "wilant-n"})
+
+	got, _ := c.Biometrics(t.Context(), time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))
+	if got.ThresholdHR != 171 || got.ThresholdPaceSecPerKM == 0 {
+		t.Errorf("got %+v, want both the pace and the threshold HR", got)
+	}
+	if calls != 1 {
+		t.Errorf("latestLactateThreshold calls = %d, want 1 (pace and HR share one request)", calls)
+	}
 }
 
 func TestBiometricsOneEndpointFailingKeepsTheOthers(t *testing.T) {

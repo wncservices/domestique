@@ -142,3 +142,17 @@ func TestApplyKeepsRefiningAnEstimate(t *testing.T) {
 		t.Error("an unchanged suggestion must be a no-op, or every sync would rewrite the profile")
 	}
 }
+
+func TestApplyFillsThresholdHROnlyWhenEmptyOrEstimated(t *testing.T) {
+	got, changed := Apply(workout.RiderProfile{Rider: "wilant"}, Suggestion{ThresholdHR: 165})
+	if got.ThresholdHR != 165 || !got.IsEstimated(workout.FieldThresholdHR) || len(changed) != 1 || changed[0] != workout.FieldThresholdHR {
+		t.Fatalf("empty: got %+v changed %v", got, changed)
+	}
+	if again, changed := Apply(got, Suggestion{ThresholdHR: 168}); again.ThresholdHR != 168 || len(changed) != 1 {
+		t.Errorf("estimated should update: %+v %v", again, changed)
+	}
+	typed := workout.RiderProfile{Rider: "wilant", ThresholdHR: 158}
+	if kept, changed := Apply(typed, Suggestion{ThresholdHR: 170}); kept.ThresholdHR != 158 || len(changed) != 0 {
+		t.Errorf("rider-typed must not change: %+v %v", kept, changed)
+	}
+}

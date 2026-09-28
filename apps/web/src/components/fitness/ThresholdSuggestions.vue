@@ -50,6 +50,12 @@ function titleFor(s: ThresholdSuggestion): string {
       return down
         ? `Your threshold pace may have slipped: ${value}${was}`
         : `New threshold pace detected: ${value}${was}`
+    case 'threshold_hr':
+      // Detection never suggests a decrease (spec: no down rule), but the
+      // switch stays exhaustive over Direction like the other fields.
+      return down
+        ? `Your threshold heart rate may have dropped: ${value}${was}`
+        : `New threshold heart rate detected: ${value}${was}`
   }
 }
 
