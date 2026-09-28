@@ -139,6 +139,10 @@ type riderProfileDTO struct {
 	// rider. Output only — handleSaveRiderProfile never reads it back.
 	Estimated []string `json:"estimated,omitempty"`
 	UpdatedAt string   `json:"updatedAt,omitempty"`
+	// LevelsRecalibrated is output only, and only on the response to a save
+	// that lowered the rider's progression levels for a new FTP.
+	// handleSaveRiderProfile never reads it back from the request.
+	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
 }
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
@@ -751,12 +755,17 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if _, _, err := s.recalibrateLevelsForFTP(r.Context(), rider, before); err != nil {
+	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before)
+	if err != nil {
 		s.logger().Error("level recalibration failed", "rider", rider, "err", err)
 	}
 
 	s.logger().Info("rider profile saved", "rider", rider)
-	writeJSON(w, http.StatusOK, profileDTOFrom(saved))
+	out := profileDTOFrom(saved)
+	if changed {
+		out.LevelsRecalibrated = &dto
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type profileProposalDTO struct {

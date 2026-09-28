@@ -193,3 +193,101 @@ func TestRecalibrationOnManualProfileSaveIgnoresATypo(t *testing.T) {
 		t.Errorf("threshold = %v, want it untouched by a typo", level)
 	}
 }
+
+// decodeRecalibrated decodes a response's optional levelsRecalibrated sibling.
+func decodeRecalibrated(t *testing.T, resp *http.Response) *struct {
+	From float64 `json:"fromFtpWatts"`
+	To   float64 `json:"toFtpWatts"`
+} {
+	t.Helper()
+	var out struct {
+		LevelsRecalibrated *struct {
+			From float64 `json:"fromFtpWatts"`
+			To   float64 `json:"toFtpWatts"`
+		} `json:"levelsRecalibrated"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out.LevelsRecalibrated
+}
+
+// All three triggers hand the client the identical levelsRecalibrated shape,
+// so one toast line serves them all.
+func TestRecalibrationResponsesCarryTheSameToastField(t *testing.T) {
+	t.Run("sync", func(t *testing.T) {
+		h := newMetricsSyncHarness(t, &fakeGarmin{biometrics: garmin.Biometrics{CyclingFTPWatts: 262}})
+		h.seedGarminSession("wilant")
+		seedRecalRider(t, h, 250, true)
+
+		got := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", ""))
+		if got == nil || got.From != 250 || got.To != 262 {
+			t.Fatalf("levelsRecalibrated = %+v, want 250 -> 262", got)
+		}
+		// The second pass at the same FTP reports nothing.
+		if again := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")); again != nil {
+			t.Errorf("second sync levelsRecalibrated = %+v, want absent", again)
+		}
+	})
+
+	t.Run("threshold accept", func(t *testing.T) {
+		h := newMetricsSyncHarness(t, &fakeGarmin{})
+		seedRecalRider(t, h, 255, false)
+		sug, err := h.srv.Training.CreateSuggestion(context.Background(), workout.ThresholdSuggestion{
+			Rider: "wilant", Field: "ftp", Value: 268, Previous: 255,
+			SourceSessionID: "garmin:9001", SourceDate: "2026-01-12", Reason: "a strong effort",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/thresholds/"+sug.ID, `{"action":"accept"}`))
+		if got == nil || got.From != 255 || got.To != 268 {
+			t.Fatalf("levelsRecalibrated = %+v, want 255 -> 268", got)
+		}
+	})
+
+	t.Run("threshold dismiss carries none", func(t *testing.T) {
+		h := newMetricsSyncHarness(t, &fakeGarmin{})
+		seedRecalRider(t, h, 255, false)
+		sug, err := h.srv.Training.CreateSuggestion(context.Background(), workout.ThresholdSuggestion{
+			Rider: "wilant", Field: "ftp", Value: 268, Previous: 255,
+			SourceSessionID: "garmin:9001", SourceDate: "2026-01-12", Reason: "a strong effort",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/thresholds/"+sug.ID, `{"action":"dismiss"}`)); got != nil {
+			t.Errorf("levelsRecalibrated = %+v on a dismiss, want absent", got)
+		}
+	})
+
+	t.Run("manual save", func(t *testing.T) {
+		h := newMetricsSyncHarness(t, &fakeGarmin{})
+		seedRecalRider(t, h, 255, false)
+		got := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"ftpWatts":268}`))
+		if got == nil || got.From != 255 || got.To != 268 {
+			t.Fatalf("levelsRecalibrated = %+v, want 255 -> 268", got)
+		}
+		// A save that changes nothing about FTP says nothing about levels.
+		if again := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"ftpWatts":268}`)); again != nil {
+			t.Errorf("re-save levelsRecalibrated = %+v, want absent", again)
+		}
+		// Nor does a GET ever carry it.
+		if get := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")); get != nil {
+			t.Errorf("GET profile levelsRecalibrated = %+v, want absent", get)
+		}
+	})
+
+	t.Run("a rider with no levels is told nothing", func(t *testing.T) {
+		h := newMetricsSyncHarness(t, &fakeGarmin{})
+		if _, err := h.srv.Training.SaveProfile(context.Background(), workout.RiderProfile{Rider: "wilant", FTPWatts: 255}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.srv.Training.SetFTPCalibrated(context.Background(), "wilant", 0, 255); err != nil {
+			t.Fatal(err)
+		}
+		if got := decodeRecalibrated(t, h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"ftpWatts":268}`)); got != nil {
+			t.Errorf("levelsRecalibrated = %+v, want absent when there was nothing to lower", got)
+		}
+	})
+}

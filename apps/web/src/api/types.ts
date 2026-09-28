@@ -806,6 +806,9 @@ export interface RiderProfile {
    *  hours_per_available_day, experience_level. Output only. */
   estimated?: string[]
   updatedAt?: string
+  /** Output only, and only on the response to a save that lowered the
+   *  rider's progression levels for a new FTP. */
+  levelsRecalibrated?: LevelsRecalibrated
 }
 
 export type StepDuration = 'time' | 'distance' | 'open'
@@ -985,8 +988,17 @@ export interface FitnessResponse {
   sessions: CompletedSession[]
 }
 
+/** Present on a response only when an FTP change just lowered the rider's
+ *  progression levels — mirrors internal/api's levelsRecalibratedDTO. The same
+ *  shape on the sync, threshold-accept and profile-save responses. */
+export interface LevelsRecalibrated {
+  fromFtpWatts: number
+  toFtpWatts: number
+}
+
 export interface SyncMetricsResult {
   synced: number
+  levelsRecalibrated?: LevelsRecalibrated
   warnings?: string[]
   /** Present only when this sync just produced a fresh FTP estimate and
    *  saved it to the rider's profile. */
@@ -1024,6 +1036,9 @@ export interface ThresholdSuggestion {
   direction: 'up' | 'down'
   reason?: string
   sourceDate?: string
+  /** Only on the response to accepting an FTP suggestion that lowered the
+   *  rider's progression levels. */
+  levelsRecalibrated?: LevelsRecalibrated
 }
 
 export interface ThresholdSuggestionsResponse {
