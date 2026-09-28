@@ -43,12 +43,17 @@ intensity factor and best-power figures.
 
 | # | Sub-project | Outcome | Status |
 |---|---|---|---|
-| 1 | **Ride analysis** | Every synced ride analysed from its FIT file (summary fallback): accurate load, time in zones, power curve, and each planned step scored hit/under/over; an outcome per session that the adapter and UI use | **this spec** |
-| 2 | Progression levels + workout library | Per-zone 1–10 levels moved by #1's outcomes and an optional 1–5 feel rating; a workout library (recovery, endurance, tempo, sweet spot, threshold, VO2max, anaerobic) with levels; weekly progression through Build; structured warmup/cooldown | next |
-| 3 | Readiness | Garmin HRV status, sleep score, Training Readiness and resting-HR trend adjust today's/tomorrow's session; Wahoo riders fall back to load-only readiness | later |
-| 4 | Threshold detection | FTP from the power curve (#1), threshold HR / pace from data; suggest profile updates (never silent) | later |
+| 1 | **Ride analysis** | Every synced ride analysed from its FIT file (summary fallback): accurate load, time in zones, power curve, and each planned step scored hit/under/over; an outcome per session that the adapter and UI use | shipped (#296–#300) |
+| 2 | Progression levels + workout library | Per-zone 1–10 levels moved by #1's outcomes and an optional 1–5 feel rating; a workout library (recovery, endurance, tempo, sweet spot, threshold, VO2max, anaerobic) with levels; weekly progression through Build; structured warmup/cooldown | shipped (#301–#305) |
+| 3 | Readiness | Garmin HRV status, sleep score, Training Readiness and resting-HR trend adjust today's/tomorrow's session; Wahoo riders fall back to load-only readiness | shipped (#306–#310) |
+| 4 | Threshold detection | FTP from the power curve (#1), threshold HR / pace from data; suggest profile updates (never silent) | shipped (#312–#315) |
 
-Each sub-project gets its own spec, plan and PR stack.
+Each sub-project has its own spec, plan and PR stack: #1 is this spec;
+#2 is `docs/superpowers/specs/2026-09-27-progression-levels-design.md`;
+#3 is `docs/superpowers/specs/2026-09-28-readiness-design.md`;
+#4 is `docs/superpowers/specs/2026-09-28-threshold-detection-design.md`.
+(The Replan button, #311, shipped between #3 and #4 and isn't one of the
+four sub-projects above.)
 
 ## Sub-project 1: ride analysis
 
