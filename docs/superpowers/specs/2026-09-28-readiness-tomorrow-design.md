@@ -92,13 +92,16 @@ returns — `rest` and `caution` mean exactly what they mean today (swap for
 easy, step down one rung), just decided a day in advance and never applied
 without the rider clicking "Ease tomorrow."
 
-- **rest** if either:
-  - `TodayVerdict` is `rest` — reason: "you needed to rest today, and
-    tomorrow is a hard session too";
+- **rest** if:
   - `HaveProjectedTSB` and `ProjectedTSB < −30` — the same threshold
     today's readiness uses for form, one day rolled forward; reason:
     "tomorrow's form is projected at −34" (same `formatSigned` as today).
-- **caution** if not rest and either:
+- **caution** if not rest and any of:
+  - `TodayVerdict` is `rest` — reason: "you needed to rest today, and
+    tomorrow is a hard session too". This is `caution`, not `rest`:
+    tonight's sleep and HRV can still recover, and a rest day today
+    already addresses the cause, so this signal alone asks for a one-rung
+    step-down at most, never a swap for an easy session;
   - `HaveACWR` and `ACWR ≥ 1.5` — the same threshold and the same ratio,
     now counting today's own load; reason: "with today's session counted,
     your load this week is 1.6× your usual";
@@ -130,7 +133,7 @@ still `rest` or `caution`, applies exactly the same two paths today's
 readiness already uses, just targeted at tomorrow's workout instead of
 today's:
 
-- `rest` → `Downgrade` (swap for the easy variant), reason "Eased ahead of
+- `rest` (projected form below −30) → `Downgrade` (swap for the easy variant), reason "Eased ahead of
   time — " + reasons.
 - `caution` → `StepDown` (one rung down its own ladder), reason "Eased
   ahead of time — " + reasons, `StepDownSourceID`
@@ -178,13 +181,28 @@ sync tick's.
   is `ready`. Same owner-only gate as the rest of the endpoint.
 - `POST /api/training/readiness/tomorrow/ease?today=YYYY-MM-DD` —
   recomputes the forecast; 200 with the applied change's reason on
-  `rest`/`caution`, 409 (nothing to do) if the recomputed forecast is now
-  `ready` or the workout is no longer eligible. Owner-only.
+  `rest`/`caution`; **409 with a plain server message** (nothing is
+  changed) when the fresh forecast is now `ready`, or tomorrow's workout
+  is no longer eligible — no longer generated, already adjusted, already
+  done, or gone. The endpoint never falls through to "ease something
+  anyway." Owner-only.
 - Plan page: a banner on tomorrow's workout row, shown only when
-  `tomorrow` is non-null — "Tomorrow may be too much" (caution) or
-  "Tomorrow is likely too much" (rest), icon + label per today's readiness
-  chip's own convention, reasons in the same popover pattern, an **Ease
-  tomorrow** button. Once eased, the workout carries the same "Adjusted
+  `tomorrow` is non-null. It must read as a **forecast**, not a verdict,
+  and say tomorrow morning's own check still runs. Exact copy (title +
+  first reason inline, remaining reasons in the popover):
+  - caution: "Tomorrow's {zone} session may be too much — {reason}. Ease
+    it now, or wait for tomorrow's readiness check."
+  - rest: "Tomorrow's {zone} session is likely too much — {reason}. Ease
+    it now, or wait for tomorrow's readiness check."
+  - e.g. "Tomorrow's threshold session may be too much — your form will be
+    about −32. Ease it now, or wait for tomorrow's readiness check."
+  Reason phrasing in the banner uses the future tense ("your form will be
+  about −32"); the API's `reasons` carry the plain form from the rules
+  above and the component maps the TSB reason to the banner wording.
+  Icon + label per today's readiness chip's own convention, an **Ease
+  tomorrow** button. A 409 from the ease call is handled like the replan
+  409: a warning toast showing the server's message, then a refetch (the
+  banner disappears if it no longer applies). Once eased, the workout carries the same "Adjusted
   automatically" note every other adaptation already renders on the Plan
   page, and the banner's own `tomorrow` field goes back to `null` on the
   next fetch (the workout is no longer `IsGenerated`) — no separate
@@ -193,10 +211,11 @@ sync tick's.
 ## Observability
 
 The sync tick (`AutoScheduleTick`, after `AdaptWorkouts`) computes the same
-forecast per rider it already has the inputs for and logs at **Info** when
-it comes back `rest`/`caution` — "tomorrow's session may need easing" with
-the rider and verdict, no health values (there are none here to leak: this
-whole feature reads training load, never HRV/sleep/RHR). This is
+forecast per rider it already has the inputs for and logs at **Info**
+when it comes back `rest`/`caution` — "tomorrow's session may need
+easing" with the rider and the verdict word only. **Counts only: no TSB,
+ACWR or load value ever appears next to the rider name** (form and load
+are health-adjacent; today's readiness logs the same way). This is
 observation only; it changes nothing, per **What it may change** above. It
 exists so an operator (and a future notification, if ever built — not
 this feature, see Out of scope) has something to look at without waiting
@@ -208,7 +227,8 @@ way a dashboard would watch yet.
 
 - `readiness`: table tests for every rule and boundary (TSB −29/−30,
   ACWR 1.49/1.5, 1/2/3 consecutive hard days), `TodayVerdict: rest` alone
-  forcing `rest` regardless of the other inputs, `HaveProjectedTSB`/
+  giving `caution` (never `rest`), and `rest` only from projected TSB
+  (which still wins when both fire), `HaveProjectedTSB`/
   `HaveACWR` false suppressing their rules, reason wording and order
   (rest reasons before caution reasons, same as today's `Assess`).
 - The new API-layer builder: projected TSB uses today's actual load when a
@@ -227,9 +247,14 @@ way a dashboard would watch yet.
   every sync tick and every page load, the same choice today's own
   `assessReadiness` already makes rather than caching an Assessment).
 - API: owner-only on both endpoints; `POST .../ease` re-reads fresh state
-  rather than trusting the caller's idea of the forecast; 409 when nothing
-  is left to ease; ease applied to tomorrow only, never today's session
+  rather than trusting the caller's idea of the forecast; 409 with the
+  message and no change when the fresh forecast is `ready` or tomorrow's
+  workout is no longer generated/untouched/hard/undone (each case tested
+  separately); ease applied to tomorrow only, never today's session
   even when today's own readiness has already eased something.
+- Sync-tick log: a spy logger sees no TSB/ACWR/load value in any attribute.
+- UI: 409 shows a warning toast with the server message; banner copy
+  matches the spec strings.
 - Acceptance: forecast appears on the Plan page only with an eligible
   tomorrow workout; the "Adjusted automatically" note appears after
   clicking Ease; a second click (or the next morning's own pass) makes no

@@ -92,6 +92,14 @@ guard are binding.
    actionable, and a banner that was `caution` when the page loaded but is
    `rest` by the time of the click must apply `rest`'s treatment, not
    `caution`'s. (Task 2)
+6. **The ease endpoint refuses rather than improvises.** 409 with the
+   server message and zero changes when the fresh forecast is `ready`, or
+   tomorrow's workout is no longer generated/untouched/hard/undone or is
+   gone; the UI shows that message as a warning toast (like the replan
+   409) and refetches. (Tasks 2–3)
+7. **Log hygiene.** The sync-tick Info line carries rider + verdict word
+   only — no TSB, ACWR or load value next to the rider name. (Task 2)
+8. **Today's `rest` maps to tomorrow `caution`**, never `rest`. (Task 1)
 
 ## Stack
 
@@ -129,8 +137,10 @@ type TomorrowInput struct {
 func ForecastTomorrow(in TomorrowInput) Assessment
 ```
 
-- [ ] RED: `TodayVerdict: Rest` alone forces `Rest` with its own reason
-  regardless of every other field being zero/false; `ProjectedTSB` −29
+- [ ] RED: `TodayVerdict: Rest` alone gives `Caution` (never `Rest`) with
+  its own reason, every other field zero/false; `Rest` comes only from
+  `ProjectedTSB < −30`, and wins when both fire, with the today-rest
+  reason still listed after it; `ProjectedTSB` −29
   (no reason) vs −30 (rest reason, `formatSigned` reused — assert the
   exact string, e.g. "tomorrow's form is projected at −34"); `HaveProjectedTSB:
   false` with `ProjectedTSB: -50` set anyway produces no TSB reason (the
@@ -252,8 +262,12 @@ if f, _, ok := s.forecastTomorrow(ctx, rider, s.now(), workouts, sessions, lates
     post-ease, not by asserting on a separately-invented marker; today's
     own workout is provably untouched by an ease call made on a day where
     today's own readiness *also* eased a (different) workout; owner-only.
+  - Ease 409s, each its own test: fresh forecast `Ready`; workout already
+    adjusted (`AdjustedMarker`); workout rider-authored; workout done;
+    workout deleted. Response carries a plain message, nothing changes.
   - Sync tick: logs at Info exactly when the recomputed forecast is not
-    `Ready`, and never mutates a workout by itself — assert via a spy
+    `Ready`, attributes are rider + verdict word only (spy logger asserts
+    no TSB/ACWR/load value), and never mutates a workout by itself — assert via a spy
     logger and via workouts being byte-for-byte unchanged after a tick
     that only logs.
   - All of the above run under `TZ=UTC` and `TZ=Europe/Brussels`.
@@ -266,6 +280,10 @@ modify `TrainingPlanPage.vue` (or wherever tomorrow's workout row already
 renders) to mount it, and `apps/web/src/api/client.ts` for the new
 `ease` call.
 
+- [ ] Banner copy exactly per the spec's API-and-UI section (forecast
+  wording, "Ease it now, or wait for tomorrow's readiness check."). A 409
+  from the ease call shows a warning toast with the server message (same
+  handling as the replan 409) and refetches.
 - [ ] Banner on tomorrow's workout row, shown only when the API's
   `tomorrow` field is non-null: "Tomorrow may be too much" (`caution`,
   warning colour/icon) or "Tomorrow is likely too much" (`rest`, error
