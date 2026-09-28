@@ -22,6 +22,13 @@ type replanResultDTO struct {
 	Week     trainingWeekDTO `json:"week"`
 }
 
+// replanLockedMessage is what a rider sees when their own replan click
+// lands the same moment AutoScheduleTick's half-hourly pass already holds
+// autoScheduleLockKey — plain enough to explain why nothing happened
+// without naming an internal mechanism the rider has no reason to know
+// about.
+const replanLockedMessage = "Your plan is being updated right now — try again in a moment."
+
 // handleReplan rebuilds the rest of the rider's current week — today
 // through Sunday — from their current progression levels, availability,
 // goal phase and readiness. Owner-only, the rider from the session like
@@ -31,7 +38,15 @@ type replanResultDTO struct {
 //
 // Runs under the same advisory lock AutoScheduleTick holds, so a rider
 // clicking Replan and the half-hourly tick can never interleave and read
-// each other's half-finished work.
+// each other's half-finished work. withDBLock reports whether its closure
+// actually ran — unlike every other caller of withDBLock (autosync,
+// autoimport, autoschedule), which are background ticks that can just try
+// again next time, this one has a rider on the other end who clicked a
+// button. Returning 200 with all-zero counts here would read as "replanned,
+// and there was nothing to do," which is a lie — nothing ran at all. See
+// writeReplanLocked, split out so it can be tested without a real Postgres
+// lock to contend for (see replan_test.go's own comment on why the
+// contended-lock path itself can't be exercised on SQLite).
 func (s *Server) handleReplan(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -43,9 +58,13 @@ func (s *Server) handleReplan(w http.ResponseWriter, r *http.Request) {
 		result replanResultDTO
 		opErr  error
 	)
-	withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
+	ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
 		result, opErr = s.replanRider(ctx, rider)
 	})
+	if !ran {
+		s.writeReplanLocked(w, rider)
+		return
+	}
 	if opErr != nil {
 		// A failure that stops the rebuild partway (a DB error, not a
 		// Garmin hiccup — those are swallowed inside pushWorkoutsForRider
@@ -58,6 +77,21 @@ func (s *Server) handleReplan(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("training replanned", "rider", rider,
 		"removed", result.Removed, "created", result.Created, "adjusted", result.Adjusted)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// writeReplanLocked is handleReplan's own response when a concurrent
+// AutoScheduleTick already holds the lock — 409, not 500: nothing is
+// broken, the rider's own plan is mid-update by the very system this
+// button also drives, and trying again in a few seconds is the correct
+// next step, not a retry-with-backoff situation. Warn, not Error, per
+// AGENTS.md's own rule ("does the request still succeed, and does
+// everything past this line still run?" — here nothing ran, but nothing is
+// broken either; this is the rider's own transient collision with a
+// half-hourly background job, not a bug) — logged with the rider only, no
+// stack of counts that were never computed.
+func (s *Server) writeReplanLocked(w http.ResponseWriter, rider string) {
+	s.logger().Warn("replan skipped: scheduling already running", "rider", rider)
+	writeJSON(w, http.StatusConflict, map[string]string{"error": replanLockedMessage})
 }
 
 // replanRider does the actual work, separate from the handler so it runs
@@ -83,7 +117,7 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 	if err != nil {
 		return replanResultDTO{}, err
 	}
-	created := 0
+	var createdIDs []string
 	for _, g := range goals {
 		if g.Rider != rider {
 			continue
@@ -95,8 +129,11 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 			}
 			return replanResultDTO{}, err
 		}
-		created += len(made)
+		for _, wk := range made {
+			createdIDs = append(createdIDs, wk.ID)
+		}
 	}
+	created := len(createdIDs)
 
 	// Readiness, missed make-up, fatigue swap, step-down — the exact same
 	// per-rider pass AutoScheduleTick runs after scheduling, so a replanned
@@ -112,7 +149,7 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 		s.pushWorkoutsForRider(ctx, rider, today, horizon)
 	}
 
-	adjusted, err := s.countAdjustedThisWeek(ctx, rider, today, weekEnd)
+	adjusted, err := s.countAdjustedAmong(ctx, rider, createdIDs)
 	if err != nil {
 		return replanResultDTO{}, err
 	}
@@ -215,24 +252,33 @@ func (s *Server) riddenToday(ctx context.Context, rider, today string, workouts 
 	return ridden, nil
 }
 
-// countAdjustedThisWeek is how handleReplan reports "adjusted" — generated
-// workouts dated today..weekEnd whose description carries
-// scheduler.AdjustedMarker after adaptRider has run. Re-reads from storage
-// rather than inspecting adaptRider's own in-memory changes, since
-// adaptRider (shared with AutoScheduleTick) reports nothing back to its
-// caller today and duplicating its logic here would be exactly the second
-// source of truth AGENTS.md warns against.
-func (s *Server) countAdjustedThisWeek(ctx context.Context, rider, today, weekEnd string) (int, error) {
+// countAdjustedAmong is how handleReplan reports "adjusted" — of the
+// workouts *this replan itself just created* (ids), how many now carry
+// scheduler.AdjustedMarker after adaptRider has run. Deliberately scoped to
+// ids rather than "every generated workout dated today..weekEnd": a
+// survivor this replan left alone (today's already-ridden session, say)
+// may already carry an adjustment an *earlier* AutoScheduleTick made,
+// sometimes days ago — counting that would tell a rider "N eased for
+// readiness" for an easing this replan had nothing to do with. Re-reads
+// from storage rather than inspecting adaptRider's own in-memory changes,
+// since adaptRider (shared with AutoScheduleTick) reports nothing back to
+// its caller today and duplicating its logic here would be exactly the
+// second source of truth AGENTS.md warns against.
+func (s *Server) countAdjustedAmong(ctx context.Context, rider string, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
 		return 0, err
 	}
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
 	n := 0
 	for _, wk := range workouts {
-		if wk.Date < today || wk.Date > weekEnd {
-			continue
-		}
-		if wk.GoalID != "" && strings.Contains(wk.Description, scheduler.AdjustedMarker) {
+		if want[wk.ID] && strings.Contains(wk.Description, scheduler.AdjustedMarker) {
 			n++
 		}
 	}

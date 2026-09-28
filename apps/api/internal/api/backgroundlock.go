@@ -46,28 +46,37 @@ func (s *Server) dbConn() *sql.DB {
 // against here) all just run fn unprotected, exactly today's behavior
 // before this existed, rather than silently stopping auto-sync over an
 // unrelated locking problem. Only an actually-held competing lock skips fn.
-func withDBLock(ctx context.Context, db *sql.DB, key string, fn func()) {
+//
+// Returns whether fn actually ran. Every background-tick caller (autosync,
+// autoimport, autoschedule) still ignores it — a tick that got skipped this
+// half hour just tries again next time, nothing to report. handleReplan
+// (replan.go) is the one caller that can't ignore it: a rider who clicked a
+// button and got back "success" with all-zero counts because a tick
+// happened to be running at that exact moment would have no way to tell a
+// real no-op replan from one that simply never ran — see its own comment.
+func withDBLock(ctx context.Context, db *sql.DB, key string, fn func()) bool {
 	if db == nil {
 		fn()
-		return
+		return true
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		fn()
-		return
+		return true
 	}
 
 	var locked bool
 	if err := tx.QueryRowContext(ctx, "SELECT pg_try_advisory_xact_lock(hashtext($1))", key).Scan(&locked); err != nil {
 		_ = tx.Rollback()
 		fn()
-		return
+		return true
 	}
 	if !locked {
 		_ = tx.Rollback()
-		return
+		return false
 	}
 
 	defer func() { _ = tx.Commit() }()
 	fn()
+	return true
 }

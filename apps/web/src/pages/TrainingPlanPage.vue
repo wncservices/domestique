@@ -13,7 +13,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { useLibrary } from '@/composables/useLibrary'
 import type { Me, PeriodizationPlan, ReadinessResponse, RiderProfile, TrainingWeek, WeekFocus, Workout } from '@/api/types'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
@@ -418,7 +418,16 @@ async function confirmReplan() {
     await loadWeek()
     await loadReadiness()
   } catch (err) {
-    toast.add({ title: 'Could not replan this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    // 409: a background auto-schedule tick held the lock at the same
+    // moment — nothing broke, nothing ran either. Not an error the rider
+    // caused, so a neutral toast rather than the red error one, and the
+    // modal stays open (replanModalOpen untouched) so Replan is one more
+    // click away rather than a whole new one.
+    if (err instanceof ApiError && err.status === 409) {
+      toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
+    } else {
+      toast.add({ title: 'Could not replan this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    }
   } finally {
     replanning.value = false
   }

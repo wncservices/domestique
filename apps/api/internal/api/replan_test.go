@@ -429,6 +429,44 @@ func TestReplanEasesTodaysSessionWhenReadinessSaysRest(t *testing.T) {
 	}
 }
 
+// "adjusted" must count only what *this* replan eased — not a survivor
+// that already carried an earlier AutoScheduleTick's own adjustment from
+// days ago. A workout dated before today is never touched by replan at
+// all (removePlanMadeWorkouts only looks at today..Sunday), so one there
+// already carrying scheduler.AdjustedMarker is exactly the survivor case:
+// present in the rider's week, plan-made, adjusted — but not by anything
+// this replan call did.
+func TestReplanAdjustedCountExcludesEarlierSurvivorAdjustments(t *testing.T) {
+	h := newReplanHarness(t)
+	ctx := context.Background()
+
+	goal, err := h.training.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.baseProfile(ctx, "wilant")
+
+	// Simulates what an earlier AutoScheduleTick's own adaptRider pass would
+	// have left behind: a generated, plan-made workout whose description
+	// already carries scheduler.AdjustedMarker, dated before today so
+	// replan leaves it alone entirely.
+	adjustedSurvivor := generated("wilant", goal.ID, "Endurance ride", replanMonday, 3600)
+	adjustedSurvivor.Description += " " + scheduler.AdjustedMarker + " Rescheduled by an earlier tick."
+	if _, err := h.training.CreateWorkout(ctx, adjustedSurvivor); err != nil {
+		t.Fatal(err)
+	}
+
+	// No wellness/readiness data at all this time — nothing this replan
+	// itself does should count as an adjustment.
+	resp, out := h.replan("wilant")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if out.Adjusted != 0 {
+		t.Errorf("adjusted = %d, want 0 — the earlier tick's own adjustment on a before-today survivor must not be recounted", out.Adjusted)
+	}
+}
+
 // One rider's replan must never touch another rider's workouts, plan-made
 // or otherwise.
 func TestReplanNeverTouchesAnotherRidersWorkouts(t *testing.T) {

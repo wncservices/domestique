@@ -12,9 +12,12 @@ import (
 
 func TestWithDBLockRunsUnprotectedWithNoConnection(t *testing.T) {
 	ran := false
-	withDBLock(context.Background(), nil, "k", func() { ran = true })
+	got := withDBLock(context.Background(), nil, "k", func() { ran = true })
 	if !ran {
 		t.Fatal("fn did not run with a nil connection")
+	}
+	if !got {
+		t.Error("withDBLock reported ran=false for the fail-open no-connection path")
 	}
 }
 
@@ -29,9 +32,20 @@ func TestWithDBLockRunsUnprotectedOnANonPostgresEngine(t *testing.T) {
 	t.Cleanup(func() { db.Close() })
 
 	ran := false
-	withDBLock(context.Background(), db.Conn(), "k", func() { ran = true })
+	got := withDBLock(context.Background(), db.Conn(), "k", func() { ran = true })
 	if !ran {
 		t.Fatal("fn did not run against a sqlite connection")
+	}
+	// This is the guarantee handleReplan's own 409 branch (replan.go) rests
+	// on for every deployment that isn't PostgreSQL: SQLite can't understand
+	// pg_try_advisory_xact_lock at all, so the query itself errors and
+	// withDBLock falls into its fail-open path — ran is unconditionally
+	// true here, never false, so a replan click on a SQLite-backed laptop
+	// deployment can never spuriously 409. Only a *real* PostgreSQL holder
+	// of the same key (TestWithDBLockSerializesConcurrentHoldersOfTheSameKey
+	// below) can make withDBLock return false.
+	if !got {
+		t.Error("withDBLock reported ran=false against sqlite — the fail-open path must always report true")
 	}
 }
 
@@ -76,9 +90,15 @@ func TestWithDBLockSerializesConcurrentHoldersOfTheSameKey(t *testing.T) {
 	// blocking wait, so a second pod's tick simply does nothing this time
 	// rather than queueing up behind the first.
 	secondRan := false
-	withDBLock(context.Background(), db.Conn(), key, func() { secondRan = true })
+	secondGot := withDBLock(context.Background(), db.Conn(), key, func() { secondRan = true })
 	if secondRan {
 		t.Fatal("second holder ran while the first still held the lock")
+	}
+	// This false is exactly what handleReplan's own 409 branch (replan.go)
+	// keys off: the one case where a rider's own replan click can genuinely
+	// collide with a concurrent AutoScheduleTick.
+	if secondGot {
+		t.Error("withDBLock reported ran=true for a holder that was actually skipped")
 	}
 
 	close(release)
