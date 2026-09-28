@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ApiError, api } from '@/api/client'
+import { ApiError, api, garminMFABody } from '@/api/client'
 import type { GarminConnection } from '@/api/types'
 
 /**
@@ -9,11 +9,32 @@ import type { GarminConnection } from '@/api/types'
  * A dialog rather than a panel because linking a head unit is a thing you do
  * once and then forget: a permanent form for it sat on the page competing for
  * attention with the library, which is what people actually come here for.
+ *
+ * An account with two-factor on is a second step in the same dialog, not a
+ * second dialog: the server answers the password with a challenge id, and the
+ * code goes back against it. See docs/superpowers/specs/2026-09-28-garmin-mfa-design.md.
  */
 const props = defineProps<{ connection: GarminConnection }>()
 const emit = defineEmits<{ changed: [GarminConnection] }>()
 
 const open = defineModel<boolean>('open', { default: false })
+
+/**
+ * Release gate. Nothing has yet touched a real two-factor Garmin account, and
+ * until one has the dialog keeps its old dead-end copy for two-factor accounts.
+ * The maintainer's manual check on a deployed build turns the step on with
+ * `?garminMfa=1` on the page URL; passing it flips this to true. Not a rider
+ * setting — a rider on an unverified flow would be told it works.
+ */
+const MFA_RELEASED = false
+function codeStepEnabled(): boolean {
+  if (MFA_RELEASED) return true
+  try {
+    return new URLSearchParams(window.location.search).has('garminMfa')
+  } catch {
+    return false
+  }
+}
 
 const email = ref('')
 const password = ref('')
@@ -24,37 +45,116 @@ const error = ref('')
 // a red "check your password" would be advice that cannot work.
 const kind = ref<'error' | 'mfa' | 'blocked'>('error')
 
+// The second step. `challenge` is the server-held sign-in in progress; the
+// password is never kept, only this id and the code being typed.
+const step = ref<'credentials' | 'code'>('credentials')
+const challenge = ref('')
+const method = ref<'email' | 'sms' | 'totp' | ''>('')
+const code = ref('')
+const attemptsRemaining = ref<number | null>(null)
+
 const canSubmit = computed(() => !!email.value.trim() && !!password.value && !busy.value)
+const canVerify = computed(() => !!code.value.trim() && !busy.value)
+
+const codeInstruction = computed(() => {
+  switch (method.value) {
+    case 'email':
+      return 'Garmin has emailed you a code. Enter it below.'
+    case 'sms':
+      return 'Garmin has texted a code to your phone. Enter it below.'
+    case 'totp':
+      return 'Enter the code from your authenticator app.'
+    default:
+      return 'Enter the two-factor code Garmin sent you, or the one your authenticator app shows.'
+  }
+})
+
+function resetSecondStep() {
+  step.value = 'credentials'
+  challenge.value = ''
+  method.value = ''
+  code.value = ''
+  attemptsRemaining.value = null
+}
 
 // Nothing from a previous attempt survives reopening the dialog — least of
-// all a password sitting in a field nobody can see.
+// all a password sitting in a field nobody can see, or a half-finished code.
 watch(open, (isOpen) => {
   if (!isOpen) {
     email.value = ''
     password.value = ''
     error.value = ''
     kind.value = 'error'
+    resetSecondStep()
   }
 })
+
+function finish(connection: GarminConnection) {
+  email.value = ''
+  password.value = ''
+  resetSecondStep()
+  open.value = false
+  emit('changed', connection)
+}
 
 async function connect() {
   busy.value = true
   error.value = ''
   kind.value = 'error'
   try {
-    const connection = await api.garminConnect(email.value.trim(), password.value)
-    email.value = ''
-    password.value = ''
-    open.value = false
-    emit('changed', connection)
+    finish(await api.garminConnect(email.value.trim(), password.value))
   } catch (err) {
-    if (err instanceof ApiError && err.body.mfa === true) kind.value = 'mfa'
-    else if (err instanceof ApiError && err.body.blocked === true) kind.value = 'blocked'
-    if (kind.value !== 'error') password.value = ''
-    error.value = err instanceof Error ? err.message : String(err)
+    const mfa = err instanceof ApiError && err.body.mfa === true ? garminMFABody(err) : null
+    if (mfa?.challenge && codeStepEnabled()) {
+      // The password has done its one job; only the challenge id carries on.
+      password.value = ''
+      challenge.value = mfa.challenge
+      method.value = mfa.method ?? ''
+      step.value = 'code'
+    } else {
+      if (mfa) kind.value = 'mfa'
+      else if (err instanceof ApiError && err.body.blocked === true) kind.value = 'blocked'
+      if (kind.value !== 'error') password.value = ''
+      error.value = err instanceof Error ? err.message : String(err)
+    }
   } finally {
     busy.value = false
   }
+}
+
+async function verify() {
+  busy.value = true
+  error.value = ''
+  kind.value = 'error'
+  try {
+    finish(await api.garminConnectMFA(challenge.value, code.value.trim()))
+  } catch (err) {
+    if (!(err instanceof ApiError)) {
+      error.value = err instanceof Error ? err.message : String(err)
+    } else if (err.status === 422 && err.body.mfaInvalid === true) {
+      // Wrong code: same challenge, field stays open.
+      const body = garminMFABody(err)
+      challenge.value = body.challenge ?? challenge.value
+      attemptsRemaining.value = body.attemptsRemaining ?? null
+      code.value = ''
+      error.value = err.message
+    } else if (err.status === 409 || err.status === 404) {
+      // Expired, used up, or gone: a fresh sign-in is the only way forward.
+      resetSecondStep()
+      error.value = err.message
+    } else {
+      if (err.body.blocked === true) kind.value = 'blocked'
+      error.value = err.message
+    }
+  } finally {
+    busy.value = false
+  }
+}
+
+function backToCredentials() {
+  resetSecondStep()
+  error.value = ''
+  kind.value = 'error'
 }
 </script>
 
@@ -98,6 +198,43 @@ async function connect() {
             'An administrator has not finished setting this up.'
           "
         />
+
+        <form
+          v-else-if="step === 'code'"
+          class="flex flex-col gap-3"
+          @submit.prevent="verify"
+        >
+          <p class="text-sm text-toned">{{ codeInstruction }}</p>
+          <UFormField label="Verification code">
+            <UInput
+              v-model="code"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              placeholder="123456"
+              autofocus
+              class="w-full"
+            />
+          </UFormField>
+          <p v-if="attemptsRemaining !== null" class="text-xs text-dimmed">
+            {{ attemptsRemaining }}
+            {{ attemptsRemaining === 1 ? 'try' : 'tries' }} left before you have to sign in again.
+          </p>
+
+          <div class="flex justify-end gap-2 pt-1">
+            <UButton color="neutral" variant="ghost" :disabled="busy" @click="backToCredentials">
+              Back
+            </UButton>
+            <UButton
+              type="submit"
+              icon="i-lucide-shield-check"
+              :loading="busy"
+              :disabled="!canVerify"
+            >
+              Verify
+            </UButton>
+          </div>
+        </form>
 
         <form v-else class="flex flex-col gap-3" @submit.prevent="connect">
           <UFormField label="Garmin Connect email">
