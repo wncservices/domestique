@@ -91,17 +91,32 @@ matters.
   This holds for every source, not just manual saves — a bad auto-detection
   is no more real a rise than a mistyped one.
 - **The marker follows FTP in both directions.** `FTPLevelsCalibratedAt` is
-  set to the new FTP on *every* FTP change — rise, drop, typo or not —
-  while levels move only for a qualifying rise (≥ 3% and ≤ 25%). A
+  set to the new FTP on a drop, a typo or a qualifying rise — but **not on a
+  rise under 3%: there the marker stays** (build ruling). Those levels are
+  still calibrated against the old FTP, and moving the marker would let a
+  run of sub-3% steps (255 → 260 → 266 → 272) add up to any total without
+  ever recalibrating. The consequence: with the marker at 255, FTP 262
+  (+2.7%, nothing) → 250 (a drop, marker follows to 250) → 262 recalibrates
+  250 → 262, although 262 was seen once already; the levels really were
+  calibrated at 250 by then. Levels move only for a qualifying rise
+  (≥ 3% and ≤ 25%, compared with a 1e-9 relative epsilon so 100 → 103 is
+  inside the band). A
   ratchet-up-only marker would, after 255 → 2550 → 255, hold 2550 and block
   every future recalibration until FTP passed 2550. Following the FTP down
   means a later genuine rise (say 255 → 268) is measured against the right
   base. A drop never moves levels (see above), only the marker.
-- **First save ever** (`FTPLevelsCalibratedAt == 0`, e.g. a brand-new
-  profile): the marker is seeded to the FTP being saved and nothing
-  recalibrates — there are no levels earned against a stale FTP to protect
-  yet, the same reasoning `progression.Initial` already uses to seed a
-  fresh rider without inventing a "previous" state that never existed.
+- **First save ever** (`FTPLevelsCalibratedAt == 0` and no FTP on file
+  before this save, i.e. a brand-new profile): the marker is seeded to the
+  FTP being saved and nothing recalibrates — there are no levels earned
+  against a stale FTP to protect yet, the same reasoning
+  `progression.Initial` already uses to seed a fresh rider without
+  inventing a "previous" state that never existed.
+- **A profile that predates the marker** (marker 0 but `before.FTPWatts > 0`,
+  every rider who existed when the column was added) uses `before.FTPWatts`
+  as the base: its levels were earned against that FTP, and skipping its
+  first real rise for want of a marker would leave exactly the over-reach
+  this feature exists to prevent. (Build ruling; the literal reading of the
+  bullet above would have skipped it.)
 
 ## The formula
 
@@ -164,16 +179,33 @@ progression-levels design already relies on for every other misestimate.
 `FTPLevelsCalibratedAt` (new `rider_profiles` column, watts, 0 = never) is
 the single guard, and it tracks the current FTP: writing the same FTP twice
 gives ratio 1, which is under the 1.03 trigger, so nothing recalibrates a
-second time. The helper compares the new FTP against the *marker*, not
-against `before.FTPWatts`, so re-detected or dismissed-then-accepted findings
-cannot double-count a rise. The marker is written with the profile in the
-same `SaveProfile` call; the per-zone level writes follow. A process crash
-between the two leaves the marker moved but one or more zones unadjusted for
-that rise — the same narrow, undo-nothing race `handleResolveThreshold`'s
-own accept path already accepts for suggestion status vs. profile write (see
-that handler's comment on why there is nothing to roll back). Acceptable for
-the same reason: the next qualifying rise, or an ordinary struggled/incomplete
-session, converges it regardless.
+second time. The helper compares the new FTP against the *marker* read from
+the stored row, not against `before.FTPWatts` (which is only the base for a
+pre-marker profile), so re-detected or dismissed-then-accepted findings
+cannot double-count a rise.
+
+**The marker is a compare-and-set, and `SaveProfile` never writes it.**
+`workout.DB.SetFTPCalibrated(ctx, rider, from, to)` is
+`UPDATE ... SET ftp_levels_calibrated_watts = to WHERE rider = ? AND
+ftp_levels_calibrated_watts = from`, true only if a row changed; the profile
+upsert leaves the column out of both INSERT and UPDATE. Levels move only for
+the caller whose CAS wins, so two saves racing on one rise, or a sync that
+saves late holding a stale profile, lower levels exactly once — a whole-row
+save carrying a marker loaded earlier could otherwise revert one a
+concurrent save had just moved. (This replaces the earlier "marker written
+with the profile in the same `SaveProfile` call".)
+
+**Failure recovery.** The CAS is won first, then the level writes follow. If
+any of them fails, the helper restores the marker with
+`SetFTPCalibrated(to → from)` so the next sync or save retries the rise, and
+logs at Error: a write that should have landed did not, and the rise would
+not self-heal — the next call would see marker == FTP and do nothing. A
+retry skips zones whose `Reason` already names this same rise, so a partial
+first attempt is not lowered twice. Only a crash between the CAS and the
+level writes (no chance to restore) leaves the marker moved with zones
+unadjusted for that rise — the same narrow race `handleResolveThreshold`'s
+own accept path accepts for suggestion status vs. profile write; the next
+qualifying rise, or an ordinary struggled/incomplete session, converges it.
 
 ## How the rider is told
 
