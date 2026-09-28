@@ -15,11 +15,14 @@ import { ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type { ThresholdSuggestion } from '@/api/types'
-import { formatThresholdValue, thresholdFieldLabel, thresholdFieldTitle } from '@/utils/fitnessMath'
+import { formatThresholdNumber, formatThresholdValue, thresholdFieldLabel, thresholdFieldTitle } from '@/utils/fitnessMath'
 
 const props = defineProps<{ suggestions: ThresholdSuggestion[] }>()
 
-const emit = defineEmits<{ resolved: [] }>()
+// `profileChanged` is true only after a successful Update — the one case the
+// parent's profile form has a stale value to refresh. Dismiss changes nothing
+// in the profile, so it must not reload the form over unsaved edits.
+const emit = defineEmits<{ resolved: [profileChanged: boolean] }>()
 
 const toast = useToast()
 
@@ -37,7 +40,8 @@ function isDown(s: ThresholdSuggestion): boolean {
 
 function titleFor(s: ThresholdSuggestion): string {
   const value = formatThresholdValue(s.field, s.value)
-  const was = s.previous !== undefined ? ` (was ${formatThresholdValue(s.field, s.previous)})` : ''
+  // The previous value drops its unit — "268 W (was 255)" — the spec's copy.
+  const was = s.previous !== undefined ? ` (was ${formatThresholdNumber(s.field, s.previous)})` : ''
   const down = isDown(s)
   switch (s.field) {
     case 'ftp':
@@ -92,13 +96,13 @@ async function acceptSuggestion(s: ThresholdSuggestion) {
       color: 'success',
       actions: [{ label: 'Replan the rest of this week', onClick: (): void => { replanAfterUpdate() } }],
     })
-    emit('resolved')
+    emit('resolved', true)
   } catch (err) {
     // 409: the suggestion is no longer pending (already resolved elsewhere,
     // or superseded) — reload quietly rather than show an error for
     // something the rider didn't cause.
     if (err instanceof ApiError && err.status === 409) {
-      emit('resolved')
+      emit('resolved', false)
     } else {
       toast.add({
         title: `Could not update ${thresholdFieldLabel(s.field)}`,
@@ -116,10 +120,10 @@ async function dismissSuggestion(s: ThresholdSuggestion) {
   dismissingId.value = s.id
   try {
     await api.resolveThreshold(s.id, 'dismiss')
-    emit('resolved')
+    emit('resolved', false)
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
-      emit('resolved')
+      emit('resolved', false)
     } else {
       toast.add({
         title: 'Could not dismiss suggestion',

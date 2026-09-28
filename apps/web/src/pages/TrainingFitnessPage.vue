@@ -111,6 +111,38 @@ async function saveProfile() {
 
 const thresholdSuggestions = ref<ThresholdSuggestion[]>([])
 
+// After an Update the server holds a new threshold (and a cleared estimated
+// flag). With no unsaved edits the whole profile reloads; with some, only the
+// threshold fields are taken from the server, into both the form and its
+// saved baseline, so the rider's other in-progress edits survive and the save
+// bar still reflects them. Dismiss changes nothing in the profile.
+async function onThresholdResolved(profileChanged: boolean) {
+  if (profileChanged) {
+    if (!dirty.value) {
+      await loadProfile()
+    } else {
+      try {
+        const fresh = await api.riderProfile()
+        const pick = (p: RiderProfile): RiderProfile => ({
+          ...p,
+          ftpWatts: fresh.ftpWatts,
+          ftpEstimated: fresh.ftpEstimated,
+          maxHr: fresh.maxHr,
+          thresholdPaceSecPerKm: fresh.thresholdPaceSecPerKm,
+          estimated: fresh.estimated,
+          updatedAt: fresh.updatedAt,
+        })
+        profile.value = pick(profile.value)
+        savedProfile.value = pick(savedProfile.value)
+      } catch {
+        // The update itself succeeded; the form just shows the old value
+        // until the next load.
+      }
+    }
+  }
+  await loadThresholdSuggestions()
+}
+
 async function loadThresholdSuggestions() {
   try {
     const result = await api.thresholds()
@@ -300,7 +332,7 @@ onMounted(() => {
   <div class="flex flex-col gap-6" :class="{ 'pb-20': dirty }">
     <ThresholdSuggestions
       :suggestions="thresholdSuggestions"
-      @resolved="() => { loadProfile(); loadThresholdSuggestions() }"
+      @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
     />
 
     <FitnessStatusCard

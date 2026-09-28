@@ -269,3 +269,9 @@ export function formatThresholdValue(field: ThresholdField, value: number): stri
       return formatPace(1000 / value)
   }
 }
+
+// The same value without its unit, for the "(was 255)" half of a banner
+// title where the unit has already been said once.
+export function formatThresholdNumber(field: ThresholdField, value: number): string {
+  return formatThresholdValue(field, value).replace(/ (W|bpm|\/km)$/, '')
+}
