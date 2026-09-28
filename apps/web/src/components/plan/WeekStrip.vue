@@ -117,11 +117,21 @@ function analysedSession(day: WeekDay) {
   return pickAnalysedSession(day.completed)
 }
 
-const resultsDay = ref<WeekDay | null>(null)
+// Only the date is kept, not the WeekDay object itself: @rated (onRated,
+// below) makes the parent reload the whole week, which replaces props.week
+// wholesale (TrainingPlanPage.vue's loadWeek) — a captured WeekDay would go
+// on pointing at the pre-reload data forever, so the modal's own steps/feel
+// would never reflect the rating it just caused. Looking the day back up by
+// date in the *current* props.week each time keeps it fresh, and if that
+// date has scrolled out of the displayed week (the rider navigated away
+// while the modal was open), the lookup simply comes back undefined and the
+// modal closes.
+const resultsDate = ref<string | null>(null)
+const resultsDay = computed<WeekDay | undefined>(() => props.week.days.find((d) => d.date === resultsDate.value))
 const resultsOpen = computed({
-  get: () => resultsDay.value !== null,
+  get: () => resultsDay.value !== undefined,
   set: (v: boolean) => {
-    if (!v) resultsDay.value = null
+    if (!v) resultsDate.value = null
   },
 })
 const resultsSteps = computed<AnalysisStep[]>(() => {
@@ -145,7 +155,7 @@ function canOpenResults(day: WeekDay): boolean {
 
 function openResults(day: WeekDay) {
   if (!canOpenResults(day)) return
-  resultsDay.value = day
+  resultsDate.value = day.date
 }
 
 const resultsSessionId = computed(() => (resultsDay.value ? analysedSession(resultsDay.value)?.id : undefined))
