@@ -128,6 +128,7 @@ async function onThresholdResolved(profileChanged: boolean) {
           ftpWatts: fresh.ftpWatts,
           ftpEstimated: fresh.ftpEstimated,
           maxHr: fresh.maxHr,
+          thresholdHr: fresh.thresholdHr,
           thresholdPaceSecPerKm: fresh.thresholdPaceSecPerKm,
           estimated: fresh.estimated,
           updatedAt: fresh.updatedAt,

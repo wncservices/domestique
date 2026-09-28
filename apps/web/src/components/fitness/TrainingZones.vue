@@ -43,9 +43,22 @@ interface ZoneBar {
 
 // The open top zone has no `high`, so it has no real span to size a bar
 // segment from — drawn at a fixed 15% of the threshold instead, per spec.
-function zoneBars(zones: Zone[], threshold: number, formatRange: (zone: Zone) => string): ZoneBar[] {
+//
+// `z1Floor` is for a set whose Z1 has no lower bound (low === 0, as with the
+// %LTHR table — Friel gives none): the bar sizes Z1 from that fraction of the
+// threshold instead of from zero, or it would swamp every other zone.
+function zoneBars(
+  zones: Zone[],
+  threshold: number,
+  formatRange: (zone: Zone) => string,
+  z1Floor?: number,
+): ZoneBar[] {
   const colors = colorsFor(zones.length)
-  const spans = zones.map((z) => (z.high === null ? threshold * 0.15 : z.high - z.low))
+  const spans = zones.map((z) => {
+    if (z.high === null) return threshold * 0.15
+    const low = z1Floor !== undefined && z.low === 0 ? threshold * z1Floor : z.low
+    return z.high - low
+  })
   const total = spans.reduce((a, b) => a + b, 0)
   return zones.map((z, i) => ({
     name: z.name,
@@ -61,11 +74,21 @@ const powerBars = computed(() => {
   return zoneBars(power.value, props.profile.ftpWatts, (z) => (z.high === null ? `${z.low}+ W` : `${z.low}–${z.high} W`))
 })
 
+// The %LTHR table has no floor for Z1, so it reads "below N bpm" like the
+// pace table's Z1 does, rather than a made-up lower bound.
+function formatHrRange(z: Zone): string {
+  if (z.high === null) return `${z.low}+ bpm`
+  if (z.low === 0) return `below ${z.high} bpm`
+  return `${z.low}–${z.high} bpm`
+}
+
+// Fraction of threshold HR the bar starts Z1 from when it has no real floor.
+const HR_Z1_BAR_FLOOR = 0.65
 const hr = computed(() => hrZones(props.profile))
 const hrBasis = computed(() => hrZoneBasis(props.profile))
 const hrBars = computed(() => {
   if (!hr.value || !hrBasis.value) return null
-  return zoneBars(hr.value, hrBasis.value.bpm, (z) => (z.high === null ? `${z.low}+ bpm` : `${z.low}–${z.high} bpm`))
+  return zoneBars(hr.value, hrBasis.value.bpm, formatHrRange, HR_Z1_BAR_FLOOR)
 })
 
 // Pace zones are built from threshold speed, so `low`/`high` are m/s — but
