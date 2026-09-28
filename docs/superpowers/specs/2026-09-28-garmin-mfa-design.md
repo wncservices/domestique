@@ -180,8 +180,21 @@ type MFAChallenge struct {
 // Garmin asks for a code, so the caller has something to resume with.
 func (c *Client) Login(ctx context.Context, email, password string) (MFAChallenge, error)
 
-func (c *Client) ResumeMFA(ctx context.Context, consumer consumerKey, ch MFAChallenge, code string) (Session, error)
+// No consumer parameter: consumerKey is unexported, so a caller outside this
+// package could not build one. The caller sets the OAuth1 consumer on the fresh
+// Client with SetConsumer, as it already does for Login.
+//
+// On ErrMFACodeRejected the returned MFAChallenge is the refreshed state to
+// keep: the re-rendered page's own CSRF token (Garmin's widget rotates it on
+// each render; the old one is refused) and the current cookies. If that page
+// carries no token the old one is kept. On every other outcome the returned
+// challenge is the input, unchanged.
+func (c *Client) ResumeMFA(ctx context.Context, ch MFAChallenge, code string) (Session, MFAChallenge, error)
 ```
+
+The API stores the refreshed challenge back into the same row
+(`garminmfa.Update`, same size cap, attempts and expiry untouched), so a wrong
+code followed by the right one on the same challenge works.
 
 `Login`'s signature change is the one break in an existing contract in this
 package; every current caller (`api.LiveGarmin`, `garmin_test.go`) discards a
@@ -226,14 +239,23 @@ CREATE TABLE garmin_mfa_challenges (
   same code has a narrow, accepted race: worst case, the loser sees "expired"
   rather than "used", never a second successful sign-in from one challenge.
 - **Attempts cap**: 5 wrong codes deletes the challenge outright and the
-  rider restarts from step 1. This is what stands between a 6-digit code
+  rider restarts from step 1. **The attempt is reserved before Garmin is
+  asked**, atomically (`UPDATE ... SET attempts = attempts + 1 WHERE token = ?
+  AND rider = ? AND attempts < 5 RETURNING attempts`), so N concurrent
+  submissions cannot each get a look at the code; a reserve that matches no row
+  is the same 409 as an exhausted challenge. A wrong code keeps its attempt;
+  the outcomes that say nothing about the code (`ErrBlocked`/429, an
+  unrecognised page, any other upstream failure) refund it. The row is deleted
+  when the fifth wrong code lands. This is what stands between a 6-digit code
   and being brute-forceable inside a 5-minute window — 5 tries is not a
   meaningful obstacle to a script but is deliberately more than a human ever
   needs, so it never fires on a fat-fingered code, only on abuse or
-  automation. `rateLimitConnect` (already keyed per rider, already shared
-  between Garmin and Komoot) covers the same endpoint too, for the same
-  reason it covers step 1: this server must not become a laundered
-  credential-stuffing proxy.
+  automation. Step 1 stays under `rateLimitConnect` (per rider, shared between
+  Garmin and Komoot): this server must not become a laundered
+  credential-stuffing proxy. **Step 2 has its own per-rider limiter, 10 per 15
+  minutes** (`Server.GarminMFALimiter`), and does not draw on
+  `ConnectLimiter`: five tries at a code plus a restart from step 1 have to
+  fit, and step 1 already spent a slot of the shared budget.
 - **Live challenges per rider: 3.** Creating a fourth deletes that rider's
   oldest live one first (expired rows are also pruned on every create, as in
   `sessions.Create`). The per-challenge attempt cap alone does not bound how
@@ -261,7 +283,7 @@ CREATE TABLE garmin_mfa_challenges (
 | Step 2, expired or already used | 409 | `{"error": "this code has expired — sign in again"}` |
 | Step 2, unknown / another rider's challenge | 404 | `{"error": "no such sign-in in progress"}` |
 | Step 1 or 2, Garmin's own rate limit (`ErrBlocked`, or a 429 from the MFA POST) | 503 | unchanged shape from today's `ErrBlocked` handling |
-| Either step, this app's own rate limiter | 429 | unchanged `rateLimit` shape |
+| Either step, this app's own rate limiter (step 1: `ConnectLimiter`; step 2: its own) | 429 | unchanged `rateLimit` shape |
 
 409 rather than 410 for "expired" to match this codebase's existing
 convention (`AGENTS.md`'s threshold-suggestions API: "409 if no longer
@@ -280,6 +302,11 @@ Per the Observability checklist:
   / `mfa-expired` classification; the challenge id (post-hash, meaningless
   without the database row) is fine to log, the code and the raw cookies are
   never passed to a logger at all.
+- When step 1 hits MFA but no challenge can be kept — no store wired
+  (`no-store`), a store without an encryption key (`no-key`), or a challenge
+  page with no CSRF token (`no-csrf`) — the handler answers today's bare 409
+  and logs a **Warn** with `reason` set to one of those three and no values:
+  it is a deployment or parsing gap, not the regular path.
 - A challenge being created (step 1 hits MFA) is logged at **Info** — it is
   the regular, expected path for any two-factor account, not a failure.
 - Attempts-exhausted and expired-on-use are logged at **Warn**: nothing is
@@ -335,6 +362,11 @@ available — and checks:
 - A **wrong code** yields "That code didn't work — check it and try again"
   with the field still open, and the correct code then still works on the
   same challenge.
+- **Wrong code, then right code, on the same challenge** (do not restart
+  between them): the second attempt must carry the CSRF token and cookies from
+  the re-rendered page the wrong code produced. The fake rotates `_csrf` on
+  every render and refuses a stale one; confirm the real widget behaves the
+  same, or that it does not care.
 - Which field name Garmin reads (`mfa-code` vs `mfa-verification-code`) and
   what the wrong-code page looks like; record both back in this spec.
 - Logs: a challenge-created Info line and a Warn on the wrong code, with no
