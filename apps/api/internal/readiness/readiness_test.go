@@ -200,6 +200,21 @@ func TestRestingHRBaselineIgnoresZeroReadingsAndTodayItself(t *testing.T) {
 	assertAssessment(t, got, Rest, "resting heart rate is 7 above your usual 52")
 }
 
+func TestRestingHRHalfIntegerDeltaRoundsOnceConsistently(t *testing.T) {
+	// Median baseline of 53.5 (four readings at 53, four at 54), today's
+	// RHR 60: delta 6.5 rounds to 7, which must be both what decides the
+	// verdict (rest, not caution) and what the sentence says — never 6 in
+	// one place and 7 in the other.
+	base := date("2026-09-27")
+	history := make([]Day, 0, 8)
+	for i, rhr := range []int{53, 53, 53, 53, 54, 54, 54, 54} {
+		history = append(history, Day{Date: base.AddDate(0, 0, -i).Format(dateLayout), RestingHR: rhr})
+	}
+	today := Day{Date: "2026-09-28", Present: true, RestingHR: 60}
+	got := Assess(today, history, nil, "", nil, date("2026-09-28"))
+	assertAssessment(t, got, Rest, "resting heart rate is 7 above your usual 54")
+}
+
 func TestRestingHRBaselineExcludesReadingsOutsideTwentyEightDays(t *testing.T) {
 	// 7 readings but 3 are 29+ days old: only 4 count, below the threshold.
 	history := historyWithRHR(4, 52)
@@ -259,10 +274,35 @@ func loadsForACWR(days int, load float64) []Load {
 	return out
 }
 
-func TestACWRNeedsAtLeastTwentyOneDistinctDays(t *testing.T) {
-	loads := loadsForACWR(20, 100) // only 20 distinct days
+func TestACWRHistoryReachingOnlyTwentyDaysStaysSilent(t *testing.T) {
+	// The gate is calendar coverage, not a count of distinct entries: the
+	// earliest load here is only 20 days before today, so the rule must
+	// stay silent even though every one of those 21 days has an entry.
+	loads := loadsForACWR(21, 100) // offsets 0..20: earliest is 20 days back
 	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, date("2026-09-28"))
 	assertAssessment(t, got, Ready)
+}
+
+func TestACWRSparseScheduleFiresWhenHistoryReachesTwentyOneDays(t *testing.T) {
+	// A realistic sparse schedule: 4 rides/week over 4 weeks (rest days
+	// have no Load entry at all, so only 16 distinct dated entries exist
+	// out of 28 calendar days). The old distinct-day-count gate would
+	// never reach 21 entries for a rider like this and the rule would be
+	// dead; the calendar-coverage gate only needs the earliest entry to
+	// reach back 21+ days, which this schedule satisfies (27 days back).
+	today := date("2026-09-28")
+	offsets := []int{27, 25, 23, 21, 20, 18, 16, 14, 13, 11, 9, 7} // weeks 4-2, moderate load
+	loads := make([]Load, 0, len(offsets)+4)
+	for _, off := range offsets {
+		loads = append(loads, Load{Date: today.AddDate(0, 0, -off).Format(dateLayout), Load: 50})
+	}
+	for _, off := range []int{6, 4, 2, 0} { // last week, heavy
+		loads = append(loads, Load{Date: today.AddDate(0, 0, -off).Format(dateLayout), Load: 150})
+	}
+	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, today)
+	if got.Verdict != Caution {
+		t.Fatalf("verdict = %q, reasons = %v", got.Verdict, got.Reasons)
+	}
 }
 
 func TestACWRBoundary(t *testing.T) {
@@ -306,15 +346,16 @@ func TestACWRBoundary(t *testing.T) {
 }
 
 func TestACWRMissingDaysCountAsZeroLoad(t *testing.T) {
-	// 21 distinct days present (out of 28), all at a high load in the last
-	// 7 days and nothing else — missing days count as 0, still enough to
-	// cross the ratio given a high enough recent load.
+	// 22 distinct days present (out of 28, earliest 21 days back so the
+	// calendar-coverage gate opens), all at a high load in the last 7 days
+	// and nothing else — missing days count as 0, still enough to cross
+	// the ratio given a high enough recent load.
 	loads := []Load{}
 	base := date("2026-09-28")
 	for i := 0; i < 7; i++ {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 200})
 	}
-	for i := 7; i < 21; i++ {
+	for i := 7; i < 22; i++ {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 10})
 	}
 	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, date("2026-09-28"))
@@ -328,13 +369,14 @@ func TestACWRMissingDaysCountAsZeroLoad(t *testing.T) {
 func TestRestVerdictAppendsCautionReasonsThatAlsoFired(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, ReadinessLevel: "POOR"}
 	tsb := -40.0
-	// 21 days of load crossing the ACWR caution threshold.
+	// 22 days of load (earliest 21 days back, opening the calendar gate)
+	// crossing the ACWR caution threshold.
 	loads := []Load{}
 	base := date("2026-09-28")
 	for i := 0; i < 7; i++ {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 200})
 	}
-	for i := 7; i < 21; i++ {
+	for i := 7; i < 22; i++ {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 10})
 	}
 	got := Assess(today, nil, &tsb, "2026-09-28", loads, date("2026-09-28"))

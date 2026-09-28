@@ -97,7 +97,11 @@ func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load
 
 		if today.RestingHR > 0 {
 			if baseline, ok := restingHRBaseline(history, nowDate); ok {
-				delta := float64(today.RestingHR) - baseline
+				// Round once, here, and use that same rounded value for both
+				// the bucket decision and the displayed text below — a
+				// half-integer delta (e.g. 6.5) must not round up to 7 for
+				// display while the raw 6.5 decided "caution".
+				delta := math.Round(float64(today.RestingHR) - baseline)
 				switch {
 				case delta >= 7:
 					restReasons = append(restReasons, rhrReason(delta, baseline))
@@ -250,8 +254,12 @@ func median(vals []float64) float64 {
 	return (sorted[n/2-1] + sorted[n/2]) / 2
 }
 
+// rhrReason takes delta already rounded by the caller — the same rounded
+// value that decided rest vs. caution — so the number in the sentence never
+// disagrees with the verdict it explains. baseline is rounded here, once,
+// purely for display.
 func rhrReason(delta, baseline float64) string {
-	return fmt.Sprintf("resting heart rate is %d above your usual %d", int(math.Round(delta)), int(math.Round(baseline)))
+	return fmt.Sprintf("resting heart rate is %d above your usual %d", int(delta), int(math.Round(baseline)))
 }
 
 // --- Form (TSB) -------------------------------------------------------
@@ -288,26 +296,38 @@ func formatSigned(v float64) string {
 // acwr is the acute:chronic load ratio: mean daily load over the 7 days up
 // to and including referenceDate, divided by the mean over the 28 days up
 // to and including referenceDate. A day with no matching Load counts as
-// zero load in both means. It needs at least 21 distinct days of loads
-// within the 28-day window, else it stays silent.
+// zero load in both means. The gate is calendar coverage, not the count of
+// days with an actual entry: the rule only applies once the earliest date
+// anywhere in loads reaches back at least 21 days before referenceDate —
+// otherwise a rider training 4-5 days a week (rest days simply have no Load
+// entry) would never accumulate 21 distinct dated entries and the rule
+// would stay dead forever. Days without an entry still count as zero load
+// in both means, unchanged.
 func acwr(loads []Load, referenceDate time.Time) (float64, bool) {
 	start28 := referenceDate.AddDate(0, 0, -27)
 	start7 := referenceDate.AddDate(0, 0, -6)
 
-	distinctDays := map[time.Time]bool{}
+	var earliest time.Time
+	haveEarliest := false
 	var sum7, sum28 float64
 	for _, l := range loads {
 		ld, ok := parseDate(l.Date)
-		if !ok || ld.Before(start28) || ld.After(referenceDate) {
+		if !ok {
 			continue
 		}
-		distinctDays[ld] = true
+		if !haveEarliest || ld.Before(earliest) {
+			earliest = ld
+			haveEarliest = true
+		}
+		if ld.Before(start28) || ld.After(referenceDate) {
+			continue
+		}
 		sum28 += l.Load
 		if !ld.Before(start7) {
 			sum7 += l.Load
 		}
 	}
-	if len(distinctDays) < 21 {
+	if !haveEarliest || referenceDate.Sub(earliest) < 21*24*time.Hour {
 		return 0, false
 	}
 	mean28 := sum28 / 28
