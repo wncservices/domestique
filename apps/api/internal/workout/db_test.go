@@ -266,6 +266,30 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("ftp_levels_calibrated_watts defaults 0 and round-trips", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				saved, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 250})
+				if err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if saved.FTPLevelsCalibratedAt != 0 {
+					t.Errorf("FTPLevelsCalibratedAt = %v, want 0 by default", saved.FTPLevelsCalibratedAt)
+				}
+
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 268, FTPLevelsCalibratedAt: 255}); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				fetched, _, err := db.GetProfile(ctx, "wilant")
+				if err != nil {
+					t.Fatalf("get profile: %v", err)
+				}
+				if fetched.FTPLevelsCalibratedAt != 255 {
+					t.Errorf("FTPLevelsCalibratedAt = %v, want 255", fetched.FTPLevelsCalibratedAt)
+				}
+			})
+
 			t.Run("estimated fields round-trip and a rider save clears them", func(t *testing.T) {
 				db := open(t)
 				ctx := t.Context()
@@ -815,5 +839,54 @@ func TestValidateStepDepth(t *testing.T) {
 	}
 	if err := validateSteps(nest(maxStepDepth + 1)); err == nil {
 		t.Errorf("depth %d should be rejected", maxStepDepth+1)
+	}
+}
+
+// TestRiderProfilesTableGainsFTPLevelsCalibratedColumn: a rider_profiles
+// table that predates ftp_levels_calibrated_watts migrates cleanly, existing
+// rows read 0 ("never calibrated"), and UseDB stays idempotent.
+func TestRiderProfilesTableGainsFTPLevelsCalibratedColumn(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	if _, err := src.Conn().Exec(`
+CREATE TABLE rider_profiles (
+    rider                      TEXT PRIMARY KEY,
+    ftp_watts                  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ftp_estimated              BOOLEAN NOT NULL DEFAULT FALSE,
+    estimated_fields           TEXT NOT NULL DEFAULT '',
+    auto_push_workouts         BOOLEAN NOT NULL DEFAULT FALSE,
+    threshold_pace_sec_per_km  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_hr                     INTEGER NOT NULL DEFAULT 0,
+    resting_hr                 INTEGER NOT NULL DEFAULT 0,
+    available_days             TEXT NOT NULL DEFAULT '',
+    hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    experience_level           TEXT NOT NULL DEFAULT '',
+    updated_at                 TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`
+INSERT INTO rider_profiles (rider, ftp_watts, updated_at) VALUES ('wilant', 255, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+	old, ok, err := db.GetProfile(t.Context(), "wilant")
+	if err != nil || !ok {
+		t.Fatalf("get pre-existing row after migration: ok=%v err=%v", ok, err)
+	}
+	if old.FTPWatts != 255 || old.FTPLevelsCalibratedAt != 0 {
+		t.Errorf("pre-existing row = %+v, want FTPWatts 255 and marker 0", old)
+	}
+
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
 	}
 }

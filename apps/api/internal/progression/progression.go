@@ -195,3 +195,39 @@ func Reason(workoutName, zone string, workoutLevel, from, to float64, outcome Ou
 	}
 	return fmt.Sprintf("%s %s (%.1f) — %s %.1f → %.1f", verb, workoutName, workoutLevel, zone, from, to)
 }
+
+// Recalibration constants — see docs/superpowers/specs/2026-09-28-level-recalibration-design.md.
+const (
+	// RecalibrationUpFactor is the smallest FTP rise (as a ratio against the
+	// FTP levels were last calibrated to) that recalibrates. It mirrors
+	// thresholds.upFactor by hand, the same package-independence convention
+	// Outcome follows for rideanalysis.
+	RecalibrationUpFactor = 1.03
+	// RecalibrationMaxFactor is the largest rise that recalibrates. Above it
+	// the jump is far likelier a correction or a typo than fitness, and
+	// lowering every level for it would punish the rider for a mistake.
+	RecalibrationMaxFactor = 1.25
+	// RecalibrationLevelsPerDoubling is the one tunable: how many levels a
+	// full doubling of FTP would cost. Smaller rises scale logarithmically.
+	RecalibrationLevelsPerDoubling = 10
+	// RecalibrationMaxDrop caps how far any single recalibration may move a
+	// level. It bites for rises past about 14.9% inside the 3-25% band.
+	RecalibrationMaxDrop = 2.0
+)
+
+// RecalibrationDelta is how far to lower a level after FTP moves from oldFTP
+// to newFTP: -RecalibrationLevelsPerDoubling*log2(new/old), capped at
+// -RecalibrationMaxDrop. It is deliberately unconditional — a decrease yields
+// a positive delta — because the caller owns the trigger gate (3-25% rise
+// only), the same split thresholds.Detect has with its caller. The cap is
+// part of the delta so no caller can forget it.
+func RecalibrationDelta(oldFTP, newFTP float64) float64 {
+	return math.Max(-RecalibrationMaxDrop, -RecalibrationLevelsPerDoubling*math.Log2(newFTP/oldFTP))
+}
+
+// RecalibrationReason builds the text recorded on a recalibrated level, e.g.
+// "FTP 255 → 268 W — threshold 5.3 → 4.6", in Reason's own em-dash shape.
+// zone is passed explicitly, as Reason does, since nothing else carries it.
+func RecalibrationReason(oldFTP, newFTP float64, zone string, from, to float64) string {
+	return fmt.Sprintf("FTP %.0f → %.0f W — %s %.1f → %.1f", oldFTP, newFTP, zone, from, to)
+}
