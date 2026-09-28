@@ -84,7 +84,6 @@ function formatHrRange(z: Zone): string {
 
 // Fraction of threshold HR the bar starts Z1 from when it has no real floor.
 const HR_Z1_BAR_FLOOR = 0.65
-
 const hr = computed(() => hrZones(props.profile))
 const hrBasis = computed(() => hrZoneBasis(props.profile))
 const hrBars = computed(() => {
