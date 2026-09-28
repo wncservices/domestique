@@ -66,6 +66,7 @@ import type {
   TrainingWeek,
   ProgressionLevel,
   SessionAnalysis,
+  ReadinessResponse,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -763,6 +764,11 @@ export const api = {
    *  Progression card's own source. Initialised server-side on first read
    *  for any sport the rider has a goal for — see handleGetProgression. */
   progression: () => request<{ levels: ProgressionLevel[] }>('/api/training/progression'),
+  /** Today's readiness verdict (from Garmin HRV/sleep/resting HR, form and
+   *  load) plus the last 7 days of Garmin wellness — the Today card's chip
+   *  and the Fitness page's Recovery card share this one call. See
+   *  handleGetReadiness. */
+  readiness: () => request<ReadinessResponse>('/api/training/readiness'),
   /** Rates (or re-rates) how a completed, analysed session felt, 1 (easy) to
    *  5 (all-out) — re-applies that ride's own progression-level change with
    *  the new feel factored in rather than stacking a second one on top. See

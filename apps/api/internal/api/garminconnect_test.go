@@ -104,6 +104,15 @@ type fakeGarmin struct {
 	biometricsErr   error
 	biometricsCalls int
 
+	// wellnessByDate is what Wellness hands back for a date ("2006-01-02"),
+	// wellnessErr what it fails with instead (regardless of date), and
+	// wellnessCalls every date asked for, in order — the sync backfill's own
+	// "once per rider" test needs to count exactly how many calls one sync
+	// made.
+	wellnessByDate map[string]garmin.Wellness
+	wellnessErr    error
+	wellnessCalls  []string
+
 	// remoteWorkouts is what the fake account holds, keyed by the ids
 	// PushWorkout hands out, and calendar what has been scheduled onto it
 	// (schedule id -> date). Every Update/Delete/Schedule call is also
@@ -202,6 +211,21 @@ func (f *fakeGarmin) Biometrics(_ context.Context, _ api.GarminConsumer, session
 	f.biometricsCalls++
 	f.mu.Unlock()
 	return f.biometrics, f.biometricsErr
+}
+
+func (f *fakeGarmin) Wellness(_ context.Context, _ api.GarminConsumer, session garmin.Session, date time.Time) (garmin.Wellness, error) {
+	f.setResumedSession(session)
+	f.mu.Lock()
+	dateStr := date.Format("2006-01-02")
+	f.wellnessCalls = append(f.wellnessCalls, dateStr)
+	f.mu.Unlock()
+	if f.wellnessErr != nil {
+		return garmin.Wellness{}, f.wellnessErr
+	}
+	if w, ok := f.wellnessByDate[dateStr]; ok {
+		return w, nil
+	}
+	return garmin.Wellness{Date: dateStr}, nil
 }
 
 func (f *fakeGarmin) setResumedSession(session garmin.Session) {

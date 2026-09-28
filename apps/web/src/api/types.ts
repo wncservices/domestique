@@ -906,6 +906,39 @@ export interface ProgressionLevel {
   updatedAt?: string
 }
 
+/** How hard today should be allowed to be — readiness only ever makes a day
+ *  easier, never harder. Mirrors internal/readiness.Verdict. See
+ *  docs/superpowers/specs/2026-09-28-readiness-design.md. */
+export type ReadinessVerdict = 'ready' | 'caution' | 'rest'
+
+/** One rider's Garmin recovery signals for one calendar day — mirrors
+ *  apps/api/internal/api's dailyWellnessDTO (itself workout.DailyWellness).
+ *  A field is absent, not zero, when Garmin had no reading for it. */
+export interface DailyWellnessDTO {
+  date: string
+  hrvLastNight?: number
+  hrvWeeklyAvg?: number
+  hrvStatus?: string
+  sleepSeconds?: number
+  sleepScore?: number
+  readinessScore?: number
+  readinessLevel?: string
+  restingHr?: number
+}
+
+/** GET /api/training/readiness's response — mirrors
+ *  apps/api/internal/api's readinessResponseDTO. today.wellness is absent
+ *  entirely when there is no Garmin row for today (a Wahoo-only rider, or a
+ *  watch not worn) — the verdict then comes from load/form rules alone. */
+export interface ReadinessResponse {
+  today: {
+    verdict: ReadinessVerdict
+    reasons?: string[]
+    wellness?: DailyWellnessDTO
+  }
+  days: DailyWellnessDTO[]
+}
+
 export interface CompletedSession {
   id: string
   provider: string

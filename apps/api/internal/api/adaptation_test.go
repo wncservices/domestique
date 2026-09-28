@@ -105,8 +105,15 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 
 	h.srv.AdaptWorkouts(ctx)
 
+	// This used to be detectFatigue's own TSB < −30 swap, with a "fatigued
+	// zone" reason baked into the adapter; that rule now lives in
+	// internal/readiness (readiness.Assess's own form rule, wired in through
+	// adaptRider's assessReadiness), which produces the "Swapped for an easy
+	// ride" wording instead — intent preserved: a very negative, fresh form
+	// swaps today's hard session for an easy one and says why.
 	swapped, _ := h.store.GetWorkout(ctx, hard.ID)
-	if swapped.Name != "Endurance ride" || !strings.Contains(swapped.Description, "fatigued") ||
+	if swapped.Name != "Endurance ride" || !strings.Contains(swapped.Description, "Swapped for an easy ride") ||
+		!strings.Contains(swapped.Description, "your form is") ||
 		!strings.Contains(swapped.Description, "VO2max intervals") {
 		t.Errorf("today's workout = %q / %q, want an easy ride with the reason and what it replaced", swapped.Name, swapped.Description)
 	}

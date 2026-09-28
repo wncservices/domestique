@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
+	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
@@ -102,13 +103,15 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		byID[w.ID] = w
 	}
 
+	assessment := s.assessReadiness(ctx, rider, sessions, latest)
+
 	// AdaptSessions already keeps each workout to at most one Change per pass
 	// (stepDownTarget skips ids its own per-session loop has claimed — see
 	// its doc comment); this is a second, independent guard here so a bug in
 	// that bookkeeping cannot silently apply two Changes to the same workout
 	// — first one wins, and a second is loud rather than a quiet clobber.
 	appliedFor := map[string]bool{}
-	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, latest, s.now(), byWorkout) {
+	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, s.now(), byWorkout, assessment) {
 		if appliedFor[c.WorkoutID] {
 			s.logger().Warn("adapt: a second change was produced for the same workout in one pass; ignoring it", "workout", c.WorkoutID, "rider", rider)
 			continue
@@ -204,4 +207,74 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
 	})
 	return err
+}
+
+// readinessHistoryDays bounds how far back assessReadiness reads
+// daily_wellness for — readiness.Assess's own widest lookback is the
+// resting-HR baseline's 28 days before the reference date (see
+// restingHRBaseline), so 29 days back from today covers that plus today
+// itself.
+const readinessHistoryDays = 29
+
+// assessReadiness builds today's readiness.Day, its wellness history, the
+// latest form (TSB) snapshot and the rider's own daily training loads, and
+// turns them into an Assessment via readiness.Assess — the one call site
+// that knows how to gather what that pure function needs. A failure reading
+// wellness history degrades to "no history" (readiness.Assess still runs on
+// whatever else is available) rather than aborting the whole adaptation pass
+// for a rider whose only problem is an unreadable wellness table.
+func (s *Server) assessReadiness(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot) readiness.Assessment {
+	now := s.now()
+	todayStr := now.Format("2006-01-02")
+	sinceDate := now.AddDate(0, 0, -readinessHistoryDays).Format("2006-01-02")
+
+	rows, err := s.Training.ListWellness(ctx, rider, sinceDate)
+	if err != nil {
+		s.logger().Warn("adapt: reading wellness history failed", "rider", rider, "err", err)
+		rows = nil
+	}
+
+	var today readiness.Day
+	var history []readiness.Day
+	for _, row := range rows {
+		d := readiness.Day{
+			Date: row.Date, HRVStatus: row.HRVStatus,
+			SleepSeconds: row.SleepSeconds, SleepScore: row.SleepScore,
+			ReadinessScore: row.ReadinessScore, ReadinessLevel: row.ReadinessLevel,
+			RestingHR: row.RestingHR, Present: true,
+		}
+		if row.Date == todayStr {
+			today = d
+		} else {
+			history = append(history, d)
+		}
+	}
+
+	var tsb *float64
+	var tsbDate string
+	if latest != nil {
+		v := latest.TSB
+		tsb, tsbDate = &v, latest.Date
+	}
+
+	return readiness.Assess(today, history, tsb, tsbDate, dailyLoadsForReadiness(sessions), now)
+}
+
+// dailyLoadsForReadiness sums each completed session's own TrainingLoad by
+// date — the same per-day aggregation workout.RecomputeFitnessSnapshots'
+// own fillDailyLoads performs before ComputeFitness, without that function's
+// gap-filling: readiness.Assess's own acwr divides by a fixed 7/28-day
+// window regardless of which days are present, so a day with no session
+// simply never appearing here already reads as zero load, exactly as a
+// filled-in DailyLoad{Load: 0} would.
+func dailyLoadsForReadiness(sessions []workout.CompletedSession) []readiness.Load {
+	byDate := map[string]float64{}
+	for _, s := range sessions {
+		byDate[s.Date] += s.TrainingLoad
+	}
+	loads := make([]readiness.Load, 0, len(byDate))
+	for date, load := range byDate {
+		loads = append(loads, readiness.Load{Date: date, Load: load})
+	}
+	return loads
 }

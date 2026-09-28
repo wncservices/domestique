@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -42,7 +43,7 @@ func TestAMissedKeySessionMovesToTheNextFreeDay(t *testing.T) {
 		planned("tue", "VO2max intervals", "2026-03-17"),
 		planned("sat", "Long ride", "2026-03-21"),
 	}
-	got := AdaptSessions(ws, nil, profileAvailable("tue", "fri", "sat"), nil, thursday, nil)
+	got := AdaptSessions(ws, nil, profileAvailable("tue", "fri", "sat"), thursday, nil, readiness.Assessment{})
 
 	if len(got) != 1 || got[0].WorkoutID != "tue" || got[0].NewDate != "2026-03-20" {
 		t.Fatalf("changes = %+v, want the missed Tuesday intervals moved to Friday (Thursday is not an available day, Saturday is taken)", got)
@@ -55,13 +56,13 @@ func TestAMissedKeySessionMovesToTheNextFreeDay(t *testing.T) {
 func TestASessionTheRiderDidIsNotMissed(t *testing.T) {
 	ws := []workout.Workout{planned("tue", "VO2max intervals", "2026-03-17")}
 	// Cut short but over half of the planned hour.
-	got := AdaptSessions(ws, []workout.CompletedSession{rode("2026-03-17", 2400)}, profileAvailable("fri"), nil, thursday, nil)
+	got := AdaptSessions(ws, []workout.CompletedSession{rode("2026-03-17", 2400)}, profileAvailable("fri"), thursday, nil, readiness.Assessment{})
 	if len(got) != 0 {
 		t.Errorf("changes = %+v, want none: 40 of 60 minutes is the session done", got)
 	}
 
 	// Ten minutes is not.
-	got = AdaptSessions(ws, []workout.CompletedSession{rode("2026-03-17", 600)}, profileAvailable("fri"), nil, thursday, nil)
+	got = AdaptSessions(ws, []workout.CompletedSession{rode("2026-03-17", 600)}, profileAvailable("fri"), thursday, nil, readiness.Assessment{})
 	if len(got) != 1 {
 		t.Errorf("changes = %+v, want the session treated as missed", got)
 	}
@@ -69,7 +70,7 @@ func TestASessionTheRiderDidIsNotMissed(t *testing.T) {
 
 func TestAMissedEasyDayIsLetGo(t *testing.T) {
 	ws := []workout.Workout{planned("mon", "Endurance ride", "2026-03-16")}
-	if got := AdaptSessions(ws, nil, profileAvailable("fri"), nil, thursday, nil); len(got) != 0 {
+	if got := AdaptSessions(ws, nil, profileAvailable("fri"), thursday, nil, readiness.Assessment{}); len(got) != 0 {
 		t.Errorf("changes = %+v, want none: nothing is lost by skipping an easy day", got)
 	}
 }
@@ -83,7 +84,7 @@ func TestAMissedKeySessionTakesOverTheNextEasyDay(t *testing.T) {
 		planned("sat", "Endurance ride", "2026-03-21"),
 		planned("sun", "Long ride", "2026-03-22"),
 	}
-	got := AdaptSessions(ws, nil, profileAvailable("tue", "fri", "sat", "sun"), nil, thursday, nil)
+	got := AdaptSessions(ws, nil, profileAvailable("tue", "fri", "sat", "sun"), thursday, nil, readiness.Assessment{})
 
 	if len(got) != 1 || got[0].WorkoutID != "tue" || got[0].NewDate != "2026-03-20" || got[0].ReplaceWorkoutID != "fri" {
 		t.Fatalf("changes = %+v, want Tuesday's tempo to take Friday's easy ride", got)
@@ -98,7 +99,7 @@ func TestAMissedKeySessionWithNowhereToGoIsLetGo(t *testing.T) {
 		planned("done", "Endurance ride", "2026-03-19"), // today's easy ride, already ridden
 	}
 	sessions := []workout.CompletedSession{rode("2026-03-19", 3600)}
-	if got := AdaptSessions(ws, sessions, profileAvailable("fri", "sat"), nil, thursday, nil); len(got) != 0 {
+	if got := AdaptSessions(ws, sessions, profileAvailable("fri", "sat"), thursday, nil, readiness.Assessment{}); len(got) != 0 {
 		t.Errorf("changes = %+v, want none: there is nowhere to put it that costs nothing that matters", got)
 	}
 }
@@ -110,42 +111,60 @@ func TestTwoMissedSessionsNeverLandOnTheSameDay(t *testing.T) {
 		planned("e1", "Endurance ride", "2026-03-20"),
 		planned("e2", "Endurance ride", "2026-03-21"),
 	}
-	got := AdaptSessions(ws, nil, profileAvailable("fri", "sat"), nil, thursday, nil)
+	got := AdaptSessions(ws, nil, profileAvailable("fri", "sat"), thursday, nil, readiness.Assessment{})
 	if len(got) != 2 || got[0].NewDate == got[1].NewDate || got[0].ReplaceWorkoutID == got[1].ReplaceWorkoutID {
 		t.Errorf("changes = %+v, want two different days", got)
 	}
 }
 
+// TestATiredRiderDoesNotMakeUpAMissedSession used to drive "tired" from a
+// very negative TSB passed directly to AdaptSessions; that rule now lives in
+// internal/readiness, so the equivalent trigger here is a Rest verdict
+// (which is what readiness.Assess would have produced from that same form) —
+// intent preserved: whatever produces "rest", a missed session is not made
+// up.
 func TestATiredRiderDoesNotMakeUpAMissedSession(t *testing.T) {
 	ws := []workout.Workout{planned("tue", "Long ride", "2026-03-17")}
-	tired := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -35}
-	if got := AdaptSessions(ws, nil, profileAvailable("fri"), tired, thursday, nil); len(got) != 0 {
+	rest := readiness.Assessment{Verdict: readiness.Rest, Reasons: []string{"your form is −35"}}
+	if got := AdaptSessions(ws, nil, profileAvailable("fri"), thursday, nil, rest); len(got) != 0 {
 		t.Errorf("changes = %+v, want none: rest is the right answer", got)
 	}
 }
 
+// TestAHardSessionIsSwappedForAnEasyOneWhenVeryFatigued used to drive the
+// swap from a fresh TSB of -34 passed directly to AdaptSessions; that rule
+// now lives in internal/readiness (see the readiness.Rest case in
+// AdaptSessions), so the equivalent input here is the Rest Assessment
+// readiness.Assess would have produced from that same form — intent
+// preserved: today's hard session, and only today's, is downgraded.
 func TestAHardSessionIsSwappedForAnEasyOneWhenVeryFatigued(t *testing.T) {
 	ws := []workout.Workout{
 		planned("today", "VO2max intervals", "2026-03-19"),
 		planned("next-week", "VO2max intervals", "2026-03-26"),
 		planned("long", "Long ride", "2026-03-20"),
 	}
-	tired := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -34}
-	got := AdaptSessions(ws, nil, profileAvailable(weekdays...), tired, thursday, nil)
+	rest := readiness.Assessment{Verdict: readiness.Rest, Reasons: []string{"your form is −34"}}
+	got := AdaptSessions(ws, nil, profileAvailable(weekdays...), thursday, nil, rest)
 
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want only today's intervals downgraded: a long ride is volume not intensity, and next week is not yet", got)
 	}
-	if !strings.Contains(got[0].Reason, "-34") {
+	if !strings.Contains(got[0].Reason, "−34") {
 		t.Errorf("reason %q should say what the form is", got[0].Reason)
 	}
 }
 
-func TestFatigueFromOldDataChangesNothing(t *testing.T) {
+// TestReadyAssessmentChangesNothing used to be TestFatigueFromOldDataChangesNothing,
+// which drove a stale TSB snapshot straight into AdaptSessions to prove a
+// two-and-a-half-week-old form reading is ignored. That freshness check now
+// lives entirely in internal/readiness (readiness.Assess's own tsbFresh, see
+// its table tests) — a stale TSB simply never produces anything but a Ready
+// Assessment. What is left for the adapter to guarantee is the other half:
+// a Ready verdict changes nothing here, whatever produced it.
+func TestReadyAssessmentChangesNothing(t *testing.T) {
 	ws := []workout.Workout{planned("today", "VO2max intervals", "2026-03-19")}
-	stale := &workout.FitnessSnapshot{Date: "2026-03-01", TSB: -50}
-	if got := AdaptSessions(ws, nil, profileAvailable(weekdays...), stale, thursday, nil); len(got) != 0 {
-		t.Errorf("changes = %+v, want none: a snapshot from two and a half weeks ago says nothing about today", got)
+	if got := AdaptSessions(ws, nil, profileAvailable(weekdays...), thursday, nil, readiness.Assessment{Verdict: readiness.Ready}); len(got) != 0 {
+		t.Errorf("changes = %+v, want none: a ready verdict never changes anything", got)
 	}
 }
 
@@ -157,7 +176,7 @@ func TestNothingElseIsEverTouched(t *testing.T) {
 	adjusted := planned("done-once", "Long ride", "2026-03-18")
 	adjusted.Description += " " + scheduler.AdjustedMarker + " moved from 2026-03-16."
 
-	got := AdaptSessions([]workout.Workout{hand, noGoal, adjusted}, nil, profileAvailable("fri"), nil, thursday, nil)
+	got := AdaptSessions([]workout.Workout{hand, noGoal, adjusted}, nil, profileAvailable("fri"), thursday, nil, readiness.Assessment{})
 	if len(got) != 0 {
 		t.Errorf("changes = %+v, want none: a rider's own, goal-less or already-adjusted workout is never changed", got)
 	}
@@ -188,7 +207,7 @@ func TestAnIncompleteAnalysisIsTreatedAsMissedEvenIfTimeWasLogged(t *testing.T) 
 	sessions := []workout.CompletedSession{rode("2026-03-17", 3600)}
 	analyses := map[string]workout.SessionAnalysis{"tue": analysed("tue", "incomplete", 40)}
 
-	got := AdaptSessions(ws, sessions, profileAvailable("fri"), nil, thursday, analyses)
+	got := AdaptSessions(ws, sessions, profileAvailable("fri"), thursday, analyses, readiness.Assessment{})
 	if len(got) != 1 || got[0].WorkoutID != "tue" {
 		t.Fatalf("changes = %+v, want the session made up: an incomplete analysis overrides the time rule", got)
 	}
@@ -198,7 +217,7 @@ func TestAStruggledAnalysisIsDoneNotMadeUp(t *testing.T) {
 	ws := []workout.Workout{planned("tue", "VO2max intervals", "2026-03-17")}
 	analyses := map[string]workout.SessionAnalysis{"tue": analysed("tue", "struggled", 80)}
 
-	got := AdaptSessions(ws, nil, profileAvailable("fri"), nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, profileAvailable("fri"), thursday, analyses, readiness.Assessment{})
 	if len(got) != 0 {
 		t.Errorf("changes = %+v, want none: a struggled session happened, it is not missed", got)
 	}
@@ -210,8 +229,8 @@ func TestLastTwoStruggledKeySessionsSwapTodaysHardSessionEvenWithMildTSB(t *test
 		planned("wed", "Interval session", "2026-03-18"),
 		planned("today", "VO2max intervals", "2026-03-19"),
 	}
-	// TSB alone (-10) is nowhere near fatigueTSB (-30).
-	mild := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -10}
+	// No readiness signal at all here — struggled sessions alone are fatigue,
+	// independent of form.
 	analyses := map[string]workout.SessionAnalysis{
 		"mon": analysed("mon", "struggled", 70),
 		// A realistic 4-on/4-recovery interval session: 4 hard "On" steps
@@ -226,7 +245,7 @@ func TestLastTwoStruggledKeySessionsSwapTodaysHardSessionEvenWithMildTSB(t *test
 		),
 	}
 
-	got := AdaptSessions(ws, nil, profileAvailable("mon", "wed", "thu", "fri"), mild, thursday, analyses)
+	got := AdaptSessions(ws, nil, profileAvailable("mon", "wed", "thu", "fri"), thursday, analyses, readiness.Assessment{})
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy: two struggled key sessions in a row is fatigue even without TSB", got)
 	}
@@ -244,13 +263,12 @@ func TestStruggleReasonOmitsHitCountWithNoHardSteps(t *testing.T) {
 		planned("wed", "Long ride", "2026-03-18"),
 		planned("today", "VO2max intervals", "2026-03-19"),
 	}
-	mild := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -10}
 	analyses := map[string]workout.SessionAnalysis{
 		"mon": analysed("mon", "struggled", 70),
 		"wed": analysed("wed", "struggled", 75), // no steps at all: no hard steps to score
 	}
 
-	got := AdaptSessions(ws, nil, profileAvailable("mon", "wed", "thu", "fri"), mild, thursday, analyses)
+	got := AdaptSessions(ws, nil, profileAvailable("mon", "wed", "thu", "fri"), thursday, analyses, readiness.Assessment{})
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy", got)
 	}
@@ -280,7 +298,7 @@ func TestSevenDayOverloadedTSSSwapsTodaysHardSession(t *testing.T) {
 		"wed": analysed("wed", "completed", 130),
 	}
 
-	got := AdaptSessions(ws, nil, profile, nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, profile, thursday, analyses, readiness.Assessment{})
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy: the last 7 days carried far more load than planned", got)
 	}
@@ -295,7 +313,7 @@ func TestOverloadTriggerIsSkippedWithoutFTP(t *testing.T) {
 	// No FTP on the profile — there is no way to estimate planned TSS at all.
 	analyses := map[string]workout.SessionAnalysis{"mon": analysed("mon", "completed", 400)}
 
-	got := AdaptSessions(ws, nil, profileAvailable("mon", "thu"), nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, profileAvailable("mon", "thu"), thursday, analyses, readiness.Assessment{})
 	if len(got) != 0 {
 		t.Errorf("changes = %+v, want none: without an FTP the overload trigger cannot fire", got)
 	}
@@ -303,7 +321,7 @@ func TestOverloadTriggerIsSkippedWithoutFTP(t *testing.T) {
 
 func TestWithoutAnalysesTheTimeRuleStillApplies(t *testing.T) {
 	ws := []workout.Workout{planned("tue", "VO2max intervals", "2026-03-17")}
-	got := AdaptSessions(ws, []workout.CompletedSession{rode("2026-03-17", 600)}, profileAvailable("fri"), nil, thursday, nil)
+	got := AdaptSessions(ws, []workout.CompletedSession{rode("2026-03-17", 600)}, profileAvailable("fri"), thursday, nil, readiness.Assessment{})
 	if len(got) != 1 {
 		t.Errorf("changes = %+v, want the ≥ 50%% time rule to still catch a missed session when there is no analysis at all", got)
 	}
@@ -312,7 +330,7 @@ func TestWithoutAnalysesTheTimeRuleStillApplies(t *testing.T) {
 func TestAnAnalysedRiderOwnedWorkoutIsNeverChanged(t *testing.T) {
 	w := hand("mine", "VO2max intervals", "2026-03-17")
 	analyses := map[string]workout.SessionAnalysis{"mine": analysed("mine", "incomplete", 0)}
-	got := AdaptSessions([]workout.Workout{w}, nil, profileAvailable("fri"), nil, thursday, analyses)
+	got := AdaptSessions([]workout.Workout{w}, nil, profileAvailable("fri"), thursday, analyses, readiness.Assessment{})
 	if len(got) != 0 {
 		t.Errorf("changes = %+v, want none: a rider's own workout is never touched, whatever ride-analysis says", got)
 	}
@@ -405,7 +423,7 @@ func TestAStruggledKeySessionStepsDownTheNextSameZoneWorkout(t *testing.T) {
 	}
 	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
 
-	got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, analyses, readiness.Assessment{})
 
 	var stepDowns []Change
 	for _, c := range got {
@@ -428,7 +446,7 @@ func TestAStruggledSessionDoesNotStepDownADifferentZone(t *testing.T) {
 	}
 	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
 
-	got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, analyses, readiness.Assessment{})
 
 	for _, c := range got {
 		if c.StepDown {
@@ -446,7 +464,7 @@ func TestAnAlreadyAdjustedWorkoutIsNeverStepDownTargeted(t *testing.T) {
 	}
 	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
 
-	got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, analyses, readiness.Assessment{})
 
 	for _, c := range got {
 		if c.StepDown {
@@ -476,7 +494,7 @@ func TestNailedOrOldStruggleTriggersNoStepDown(t *testing.T) {
 				ws[0].Date = "2026-03-17"
 			}
 
-			got := AdaptSessions(ws, nil, workout.RiderProfile{}, nil, thursday, analyses)
+			got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, analyses, readiness.Assessment{})
 			for _, c := range got {
 				if c.StepDown {
 					t.Fatalf("changes = %+v, want no step-down for %s", got, tt.name)
@@ -487,27 +505,32 @@ func TestNailedOrOldStruggleTriggersNoStepDown(t *testing.T) {
 }
 
 // TestAFatigueSwapTargetIsNeverAlsoStepDownTargeted is the final review's
-// fix for the bug the brief describes: a workout can be both the fatigue
-// swap's target (today's hard session, Downgrade) and stepDownTarget's own
-// candidate (the next untouched same-zone workout after a struggled
-// session) — before the fix, AdaptSessions handed that one workout two
-// Changes in the same pass, and adaptRider applied them against a snapshot
-// taken before the loop, so the later write silently clobbered the earlier
-// one. Now stepDownTarget must skip any workout id the per-session loop
-// already claimed this pass.
+// fix for the bug the brief describes: a workout can be both readiness's own
+// target for today (Downgrade) and stepDownTarget's own candidate (the next
+// untouched same-zone workout after a struggled session) — before the fix,
+// AdaptSessions handed that one workout two Changes in the same pass, and
+// adaptRider applied them against a snapshot taken before the loop, so the
+// later write silently clobbered the earlier one. Readiness's own rest/
+// caution check now runs, and claims its target, before stepDownTarget.
+//
+// This used to drive the conflict from a fresh, very negative TSB passed
+// directly to AdaptSessions; that rule now lives in internal/readiness, so
+// the equivalent input is the Rest Assessment readiness.Assess would have
+// produced from that same form — intent preserved.
 func TestAFatigueSwapTargetIsNeverAlsoStepDownTargeted(t *testing.T) {
 	ws := []workout.Workout{
 		structured("tue-threshold", "Threshold 3×12", "2026-03-17", workout.ZoneThreshold, 5),
 		structured("thu-threshold", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4),
 	}
 	analyses := map[string]workout.SessionAnalysis{"tue-threshold": struggled()}
-	// Deep fatigue (fresh, very negative TSB) makes thu-threshold — dated
-	// today and a hard/structured-zone session — a fatigue-swap Downgrade
+	// Deep fatigue (a Rest verdict, standing in for the fresh, very negative
+	// TSB that used to drive this directly) makes thu-threshold — dated
+	// today and a hard/structured-zone session — readiness's own Downgrade
 	// target too, on top of already being stepDownTarget's own candidate for
 	// the Tuesday struggle.
-	tired := &workout.FitnessSnapshot{Date: "2026-03-19", TSB: -34}
+	rest := readiness.Assessment{Verdict: readiness.Rest, Reasons: []string{"your form is −34"}}
 
-	got := AdaptSessions(ws, nil, workout.RiderProfile{}, tired, thursday, analyses)
+	got := AdaptSessions(ws, nil, workout.RiderProfile{}, thursday, analyses, rest)
 
 	var forThursday []Change
 	for _, c := range got {
@@ -538,7 +561,7 @@ func TestAMissedSessionRescheduledOntoASameZoneSlotIsNotAlsoSteppedDown(t *testi
 	// today is Thursday the 19th; Tuesday's threshold session is this week,
 	// already over, and nothing else is planned, so Friday is free to make
 	// it up on.
-	got := AdaptSessions(ws, nil, profileAvailable("fri"), nil, thursday, analyses)
+	got := AdaptSessions(ws, nil, profileAvailable("fri"), thursday, analyses, readiness.Assessment{})
 
 	var forTuesday []Change
 	for _, c := range got {
