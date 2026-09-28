@@ -438,7 +438,7 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, skipped, err := s.scheduleGoal(r.Context(), g)
+	created, skipped, err := s.scheduleGoal(r.Context(), g, "")
 	if err != nil {
 		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
 			// ErrNoEventDate/ErrEventInThePast — see handleGoalPeriodization's
@@ -511,10 +511,17 @@ func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.Ri
 // been scheduled yet (see adapter.Reconcile's own doc comment), so there
 // is no already-scheduled week here whose workouts it would need to
 // revise. Shared by handleGoalSchedule (a rider's own "Schedule this
-// week's workouts" click) and AutoScheduleTick (the unattended weekly
-// equivalent, see autoschedule.go) — one implementation, so a rider gets
-// exactly the same workouts whichever path creates them.
-func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Workout, int, error) {
+// week's workouts" click), AutoScheduleTick (the unattended weekly
+// equivalent, see autoschedule.go) and handleReplan (see replan.go) — one
+// implementation, so a rider gets exactly the same workouts whichever path
+// creates them.
+//
+// fromDate, when non-empty, drops any request dated before it before
+// persisting — how replan asks for "the rest of this week" without
+// resurrecting a day already in the past. handleGoalSchedule and
+// AutoScheduleTick both pass "", keeping their own behaviour exactly what
+// it was before this parameter existed.
+func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate string) ([]workout.Workout, int, error) {
 	plan, profile, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider)
 	if err != nil {
 		return nil, 0, err
@@ -557,6 +564,9 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal) ([]workout.Wo
 	created := make([]workout.Workout, 0, len(requests))
 	skipped := 0
 	for _, req := range requests {
+		if fromDate != "" && req.Date < fromDate {
+			continue
+		}
 		if alreadyScheduled[req.Date] {
 			skipped++
 			continue

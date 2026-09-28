@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"time"
@@ -70,17 +71,32 @@ func (s *Server) handleTrainingWeek(w http.ResponseWriter, r *http.Request) {
 		}
 		start = periodization.MondayOf(parsed)
 	}
-	today := now.Format(dateLayout)
-
-	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	dto, err := s.buildTrainingWeekDTO(ctx, rider, start, now)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, dto)
+}
+
+// buildTrainingWeekDTO is handleTrainingWeek's own assembly, pulled out so
+// handleReplan (see replan.go) can hand a rider the same "here's your
+// week" shape it always gets after replanning, without a second place that
+// knows how to build it — the same "one DTO builder" reasoning
+// reconciledPeriodizationPlan's own doc comment gives for the plan itself.
+// Takes a bare context.Context rather than *http.Request for the same
+// reason reconciledPeriodizationPlan does: replan has no request of its own
+// mid-lock to hold one.
+func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, now time.Time) (trainingWeekDTO, error) {
+	today := now.Format(dateLayout)
+
+	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		return trainingWeekDTO{}, err
+	}
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return trainingWeekDTO{}, err
 	}
 	// One ListAnalyses call for the whole week, covering every date the days
 	// loop below can show (start onward) — see analysesSince's own doc
@@ -124,21 +140,20 @@ func (s *Server) handleTrainingWeek(w http.ResponseWriter, r *http.Request) {
 		dto.Days = append(dto.Days, day)
 	}
 
-	focus, err := s.weekFocus(r, rider, start, now)
+	focus, err := s.weekFocus(ctx, rider, start, now)
 	if err != nil {
-		s.fail(w, err)
-		return
+		return trainingWeekDTO{}, err
 	}
 	dto.Focus = focus
-	writeJSON(w, http.StatusOK, dto)
+	return dto, nil
 }
 
 // weekFocus picks the goal the header talks about: the most important one
 // whose plan covers this week, nearest event first, dated before undated —
 // a race on the calendar outranks "keep training". A goal that cannot be
 // planned (event already past) is skipped rather than failing the page.
-func (s *Server) weekFocus(r *http.Request, rider string, start, now time.Time) (*weekFocusDTO, error) {
-	goals, err := s.Training.ListGoals(r.Context(), rider)
+func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Time) (*weekFocusDTO, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +170,7 @@ func (s *Server) weekFocus(r *http.Request, rider string, start, now time.Time) 
 
 	startDate := start.Format(dateLayout)
 	for _, g := range goals {
-		plan, _, err := s.reconciledPeriodizationPlan(r.Context(), g, rider)
+		plan, _, err := s.reconciledPeriodizationPlan(ctx, g, rider)
 		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
 			continue
 		}

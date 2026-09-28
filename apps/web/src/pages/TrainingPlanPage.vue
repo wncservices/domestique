@@ -13,7 +13,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { useLibrary } from '@/composables/useLibrary'
 import type { Me, PeriodizationPlan, ReadinessResponse, RiderProfile, TrainingWeek, WeekFocus, Workout } from '@/api/types'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
@@ -391,6 +391,48 @@ function fromRoute() {
   router.push('/')
 }
 
+// --- replan: rebuilds today → Sunday from current levels, availability,
+// goal phase and readiness. Confirmed with a modal first — unlike Fill,
+// which only ever adds workouts to empty days, this one removes plan-made
+// sessions before rebuilding them, so a rider should see what it does
+// before it does it. ---
+
+const replanModalOpen = ref(false)
+const replanning = ref(false)
+
+function openReplanConfirm() {
+  replanModalOpen.value = true
+}
+
+async function confirmReplan() {
+  replanning.value = true
+  try {
+    const result = await api.replan()
+    replanModalOpen.value = false
+    const description = result.adjusted > 0 ? `, ${result.adjusted} eased for readiness` : ''
+    toast.add({
+      title: `Replanned — ${result.created} sessions rebuilt${description}`,
+      icon: 'i-lucide-refresh-ccw',
+      color: 'success',
+    })
+    await loadWeek()
+    await loadReadiness()
+  } catch (err) {
+    // 409: a background auto-schedule tick held the lock at the same
+    // moment — nothing broke, nothing ran either. Not an error the rider
+    // caused, so a neutral toast rather than the red error one, and the
+    // modal stays open (replanModalOpen untouched) so Replan is one more
+    // click away rather than a whole new one.
+    if (err instanceof ApiError && err.status === 409) {
+      toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
+    } else {
+      toast.add({ title: 'Could not replan this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    }
+  } finally {
+    replanning.value = false
+  }
+}
+
 const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && profile.value.availableDays?.length))
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
@@ -464,6 +506,7 @@ onMounted(() => {
         @open="openEditWorkout"
         @fill="fillWeek"
         @rated="loadWeek"
+        @replan="openReplanConfirm"
       />
 
       <SeasonTimeline
@@ -518,5 +561,20 @@ onMounted(() => {
       @update:form="(f) => (workoutForm = f)"
       @save="saveWorkout"
     />
+
+    <UModal v-model:open="replanModalOpen" title="Replan the rest of this week?">
+      <template #body>
+        <p class="text-sm text-toned">
+          Rebuilds today → Sunday from your current levels, availability and readiness. Rides you've done and sessions you made
+          yourself stay.
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="replanModalOpen = false">Cancel</UButton>
+          <UButton color="primary" :loading="replanning" @click="confirmReplan">Replan</UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

@@ -20,6 +20,7 @@ import type {
   PeriodizationPlan,
   PlanExplanation,
   ProfileChangeProposal,
+  ReplanResult,
   ScheduledWorkouts,
   KomootImportResult,
   KomootConnection,
@@ -746,6 +747,11 @@ export const api = {
    *  internal/api/trainingweek.go. start snaps to its Monday server-side. */
   trainingWeek: (start?: string) =>
     request<TrainingWeek>(`/api/training/week${start ? `?start=${encodeURIComponent(start)}` : ''}`),
+  /** Rebuilds today through Sunday from the rider's current levels,
+   *  availability, goal phase and readiness — see internal/api/replan.go.
+   *  Owner-only, no body: the rider comes from the session, same as every
+   *  other training route. */
+  replan: () => request<ReplanResult>('/api/training/replan', { method: 'POST' }),
   /** Builds and persists the classic 20-minute FTP test as an ordinary,
    *  plannable workout — see internal/fitnesstest for why this is the
    *  answer when there isn't enough synced data to estimate FTP from. */
