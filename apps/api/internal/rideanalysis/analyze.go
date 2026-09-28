@@ -100,6 +100,16 @@ type Analysis struct {
 	TSS             float64
 	DurationRatio   float64
 
+	// MaxHR and BestSpeed1200/BestSpeed1800 feed threshold detection
+	// (internal/thresholds): the ride's peak heart rate and its best 20-
+	// and 30-minute average speeds. All three are 0 when in.Activity is
+	// nil — there is no per-second stream to compute them from, the same
+	// reasoning that leaves PowerZoneSeconds/HRZoneSeconds/PowerCurve empty
+	// in that case.
+	MaxHR         int
+	BestSpeed1200 float64
+	BestSpeed1800 float64
+
 	PowerZoneSeconds [7]int
 	HRZoneSeconds    [5]int
 	PowerCurve       map[int]float64
@@ -533,6 +543,8 @@ func Analyze(in Input) Analysis {
 		a.PowerZoneSeconds = PowerZoneSeconds(samples, in.Profile.FTPWatts)
 		a.HRZoneSeconds = HRZoneSeconds(samples, in.Profile.MaxHR)
 		a.PowerCurve = PowerCurve(samples)
+		a.MaxHR = MaxHR(samples)
+		a.BestSpeed1200, a.BestSpeed1800 = BestSpeeds(samples)
 	} else {
 		// No FIT file decoded (never fetched, or the download/decode
 		// failed — spec: a Warn, the sync still succeeds with summary
