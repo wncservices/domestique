@@ -156,6 +156,34 @@ CREATE TABLE IF NOT EXISTS progression_levels (
 -- row per (rider, date), upserted on every fetch so a re-sync corrects a
 -- reading Connect had not finished processing yet rather than duplicating
 -- the day.
+-- threshold_suggestions holds internal/thresholds's non-auto findings — a
+-- detected FTP/max-HR/threshold-pace change for a field the rider has
+-- typed in themselves, which a sync never overwrites on its own (see
+-- AGENTS.md's "a rider-typed FTP is never changed by a sync, only
+-- suggested"). id is a random hex string (this package's schedule.newID
+-- shape), not a slug: there is no rider-chosen name to slugify, and two
+-- suggestions for the same rider/field over time are meant to keep their
+-- own distinct ids rather than colliding on one. At most one row per
+-- (rider, field) may be status='pending' at a time — enforced in Go
+-- (CreateSuggestion), not by a partial unique index, since SQLite and
+-- PostgreSQL spell "unique except when dismissed/accepted" differently and
+-- this table's write volume never justifies the engine doing that work.
+CREATE TABLE IF NOT EXISTS threshold_suggestions (
+    id                 TEXT PRIMARY KEY,
+    rider              TEXT NOT NULL,
+    field              TEXT NOT NULL,
+    value              DOUBLE PRECISION NOT NULL DEFAULT 0,
+    previous           DOUBLE PRECISION NOT NULL DEFAULT 0,
+    direction          TEXT NOT NULL DEFAULT 'up',
+    source_session_id  TEXT NOT NULL DEFAULT '',
+    source_date        TEXT NOT NULL DEFAULT '',
+    reason             TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'pending',
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS threshold_suggestions_rider_field_idx ON threshold_suggestions (rider, field, status);
+
 CREATE TABLE IF NOT EXISTS daily_wellness (
     rider            TEXT NOT NULL,
     date             TEXT NOT NULL,
@@ -210,6 +238,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addThresholdColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.addThresholdSuggestionDirectionColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
@@ -315,6 +346,27 @@ func (d *DB) addThresholdColumns() error {
 		return err
 	}
 	return nil
+}
+
+// addThresholdSuggestionDirectionColumn adds direction to a
+// threshold_suggestions table that predates it — the same "table exists,
+// column doesn't" situation addThresholdColumns already handles. Defaulting
+// to 'up' is correct for the near-totality of pre-existing rows (Auto
+// findings, which are always up-direction, were never stored here at all;
+// every stored suggestion up to this point came overwhelmingly from an up
+// finding), and safe even for the rare pre-migration down suggestion: it is
+// only briefly mis-scoped for the dismissed-suggestion gate, corrected the
+// next time that field produces a fresh finding.
+func (d *DB) addThresholdSuggestionDirectionColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE threshold_suggestions ADD COLUMN direction TEXT NOT NULL DEFAULT 'up'`)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
 }
 
 func (d *DB) query(q string) string { return d.dialect.Rebind(q) }

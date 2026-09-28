@@ -40,6 +40,13 @@ type syncMetricsResultDTO struct {
 	// on its own — from Garmin's biometrics or the rider's own history — so
 	// the UI can tell them what changed and ask them to check it.
 	AutoFilled []string `json:"autoFilled,omitempty"`
+	// Detected lists every threshold (FTP, max HR, threshold pace) this
+	// sync's own internal/thresholds.Detect pass applied straight to the
+	// profile — an Auto finding, for an empty or already-estimated field.
+	// See detectThresholds' own doc comment; a rider-typed field never
+	// appears here, it gets a stored suggestion instead (GET
+	// /api/training/thresholds).
+	Detected []detectedThresholdDTO `json:"detected,omitempty"`
 }
 
 // handleSyncTrainingMetrics is a rider's own "Sync now" click — a thin HTTP
@@ -331,8 +338,21 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
+
+	// Threshold detection (internal/thresholds): auto-applies to an empty or
+	// estimated field, stores a suggestion for a rider-typed one. Runs
+	// before the cruder EstimateFTP fallback below, whose own condition
+	// reads tdr.HasFTPPowerCurve to decide whether Detect already had
+	// something better to say about FTP.
+	tdr, err := s.detectThresholds(ctx, rider, profile, sessions, time.Now())
+	if err != nil {
+		return syncMetricsResultDTO{}, err
+	}
+	profile = tdr.Profile
+	autoFilled = append(autoFilled, tdr.AutoFields...)
+
 	history := autoprofile.Suggestion{}
-	if suggestion.FTPWatts == 0 {
+	if suggestion.FTPWatts == 0 && !tdr.HasFTPPowerCurve {
 		if watts, ok := fitnesstest.EstimateFTP(sessions); ok {
 			history.FTPWatts = watts
 		}
@@ -367,7 +387,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
 	return syncMetricsResultDTO{
 		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
-		AutoFilled: autoFilled,
+		AutoFilled: autoFilled, Detected: tdr.Detected,
 	}, nil
 }
 

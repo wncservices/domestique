@@ -978,6 +978,38 @@ export interface SyncMetricsResult {
   restingHrBpm?: number
   /** Every profile field this sync filled in or refreshed on its own. */
   autoFilled?: string[]
+  /** Every threshold (FTP, max HR, threshold pace) this sync's own
+   *  internal/thresholds.Detect pass applied straight to the profile — an
+   *  Auto finding, for an empty or already-estimated field. A rider-typed
+   *  field never appears here; it gets a stored suggestion instead (see
+   *  GET /api/training/thresholds). */
+  detected?: DetectedThreshold[]
+}
+
+/** One threshold internal/thresholds.Detect applied automatically during a
+ *  sync — what the sync toast lists ("FTP updated to 268 W from Saturday's
+ *  20-minute effort"). Mirrors internal/api's detectedThresholdDTO. */
+export interface DetectedThreshold {
+  field: 'ftp' | 'max_hr' | 'threshold_pace'
+  value: number
+  reason?: string
+}
+
+/** One pending threshold suggestion — a detected FTP/max-HR/threshold-pace
+ *  change for a field the rider has typed in themselves, which a sync never
+ *  overwrites on its own. Mirrors internal/api's thresholdSuggestionDTO. */
+export interface ThresholdSuggestion {
+  id: string
+  field: 'ftp' | 'max_hr' | 'threshold_pace'
+  value: number
+  previous?: number
+  direction: 'up' | 'down'
+  reason?: string
+  sourceDate?: string
+}
+
+export interface ThresholdSuggestionsResponse {
+  suggestions: ThresholdSuggestion[]
 }
 
 export type PeriodizationPhase = 'base' | 'build' | 'peak' | 'taper'

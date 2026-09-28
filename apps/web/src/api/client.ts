@@ -64,6 +64,8 @@ import type {
   FitnessResponse,
   GoalProposal,
   SyncMetricsResult,
+  ThresholdSuggestion,
+  ThresholdSuggestionsResponse,
   TrainingWeek,
   ProgressionLevel,
   SessionAnalysis,
@@ -739,6 +741,19 @@ export const api = {
    *  provider failing (not connected, a stale token) is reported in
    *  `warnings` rather than failing the whole call. */
   syncTrainingMetrics: () => request<SyncMetricsResult>('/api/training/sync', { method: 'POST' }),
+  /** A rider's own pending threshold suggestions — a detected FTP/max-HR/
+   *  threshold-pace change for a field they typed in themselves, which a
+   *  sync never overwrites on its own. */
+  thresholds: () => request<ThresholdSuggestionsResponse>('/api/training/thresholds'),
+  /** Accepts (writes the profile, clears the estimated flag) or dismisses a
+   *  pending suggestion. 404 for another rider's or an unknown id, 409 once
+   *  it is no longer pending. */
+  resolveThreshold: (id: string, action: 'accept' | 'dismiss') =>
+    request<ThresholdSuggestion>(`/api/training/thresholds/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    }),
   /** The rider's own CTL/ATL/TSB history plus the completed sessions it
    *  was computed from — read-only, reflects whatever syncTrainingMetrics
    *  last recorded. */

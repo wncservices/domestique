@@ -454,6 +454,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/workouts/{id}/fit", s.handleDownloadWorkoutFIT)
 	mux.HandleFunc("POST /api/training/workouts/{id}/push/garmin", s.handlePushWorkoutToGarmin)
 	mux.HandleFunc("POST /api/training/sync", s.handleSyncTrainingMetrics)
+	mux.HandleFunc("GET /api/training/thresholds", s.handleListThresholds)
+	mux.HandleFunc("POST /api/training/thresholds/{id}", s.handleResolveThreshold)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/progression", s.handleGetProgression)
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)

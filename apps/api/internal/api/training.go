@@ -690,7 +690,8 @@ func (s *Server) handleBuildMaxHRTest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) failTrainingLookup(w http.ResponseWriter, err error) {
-	if errors.Is(err, workout.ErrGoalNotFound) || errors.Is(err, workout.ErrWorkoutNotFound) {
+	if errors.Is(err, workout.ErrGoalNotFound) || errors.Is(err, workout.ErrWorkoutNotFound) ||
+		errors.Is(err, workout.ErrThresholdSuggestionNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
