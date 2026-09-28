@@ -47,6 +47,12 @@ type syncMetricsResultDTO struct {
 	// appears here, it gets a stored suggestion instead (GET
 	// /api/training/thresholds).
 	Detected []detectedThresholdDTO `json:"detected,omitempty"`
+	// LevelsRecalibrated is set only when this sync's FTP change lowered the
+	// rider's progression levels (see recalibrateLevelsForFTP) — the same
+	// shape the threshold-accept and profile-save responses carry, so the
+	// UI toasts one line for all three. Background syncs have nobody
+	// looking at a screen; the Progression card's Reason is what they see.
+	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
 }
 
 // handleSyncTrainingMetrics is a rider's own "Sync now" click — a thin HTTP
@@ -380,6 +386,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		restingHR = 0
 	}
 
+	var recalibrated *levelsRecalibratedDTO
 	if len(autoFilled) > 0 {
 		if _, err := s.Training.SaveProfile(ctx, profile); err != nil {
 			return syncMetricsResultDTO{}, err
@@ -390,8 +397,12 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		// of them go through the one helper. The profile write has already
 		// landed, so a failure here is logged rather than failing the sync.
 		if profile.FTPWatts != before.FTPWatts {
-			if _, _, err := s.recalibrateLevelsForFTP(ctx, rider, before); err != nil {
+			dto, changed, err := s.recalibrateLevelsForFTP(ctx, rider, before)
+			if err != nil {
 				s.logger().Error("level recalibration failed", "rider", rider, "err", err)
+			}
+			if changed {
+				recalibrated = &dto
 			}
 		}
 	}
@@ -399,7 +410,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
 	return syncMetricsResultDTO{
 		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
-		AutoFilled: autoFilled, Detected: tdr.Detected,
+		AutoFilled: autoFilled, Detected: tdr.Detected, LevelsRecalibrated: recalibrated,
 	}, nil
 }
 

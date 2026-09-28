@@ -31,6 +31,9 @@ type thresholdSuggestionDTO struct {
 	Direction  string `json:"direction"`
 	Reason     string `json:"reason,omitempty"`
 	SourceDate string `json:"sourceDate,omitempty"`
+	// LevelsRecalibrated is set only on the response to accepting an FTP
+	// suggestion that lowered the rider's progression levels.
+	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
 }
 
 func thresholdSuggestionDTOFrom(s workout.ThresholdSuggestion) thresholdSuggestionDTO {
@@ -329,6 +332,7 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	var recalibrated *levelsRecalibratedDTO
 	switch body.Action {
 	case "accept":
 		profile, _, err := s.Training.GetProfile(r.Context(), sug.Rider)
@@ -346,8 +350,12 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		if sug.Field == "ftp" {
 			// The accepted FTP is already stored; a failure to adjust
 			// levels is logged, not surfaced as a failed accept.
-			if _, _, err := s.recalibrateLevelsForFTP(r.Context(), sug.Rider, before); err != nil {
+			dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), sug.Rider, before)
+			if err != nil {
 				s.logger().Error("level recalibration failed", "rider", sug.Rider, "err", err)
+			}
+			if changed {
+				recalibrated = &dto
 			}
 		}
 		// The profile write above has already landed by the time a race
@@ -375,7 +383,9 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, thresholdSuggestionDTOFrom(updated))
+	out := thresholdSuggestionDTOFrom(updated)
+	out.LevelsRecalibrated = recalibrated
+	writeJSON(w, http.StatusOK, out)
 }
 
 // failThresholdResolveRace maps MarkSuggestionAccepted/MarkSuggestionDismissed
