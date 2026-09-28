@@ -166,6 +166,7 @@ func (s *Server) analyseNewSessions(
 
 		matched := rideanalysis.MatchPlanned(sess.Date, sess.Sport, summary.DurationSeconds, planned)
 		analysis := rideanalysis.Analyze(rideanalysis.Input{
+			Sport:    sess.Sport,
 			Activity: act,
 			Summary:  summary,
 			Planned:  matched,

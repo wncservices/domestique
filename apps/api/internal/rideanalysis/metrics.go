@@ -275,13 +275,46 @@ func HRZoneSeconds(s []Sample, maxHR int) [5]int {
 	return zones
 }
 
-func hrZoneIndex(pct float64) int {
-	for i, edge := range hrZoneEdges {
+func hrZoneIndex(pct float64) int { return zoneIndex(pct, hrZoneEdges) }
+
+func zoneIndex(pct float64, edges [4]float64) int {
+	for i, edge := range edges {
 		if pct < edge {
 			return i
 		}
 	}
-	return len(hrZoneEdges)
+	return len(edges)
+}
+
+// lthrZoneEdges are Friel's %LTHR zones collapsed to the five bands the
+// Fitness page shows (Z5a-c together, >= 100 %): a sample is in zone i when
+// it is below edge i, and in Z5 at or above the last. Keyed by sport, with
+// cycling the fallback. The same numbers as LTHR_CYCLING_EDGES /
+// LTHR_RUNNING_EDGES in apps/web/src/utils/fitnessMath.ts — a test pins them
+// together, because a ride's stored zone-seconds must mean the same "Z3" as
+// the list the page draws.
+var lthrZoneEdges = map[string][4]float64{
+	"cycling": {0.81, 0.90, 0.94, 1.00},
+	"running": {0.85, 0.90, 0.95, 1.00},
+}
+
+// HRZoneSecondsLTHR is HRZoneSeconds against threshold heart rate and the
+// sport's Friel edges, for a rider who has one. lthr <= 0 puts every second
+// in Z1, like HRZoneSeconds does for a missing max HR.
+func HRZoneSecondsLTHR(s []Sample, lthr int, sport string) [5]int {
+	edges, ok := lthrZoneEdges[sport]
+	if !ok {
+		edges = lthrZoneEdges["cycling"]
+	}
+	var zones [5]int
+	for _, sample := range s {
+		pct := 0.0
+		if lthr > 0 {
+			pct = sample.HeartRate / float64(lthr)
+		}
+		zones[zoneIndex(pct, edges)]++
+	}
+	return zones
 }
 
 // powerCurveWindows are the durations the Fitness page's power curve

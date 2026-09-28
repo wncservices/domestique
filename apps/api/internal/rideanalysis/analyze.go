@@ -85,6 +85,10 @@ type Input struct {
 	Summary  Summary
 	Planned  *workout.Workout
 	Profile  workout.RiderProfile
+	// Sport is the ride's sport ("cycling" | "running"), which picks the
+	// %LTHR edges HRZoneSeconds is counted against when the rider has a
+	// threshold heart rate. Empty falls back to the cycling table.
+	Sport string
 }
 
 // Analysis is the result of scoring one ride: its own metrics (independent
@@ -542,7 +546,14 @@ func Analyze(in Input) Analysis {
 			a.IntensityFactor, a.TSS = PowerTSS(len(samples), a.NormalizedPower, in.Profile.FTPWatts)
 		}
 		a.PowerZoneSeconds = PowerZoneSeconds(samples, in.Profile.FTPWatts)
-		a.HRZoneSeconds = HRZoneSeconds(samples, in.Profile.MaxHR)
+		// One basis for the stored time-in-zone, chosen once: threshold HR
+		// with the sport's Friel edges when the rider has one, else max HR.
+		// It must match the basis the Fitness page's zone list draws.
+		if in.Profile.ThresholdHR > 0 {
+			a.HRZoneSeconds = HRZoneSecondsLTHR(samples, in.Profile.ThresholdHR, in.Sport)
+		} else {
+			a.HRZoneSeconds = HRZoneSeconds(samples, in.Profile.MaxHR)
+		}
 		a.PowerCurve = PowerCurve(samples)
 		a.MaxHR = MaxHR(samples)
 		a.BestHR1200 = BestHR(samples)

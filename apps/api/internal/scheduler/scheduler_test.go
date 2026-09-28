@@ -610,3 +610,34 @@ func abs(n int) int {
 	}
 	return n
 }
+
+func TestEnduranceZoneTargetUsesFrielZone2WhenThresholdHRKnown(t *testing.T) {
+	cases := []struct {
+		name              string
+		sport             model.Sport
+		profile           workout.RiderProfile
+		wantLow, wantHigh float64
+	}{
+		{"cycling LTHR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160}, 160 * 0.81, 160 * 0.89},
+		{"running LTHR", model.SportRunning, workout.RiderProfile{ThresholdHR: 160}, 160 * 0.85, 160 * 0.89},
+		{"LTHR wins over max HR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160, MaxHR: 190}, 160 * 0.81, 160 * 0.89},
+		{"high capped at max HR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160, MaxHR: 140}, 160 * 0.81, 140},
+		{"both ends capped at max HR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160, MaxHR: 120}, 120, 120},
+	}
+	for _, c := range cases {
+		tt, low, high := enduranceZoneTarget(c.sport, c.profile)
+		if tt != workout.TargetHeartRate || math.Abs(low-c.wantLow) > 1e-9 || math.Abs(high-c.wantHigh) > 1e-9 {
+			t.Errorf("%s: got %v [%v, %v], want heart_rate [%v, %v]", c.name, tt, low, high, c.wantLow, c.wantHigh)
+		}
+	}
+}
+
+func TestEnduranceZoneTargetWithOnlyMaxHRIsUnchanged(t *testing.T) {
+	tt, low, high := enduranceZoneTarget(model.SportCycling, workout.RiderProfile{MaxHR: 180})
+	if tt != workout.TargetHeartRate || math.Abs(low-180*0.60) > 1e-9 || math.Abs(high-180*0.75) > 1e-9 {
+		t.Errorf("got %v [%v, %v], want heart_rate 60-75%% of max HR", tt, low, high)
+	}
+	if tt, low, high := enduranceZoneTarget(model.SportCycling, workout.RiderProfile{FTPWatts: 200, ThresholdHR: 160}); tt != workout.TargetPower || math.Abs(low-110) > 1e-9 || math.Abs(high-150) > 1e-9 {
+		t.Errorf("FTP still wins: got %v [%v, %v]", tt, low, high)
+	}
+}
