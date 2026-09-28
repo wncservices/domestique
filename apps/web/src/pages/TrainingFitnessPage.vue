@@ -201,6 +201,9 @@ async function syncMetrics() {
     }
     await loadFitness()
     if (result.autoFilled?.length) await loadProfile()
+    // The sync also refreshes daily_wellness (internal/api/wellnesssync.go),
+    // so the Recovery card needs a reload too, not just the fitness history.
+    await loadReadiness()
   } catch (err) {
     toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {

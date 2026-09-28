@@ -30,8 +30,12 @@ function titleCase(s: string): string {
 }
 
 function formatSleepDuration(seconds: number): string {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.round((seconds % 3600) / 60)
+  // Round to whole minutes first, then split into hours/minutes — rounding
+  // the hour and minute remainder separately can carry a rounded-up minute
+  // past 59 (3599s -> 0h60 instead of 1h00).
+  const totalMinutes = Math.round(seconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
   return `${hours}h${String(minutes).padStart(2, '0')}`
 }
 
