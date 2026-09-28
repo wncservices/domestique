@@ -10,7 +10,7 @@
 // Still no Wahoo structured-workout push — it needs a further-gated
 // partner entitlement this deployment does not have; see the plan doc's
 // own "Structured workouts and the providers".
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
@@ -437,6 +437,29 @@ const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && prof
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
 const today = computed(() => (isCurrentWeek.value ? week.value?.days.find((d) => d.date === week.value!.today) : undefined))
+
+// A session picked in the week strip, shown in the day card instead of
+// today's. Kept as ids, not objects: the week reloads after every edit/move,
+// and a held WeekDay would go stale. A pick that isn't in the displayed week
+// any more (the rider browsed away) simply falls back to today.
+const selectedDate = ref<string | null>(null)
+const selectedWorkoutId = ref<string | null>(null)
+const selectedDay = computed(() => (selectedDate.value ? week.value?.days.find((d) => d.date === selectedDate.value) : undefined))
+const cardDay = computed(() => selectedDay.value ?? today.value)
+const cardIsToday = computed(() => !selectedDay.value || selectedDay.value.date === week.value?.today)
+const dayCardEl = useTemplateRef<HTMLElement>('dayCardEl')
+
+function selectWorkout(w: Workout, date: string) {
+  selectedDate.value = date
+  selectedWorkoutId.value = w.id
+  // On a phone the card sits a screen above the strip; bring it into view.
+  nextTick(() => dayCardEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+}
+
+function backToToday() {
+  selectedDate.value = null
+  selectedWorkoutId.value = null
+}
 const yesterday = computed(() => {
   if (!isCurrentWeek.value || !week.value) return undefined
   const index = week.value.days.findIndex((d) => d.date === week.value!.today)
@@ -478,20 +501,24 @@ onMounted(() => {
         @select-goal="selectGoal"
       />
 
-      <TodayCard
-        v-if="week && isCurrentWeek"
-        :day="today"
-        :yesterday="yesterday"
-        :profile="profile"
-        :can-sync-garmin="canSyncGarmin"
-        :pushing="pushingWorkout"
-        :readiness-verdict="readiness?.today.verdict"
-        :readiness-reasons="readiness?.today.reasons"
-        @push="pushWorkoutToGarmin"
-        @edit="openEditWorkout"
-        @move="moveWorkout"
-        @rated="loadWeek"
-      />
+      <div v-if="week && (isCurrentWeek || selectedDay)" ref="dayCardEl" class="scroll-mt-4">
+        <TodayCard
+          :day="cardDay"
+          :is-today="cardIsToday"
+          :selected-workout-id="selectedWorkoutId ?? undefined"
+          :yesterday="yesterday"
+          :profile="profile"
+          :can-sync-garmin="canSyncGarmin"
+          :pushing="pushingWorkout"
+          :readiness-verdict="readiness?.today.verdict"
+          :readiness-reasons="readiness?.today.reasons"
+          @push="pushWorkoutToGarmin"
+          @edit="openEditWorkout"
+          @move="moveWorkout"
+          @rated="loadWeek"
+          @back-to-today="backToToday"
+        />
+      </div>
 
       <WeekStrip
         v-if="week"
@@ -503,7 +530,8 @@ onMounted(() => {
         @next="nextWeek"
         @this-week="thisWeek"
         @move="moveWorkout"
-        @open="openEditWorkout"
+        :selected-workout-id="selectedWorkoutId ?? undefined"
+        @select="selectWorkout"
         @fill="fillWeek"
         @rated="loadWeek"
         @replan="openReplanConfirm"
