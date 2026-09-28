@@ -326,3 +326,67 @@ func bestRollingMean(power []float64, window int) float64 {
 	}
 	return best
 }
+
+// maxHRSpikeThreshold is the highest heart-rate reading MaxHR treats as
+// real. A chest strap or optical sensor occasionally reports a brief,
+// physiologically impossible spike (a loose strap, a cadence-lock glitch);
+// see the design spec's Data section and AGENTS.md's "Sensor spikes /
+// a single weird ride" review focus — max HR must not be that spike.
+const maxHRSpikeThreshold = 230
+
+// MaxHR returns the highest heart-rate sample among samples that carry a
+// reading, ignoring any above maxHRSpikeThreshold — 0 when no sample has HR
+// data at all (never a real ride's own 0 bpm).
+func MaxHR(s []Sample) int {
+	max := 0
+	for _, sample := range s {
+		if !sample.HasHR || sample.HeartRate > maxHRSpikeThreshold {
+			continue
+		}
+		if hr := int(sample.HeartRate); hr > max {
+			max = hr
+		}
+	}
+	return max
+}
+
+// speedCurveWindows are the two windows the threshold-detection design
+// needs a best average speed for: 20 and 30 minutes, the same running-pace
+// windows a rider's threshold pace is judged against — see docs/superpowers/
+// specs/2026-09-28-threshold-detection-design.md's Data section.
+const (
+	speedWindow1200Seconds = 1200
+	speedWindow1800Seconds = 1800
+)
+
+// BestSpeeds returns the best 20- and 30-minute average speeds (m/s),
+// reusing PowerCurve's own bestRollingMean helper rather than a second
+// rolling-average implementation. Either return is 0 when the ride has no
+// speed data at all, or is shorter than that window — a window longer than
+// the ride has no meaningful best average, the same reasoning PowerCurve
+// gives for leaving a too-long window out of its map entirely.
+func BestSpeeds(s []Sample) (best1200, best1800 float64) {
+	hasSpeed := false
+	for _, sample := range s {
+		if sample.HasSpeed {
+			hasSpeed = true
+			break
+		}
+	}
+	if !hasSpeed {
+		return 0, 0
+	}
+
+	speed := make([]float64, len(s))
+	for i, sample := range s {
+		speed[i] = sample.Speed
+	}
+
+	if len(speed) >= speedWindow1200Seconds {
+		best1200 = bestRollingMean(speed, speedWindow1200Seconds)
+	}
+	if len(speed) >= speedWindow1800Seconds {
+		best1800 = bestRollingMean(speed, speedWindow1800Seconds)
+	}
+	return best1200, best1800
+}

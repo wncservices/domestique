@@ -26,6 +26,15 @@ type SessionAnalysis struct {
 	TSS             float64
 	DurationRatio   float64
 
+	// MaxHR and BestSpeed1200/BestSpeed1800 mirror rideanalysis.Analysis's
+	// own fields of the same name — the ride's peak heart rate and best
+	// 20-/30-minute average speeds, threshold detection's raw material. See
+	// that package's own doc comment for why they are 0 for a ride with no
+	// decoded FIT activity.
+	MaxHR         int
+	BestSpeed1200 float64
+	BestSpeed1800 float64
+
 	PowerZoneSeconds []int
 	HRZoneSeconds    []int
 	PowerCurve       map[string]float64
@@ -105,18 +114,23 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO session_analyses (session_id, rider, workout_id, outcome, load_source,
                     normalized_power, intensity_factor, tss, duration_ratio,
+                    max_hr, best_speed_1200, best_speed_1800,
                     power_zone_seconds, hr_zone_seconds, power_curve, steps,
                     feel, level_delta, analysed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (session_id) DO UPDATE SET
             rider = excluded.rider, workout_id = excluded.workout_id, outcome = excluded.outcome,
             load_source = excluded.load_source, normalized_power = excluded.normalized_power,
             intensity_factor = excluded.intensity_factor, tss = excluded.tss,
-            duration_ratio = excluded.duration_ratio, power_zone_seconds = excluded.power_zone_seconds,
+            duration_ratio = excluded.duration_ratio,
+            max_hr = excluded.max_hr, best_speed_1200 = excluded.best_speed_1200,
+            best_speed_1800 = excluded.best_speed_1800,
+            power_zone_seconds = excluded.power_zone_seconds,
             hr_zone_seconds = excluded.hr_zone_seconds, power_curve = excluded.power_curve,
             steps = excluded.steps, analysed_at = excluded.analysed_at`),
 		a.SessionID, rider, a.WorkoutID, a.Outcome, a.LoadSource,
 		a.NormalizedPower, a.IntensityFactor, a.TSS, a.DurationRatio,
+		a.MaxHR, a.BestSpeed1200, a.BestSpeed1800,
 		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, analysedAt)
 	return err
 }
@@ -128,6 +142,7 @@ func (d *DB) GetAnalysis(ctx context.Context, sessionID string) (SessionAnalysis
 	row := d.db.QueryRowContext(ctx, d.query(`
         SELECT session_id, rider, workout_id, outcome, load_source,
                normalized_power, intensity_factor, tss, duration_ratio,
+               max_hr, best_speed_1200, best_speed_1800,
                power_zone_seconds, hr_zone_seconds, power_curve, steps,
                feel, level_delta, analysed_at
         FROM session_analyses WHERE session_id = ?`), sessionID)
@@ -149,6 +164,7 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT a.session_id, a.rider, a.workout_id, a.outcome, a.load_source,
                a.normalized_power, a.intensity_factor, a.tss, a.duration_ratio,
+               a.max_hr, a.best_speed_1200, a.best_speed_1800,
                a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps,
                a.feel, a.level_delta, a.analysed_at
         FROM session_analyses a
@@ -180,6 +196,7 @@ func scanAnalysis(row rowScanner) (SessionAnalysis, error) {
 	)
 	if err := row.Scan(&a.SessionID, &a.Rider, &a.WorkoutID, &a.Outcome, &a.LoadSource,
 		&a.NormalizedPower, &a.IntensityFactor, &a.TSS, &a.DurationRatio,
+		&a.MaxHR, &a.BestSpeed1200, &a.BestSpeed1800,
 		&powerZones, &hrZones, &powerCurve, &steps,
 		&a.Feel, &a.LevelDelta, &a.AnalysedAt); err != nil {
 		return SessionAnalysis{}, err

@@ -125,3 +125,13 @@ func alternatingPower(totalSeconds, blockSeconds, highWatts, lowWatts int) []fix
 	}
 	return out
 }
+
+// constantSpeed returns one fixture per second, 0..seconds-1, all at the
+// same speed (m/s) with no power or HR recorded.
+func constantSpeed(seconds int, metersPerSecond float64) []fixture {
+	out := make([]fixture, seconds)
+	for i := 0; i < seconds; i++ {
+		out[i] = fixture{Sec: i, Speed: metersPerSecond}
+	}
+	return out
+}

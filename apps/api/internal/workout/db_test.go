@@ -504,6 +504,7 @@ func TestEachEngine(t *testing.T) {
 					SessionID: session.ID, Rider: "Wilant", WorkoutID: "threshold-6x3",
 					Outcome: "struggled", LoadSource: "power",
 					NormalizedPower: 245.5, IntensityFactor: 0.98, TSS: 92.3, DurationRatio: 1.02,
+					MaxHR: 178, BestSpeed1200: 4.2, BestSpeed1800: 3.9,
 					PowerZoneSeconds: []int{100, 200, 900, 1200, 800, 400},
 					HRZoneSeconds:    []int{300, 600, 1500, 900, 300},
 					PowerCurve:       map[string]float64{"5": 550, "60": 400, "300": 260, "1200": 230},
@@ -531,6 +532,10 @@ func TestEachEngine(t *testing.T) {
 					fetched.TSS != analysis.TSS || fetched.DurationRatio != analysis.DurationRatio {
 					t.Errorf("fetched numbers = %+v, want %+v", fetched, analysis)
 				}
+				if fetched.MaxHR != analysis.MaxHR || fetched.BestSpeed1200 != analysis.BestSpeed1200 ||
+					fetched.BestSpeed1800 != analysis.BestSpeed1800 {
+					t.Errorf("fetched threshold fields = %+v, want %+v", fetched, analysis)
+				}
 				if len(fetched.PowerZoneSeconds) != 6 || fetched.PowerZoneSeconds[2] != 900 {
 					t.Errorf("power zone seconds = %v", fetched.PowerZoneSeconds)
 				}
@@ -550,15 +555,23 @@ func TestEachEngine(t *testing.T) {
 					t.Error("analysed_at was not stamped")
 				}
 
-				// Upsert replaces rather than accumulating a second row.
+				// Upsert replaces rather than accumulating a second row —
+				// and, unlike feel/level_delta, max_hr/best_speed_* update
+				// on conflict: a re-analysis reports a new peak/best speed,
+				// there is no prior rider input here to preserve.
 				analysis.Outcome = "nailed_it"
 				analysis.TSS = 95
+				analysis.MaxHR = 182
+				analysis.BestSpeed1200 = 4.5
 				if err := db.SaveAnalysis(ctx, analysis); err != nil {
 					t.Fatalf("re-save analysis: %v", err)
 				}
 				replaced, ok, err := db.GetAnalysis(ctx, session.ID)
 				if err != nil || !ok || replaced.Outcome != "nailed_it" || replaced.TSS != 95 {
 					t.Fatalf("replaced = %+v, ok=%v, err=%v, want outcome nailed_it tss 95", replaced, ok, err)
+				}
+				if replaced.MaxHR != 182 || replaced.BestSpeed1200 != 4.5 {
+					t.Errorf("replaced threshold fields = %+v, want max_hr 182 best_speed_1200 4.5", replaced)
 				}
 
 				otherSession, err := db.UpsertSession(ctx, UpsertSessionRequest{
@@ -700,6 +713,85 @@ VALUES ('old-workout', 'wilant', 'cycling', 'Old Session', '', '', '', '[]', '20
 	}
 	if created.Zone != ZoneThreshold || created.Level != 3 {
 		t.Errorf("created zone/level = %q/%v", created.Zone, created.Level)
+	}
+
+	// UseDB must also be idempotent — a second call against an
+	// already-migrated database (a second process startup) must not error.
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
+	}
+}
+
+// TestSessionAnalysesTableGainsThresholdColumns simulates a database created
+// before max_hr/best_speed_1200/best_speed_1800 existed — the same
+// "predates the column" situation TestWorkoutsTableGainsZoneAndLevelColumns
+// already covers for workouts — and checks UseDB adds them rather than
+// requiring a fresh database.
+func TestSessionAnalysesTableGainsThresholdColumns(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	// The pre-migration shape of session_analyses, minus the threshold
+	// columns and (to match how far back this table could predate them)
+	// feel/level_delta too.
+	if _, err := src.Conn().Exec(`
+CREATE TABLE session_analyses (
+    session_id          TEXT PRIMARY KEY,
+    rider                TEXT NOT NULL,
+    workout_id           TEXT NOT NULL DEFAULT '',
+    outcome              TEXT NOT NULL DEFAULT '',
+    load_source          TEXT NOT NULL DEFAULT '',
+    normalized_power     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    intensity_factor     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    tss                  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    duration_ratio       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    power_zone_seconds   TEXT NOT NULL DEFAULT '',
+    hr_zone_seconds      TEXT NOT NULL DEFAULT '',
+    power_curve          TEXT NOT NULL DEFAULT '',
+    steps                TEXT NOT NULL DEFAULT '',
+    analysed_at          TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`
+INSERT INTO session_analyses (session_id, rider, workout_id, outcome, load_source,
+            normalized_power, intensity_factor, tss, duration_ratio,
+            power_zone_seconds, hr_zone_seconds, power_curve, steps, analysed_at)
+VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
+        200, 0.9, 80, 1, '', '', '', '', '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+
+	old, ok, err := db.GetAnalysis(t.Context(), "garmin:old-ride")
+	if err != nil || !ok {
+		t.Fatalf("get pre-existing row after migration: ok=%v err=%v", ok, err)
+	}
+	if old.MaxHR != 0 || old.BestSpeed1200 != 0 || old.BestSpeed1800 != 0 {
+		t.Errorf("pre-existing row threshold fields = %+v, want all zero", old)
+	}
+
+	// The migration must also leave the store usable for a fresh analysis
+	// carrying real threshold values, not just tolerate the old row.
+	if err := db.SaveAnalysis(t.Context(), SessionAnalysis{
+		SessionID: "garmin:new-ride", Rider: "wilant", Outcome: "completed",
+		MaxHR: 175, BestSpeed1200: 4.1, BestSpeed1800: 3.8,
+	}); err != nil {
+		t.Fatalf("save analysis after migration: %v", err)
+	}
+	saved, ok, err := db.GetAnalysis(t.Context(), "garmin:new-ride")
+	if err != nil || !ok {
+		t.Fatalf("get new row after migration: ok=%v err=%v", ok, err)
+	}
+	if saved.MaxHR != 175 || saved.BestSpeed1200 != 4.1 || saved.BestSpeed1800 != 3.8 {
+		t.Errorf("saved threshold fields = %+v, want 175/4.1/3.8", saved)
 	}
 
 	// UseDB must also be idempotent — a second call against an

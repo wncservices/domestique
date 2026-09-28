@@ -121,6 +121,9 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     intensity_factor     DOUBLE PRECISION NOT NULL DEFAULT 0,
     tss                  DOUBLE PRECISION NOT NULL DEFAULT 0,
     duration_ratio       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_hr               INTEGER NOT NULL DEFAULT 0,
+    best_speed_1200      DOUBLE PRECISION NOT NULL DEFAULT 0,
+    best_speed_1800      DOUBLE PRECISION NOT NULL DEFAULT 0,
     power_zone_seconds   TEXT NOT NULL DEFAULT '',
     hr_zone_seconds      TEXT NOT NULL DEFAULT '',
     power_curve          TEXT NOT NULL DEFAULT '',
@@ -206,6 +209,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addAnalysisFeelColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addThresholdColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	return store, nil
 }
 
@@ -270,6 +276,33 @@ func (d *DB) addAnalysisFeelColumns() error {
 	for _, stmt := range []string{
 		`ALTER TABLE session_analyses ADD COLUMN feel INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_analyses ADD COLUMN level_delta DOUBLE PRECISION NOT NULL DEFAULT 0`,
+	} {
+		_, err := d.db.Exec(stmt)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+// addThresholdColumns adds max_hr/best_speed_1200/best_speed_1800 to a
+// session_analyses table that predates them — the same "table exists,
+// column doesn't" situation addAnalysisFeelColumns already handles.
+// Defaulting to 0 is correct for every pre-existing row: a ride analysed
+// before threshold detection existed never had these computed, and 0 is
+// exactly what rideanalysis reports for a ride with no HR/speed data, so a
+// re-analysis (the same 42-day window this feature already sweeps) is what
+// backfills them rather than a data migration.
+func (d *DB) addThresholdColumns() error {
+	for _, stmt := range []string{
+		`ALTER TABLE session_analyses ADD COLUMN max_hr INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE session_analyses ADD COLUMN best_speed_1200 DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		`ALTER TABLE session_analyses ADD COLUMN best_speed_1800 DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {

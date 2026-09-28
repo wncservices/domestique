@@ -223,3 +223,67 @@ func TestPowerCurveOnTenMinuteRideHasOnlyShorterKeys(t *testing.T) {
 		t.Errorf("power curve = %v, want 200 for every window on constant power", curve)
 	}
 }
+
+func TestMaxHRIgnoresSpikeAbove230(t *testing.T) {
+	fixtures := constantHR(60, 150)
+	fixtures = append(fixtures, fixture{Sec: 60, HR: 195})
+	fixtures = append(fixtures, fixture{Sec: 61, HR: 250}) // sensor spike, ignored
+	act := buildActivity(t, fixtures, nil)
+	samples := Resample(act.Records)
+
+	if got := MaxHR(samples); got != 195 {
+		t.Errorf("MaxHR = %d, want 195 (250 bpm spike ignored)", got)
+	}
+}
+
+func TestMaxHRZeroWithNoHRData(t *testing.T) {
+	act := buildActivity(t, constantPower(60, 200), nil)
+	samples := Resample(act.Records)
+
+	if got := MaxHR(samples); got != 0 {
+		t.Errorf("MaxHR = %d, want 0 with no HR data", got)
+	}
+}
+
+func TestBestSpeedsOnConstantSpeedRide(t *testing.T) {
+	act := buildActivity(t, constantSpeed(2000, 8.0), nil)
+	samples := Resample(act.Records)
+
+	best1200, best1800 := BestSpeeds(samples)
+	if math.Abs(best1200-8.0) > 0.01 || math.Abs(best1800-8.0) > 0.01 {
+		t.Errorf("BestSpeeds = (%v, %v), want (8, 8) on constant-speed ride", best1200, best1800)
+	}
+}
+
+func TestBestSpeedsOnlyLongerThan20MinuteWindowGetsThatOne(t *testing.T) {
+	act := buildActivity(t, constantSpeed(1500, 8.0), nil)
+	samples := Resample(act.Records)
+
+	best1200, best1800 := BestSpeeds(samples)
+	if math.Abs(best1200-8.0) > 0.01 {
+		t.Errorf("best1200 = %v, want 8 on a 1500 s ride", best1200)
+	}
+	if best1800 != 0 {
+		t.Errorf("best1800 = %v, want 0 on a ride shorter than 30 minutes", best1800)
+	}
+}
+
+func TestBestSpeedsZeroWhenRideShorterThanEitherWindow(t *testing.T) {
+	act := buildActivity(t, constantSpeed(1000, 8.0), nil)
+	samples := Resample(act.Records)
+
+	best1200, best1800 := BestSpeeds(samples)
+	if best1200 != 0 || best1800 != 0 {
+		t.Errorf("BestSpeeds = (%v, %v), want (0, 0) on a ride shorter than either window", best1200, best1800)
+	}
+}
+
+func TestBestSpeedsZeroWithNoSpeedData(t *testing.T) {
+	act := buildActivity(t, constantPower(2000, 200), nil)
+	samples := Resample(act.Records)
+
+	best1200, best1800 := BestSpeeds(samples)
+	if best1200 != 0 || best1800 != 0 {
+		t.Errorf("BestSpeeds = (%v, %v), want (0, 0) with no speed data", best1200, best1800)
+	}
+}
