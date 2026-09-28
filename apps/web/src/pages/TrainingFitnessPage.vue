@@ -8,12 +8,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { FitnessResponse, Me, ProgressionLevel, RiderProfile } from '@/api/types'
+import type { DailyWellnessDTO, FitnessResponse, Me, ProgressionLevel, RiderProfile } from '@/api/types'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
+import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
 import SaveBar from '@/components/fitness/SaveBar.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
@@ -200,6 +201,9 @@ async function syncMetrics() {
     }
     await loadFitness()
     if (result.autoFilled?.length) await loadProfile()
+    // The sync also refreshes daily_wellness (internal/api/wellnesssync.go),
+    // so the Recovery card needs a reload too, not just the fitness history.
+    await loadReadiness()
   } catch (err) {
     toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -227,11 +231,26 @@ async function loadProgression() {
   }
 }
 
+// --- readiness (Task 4): the Recovery card's last 7 days. Optional, same
+// as the Plan page's chip — a failure just hides the card. ---
+
+const recoveryDays = ref<DailyWellnessDTO[]>([])
+
+async function loadReadiness() {
+  try {
+    const result = await api.readiness()
+    recoveryDays.value = result.days
+  } catch {
+    recoveryDays.value = []
+  }
+}
+
 onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
   loadProfile()
   loadFitness()
   loadProgression()
+  loadReadiness()
 })
 </script>
 
@@ -246,6 +265,8 @@ onMounted(() => {
     />
 
     <ProgressionCard :levels="progressionLevels" />
+
+    <RecoveryCard :days="recoveryDays" />
 
     <UCard v-if="hasFitnessHistory" variant="outline">
       <template #header>

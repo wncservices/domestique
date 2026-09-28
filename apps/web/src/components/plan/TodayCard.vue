@@ -5,11 +5,12 @@
 // (TrainingPlanPage.vue looks up `day`/`yesterday` from `week.today`).
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
-import type { RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
+import type { ReadinessVerdict, RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import FeelRating from './FeelRating.vue'
 import OutcomeChip from './OutcomeChip.vue'
+import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
@@ -20,6 +21,11 @@ const props = defineProps<{
   profile: RiderProfile
   canSyncGarmin: boolean
   pushing: string
+  // Absent whenever the readiness API failed, or returned no today
+  // assessment (readiness is an optional enhancement, never a hard
+  // dependency of the plan) — the chip simply doesn't render.
+  readinessVerdict?: ReadinessVerdict
+  readinessReasons?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -143,7 +149,10 @@ function onRated(analysis: SessionAnalysis) {
     </UAlert>
 
     <UCard variant="outline">
-      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ eyebrow }}</p>
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ eyebrow }}</p>
+        <ReadinessChip v-if="readinessVerdict" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
+      </div>
 
       <template v-if="day">
         <!-- Done -->

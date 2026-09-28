@@ -23,10 +23,12 @@ device and workouts appear — sits on top. Where the code lives:
 | Fitness page: form status (intervals.icu TSB bands), chart ranges, training zones | `apps/web/src/utils/fitnessMath.ts`, `apps/web/src/components/fitness/`; Plan is the default Training tab |
 | Ride analysis (FIT from Garmin/Wahoo, outcomes) | `internal/rideanalysis`, `internal/api/rideanalysis.go`, `workout.session_analyses` |
 | Progression levels (per-zone rider level, workout library at that level, struggled-zone step-down) | `internal/progression`, `internal/workoutlib`, `progression_levels` table, `GET /api/training/progression`, `PUT /api/training/sessions/{id}/feel` |
+| Daily readiness (HRV, sleep, resting HR, load → ready/caution/rest) | `internal/readiness`, `daily_wellness` table, `garmin.Client.Wellness`, `GET /api/training/readiness` |
 
 For where outcome-driven adaptation goes from here, see
 `docs/superpowers/specs/2026-09-27-training-adaptation-design.md`. For the progression-levels
-design itself, see `docs/superpowers/specs/2026-09-27-progression-levels-design.md`.
+design itself, see `docs/superpowers/specs/2026-09-27-progression-levels-design.md`. For the
+readiness design itself, see `docs/superpowers/specs/2026-09-28-readiness-design.md`.
 
 **How it runs unattended.** One loop (`RunAutoScheduleLoop`, every 30 minutes, behind the
 admin's `auto_schedule` flag, under one advisory lock) does, in order: sync every connected
