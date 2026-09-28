@@ -205,14 +205,14 @@ func TestEachEngine(t *testing.T) {
 				}
 
 				saved, err := db.SaveProfile(ctx, RiderProfile{
-					Rider: "Wilant", FTPWatts: 280, MaxHR: 185, RestingHR: 48,
+					Rider: "Wilant", FTPWatts: 280, MaxHR: 185, ThresholdHR: 166, RestingHR: 48,
 					AvailableDays: []string{"tue", "thu", "sat", "sun"}, HoursPerAvailableDay: 1.5,
 					ExperienceLevel: "intermediate",
 				})
 				if err != nil {
 					t.Fatalf("save profile: %v", err)
 				}
-				if saved.Rider != "wilant" || saved.FTPWatts != 280 {
+				if saved.Rider != "wilant" || saved.FTPWatts != 280 || saved.ThresholdHR != 166 {
 					t.Errorf("saved = %+v", saved)
 				}
 				if len(saved.AvailableDays) != 4 {
@@ -816,5 +816,56 @@ func TestValidateStepDepth(t *testing.T) {
 	}
 	if err := validateSteps(nest(maxStepDepth + 1)); err == nil {
 		t.Errorf("depth %d should be rejected", maxStepDepth+1)
+	}
+}
+
+// TestRiderProfilesTableGainsThresholdHR simulates a database created before
+// rider_profiles.threshold_hr existed and checks UseDB adds it (defaulting to
+// 0, "unset") rather than requiring a fresh database, and is idempotent.
+func TestRiderProfilesTableGainsThresholdHR(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	if _, err := src.Conn().Exec(`
+CREATE TABLE rider_profiles (
+    rider                      TEXT PRIMARY KEY,
+    ftp_watts                  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ftp_estimated              INTEGER NOT NULL DEFAULT 0,
+    estimated_fields           TEXT NOT NULL DEFAULT '',
+    auto_push_workouts         INTEGER NOT NULL DEFAULT 0,
+    threshold_pace_sec_per_km  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_hr                     INTEGER NOT NULL DEFAULT 0,
+    resting_hr                 INTEGER NOT NULL DEFAULT 0,
+    available_days             TEXT NOT NULL DEFAULT '',
+    hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    experience_level           TEXT NOT NULL DEFAULT '',
+    updated_at                 TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`INSERT INTO rider_profiles (rider, max_hr, updated_at) VALUES ('wilant', 190, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+	old, ok, err := db.GetProfile(t.Context(), "wilant")
+	if err != nil || !ok {
+		t.Fatalf("get pre-existing row: ok=%v err=%v", ok, err)
+	}
+	if old.MaxHR != 190 || old.ThresholdHR != 0 {
+		t.Errorf("pre-existing row = %+v, want max_hr 190 and threshold_hr 0", old)
+	}
+	saved, err := db.SaveProfile(t.Context(), RiderProfile{Rider: "wilant", MaxHR: 190, ThresholdHR: 165})
+	if err != nil || saved.ThresholdHR != 165 {
+		t.Fatalf("save after migration = %+v, err=%v, want threshold_hr 165", saved, err)
+	}
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
 	}
 }

@@ -773,6 +773,8 @@ export interface RiderProfile {
   ftpEstimated?: boolean
   thresholdPaceSecPerKm?: number
   maxHr?: number
+  /** Lactate threshold heart rate (LTHR) — the anchor for HR zones when known. */
+  thresholdHr?: number
   restingHr?: number
   /** Lowercase three-letter weekday abbreviations, e.g. ["tue","thu","sat","sun"]. */
   availableDays?: string[]
@@ -784,7 +786,7 @@ export interface RiderProfile {
   /** Fields (other than FTP, which has ftpEstimated) that were filled in
    *  automatically — from Garmin's own biometrics or the rider's recent
    *  training — and not yet confirmed. Names match internal/workout's Field*
-   *  constants: max_hr, threshold_pace, resting_hr, available_days,
+   *  constants: max_hr, threshold_pace, threshold_hr, resting_hr, available_days,
    *  hours_per_available_day, experience_level. Output only. */
   estimated?: string[]
   updatedAt?: string
@@ -990,7 +992,7 @@ export interface SyncMetricsResult {
  *  sync — what the sync toast lists ("FTP updated to 268 W from Saturday's
  *  20-minute effort"). Mirrors internal/api's detectedThresholdDTO. */
 export interface DetectedThreshold {
-  field: 'ftp' | 'max_hr' | 'threshold_pace'
+  field: 'ftp' | 'max_hr' | 'threshold_pace' | 'threshold_hr'
   value: number
   reason?: string
 }
@@ -1000,7 +1002,7 @@ export interface DetectedThreshold {
  *  overwrites on its own. Mirrors internal/api's thresholdSuggestionDTO. */
 export interface ThresholdSuggestion {
   id: string
-  field: 'ftp' | 'max_hr' | 'threshold_pace'
+  field: 'ftp' | 'max_hr' | 'threshold_pace' | 'threshold_hr'
   value: number
   previous?: number
   direction: 'up' | 'down'

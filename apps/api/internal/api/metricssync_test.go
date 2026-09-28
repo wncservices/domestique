@@ -558,6 +558,7 @@ type profileBody struct {
 	FTPWatts              float64  `json:"ftpWatts"`
 	FTPEstimated          bool     `json:"ftpEstimated"`
 	MaxHR                 int      `json:"maxHr"`
+	ThresholdHR           int      `json:"thresholdHr"`
 	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm"`
 	AvailableDays         []string `json:"availableDays"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay"`
@@ -597,6 +598,47 @@ func TestSyncFillsTheProfileFromGarminBiometrics(t *testing.T) {
 	}
 	if len(p.Estimated) != 2 {
 		t.Errorf("estimated = %v, want max_hr and threshold_pace", p.Estimated)
+	}
+}
+
+func TestSyncFillsThresholdHRFromGarminBiometricsOnlyWhenEmpty(t *testing.T) {
+	fake := &fakeGarmin{biometrics: garmin.Biometrics{ThresholdPaceSecPerKM: 290, ThresholdHR: 165}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		AutoFilled []string `json:"autoFilled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.AutoFilled) != 2 {
+		t.Errorf("autoFilled = %v, want threshold_pace and threshold_hr in the same pass", out.AutoFilled)
+	}
+	p := h.profile("wilant")
+	if p.ThresholdHR != 165 {
+		t.Errorf("thresholdHr = %d, want Garmin's 165", p.ThresholdHR)
+	}
+	found := false
+	for _, f := range p.Estimated {
+		found = found || f == "threshold_hr"
+	}
+	if !found {
+		t.Errorf("estimated = %v, want threshold_hr labelled as an estimate", p.Estimated)
+	}
+
+	// A rider-typed value is never overwritten, even by a fresh Garmin reading.
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"thresholdHr":170}`)
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	p = h.profile("wilant")
+	for _, f := range p.Estimated {
+		if f == "threshold_hr" {
+			t.Errorf("estimated = %v, want the rider-typed threshold_hr confirmed", p.Estimated)
+		}
+	}
+	if p.ThresholdHR != 170 {
+		t.Errorf("thresholdHr = %d, want the rider-typed 170 untouched", p.ThresholdHR)
 	}
 }
 
