@@ -15,7 +15,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import { useLibrary } from '@/composables/useLibrary'
-import type { Me, PeriodizationPlan, RiderProfile, TrainingWeek, WeekFocus, Workout } from '@/api/types'
+import type { Me, PeriodizationPlan, ReadinessResponse, RiderProfile, TrainingWeek, WeekFocus, Workout } from '@/api/types'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import GoalsSection from '@/components/plan/GoalsSection.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
@@ -216,6 +216,20 @@ async function pushWorkoutToGarmin(w: Workout) {
 const week = ref<TrainingWeek | null>(null)
 const weekStart = ref<string | undefined>(undefined)
 
+// --- readiness: today's chip on TodayCard. Optional — a failure (no
+// Garmin data at all, an older deployment, a transient error) just hides
+// the chip rather than surfacing a toast for what is a nice-to-have. ---
+
+const readiness = ref<ReadinessResponse | null>(null)
+
+async function loadReadiness() {
+  try {
+    readiness.value = await api.readiness()
+  } catch {
+    readiness.value = null
+  }
+}
+
 // Same reasoning as seasonRequest below: prevWeek/nextWeek/thisWeek/
 // selectSeasonWeek can all fire loadWeek again before an in-flight one
 // resolves (clicking next-week twice fast, or a save's own reload racing a
@@ -393,6 +407,7 @@ onMounted(() => {
   loadGoals()
   loadWorkouts()
   loadWeek()
+  loadReadiness()
   startGoalFromRoute()
 })
 </script>
@@ -428,6 +443,8 @@ onMounted(() => {
         :profile="profile"
         :can-sync-garmin="canSyncGarmin"
         :pushing="pushingWorkout"
+        :readiness-verdict="readiness?.today.verdict"
+        :readiness-reasons="readiness?.today.reasons"
         @push="pushWorkoutToGarmin"
         @edit="openEditWorkout"
         @move="moveWorkout"
