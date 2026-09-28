@@ -175,9 +175,9 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 			// one — a re-rate replaces the delta, it never stacks a second
 			// adjustment on top of the first.
 			curWithout := levels[string(wk.Zone)] - analysis.LevelDelta
-			rawDelta := progression.Delta(curWithout, wk.Level, analysis.Outcome, body.Feel)
+			rawDelta := progression.Delta(curWithout, wk.Level, progression.Outcome(analysis.Outcome), body.Feel)
 			newLevel := progression.Apply(curWithout, rawDelta)
-			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, analysis.Outcome)
+			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, progression.Outcome(analysis.Outcome))
 
 			// Store what Apply actually did (newLevel - curWithout, rounded),
 			// not Delta's raw, unclamped result — see

@@ -102,7 +102,18 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		byID[w.ID] = w
 	}
 
+	// AdaptSessions already keeps each workout to at most one Change per pass
+	// (stepDownTarget skips ids its own per-session loop has claimed — see
+	// its doc comment); this is a second, independent guard here so a bug in
+	// that bookkeeping cannot silently apply two Changes to the same workout
+	// — first one wins, and a second is loud rather than a quiet clobber.
+	appliedFor := map[string]bool{}
 	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, latest, s.now(), byWorkout) {
+		if appliedFor[c.WorkoutID] {
+			s.logger().Warn("adapt: a second change was produced for the same workout in one pass; ignoring it", "workout", c.WorkoutID, "rider", rider)
+			continue
+		}
+		appliedFor[c.WorkoutID] = true
 		wk := byID[c.WorkoutID]
 
 		// A step-down replaces the workout's own content (name, steps,

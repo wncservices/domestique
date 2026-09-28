@@ -69,7 +69,7 @@ func TestDelta(t *testing.T) {
 		name       string
 		cur        float64
 		workoutLvl float64
-		outcome    string
+		outcome    Outcome
 		feel       int
 		want       float64
 	}{
@@ -158,8 +158,8 @@ func TestReason(t *testing.T) {
 		t.Errorf("Reason = %q, want %q", got, want)
 	}
 
-	for _, outcome := range []string{"completed", "struggled", "incomplete"} {
-		t.Run(outcome, func(t *testing.T) {
+	for _, outcome := range []Outcome{OutcomeCompleted, OutcomeStruggled, OutcomeIncomplete} {
+		t.Run(string(outcome), func(t *testing.T) {
 			r := Reason("Sweet spot 3×10", "sweet_spot", 4.0, 4.0, 4.1, outcome)
 			wantVerb := outcomeVerbs[outcome]
 			if len(r) < len(wantVerb) || r[:len(wantVerb)] != wantVerb {

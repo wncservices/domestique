@@ -334,9 +334,9 @@ func (s *Server) applyProgressionForAnalysis(ctx context.Context, rider string, 
 	}
 	cur := levels[string(matched.Zone)]
 
-	delta := progression.Delta(cur, matched.Level, outcome, 0)
+	delta := progression.Delta(cur, matched.Level, progression.Outcome(outcome), 0)
 	newLevel := progression.Apply(cur, delta)
-	reason := progression.Reason(matched.Name, string(matched.Zone), matched.Level, cur, newLevel, outcome)
+	reason := progression.Reason(matched.Name, string(matched.Zone), matched.Level, cur, newLevel, progression.Outcome(outcome))
 
 	// What is stored is the change Apply actually produced — newLevel minus
 	// cur, rounded to the same one decimal every stored level uses — not
