@@ -12,6 +12,8 @@ export interface FlatStep {
   seconds: number
   intensity: StepIntensity | undefined
   level: number
+  /** The step this bar came from — what a hover on the chart describes. */
+  step: WorkoutStep
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -58,7 +60,7 @@ export function flattenSteps(steps: WorkoutStep[], profile?: RiderProfile): Flat
       continue
     }
     if (step.duration !== 'time' || !step.seconds || step.seconds <= 0) continue
-    result.push({ seconds: step.seconds, intensity: step.intensity, level: levelFor(step, profile) })
+    result.push({ seconds: step.seconds, intensity: step.intensity, level: levelFor(step, profile), step })
   }
   return result
 }
@@ -153,6 +155,14 @@ function formatPaceMinPerKm(speedMps: number): string {
   return `${minutes}:${String(secs).padStart(2, '0')}`
 }
 
+/** One target value as a rider reads it: whole watts/bpm/rpm, pace as
+ *  m:ss. Stored targets are not always whole — a generated workout's
+ *  0.55 × FTP can land on 93.50000000000001 — so every display goes through
+ *  here rather than printing the raw number. */
+export function formatTargetValue(target: StepTarget, value: number): string {
+  return target === 'pace' ? formatPaceMinPerKm(value) : String(Math.round(value))
+}
+
 /** A one-line target summary for a step row: "248–270 W · 92–100% FTP",
  *  "140–150 bpm", "4:10–4:30 /km", "" for an open (untargeted) step. The
  *  % suffix only appears when the rider has the matching threshold on
@@ -177,7 +187,9 @@ export function describeTarget(step: WorkoutStep, profile: RiderProfile): string
   }
 
   const unit = target === 'power' ? 'W' : target === 'heart_rate' ? 'bpm' : 'rpm'
-  const valueRange = targetLow === targetHigh ? `${targetLow}` : `${targetLow}–${targetHigh}`
+  const low = formatTargetValue(target, targetLow)
+  const high = formatTargetValue(target, targetHigh)
+  const valueRange = low === high ? low : `${low}–${high}`
   const base = `${valueRange} ${unit}`
   if (target === 'cadence' || threshold === null) return base
 
