@@ -81,7 +81,7 @@ services:
 
   go:
     profiles: [tools]
-    image: golang:1.26.5-alpine
+    image: golang:1.26.6-alpine
     working_dir: /src
     depends_on:
       db:

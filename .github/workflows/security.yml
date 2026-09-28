@@ -31,7 +31,7 @@ jobs:
         include:
           # Go is built manually. CodeQL's autobuild ships its own older Go
           # (1.24 at the time of writing) and go.work requires a newer one, so
-          # autobuild fails before extraction: "go.work requires go >= 1.26.5".
+          # autobuild fails before extraction: "go.work requires go >= 1.26.6".
           - language: go
             build-mode: manual
           - language: javascript-typescript
