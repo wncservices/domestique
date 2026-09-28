@@ -269,13 +269,26 @@ const mfaRequiredMessage = "This Garmin account uses two-factor authentication, 
 // hands the id back. With nothing to resume from — no store, no key, or state
 // Garmin's page did not give enough of — it is the bare 409 it always was.
 func (s *Server) writeGarminMFARequired(w http.ResponseWriter, r *http.Request, rider string, err error) {
-	bare := func() {
+	// The bare answer is a deployment or parsing gap, not the regular path, so
+	// it says which — reasons only, never values.
+	bare := func(reason string) {
+		s.logger().Warn("garmin mfa challenge not kept; answering without a way to enter the code",
+			"rider", rider, "reason", reason)
 		writeJSON(w, http.StatusConflict, map[string]any{"error": mfaRequiredMessage, "mfa": true})
 	}
 
 	var challenged *GarminMFAChallengeError
-	if !errors.As(err, &challenged) || challenged.Challenge.CSRF == "" || !s.GarminMFA.CanStore() {
-		bare()
+	switch {
+	case s.GarminMFA == nil:
+		bare("no-store")
+		return
+	case !s.GarminMFA.CanStore():
+		bare("no-key")
+		return
+	case !errors.As(err, &challenged) || challenged.Challenge.CSRF == "":
+		// Nothing to resume from: no state came back, or the challenge page
+		// had no token to answer with.
+		bare("no-csrf")
 		return
 	}
 
@@ -478,7 +491,7 @@ func (s *Server) handleGarminConnectMFA(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
-	if !s.rateLimitConnect(w, rider) {
+	if !rateLimit(w, s.GarminMFALimiter, rider, "too many two-factor attempts — wait a few minutes and try again") {
 		return
 	}
 
@@ -498,48 +511,80 @@ func (s *Server) handleGarminConnectMFA(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	session, err := s.Garmin.ResumeMFA(ctx, consumer, challenge, body.Code)
+	// The attempt is taken before Garmin is asked, atomically, so N requests in
+	// flight together cannot each get a look at the code. A refused reserve is
+	// the same answer as a spent challenge.
+	used, err := s.GarminMFA.Reserve(ctx, rider, body.Challenge)
+	switch {
+	case errors.Is(err, garminmfa.ErrAttemptsExhausted):
+		s.logger().Warn("garmin mfa attempts exhausted", "rider", rider, "reason", "mfa-exhausted")
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "too many wrong codes — sign in again"})
+		return
+	case errors.Is(err, garminmfa.ErrNotFound):
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such sign-in in progress"})
+		return
+	case err != nil:
+		s.logger().Error("reserving a garmin mfa attempt failed", "rider", rider, "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the sign-in in progress"})
+		return
+	}
+
+	session, refreshed, err := s.Garmin.ResumeMFA(ctx, consumer, challenge, body.Code)
 	if errors.Is(err, garmin.ErrMFACodeRejected) {
-		s.writeGarminMFAWrongCode(w, r, rider, body.Challenge)
+		// A wrong code keeps its attempt.
+		s.writeGarminMFAWrongCode(w, r, rider, body.Challenge, used, refreshed)
 		return
 	}
 	if err != nil {
 		// Blocked, an unrecognised page, an outage: none of them is the
-		// rider's mistake, so none of them costs an attempt.
+		// rider's mistake, so the attempt goes back.
+		if refundErr := s.GarminMFA.Refund(ctx, rider, body.Challenge); refundErr != nil {
+			s.logger().Warn("refunding a garmin mfa attempt failed", "rider", rider, "err", refundErr)
+		}
 		s.writeGarminLoginError(w, r, rider, err)
 		return
 	}
 
 	// Spent the moment it works, before anything that could fail, so a
-	// challenge can never sign in twice.
-	if err := s.GarminMFA.Consume(ctx, body.Challenge); err != nil {
-		s.logger().Warn("deleting a used garmin mfa challenge failed", "rider", rider, "err", err)
+	// challenge can never sign in twice. Error, not Warn: a spent challenge
+	// left in the table is replayable for the rest of its TTL, which should
+	// not be happening. It still returns success — Garmin has accepted the
+	// code and completeGarminConnect below saves the link, so failing the
+	// request would tell the rider a working sign-in failed.
+	if err := s.GarminMFA.Consume(ctx, rider, body.Challenge); err != nil {
+		s.logger().Error("deleting a used garmin mfa challenge failed", "rider", rider, "err", err)
 	}
 	s.completeGarminConnect(w, r, rider, challenge.Email, session)
 }
 
-// writeGarminMFAWrongCode counts the attempt and answers 422 with the same
-// challenge id so the UI keeps the code field open, or 409 once the budget is
-// spent and the challenge is gone.
-func (s *Server) writeGarminMFAWrongCode(w http.ResponseWriter, r *http.Request, rider, id string) {
+// writeGarminMFAWrongCode answers a rejected code. The attempt was already
+// taken by Reserve. At the cap the challenge is deleted and the answer is 409;
+// otherwise the refreshed state Garmin's re-rendered page gave (a new CSRF, moved
+// cookies) is re-sealed into the same row, and the answer is 422 with the same
+// challenge id so the UI keeps the code field open.
+func (s *Server) writeGarminMFAWrongCode(w http.ResponseWriter, r *http.Request, rider, id string, used int, refreshed garmin.MFAChallenge) {
+	ctx := r.Context()
 	s.logger().Warn("garmin mfa code rejected", "rider", rider, "reason", classifyGarminError(garmin.ErrMFACodeRejected))
 
-	used, err := s.GarminMFA.RecordAttempt(r.Context(), id)
-	switch {
-	case errors.Is(err, garminmfa.ErrAttemptsExhausted):
-		s.logger().Warn("garmin mfa attempts exhausted", "rider", rider)
+	if used >= garminmfa.MaxAttempts {
+		if err := s.GarminMFA.Consume(ctx, rider, id); err != nil {
+			s.logger().Error("deleting an exhausted garmin mfa challenge failed", "rider", rider, "err", err)
+		}
+		s.logger().Warn("garmin mfa attempts exhausted", "rider", rider, "reason", "mfa-exhausted")
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "too many wrong codes — sign in again"})
-	case errors.Is(err, garminmfa.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such sign-in in progress"})
-	case err != nil:
-		s.logger().Error("recording a garmin mfa attempt failed", "rider", rider, "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read the sign-in in progress"})
-	default:
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"error":             "That code didn't work — check it and try again",
-			"mfaInvalid":        true,
-			"challenge":         id,
-			"attemptsRemaining": garminmfa.MaxAttempts - used,
-		})
+		return
 	}
+
+	// Best effort: if the refreshed state cannot be kept the old one stays,
+	// which may be stale, but the rider can still retry or restart.
+	if err := s.GarminMFA.Update(ctx, rider, id, refreshed); err != nil {
+		s.logger().Warn("keeping the refreshed garmin mfa state failed", "rider", rider, "err", err)
+	}
+
+	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+		"error":             "That code didn't work — check it and try again",
+		"mfaInvalid":        true,
+		"challenge":         id,
+		"attemptsRemaining": garminmfa.MaxAttempts - used,
+	})
 }

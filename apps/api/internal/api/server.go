@@ -254,6 +254,14 @@ type Server struct {
 	// redeploying to change a limit.
 	ConnectLimiter *ratelimit.Limiter
 
+	// GarminMFALimiter throttles the second step of a Garmin two-factor
+	// sign-in, per rider, on its own budget. It must not draw on
+	// ConnectLimiter: a rider's five tries at a code plus a restart from step
+	// one have to fit, and step one already spent a slot. The attempt cap on
+	// the challenge itself is the brute-force control; this bounds how much
+	// this server can be made to ask Garmin.
+	GarminMFALimiter *ratelimit.Limiter
+
 	// AuthActionLimiter throttles a rider's own self-service Auth0
 	// Management API actions — a password-reset email
 	// (handleSelfPasswordReset) and an MFA enrollment ticket

@@ -40,8 +40,10 @@ type GarminConnector interface {
 	Connect(ctx context.Context, consumer GarminConsumer, email, password string) (garmin.Session, error)
 	// ResumeMFA answers a challenge Connect returned with the rider's code and
 	// finishes the sign-in. No password: it was used once and is gone.
-	// garmin.ErrMFACodeRejected means the code was wrong.
-	ResumeMFA(ctx context.Context, consumer GarminConsumer, challenge garmin.MFAChallenge, code string) (garmin.Session, error)
+	// garmin.ErrMFACodeRejected means the code was wrong, and the returned
+	// challenge is then the refreshed state (new CSRF, moved cookies) to keep
+	// for the next attempt. Otherwise the returned challenge is unused.
+	ResumeMFA(ctx context.Context, consumer GarminConsumer, challenge garmin.MFAChallenge, code string) (garmin.Session, garmin.MFAChallenge, error)
 	// Devices lists the head units on an account, from a stored session. No
 	// password: this is what the session is for.
 	Devices(ctx context.Context, consumer GarminConsumer, session garmin.Session) ([]garmin.Device, error)
@@ -160,17 +162,18 @@ func (l LiveGarmin) Connect(ctx context.Context, consumer GarminConsumer, email,
 }
 
 // ResumeMFA is the second half of an MFA sign-in.
-func (l LiveGarmin) ResumeMFA(ctx context.Context, consumer GarminConsumer, challenge garmin.MFAChallenge, code string) (garmin.Session, error) {
+func (l LiveGarmin) ResumeMFA(ctx context.Context, consumer GarminConsumer, challenge garmin.MFAChallenge, code string) (garmin.Session, garmin.MFAChallenge, error) {
 	if !consumer.Configured() {
-		return garmin.Session{}, garmin.ErrNoConsumer
+		return garmin.Session{}, challenge, garmin.ErrNoConsumer
 	}
 
 	client := garmin.New()
 	client.SetConsumer(consumer.Key, consumer.Secret)
-	if _, err := client.ResumeMFA(ctx, challenge, code); err != nil {
-		return garmin.Session{}, err
+	_, refreshed, err := client.ResumeMFA(ctx, challenge, code)
+	if err != nil {
+		return garmin.Session{}, refreshed, err
 	}
-	return l.named(ctx, client), nil
+	return l.named(ctx, client), garmin.MFAChallenge{}, nil
 }
 
 // named adds the account's display name to a freshly signed-in client's

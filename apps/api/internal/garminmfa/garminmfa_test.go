@@ -175,7 +175,7 @@ func TestEachEngine(t *testing.T) {
 				if rowCount(t, src) != 1 {
 					t.Fatal("Resolve deleted the row")
 				}
-				if err := h.store.Consume(t.Context(), token); err != nil {
+				if err := h.store.Consume(t.Context(), "wilant", token); err != nil {
 					t.Fatal(err)
 				}
 				if rowCount(t, src) != 0 {
@@ -212,26 +212,152 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
-			t.Run("the fifth wrong code deletes the challenge", func(t *testing.T) {
+			t.Run("reserve counts atomically up to the cap, then refuses", func(t *testing.T) {
 				h, src := open(t)
 				token, _ := h.store.Create(t.Context(), "wilant", challenge("w@example.com"), DefaultTTL)
-				for want := 1; want < MaxAttempts; want++ {
-					n, err := h.store.RecordAttempt(t.Context(), token)
+				for want := 1; want <= MaxAttempts; want++ {
+					n, err := h.store.Reserve(t.Context(), "wilant", token)
 					if err != nil || n != want {
-						t.Fatalf("attempt %d: n=%d err=%v", want, n, err)
+						t.Fatalf("reserve %d: n=%d err=%v", want, n, err)
 					}
 				}
-				if _, err := h.store.RecordAttempt(t.Context(), token); !errors.Is(err, ErrAttemptsExhausted) {
-					t.Fatalf("fifth attempt: %v, want ErrAttemptsExhausted", err)
+				if _, err := h.store.Reserve(t.Context(), "wilant", token); !errors.Is(err, ErrAttemptsExhausted) {
+					t.Fatalf("sixth reserve: %v, want ErrAttemptsExhausted", err)
 				}
-				if rowCount(t, src) != 0 {
-					t.Error("an exhausted challenge is still there")
+				// Refusing does not delete: the attempts in flight may yet be
+				// refunded. Finishing the challenge is Consume's job.
+				if rowCount(t, src) != 1 {
+					t.Error("a refused reserve deleted the row")
 				}
-				if _, err := h.store.Resolve(t.Context(), "wilant", token); !errors.Is(err, ErrNotFound) {
-					t.Errorf("resolve after exhaustion: %v, want ErrNotFound", err)
+				if err := h.store.Consume(t.Context(), "wilant", token); err != nil {
+					t.Fatal(err)
 				}
-				if _, err := h.store.RecordAttempt(t.Context(), token); !errors.Is(err, ErrNotFound) {
-					t.Errorf("sixth attempt: %v, want ErrNotFound", err)
+				if _, err := h.store.Reserve(t.Context(), "wilant", token); !errors.Is(err, ErrNotFound) {
+					t.Errorf("reserve after consume: %v, want ErrNotFound", err)
+				}
+			})
+
+			t.Run("reserve is the owners only and a stranger costs nothing", func(t *testing.T) {
+				h, _ := open(t)
+				token, _ := h.store.Create(t.Context(), "wilant", challenge("w@example.com"), DefaultTTL)
+				if _, err := h.store.Reserve(t.Context(), "friend", token); !errors.Is(err, ErrNotFound) {
+					t.Errorf("stranger reserve: %v, want ErrNotFound", err)
+				}
+				if n, err := h.store.Reserve(t.Context(), "wilant", token); err != nil || n != 1 {
+					t.Errorf("owner's first reserve: n=%d err=%v, want 1", n, err)
+				}
+			})
+
+			t.Run("refund gives an attempt back and never goes below zero", func(t *testing.T) {
+				h, _ := open(t)
+				token, _ := h.store.Create(t.Context(), "wilant", challenge("w@example.com"), DefaultTTL)
+				for range MaxAttempts {
+					if _, err := h.store.Reserve(t.Context(), "wilant", token); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := h.store.Refund(t.Context(), "wilant", token); err != nil {
+					t.Fatal(err)
+				}
+				if n, err := h.store.Reserve(t.Context(), "wilant", token); err != nil || n != MaxAttempts {
+					t.Errorf("reserve after refund: n=%d err=%v, want %d", n, err, MaxAttempts)
+				}
+
+				fresh, _ := h.store.Create(t.Context(), "friend", challenge("f@example.com"), DefaultTTL)
+				if err := h.store.Refund(t.Context(), "friend", fresh); err != nil {
+					t.Fatal(err)
+				}
+				if n, _ := h.store.Reserve(t.Context(), "friend", fresh); n != 1 {
+					t.Errorf("a refund on zero attempts went negative: next reserve = %d, want 1", n)
+				}
+				// A stranger cannot refund the owner's attempts back.
+				if err := h.store.Refund(t.Context(), "friend", token); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.store.Reserve(t.Context(), "wilant", token); !errors.Is(err, ErrAttemptsExhausted) {
+					t.Errorf("a stranger's refund freed an attempt: %v", err)
+				}
+			})
+
+			t.Run("concurrent reserves never exceed the cap", func(t *testing.T) {
+				h, _ := open(t)
+				token, _ := h.store.Create(t.Context(), "wilant", challenge("w@example.com"), DefaultTTL)
+
+				const workers = 20
+				results := make(chan error, workers)
+				for range workers {
+					go func() {
+						_, err := h.store.Reserve(t.Context(), "wilant", token)
+						results <- err
+					}()
+				}
+				granted := 0
+				for range workers {
+					switch err := <-results; {
+					case err == nil:
+						granted++
+					case errors.Is(err, ErrAttemptsExhausted):
+					default:
+						t.Errorf("unexpected error: %v", err)
+					}
+				}
+				if granted != MaxAttempts {
+					t.Errorf("%d reserves granted, want exactly %d", granted, MaxAttempts)
+				}
+			})
+
+			t.Run("update re-seals the state in place", func(t *testing.T) {
+				h, src := open(t)
+				token, _ := h.store.Create(t.Context(), "wilant", challenge("w@example.com"), DefaultTTL)
+				if _, err := h.store.Reserve(t.Context(), "wilant", token); err != nil {
+					t.Fatal(err)
+				}
+
+				next := challenge("w@example.com")
+				next.CSRF = "csrf-rotated"
+				next.Cookies["https://sso.garmin.com/sso"][0].Value = "cookie-rotated"
+				if err := h.store.Update(t.Context(), "wilant", token, next); err != nil {
+					t.Fatal(err)
+				}
+
+				got, err := h.store.Resolve(t.Context(), "wilant", token)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.CSRF != "csrf-rotated" || got.Cookies["https://sso.garmin.com/sso"][0].Value != "cookie-rotated" {
+					t.Errorf("resolved %+v, want the updated state", got)
+				}
+				if rowCount(t, src) != 1 {
+					t.Error("update created a second row")
+				}
+				// Neither the attempts spent nor the expiry moved.
+				if n, _ := h.store.Reserve(t.Context(), "wilant", token); n != 2 {
+					t.Errorf("attempts after update = %d, want 2 kept", n)
+				}
+				h.advance(DefaultTTL + time.Second)
+				if _, err := h.store.Resolve(t.Context(), "wilant", token); !errors.Is(err, ErrExpired) {
+					t.Errorf("update extended the life of a challenge: %v", err)
+				}
+			})
+
+			t.Run("update refuses a stranger, the unknown, and the oversized", func(t *testing.T) {
+				h, _ := open(t)
+				token, _ := h.store.Create(t.Context(), "wilant", challenge("w@example.com"), DefaultTTL)
+
+				if err := h.store.Update(t.Context(), "friend", token, challenge("x@example.com")); !errors.Is(err, ErrNotFound) {
+					t.Errorf("stranger update: %v, want ErrNotFound", err)
+				}
+				if err := h.store.Update(t.Context(), "wilant", "nope", challenge("x@example.com")); !errors.Is(err, ErrNotFound) {
+					t.Errorf("unknown update: %v, want ErrNotFound", err)
+				}
+				big := challenge("w@example.com")
+				big.Cookies["https://sso.garmin.com/sso"][0].Value = strings.Repeat("x", MaxChallengeBytes)
+				if err := h.store.Update(t.Context(), "wilant", token, big); !errors.Is(err, ErrTooLarge) {
+					t.Errorf("oversized update: %v, want ErrTooLarge", err)
+				}
+				got, err := h.store.Resolve(t.Context(), "wilant", token)
+				if err != nil || got.Email != "w@example.com" {
+					t.Errorf("a refused update disturbed the row: %+v %v", got, err)
 				}
 			})
 

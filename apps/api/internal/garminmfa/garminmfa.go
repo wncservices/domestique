@@ -250,7 +250,7 @@ func (s *Store) Resolve(ctx context.Context, rider, token string) (garmin.MFACha
 		return garmin.MFAChallenge{}, ErrNotFound
 	}
 	if s.now().Format(tsFormat) > expires {
-		_ = s.Consume(ctx, token)
+		_ = s.Consume(ctx, rider, token)
 		return garmin.MFAChallenge{}, ErrExpired
 	}
 
@@ -265,49 +265,106 @@ func (s *Store) Resolve(ctx context.Context, rider, token string) (garmin.MFACha
 	return ch, nil
 }
 
-// RecordAttempt counts one wrong code and returns how many have been used.
-// The MaxAttempts-th deletes the row and returns ErrAttemptsExhausted.
-func (s *Store) RecordAttempt(ctx context.Context, token string) (int, error) {
+// Reserve takes one attempt for rider's challenge, atomically, and returns
+// how many have now been used. It is called before Garmin is asked to check a
+// code, so N concurrent submissions cannot each get a look: the UPDATE only
+// matches while attempts is under the cap, and the database serialises it.
+//
+// A refused reserve is ErrAttemptsExhausted (the row exists and is spent) or
+// ErrNotFound (no such live row for this rider). It does not delete: the
+// attempts in flight may yet be refunded, and finishing a spent challenge is
+// Consume's job. It does not check expiry either — Resolve first, which does.
+func (s *Store) Reserve(ctx context.Context, rider, token string) (int, error) {
 	if !s.CanStore() || token == "" {
 		return 0, ErrNotFound
 	}
-	// #nosec G701 -- constant statements, bound parameters.
-	res, err := s.db.ExecContext(ctx, s.dialect.Rebind(
-		`UPDATE garmin_mfa_challenges SET attempts = attempts + 1 WHERE token = ?`), hashToken(token))
-	if err != nil {
-		return 0, fmt.Errorf("garminmfa: recording attempt: %w", err)
+	rider = normalise(rider)
+
+	var used int
+	// #nosec G701 -- constant statement, bound parameters.
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(
+		`UPDATE garmin_mfa_challenges SET attempts = attempts + 1
+		 WHERE token = ? AND rider = ? AND attempts < ? RETURNING attempts`),
+		hashToken(token), rider, MaxAttempts).Scan(&used)
+	if err == nil {
+		return used, nil
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return 0, ErrNotFound
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("garminmfa: reserving an attempt: %w", err)
 	}
 
-	var attempts int
+	// Nothing matched: either the row is spent or it is not this rider's.
+	var one int
 	err = s.db.QueryRowContext(ctx, s.dialect.Rebind(
-		`SELECT attempts FROM garmin_mfa_challenges WHERE token = ?`), hashToken(token)).Scan(&attempts)
+		`SELECT 1 FROM garmin_mfa_challenges WHERE token = ? AND rider = ?`),
+		hashToken(token), rider).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound
 	}
 	if err != nil {
 		return 0, fmt.Errorf("garminmfa: reading attempts: %w", err)
 	}
-	if attempts >= MaxAttempts {
-		if err := s.Consume(ctx, token); err != nil {
-			return attempts, err
-		}
-		return attempts, ErrAttemptsExhausted
-	}
-	return attempts, nil
+	return 0, ErrAttemptsExhausted
 }
 
-// Consume deletes a challenge: on success, or once it is spent. Deleting one
-// that is not there is not an error.
-func (s *Store) Consume(ctx context.Context, token string) error {
+// Refund gives back an attempt Reserve took, for the outcomes that say nothing
+// about the code: Garmin blocked or rate-limited us, or answered a page we do
+// not recognise. Never below zero, and only for the owning rider. Callers must
+// have Resolved the challenge as this rider first.
+func (s *Store) Refund(ctx context.Context, rider, token string) error {
 	if !s.CanStore() || token == "" {
 		return nil
 	}
-	// #nosec G701 -- constant statement, bound parameter.
+	// #nosec G701 -- constant statement, bound parameters.
 	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(
-		`DELETE FROM garmin_mfa_challenges WHERE token = ?`), hashToken(token))
+		`UPDATE garmin_mfa_challenges SET attempts = attempts - 1
+		 WHERE token = ? AND rider = ? AND attempts > 0`), hashToken(token), normalise(rider))
+	return err
+}
+
+// Update re-seals a challenge's state in place — after a rejected code Garmin
+// re-renders the page with a fresh CSRF token and the cookies move on, and the
+// next attempt on the same challenge needs both. Attempts and expiry are not
+// touched. The size cap applies as it does on Create; the rider must own the
+// row.
+func (s *Store) Update(ctx context.Context, rider, token string, ch garmin.MFAChallenge) error {
+	if !s.CanStore() || token == "" {
+		return ErrNotFound
+	}
+	raw, err := json.Marshal(ch)
+	if err != nil {
+		return fmt.Errorf("garminmfa: encoding challenge: %w", err)
+	}
+	if len(raw) > MaxChallengeBytes {
+		return fmt.Errorf("%w: %d bytes", ErrTooLarge, len(raw))
+	}
+	sealed, err := s.box.Seal(string(raw))
+	if err != nil {
+		return err
+	}
+	// #nosec G701 -- constant statement, bound parameters.
+	res, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`UPDATE garmin_mfa_challenges SET state = ? WHERE token = ? AND rider = ?`),
+		sealed, hashToken(token), normalise(rider))
+	if err != nil {
+		return fmt.Errorf("garminmfa: updating challenge: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Consume deletes a challenge: on success, or once it is spent. Deleting one
+// that is not there is not an error. Scoped to the rider so a caller that has
+// not Resolved as the owner cannot delete someone else's challenge.
+func (s *Store) Consume(ctx context.Context, rider, token string) error {
+	if !s.CanStore() || token == "" {
+		return nil
+	}
+	// #nosec G701 -- constant statement, bound parameters.
+	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM garmin_mfa_challenges WHERE token = ? AND rider = ?`), hashToken(token), normalise(rider))
 	return err
 }
 

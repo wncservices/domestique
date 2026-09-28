@@ -375,19 +375,169 @@ func TestGarminMFAIsRefusedWithoutAStore(t *testing.T) {
 	}
 }
 
-// One budget for the sign-in and the code, so the second step is not a way
-// round the limit on the first.
-func TestGarminMFASharesTheConnectRateLimit(t *testing.T) {
+// Step one keeps ConnectLimiter — the abuse there is this server becoming a
+// credential-stuffing proxy — and step two no longer draws on it, so a rider
+// whose budget the sign-in spent can still type a code.
+func TestGarminMFAStepTwoDoesNotShareTheConnectLimit(t *testing.T) {
 	h := newConnectHarness(t, true, func(s *api.Server) {
-		s.ConnectLimiter = ratelimit.New(2, time.Hour)
+		s.ConnectLimiter = ratelimit.New(1, time.Hour)
 	})
-	id := startMFA(t, h, "wilant") // spends 1
+	id := startMFA(t, h, "wilant") // spends the whole connect budget
 
-	if resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaBadCode)); resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Fatalf("second request status = %d, want 422", resp.StatusCode)
+	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/garmin/connection",
+		`{"email":"r@example.com","password":"pw"}`); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("step one after its budget: status = %d, want 429", resp.StatusCode)
+	}
+	if resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaGoodCode)); resp.StatusCode != http.StatusOK {
+		t.Errorf("step two with the connect budget spent: status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestGarminMFAStepTwoHasItsOwnPerRiderLimit(t *testing.T) {
+	h := newConnectHarness(t, true, func(s *api.Server) {
+		s.GarminMFALimiter = ratelimit.New(2, time.Hour)
+	})
+	id := startMFA(t, h, "wilant") // step one is not on this limiter
+
+	for i := 1; i <= 2; i++ {
+		if resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaBadCode)); resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("request %d: status = %d, want 422", i, resp.StatusCode)
+		}
 	}
 	if resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaGoodCode)); resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("third request status = %d, want 429", resp.StatusCode)
+		t.Errorf("third request: status = %d, want 429", resp.StatusCode)
+	}
+	// Per rider: another rider's budget is untouched.
+	other := startMFA(t, h, "friend")
+	if resp := h.as("friend", "cyclists", http.MethodPost, mfaPath, codeBody(other, mfaGoodCode)); resp.StatusCode != http.StatusOK {
+		t.Errorf("another rider: status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// The cap has to hold against requests that overlap: the count is taken before
+// Garmin is asked, not after, or N in flight all get a look at the code.
+func TestGarminMFAConcurrentWrongCodesNeverExceedTheCap(t *testing.T) {
+	h := newConnectHarness(t, true)
+	id := startMFA(t, h, "wilant")
+	h.garmin.resumeDelay = 100 * time.Millisecond
+
+	const workers = 6
+	statuses := make(chan int, workers)
+	for range workers {
+		go func() {
+			statuses <- h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaBadCode)).StatusCode
+		}()
+	}
+	counts := map[int]int{}
+	for range workers {
+		counts[<-statuses]++
+	}
+
+	h.garmin.mu.Lock()
+	calls := h.garmin.resumeCalls
+	h.garmin.mu.Unlock()
+	if calls != garminmfa.MaxAttempts {
+		t.Errorf("%d codes reached Garmin, want exactly %d (statuses %v)", calls, garminmfa.MaxAttempts, counts)
+	}
+	if counts[http.StatusConflict] < 1 {
+		t.Errorf("statuses = %v, want the sixth refused with 409", counts)
+	}
+}
+
+// The outcomes that say nothing about the code give the attempt back.
+func TestGarminMFANonCodeFailuresRefundTheAttempt(t *testing.T) {
+	for name, failure := range map[string]error{
+		"blocked":         garmin.ErrBlocked,
+		"unexpected page": errors.New("garmin: unrecognised page"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newConnectHarness(t, true)
+			id := startMFA(t, h, "wilant")
+
+			h.garmin.resumeErr = failure
+			for range garminmfa.MaxAttempts + 1 {
+				h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaBadCode))
+			}
+			h.garmin.resumeErr = nil
+
+			resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaBadCode))
+			body := decodeConnection(t, resp)
+			if resp.StatusCode != http.StatusUnprocessableEntity || body["attemptsRemaining"] != float64(garminmfa.MaxAttempts-1) {
+				t.Errorf("status = %d body = %v: failures that are not the rider's were counted", resp.StatusCode, body)
+			}
+		})
+	}
+}
+
+// After a wrong code the re-rendered page has a fresh CSRF and the cookies
+// moved; the next attempt on the same challenge must carry them.
+func TestGarminMFAWrongCodeThenRightCodeUsesTheRefreshedState(t *testing.T) {
+	h := newConnectHarness(t, true)
+	id := startMFA(t, h, "wilant")
+
+	if resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaBadCode)); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("wrong code: status = %d, want 422", resp.StatusCode)
+	}
+	if resp := h.as("wilant", "cyclists", http.MethodPost, mfaPath, codeBody(id, mfaGoodCode)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("right code: status = %d, want 200", resp.StatusCode)
+	}
+	ch := h.garmin.resumedChallenge
+	if ch.CSRF != "csrf-refreshed-1" {
+		t.Errorf("second attempt CSRF = %q, want the refreshed one", ch.CSRF)
+	}
+	if c := ch.Cookies["https://sso.garmin.com/sso"]; len(c) != 1 || c[0].Value != "cookie-refreshed-1" {
+		t.Errorf("second attempt cookies = %+v, want the refreshed ones", ch.Cookies)
+	}
+	if ch.Email != "rider@example.com" {
+		t.Errorf("email = %q, want it carried through", ch.Email)
+	}
+}
+
+// The bare 409 is a deployment gap and must say which, without values.
+func TestGarminMFAFallbackIsLoggedWithItsReason(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		opt    func(*api.Server)
+		err    error
+	}{
+		{"no-store", func(s *api.Server) { s.GarminMFA = nil }, mfaChallengeError()},
+		{"no-key", nil, mfaChallengeError()},
+		{"no-csrf", nil, &api.GarminMFAChallengeError{Challenge: garmin.MFAChallenge{Email: "rider@example.com"}}},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			var opts []func(*api.Server)
+			if tc.opt != nil {
+				opts = append(opts, tc.opt)
+			}
+			// no-key: a store that exists but has no box, which Links (with a
+			// key) does not stop; built by hand to reach that branch.
+			h := newConnectHarness(t, true, opts...)
+			if tc.reason == "no-key" {
+				keyless, err := garminmfa.UseDB(h.db.Conn(), h.db.DSN(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				h.srv.GarminMFA = keyless
+			}
+			var logs bytes.Buffer
+			h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
+			h.garmin.err = tc.err
+
+			resp := h.as("wilant", "cyclists", http.MethodPost, "/api/garmin/connection",
+				fmt.Sprintf(`{"email":"rider@example.com","password":%q}`, mfaPassword))
+			if resp.StatusCode != http.StatusConflict {
+				t.Fatalf("status = %d, want 409", resp.StatusCode)
+			}
+			out := logs.String()
+			if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "reason="+tc.reason) {
+				t.Errorf("log = %q, want a Warn with reason=%s", out, tc.reason)
+			}
+			for _, secret := range []string{mfaPassword, mfaCookieVal, mfaCSRFVal} {
+				if strings.Contains(out, secret) {
+					t.Errorf("log contains %q", secret)
+				}
+			}
+		})
 	}
 }
 
