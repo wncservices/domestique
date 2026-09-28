@@ -126,7 +126,7 @@ func (l LiveGarmin) Connect(ctx context.Context, consumer GarminConsumer, email,
 	// pair an admin pasted into the UI is the one that signs the request.
 	client.SetConsumer(consumer.Key, consumer.Secret)
 
-	if err := client.Login(ctx, email, password); err != nil {
+	if _, err := client.Login(ctx, email, password); err != nil {
 		return garmin.Session{}, err
 	}
 
