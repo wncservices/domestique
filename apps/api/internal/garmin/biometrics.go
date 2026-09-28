@@ -41,6 +41,10 @@ type Biometrics struct {
 	MaxHR int
 	// ThresholdPaceSecPerKM is running lactate-threshold pace.
 	ThresholdPaceSecPerKM float64
+	// ThresholdHR is the running lactate-threshold heart rate from the same
+	// latestLactateThreshold object that supplied the pace — running-only,
+	// Connect has no cycling equivalent.
+	ThresholdHR int
 	// CyclingFTPWatts is the rider's functional threshold power as Connect
 	// has it — auto-detected by the watch or entered by the rider.
 	CyclingFTPWatts float64
@@ -60,10 +64,11 @@ func (c *Client) Biometrics(ctx context.Context, now time.Time) (Biometrics, err
 	} else {
 		out.MaxHR = hr
 	}
-	if pace, err := c.thresholdPace(ctx); err != nil {
+	if pace, hr, err := c.lactateThreshold(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("lactate threshold: %w", err))
 	} else {
 		out.ThresholdPaceSecPerKM = pace
+		out.ThresholdHR = hr
 	}
 	if ftp, err := c.cyclingFTP(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("functional threshold power: %w", err))
@@ -126,22 +131,38 @@ const (
 	maxPlausibleMaxHR = 230
 )
 
-func (c *Client) thresholdPace(ctx context.Context) (float64, error) {
+// lactateThreshold reads running lactate-threshold pace and heart rate from
+// one request. The heart rate is taken from the same object that supplied
+// the accepted speed: the endpoint is a list of near-identical dicts and only
+// the one with a speed is known to be the running threshold. The key is
+// spelled "hearRate" by the reference implementation's own workaround and
+// "heartRate" everywhere else, and neither has been verified against a live
+// response, so both are read; an out-of-range value fails closed to 0.
+func (c *Client) lactateThreshold(ctx context.Context) (pace float64, hr int, err error) {
 	raw, err := c.getBiometric(ctx, lactateThresholdPath)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	objs, err := decodeObjects(raw)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	for _, o := range objs {
 		if pace := paceFromLactateSpeed(number(o, "speed")); pace > 0 {
-			return pace, nil
+			hr := int(number(o, "heartRate", "hearRate"))
+			if hr < minPlausibleThresholdHR || hr > maxPlausibleThresholdHR {
+				hr = 0
+			}
+			return pace, hr, nil
 		}
 	}
-	return 0, nil
+	return 0, 0, nil
 }
+
+const (
+	minPlausibleThresholdHR = 90
+	maxPlausibleThresholdHR = 220
+)
 
 // paceFromLactateSpeed turns Connect's lactate-threshold "speed" into
 // seconds per kilometre, or 0 when it is not credible.

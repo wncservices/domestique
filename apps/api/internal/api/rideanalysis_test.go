@@ -28,6 +28,13 @@ import (
 // fixtures, satisfied by only ever holding this in memory for one test.
 func buildRideFIT(t *testing.T, start time.Time, seconds, watts int) []byte {
 	t.Helper()
+	return buildRideFITWithHR(t, start, seconds, watts, 0)
+}
+
+// buildRideFITWithHR is buildRideFIT with a constant heart rate on every
+// record (0 for none).
+func buildRideFITWithHR(t *testing.T, start time.Time, seconds, watts, bpm int) []byte {
+	t.Helper()
 
 	act := filedef.NewActivity()
 	act.FileId = *mesgdef.NewFileId(nil).
@@ -41,6 +48,9 @@ func buildRideFIT(t *testing.T, start time.Time, seconds, watts int) []byte {
 		r := mesgdef.NewRecord(nil).SetTimestamp(start.Add(time.Duration(i) * time.Second))
 		if watts > 0 {
 			r.SetPower(uint16(watts))
+		}
+		if bpm > 0 {
+			r.SetHeartRate(uint8(bpm))
 		}
 		act.Records = append(act.Records, r)
 	}

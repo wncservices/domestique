@@ -234,7 +234,7 @@ export function formatPace(metersPerSecond: number): string {
 // ThresholdSuggestions.vue, ProfileForm.vue's provenance line and
 // TrainingFitnessPage.vue's sync toast — see DetectedThreshold/
 // ThresholdSuggestion in api/types.ts.
-export type ThresholdField = 'ftp' | 'max_hr' | 'threshold_pace'
+export type ThresholdField = 'ftp' | 'max_hr' | 'threshold_pace' | 'threshold_hr'
 
 // Lowercase, mid-sentence form ("New max heart rate detected") — FTP is
 // already the right case either way.
@@ -246,6 +246,8 @@ export function thresholdFieldLabel(field: ThresholdField): string {
       return 'max heart rate'
     case 'threshold_pace':
       return 'threshold pace'
+    case 'threshold_hr':
+      return 'threshold heart rate'
   }
 }
 
@@ -264,6 +266,7 @@ export function formatThresholdValue(field: ThresholdField, value: number): stri
     case 'ftp':
       return `${Math.round(value)} W`
     case 'max_hr':
+    case 'threshold_hr':
       return `${Math.round(value)} bpm`
     case 'threshold_pace':
       return formatPace(1000 / value)
