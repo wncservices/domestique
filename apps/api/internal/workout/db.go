@@ -143,6 +143,29 @@ CREATE TABLE IF NOT EXISTS progression_levels (
     reason     TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL,
     PRIMARY KEY (rider, sport, zone)
+);
+
+-- daily_wellness holds one row per rider per calendar day: the daily
+-- aggregates internal/garmin's Wellness call reads (HRV, sleep, Garmin's
+-- own Training Readiness, resting heart rate) for internal/readiness to
+-- assess. Daily aggregates only, deliberately — no sleep stages, no raw
+-- HRV samples — health data stays to the minimum this feature needs. One
+-- row per (rider, date), upserted on every fetch so a re-sync corrects a
+-- reading Connect had not finished processing yet rather than duplicating
+-- the day.
+CREATE TABLE IF NOT EXISTS daily_wellness (
+    rider            TEXT NOT NULL,
+    date             TEXT NOT NULL,
+    hrv_last_night   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    hrv_weekly_avg   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    hrv_status       TEXT NOT NULL DEFAULT '',
+    sleep_seconds    INTEGER NOT NULL DEFAULT 0,
+    sleep_score      INTEGER NOT NULL DEFAULT 0,
+    readiness_score  INTEGER NOT NULL DEFAULT 0,
+    readiness_level  TEXT NOT NULL DEFAULT '',
+    resting_hr       INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (rider, date)
 );`, d.Blob, d.Boolean)
 }
 
