@@ -8,7 +8,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { DailyWellnessDTO, FitnessResponse, Me, ProgressionLevel, RiderProfile } from '@/api/types'
+import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, ProgressionLevel, RiderProfile, ThresholdSuggestion } from '@/api/types'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
@@ -16,8 +16,10 @@ import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
 import SaveBar from '@/components/fitness/SaveBar.vue'
+import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
+import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
 
 const toast = useToast()
 const { canSyncGarmin } = useLibrary()
@@ -99,6 +101,64 @@ async function saveProfile() {
     savingProfile.value = false
   }
 }
+
+// --- threshold suggestions (Task 4): a detected FTP/max-HR/threshold-pace
+// change for a field the rider typed in themselves — see
+// ThresholdSuggestions.vue and docs/superpowers/specs/
+// 2026-09-28-threshold-detection-design.md. Loaded on mount and again after
+// a sync; a failed load just hides the banner rather than erroring the
+// whole page over something secondary. ---
+
+const thresholdSuggestions = ref<ThresholdSuggestion[]>([])
+
+// After an Update the server holds a new threshold (and a cleared estimated
+// flag). With no unsaved edits the whole profile reloads; with some, only the
+// threshold fields are taken from the server, into both the form and its
+// saved baseline, so the rider's other in-progress edits survive and the save
+// bar still reflects them. Dismiss changes nothing in the profile.
+async function onThresholdResolved(profileChanged: boolean) {
+  if (profileChanged) {
+    if (!dirty.value) {
+      await loadProfile()
+    } else {
+      try {
+        const fresh = await api.riderProfile()
+        const pick = (p: RiderProfile): RiderProfile => ({
+          ...p,
+          ftpWatts: fresh.ftpWatts,
+          ftpEstimated: fresh.ftpEstimated,
+          maxHr: fresh.maxHr,
+          thresholdPaceSecPerKm: fresh.thresholdPaceSecPerKm,
+          estimated: fresh.estimated,
+          updatedAt: fresh.updatedAt,
+        })
+        profile.value = pick(profile.value)
+        savedProfile.value = pick(savedProfile.value)
+      } catch {
+        // The update itself succeeded; the form just shows the old value
+        // until the next load.
+      }
+    }
+  }
+  await loadThresholdSuggestions()
+}
+
+async function loadThresholdSuggestions() {
+  try {
+    const result = await api.thresholds()
+    thresholdSuggestions.value = result.suggestions
+  } catch {
+    thresholdSuggestions.value = []
+  }
+}
+
+// The most recent sync's own auto-applied findings, keyed by field, so
+// ProfileForm can show "detected from ..." provenance next to an estimated
+// value. DetectedThreshold carries no structured source date (only a
+// human-readable reason, e.g. "from Saturday's 20-minute effort") — this
+// holds only for the current session, the same way the sync toast itself is
+// a one-off rather than something reloaded from the server.
+const lastDetected = ref<DetectedThreshold[]>([])
 
 // --- free-text profile suggestion: Phase E's other half — see
 // internal/narration.ProposeProfileChange. Deliberately never saved on its
@@ -199,8 +259,21 @@ async function syncMetrics() {
     for (const warning of result.warnings ?? []) {
       toast.add({ title: 'Sync warning', description: warning, icon: 'i-lucide-triangle-alert', color: 'warning' })
     }
+    // One toast per threshold this sync applied straight to the profile
+    // (an empty or already-estimated field) — see internal/thresholds'
+    // "When a value changes" table. A rider-typed field never appears here;
+    // it gets a stored suggestion instead, surfaced by loadThresholdSuggestions.
+    lastDetected.value = result.detected ?? []
+    for (const d of lastDetected.value) {
+      toast.add({
+        title: `${thresholdFieldTitle(d.field)} updated to ${formatThresholdValue(d.field, d.value)}`,
+        description: d.reason,
+        icon: 'i-lucide-sparkles',
+      })
+    }
     await loadFitness()
-    if (result.autoFilled?.length) await loadProfile()
+    if (result.autoFilled?.length || lastDetected.value.length) await loadProfile()
+    await loadThresholdSuggestions()
     // The sync also refreshes daily_wellness (internal/api/wellnesssync.go),
     // so the Recovery card needs a reload too, not just the fitness history.
     await loadReadiness()
@@ -251,11 +324,17 @@ onMounted(() => {
   loadFitness()
   loadProgression()
   loadReadiness()
+  loadThresholdSuggestions()
 })
 </script>
 
 <template>
   <div class="flex flex-col gap-6" :class="{ 'pb-20': dirty }">
+    <ThresholdSuggestions
+      :suggestions="thresholdSuggestions"
+      @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
+    />
+
     <FitnessStatusCard
       :fitness="fitness"
       :loading="loadingFitness"
@@ -302,6 +381,7 @@ onMounted(() => {
       <ProfileForm
         v-model:note="profileNote"
         :profile="profile"
+        :detected="lastDetected"
         :narration-enabled="!!me?.narrationEnabled"
         :can-sync-garmin="canSyncGarmin"
         :proposing="proposingProfileChange"

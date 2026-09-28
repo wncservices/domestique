@@ -4,7 +4,8 @@
 // rather than mutating the prop — the page owns `profile` and decides what
 // "dirty" means against the last saved copy (see SaveBar.vue).
 import { computed } from 'vue'
-import type { RiderProfile } from '@/api/types'
+import type { DetectedThreshold, RiderProfile } from '@/api/types'
+import type { ThresholdField } from '@/utils/fitnessMath'
 
 const props = defineProps<{
   profile: RiderProfile
@@ -14,6 +15,12 @@ const props = defineProps<{
   explanation: string
   buildingFtpTest: boolean
   buildingMaxHrTest: boolean
+  /** The most recent sync's own auto-applied findings — provenance for an
+   *  estimated FTP/max HR/threshold pace ("detected ..."). Empty once the
+   *  rider confirms the field (Save clears `estimated`/`ftpEstimated`), and
+   *  otherwise only covers the current session — see TrainingFitnessPage's
+   *  own comment on why there's no persisted source date to show instead. */
+  detected?: DetectedThreshold[]
 }>()
 
 const emit = defineEmits<{
@@ -42,6 +49,19 @@ function numberOrUndefined(v: string | number): number | undefined {
 // the confirmation.
 function isEstimated(field: string): boolean {
   return (props.profile.estimated ?? []).includes(field)
+}
+
+// "detected ..." provenance next to an estimated threshold value — the
+// reason from the sync that just filled it in, e.g. "Detected from
+// Saturday's 20-minute effort (282 W)." Only ever the current session's own
+// finding (see the `detected` prop's doc comment); absent otherwise, rather
+// than inventing a date the API doesn't give us.
+function provenance(field: ThresholdField): string | undefined {
+  const found = (props.detected ?? []).find((d) => d.field === field)
+  if (!found?.reason) return undefined
+  const trimmed = found.reason.trim()
+  if (!trimmed) return undefined
+  return `Detected ${trimmed}.`
 }
 
 const weekdays = [
@@ -120,6 +140,7 @@ const experienceItems = computed(() => {
               @click="emit('buildFtpTest')"
             />.
           </p>
+          <p v-if="profile.ftpEstimated && provenance('ftp')" class="text-xs text-dimmed mt-1">{{ provenance('ftp') }}</p>
         </UFormField>
         <UFormField>
           <template #label>
@@ -132,6 +153,9 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ thresholdPaceSecPerKm: numberOrUndefined(v) })"
           />
+          <p v-if="isEstimated('threshold_pace') && provenance('threshold_pace')" class="text-xs text-dimmed mt-1">
+            {{ provenance('threshold_pace') }}
+          </p>
         </UFormField>
         <UFormField>
           <template #label>
@@ -156,6 +180,7 @@ const experienceItems = computed(() => {
               @click="emit('buildMaxHrTest')"
             />. Garmin's figure is often an age-based default, so a real test is the accurate way to get it.
           </p>
+          <p v-if="isEstimated('max_hr') && provenance('max_hr')" class="text-xs text-dimmed mt-1">{{ provenance('max_hr') }}</p>
         </UFormField>
         <UFormField>
           <template #label>
