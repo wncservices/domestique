@@ -19,10 +19,12 @@ import SaveBar from '@/components/fitness/SaveBar.vue'
 import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
+import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
 import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
 
 const toast = useToast()
 const { canSyncGarmin } = useLibrary()
+const { replanAction, announceRecalibration } = useRecalibration()
 
 // --- me: only fetched here for narrationEnabled, so the free-text
 // suggestion box can avoid offering a button that would 412 — see meDTO's
@@ -91,10 +93,22 @@ function discardProfile() {
 async function saveProfile() {
   savingProfile.value = true
   try {
-    profile.value = await api.saveRiderProfile(profile.value)
+    // levelsRecalibrated is a one-shot notice on the response, not part of
+    // the profile — keep it out of the form state so it is never echoed back
+    // and never reads as an unsaved edit.
+    const { levelsRecalibrated, ...saved } = await api.saveRiderProfile(profile.value)
+    profile.value = saved
     savedProfile.value = cloneProfile(profile.value)
     proposalExplanation.value = ''
-    toast.add({ title: 'Training profile saved', icon: 'i-lucide-user', color: 'success' })
+    toast.add({
+      title: 'Training profile saved',
+      description: levelsRecalibrated ? levelsRecalibratedText(levelsRecalibrated) : undefined,
+      icon: 'i-lucide-user',
+      color: 'success',
+      actions: levelsRecalibrated ? [replanAction] : undefined,
+    })
+    // The Progression card carries the per-zone Reason for an adjustment.
+    if (levelsRecalibrated) await loadProgression()
   } catch (err) {
     toast.add({ title: 'Could not save your training profile', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -118,6 +132,8 @@ const thresholdSuggestions = ref<ThresholdSuggestion[]>([])
 // bar still reflects them. Dismiss changes nothing in the profile.
 async function onThresholdResolved(profileChanged: boolean) {
   if (profileChanged) {
+    // An accepted FTP may have lowered the levels the Progression card shows.
+    loadProgression()
     if (!dirty.value) {
       await loadProfile()
     } else {
@@ -272,8 +288,11 @@ async function syncMetrics() {
         icon: 'i-lucide-sparkles',
       })
     }
+    announceRecalibration(result.levelsRecalibrated)
     await loadFitness()
     if (result.autoFilled?.length || lastDetected.value.length) await loadProfile()
+    // The Progression card carries the per-zone Reason for the adjustment.
+    if (result.levelsRecalibrated) await loadProgression()
     await loadThresholdSuggestions()
     // The sync also refreshes daily_wellness (internal/api/wellnesssync.go),
     // so the Recovery card needs a reload too, not just the fitness history.

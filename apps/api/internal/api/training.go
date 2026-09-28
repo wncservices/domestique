@@ -139,6 +139,10 @@ type riderProfileDTO struct {
 	// rider. Output only — handleSaveRiderProfile never reads it back.
 	Estimated []string `json:"estimated,omitempty"`
 	UpdatedAt string   `json:"updatedAt,omitempty"`
+	// LevelsRecalibrated is output only, and only on the response to a save
+	// that lowered the rider's progression levels for a new FTP.
+	// handleSaveRiderProfile never reads it back from the request.
+	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
 }
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
@@ -729,6 +733,13 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rider := auth.FromContext(r.Context()).User
+	// before is what recalibrateLevelsForFTP needs; the marker is not carried
+	// forward into the save below because SaveProfile never writes it.
+	before, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	saved, err := s.Training.SaveProfile(r.Context(), workout.RiderProfile{
 		// FTPEstimated and Estimated are deliberately not read from body:
 		// this is the manual save form, and a rider willing to click Save
@@ -744,9 +755,17 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before)
+	if err != nil {
+		s.logger().Error("level recalibration failed", "rider", rider, "err", err)
+	}
 
 	s.logger().Info("rider profile saved", "rider", rider)
-	writeJSON(w, http.StatusOK, profileDTOFrom(saved))
+	out := profileDTOFrom(saved)
+	if changed {
+		out.LevelsRecalibrated = &dto
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type profileProposalDTO struct {

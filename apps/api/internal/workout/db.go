@@ -584,6 +584,25 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 	return p, true, nil
 }
 
+// SetFTPCalibrated is a compare-and-set on the FTP the rider's levels were
+// last calibrated against: it writes to only if the stored value is still
+// from, and reports whether it did. SaveProfile deliberately never writes
+// this column — a whole-row save carrying a marker loaded earlier could
+// revert one a concurrent save had just moved, and that is what lets two
+// racing saves of the same FTP rise both lower the levels. Routing every
+// marker write through here means exactly one of them wins. A missing rider
+// is a clean loss, not an error.
+func (d *DB) SetFTPCalibrated(ctx context.Context, rider string, from, to float64) (bool, error) {
+	result, err := d.db.ExecContext(ctx, d.query(`
+        UPDATE rider_profiles SET ftp_levels_calibrated_watts = ?
+        WHERE rider = ? AND ftp_levels_calibrated_watts = ?`), to, normalizeRider(rider), from)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
+}
+
 // SaveProfile upserts — a rider has exactly one profile, and setting it up
 // or editing it later are the same write, the same shape
 // internal/settings's own encrypted config rows use for a single
@@ -603,19 +622,18 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr,
                     threshold_hr, resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields,
-                    auto_push_workouts, ftp_levels_calibrated_watts, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    auto_push_workouts, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET
             ftp_watts = excluded.ftp_watts, ftp_estimated = excluded.ftp_estimated,
             threshold_pace_sec_per_km = excluded.threshold_pace_sec_per_km,
             max_hr = excluded.max_hr, threshold_hr = excluded.threshold_hr, resting_hr = excluded.resting_hr,
             available_days = excluded.available_days, hours_per_available_day = excluded.hours_per_available_day,
             experience_level = excluded.experience_level, estimated_fields = excluded.estimated_fields,
-            auto_push_workouts = excluded.auto_push_workouts,
-            ftp_levels_calibrated_watts = excluded.ftp_levels_calibrated_watts, updated_at = excluded.updated_at`),
+            auto_push_workouts = excluded.auto_push_workouts, updated_at = excluded.updated_at`),
 		profile.Rider, profile.FTPWatts, profile.FTPEstimated, profile.ThresholdPaceSecPerKM, profile.MaxHR, profile.ThresholdHR, profile.RestingHR,
 		joinList(profile.AvailableDays), profile.HoursPerAvailableDay, profile.ExperienceLevel,
-		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.FTPLevelsCalibratedAt, profile.UpdatedAt)
+		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.UpdatedAt)
 	if err != nil {
 		return RiderProfile{}, err
 	}
