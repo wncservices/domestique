@@ -152,7 +152,16 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	}
 
 	start := MondayOf(today)
-	if !event.After(start) {
+	// event comes from time.Parse, which always lands in time.UTC. start is
+	// midnight in today's own Location (Local outside tests) — comparing
+	// the two instants directly is wrong everywhere east or west of UTC: a
+	// local midnight is not a UTC midnight, so event.Sub(start) would carry
+	// a few extra (or missing) hours of zone offset into what is meant to
+	// be pure calendar-day arithmetic. Normalize start onto the same UTC
+	// clock event already uses, the same fix BuildRollingPlan's own
+	// startUTC already applies below.
+	startUTC := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	if !event.After(startUTC) {
 		return Plan{}, ErrEventInThePast
 	}
 
@@ -162,7 +171,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	// the event on the Monday immediately after the last planned week
 	// rather than inside it. Integer division (floor, since both operands
 	// are non-negative here) plus one covers every case uniformly.
-	daysUntilEvent := int(event.Sub(start).Hours() / 24)
+	daysUntilEvent := int(event.Sub(startUTC).Hours() / 24)
 	totalWeeks := daysUntilEvent/7 + 1
 
 	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))

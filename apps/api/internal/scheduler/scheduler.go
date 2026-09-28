@@ -391,7 +391,15 @@ func normalizeWeights(weights []float64) []float64 {
 // currentWeek finds the plan week whose Monday-to-Sunday span contains
 // today.
 func currentWeek(plan periodization.Plan, today time.Time) (periodization.Week, bool) {
-	day := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
+	// w.StartDate is always parsed back with time.Parse, which lands in
+	// time.UTC. today.Location() is Local outside tests, so building day
+	// with today's own Location made it a few hours earlier or later than
+	// a true UTC midnight of the same calendar date — east of UTC that put
+	// "today" before its own week's start and this never matched, silently
+	// scheduling nothing. day is built in time.UTC instead, matching start
+	// below, so the comparison is pure calendar-date arithmetic regardless
+	// of the machine's timezone.
+	day := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 	for _, w := range plan.Weeks {
 		start, err := time.Parse("2006-01-02", w.StartDate)
 		if err != nil {
