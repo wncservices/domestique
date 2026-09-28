@@ -24,6 +24,7 @@ type Ride struct {
 	Sport         string // "cycling" | "running"
 	PowerCurve    map[int]float64
 	MaxHR         int
+	BestHR1200    int // best 20-minute mean heart rate, internal/rideanalysis.BestHR
 	BestSpeed1200 float64
 	BestSpeed1800 float64
 }
@@ -37,11 +38,13 @@ type Profile struct {
 	MaxHREstimated        bool
 	ThresholdPaceSecPerKM float64
 	PaceEstimated         bool
+	ThresholdHR           int
+	ThresholdHREstimated  bool
 }
 
 // Finding is one detected change to the rider's profile.
 type Finding struct {
-	Field           string // "ftp" | "max_hr" | "threshold_pace"
+	Field           string // "ftp" | "max_hr" | "threshold_pace" | "threshold_hr"
 	Value           float64
 	Previous        float64
 	Direction       string // "up" | "down"
@@ -93,6 +96,17 @@ const maxHRUpDelta = 1
 // rather than assuming the caller got it right.
 const maxHRSpikeThreshold = 230
 
+// thresholdHRUpDelta is the flat +1 bpm threshold-HR threshold, max HR's own
+// reasoning: a percentage means nothing for a small integer.
+const thresholdHRUpDelta = 1
+
+// thresholdHRFactor is Friel's correction from a 20-minute all-out test's
+// average heart rate to LTHR. An organic best-20 effort resembles that test
+// more than the last 20 minutes of a 30-minute one, and 0.95 errs the safe
+// way: an underestimated LTHR only makes zones easier. Lives here, not in
+// storage, so it can change without a migration.
+const thresholdHRFactor = 0.95
+
 // paceFallbackFactor turns a run's best 20-minute speed into a threshold
 // estimate when the run has no 30-minute best to use directly.
 const paceFallbackFactor = 0.97
@@ -105,8 +119,8 @@ const (
 	powerCurveKey60Min = 3600
 )
 
-// Detect returns every finding across the three fields, in a fixed order
-// (ftp, max_hr, threshold_pace) regardless of ride order, so callers (a sync
+// Detect returns every finding across the four fields, in a fixed order
+// (ftp, max_hr, threshold_pace, threshold_hr) regardless of ride order, so callers (a sync
 // result, a test) see a deterministic list.
 func Detect(rides []Ride, p Profile, now time.Time) []Finding {
 	today := dateOnly(now)
@@ -119,6 +133,9 @@ func Detect(rides []Ride, p Profile, now time.Time) []Finding {
 		findings = append(findings, f)
 	}
 	if f, ok := detectPace(rides, p, today); ok {
+		findings = append(findings, f)
+	}
+	if f, ok := detectThresholdHR(rides, p, today); ok {
 		findings = append(findings, f)
 	}
 	return findings
@@ -339,6 +356,46 @@ func detectMaxHR(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 		SourceDate:      source.Date,
 		Reason:          fmt.Sprintf("peak heart rate %d on %s's ride", best, weekday(source.Date)),
 		Auto:            p.MaxHR == 0 || p.MaxHREstimated,
+	}, true
+}
+
+// detectThresholdHR is detectMaxHR's shape with the 0.95 factor: the highest
+// best-20-minute HR in the window, scaled, up only. There is deliberately no
+// down rule — a stretch of endurance-only riding never contains a
+// near-threshold 20-minute effort, so "nothing reached it" would fire false
+// suggestions at exactly the riders doing base training.
+func detectThresholdHR(rides []Ride, p Profile, today time.Time) (Finding, bool) {
+	var best int
+	var source Ride
+	found := false
+	for _, r := range rides {
+		d, ok := parseDate(r.Date)
+		if !ok || !inWindow(d, today, DetectionWindowDays) {
+			continue
+		}
+		if r.BestHR1200 <= 0 || r.BestHR1200 > maxHRSpikeThreshold {
+			continue
+		}
+		if !found || r.BestHR1200 > best {
+			best, source, found = r.BestHR1200, r, true
+		}
+	}
+	if !found {
+		return Finding{}, false
+	}
+	estimate := int(roundInt(thresholdHRFactor * float64(best)))
+	if estimate < p.ThresholdHR+thresholdHRUpDelta {
+		return Finding{}, false
+	}
+	return Finding{
+		Field:           "threshold_hr",
+		Value:           float64(estimate),
+		Previous:        float64(p.ThresholdHR),
+		Direction:       "up",
+		SourceSessionID: source.SessionID,
+		SourceDate:      source.Date,
+		Reason:          fmt.Sprintf("from %s's best 20-minute heart rate (%d bpm)", weekday(source.Date), best),
+		Auto:            p.ThresholdHR == 0 || p.ThresholdHREstimated,
 	}, true
 }
 

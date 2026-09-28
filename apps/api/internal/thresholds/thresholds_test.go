@@ -28,6 +28,10 @@ func hrRide(id string, daysAgo int, sport string, maxHR int) Ride {
 	return Ride{SessionID: id, Date: today.AddDate(0, 0, -daysAgo).Format("2006-01-02"), Sport: sport, MaxHR: maxHR}
 }
 
+func bestHRRide(id string, daysAgo int, sport string, best1200 int) Ride {
+	return Ride{SessionID: id, Date: today.AddDate(0, 0, -daysAgo).Format("2006-01-02"), Sport: sport, BestHR1200: best1200}
+}
+
 func findField(t *testing.T, findings []Finding, field string) (Finding, bool) {
 	t.Helper()
 	for _, f := range findings {
@@ -386,6 +390,88 @@ func TestMaxHRNeverDown(t *testing.T) {
 	}
 }
 
+// --- Threshold HR ---
+
+func TestThresholdHRUpBoundary(t *testing.T) {
+	// 0.95 x 180 = 171.0; current 170 -> needs >= 171.
+	p := Profile{ThresholdHR: 170}
+	rides := []Ride{bestHRRide("s1", 1, "cycling", 180)}
+	f, ok := findField(t, Detect(rides, p, today), "threshold_hr")
+	if !ok {
+		t.Fatal("estimate == current+1 should fire")
+	}
+	if f.Value != 171 || f.Previous != 170 || f.Direction != "up" || f.SourceSessionID != "s1" {
+		t.Errorf("finding = %+v, want value 171, previous 170, up, s1", f)
+	}
+	wantWeekday := today.AddDate(0, 0, -1).Weekday().String()
+	if want := "from " + wantWeekday + "'s best 20-minute heart rate (180 bpm)"; f.Reason != want {
+		t.Errorf("reason = %q, want %q", f.Reason, want)
+	}
+
+	p = Profile{ThresholdHR: 171}
+	if f, ok := findField(t, Detect(rides, p, today), "threshold_hr"); ok {
+		t.Errorf("estimate equal to current should not fire, got %+v", f)
+	}
+}
+
+func TestThresholdHRUsesHighestBestInWindowAndRounds(t *testing.T) {
+	// 0.95 x 172 = 163.4 -> 163; the older (outside 42 d) 190 is ignored.
+	rides := []Ride{
+		bestHRRide("old", 60, "cycling", 190),
+		bestHRRide("a", 3, "cycling", 160),
+		bestHRRide("b", 5, "running", 172),
+	}
+	f, ok := findField(t, Detect(rides, Profile{}, today), "threshold_hr")
+	if !ok {
+		t.Fatal("want a finding")
+	}
+	if f.Value != 163 || f.SourceSessionID != "b" {
+		t.Errorf("finding = %+v, want value 163 from b", f)
+	}
+}
+
+func TestThresholdHRAutoOnlyWhenEmptyOrEstimated(t *testing.T) {
+	rides := []Ride{bestHRRide("s1", 1, "cycling", 180)}
+	cases := []struct {
+		name string
+		p    Profile
+		auto bool
+	}{
+		{"empty", Profile{}, true},
+		{"estimated", Profile{ThresholdHR: 150, ThresholdHREstimated: true}, true},
+		{"rider typed", Profile{ThresholdHR: 150}, false},
+	}
+	for _, c := range cases {
+		f, ok := findField(t, Detect(rides, c.p, today), "threshold_hr")
+		if !ok {
+			t.Fatalf("%s: want a finding", c.name)
+		}
+		if f.Auto != c.auto {
+			t.Errorf("%s: Auto = %v, want %v", c.name, f.Auto, c.auto)
+		}
+	}
+}
+
+func TestThresholdHRNeverDown(t *testing.T) {
+	// Enough history (>90 days) but only easy recent rides: still no finding.
+	p := Profile{ThresholdHR: 170}
+	rides := []Ride{
+		bestHRRide("old", 120, "cycling", 180),
+		bestHRRide("easy1", 10, "cycling", 130),
+		bestHRRide("easy2", 3, "cycling", 125),
+	}
+	if f, ok := findField(t, Detect(rides, p, today), "threshold_hr"); ok {
+		t.Errorf("threshold HR must never suggest a down move, got %+v", f)
+	}
+}
+
+func TestThresholdHRIgnoresRidesWithoutBestHR(t *testing.T) {
+	rides := []Ride{bestHRRide("short", 1, "cycling", 0)}
+	if f, ok := findField(t, Detect(rides, Profile{}, today), "threshold_hr"); ok {
+		t.Errorf("a ride with no 20-minute HR contributes nothing, got %+v", f)
+	}
+}
+
 // --- Threshold pace ---
 
 func TestPaceUpFrom30MinuteBest(t *testing.T) {
@@ -559,15 +645,16 @@ func TestDetectReturnsFieldsInFixedOrder(t *testing.T) {
 		hrRide("h1", 1, "cycling", 999), // will be ignored (spike), no finding
 		cyclingRide("c1", 1, map[int]float64{3600: 500}),
 		hrRide("h2", 1, "running", 200),
+		bestHRRide("b1", 1, "running", 180),
 	}
-	p := Profile{FTPWatts: 100, MaxHR: 100, ThresholdPaceSecPerKM: 400}
+	p := Profile{FTPWatts: 100, MaxHR: 100, ThresholdPaceSecPerKM: 400, ThresholdHR: 100}
 	got := Detect(rides, p, today)
 
 	var fields []string
 	for _, f := range got {
 		fields = append(fields, f.Field)
 	}
-	want := []string{"ftp", "max_hr", "threshold_pace"}
+	want := []string{"ftp", "max_hr", "threshold_pace", "threshold_hr"}
 	if !reflect.DeepEqual(fields, want) {
 		t.Errorf("field order = %v, want %v", fields, want)
 	}
