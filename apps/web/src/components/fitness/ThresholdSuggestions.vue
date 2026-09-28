@@ -30,12 +30,8 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// A field improving is "up" for FTP and max HR (a bigger number), but for
-// pace a *lower* sec/km is the faster, better direction — so pace's sense
-// of up/down is inverted relative to the raw value comparison.
 function isDown(s: ThresholdSuggestion): boolean {
-  if (s.previous === undefined) return false
-  return s.field === 'threshold_pace' ? s.value > s.previous : s.value < s.previous
+  return s.direction === 'down'
 }
 
 function titleFor(s: ThresholdSuggestion): string {
