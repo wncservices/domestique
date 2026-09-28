@@ -1,0 +1,268 @@
+# Level recalibration after an FTP change — design
+
+Status: draft 2026-09-28. Follow-up named in
+`2026-09-28-threshold-detection-design.md`'s own "Out of scope": "Recalibrating
+progression levels after an FTP change."
+
+## Why
+
+A progression level (`internal/progression`, `docs/superpowers/specs's
+2026-09-27-progression-levels-design.md`) is not itself a wattage — it is a
+rung on a ten-rung ladder (`internal/workoutlib`), and every rung in a zone's
+ladder shares the same percentage-of-FTP target (`Ladder.LowPct`/`HighPct` are
+per zone, not per rung; see `ladders.go`'s own comment: "the Target column of
+the spec's table is per zone, not per rung"). What actually changes rung to
+rung is reps and duration — `Pick` walks a ladder by nearest `Level`, not by
+intensity. So a level's real meaning is "how much time-at-this-percentage a
+rider can handle," at whatever FTP happens to be on file when the percentage
+is converted to watts (`workoutlib.target`).
+
+That is exactly the trap: raise FTP and every existing level keeps its
+reps/duration but the watts under it jump, because the same percentage now
+multiplies a bigger number. A rider sitting at threshold level 5.3 was
+handling 3×12′ at 95–105% of 255 W (242–268 W); the moment FTP is corrected to
+268 W the *same* level asks for the *same* 3×12′ at 255–281 W — more work at
+a higher absolute intensity than anything that level was ever earned against.
+The ordinary per-workout correction (`progression.Delta`'s struggled/
+incomplete rules) would eventually walk it back down, but only after the
+rider has already been over-reached for a week or two of sessions.
+
+TrainerRoad ships the fix this spec follows: **Progression Levels drop after
+an FTP increase** (support.trainerroad.com/hc/en-us/articles/4404977149211,
+"Why did my Athlete Levels Adjust after an FTP change?"), so the wattage a
+rider is actually asked to hold stays close to what they had just adapted to.
+The same page states the asymmetric half that's easy to miss: **an FTP
+*decrease* does not raise levels** — the lower FTP already makes every
+existing level's target watts easier on its own, so there is nothing to
+compensate for; TrainerRoad only lowers a level afterward if the rider then
+struggles at the new, easier watts, through its ordinary per-workout rule.
+No formula for the size of the decrease is published (forum reports vary
+FTP-jump-to-level-drop by a large factor between riders, suggesting it isn't
+a fixed ratio TrainerRoad discloses). intervals.icu and Xert were checked as
+well: neither publishes a progression-level recalibration rule at all —
+intervals.icu has no progression-level concept of its own, and Xert riders
+report its own Training Peaks-equivalent metrics needing to be re-entered by
+hand elsewhere rather than auto-recalibrating.
+
+This spec derives its own formula from how this codebase's levels actually
+work (above), rather than reverse-engineering TrainerRoad's undisclosed one,
+and keeps the same asymmetry: **only an FTP increase recalibrates**.
+
+## What recalibrates
+
+**Cycling's five structured zones only** — tempo, sweet_spot, threshold,
+vo2max, anaerobic (`workout.StructuredZones` minus running's). Running's
+zones (tempo, threshold, intervals) are driven by threshold pace, a
+different field with its own up/down detection; recalibrating those after a
+threshold-pace change is a natural follow-up (see Out of scope) but is not
+this spec.
+
+A zone recalibrates only if the rider already has a saved level for it
+(`workout.ProgressionLevel` row exists) — nothing seeds a level early just
+to immediately lower it; a zone with no row yet is left for the ordinary
+`levelsFor` seeding path to create at whatever FTP is current when it first
+matters.
+
+## When it fires
+
+- **Trigger:** the rider's FTP rises to at least 1.03× the FTP levels were
+  last calibrated against (`RiderProfile.FTPLevelsCalibratedAt` — new field,
+  0 meaning "never calibrated"; see Data). 1.03 is the same up-factor
+  `internal/thresholds` already uses for "a real improvement, not noise" —
+  mirrored by hand into `internal/progression`, the same
+  package-independence convention `progression.Outcome`'s own doc comment
+  already follows for `rideanalysis`'s outcome strings.
+- **Never on a decrease**, matching TrainerRoad's own behaviour above, and
+  matching this codebase's existing asymmetry that a downward threshold
+  finding is already suggestion-only, never auto-applied
+  (`docs/superpowers/specs/2026-09-28-threshold-detection-design.md`, "When
+  a value changes").
+- **Every source of an FTP change qualifies** — Garmin biometrics, the
+  threshold-detection auto-apply (an empty/estimated field, sync-time), the
+  fallback `fitnesstest.EstimateFTP`, an accepted threshold suggestion, and
+  a rider's own manual profile save. The over-reach risk is identical
+  regardless of which of these produced the new number, so there is no
+  case among them worth excluding.
+- **The marker only ratchets up.** `FTPLevelsCalibratedAt` is set to the new
+  FTP every time recalibration actually runs, and is never moved down by an
+  FTP decrease (which never recalibrates in the first place). A rider whose
+  FTP drifts down and back up without ever exceeding the last calibration
+  point by 3% triggers nothing on the way back up either — correctly:
+  levels were already lowered for the higher point once, and the rider
+  hasn't yet re-earned anything past it.
+- **First save ever** (`FTPLevelsCalibratedAt == 0`, e.g. a brand-new
+  profile): the marker is seeded to the FTP being saved and nothing
+  recalibrates — there are no levels earned against a stale FTP to protect
+  yet, the same reasoning `progression.Initial` already uses to seed a
+  fresh rider without inventing a "previous" state that never existed.
+
+## The formula
+
+Every rung in a zone shares one percentage-of-FTP band, so the only lever a
+level moves is time-at-that-band. Treat one full level as one step on that
+time axis, and ask: after FTP rises by ratio `r = newFTP / oldFTP`, how many
+levels' worth of time-at-band would keep the *absolute* watts×time (roughly,
+training stress) a rider is asked for close to what it was before the
+change? A doubling of FTP (`r = 2`) is treated as moving a rider from
+scratch back to the bottom of the ladder they're on — an enormous, sanity-
+bounding case — which fixes the scale: a full doubling costs all 10 levels.
+Anything smaller scales logarithmically between those two points:
+
+```
+delta = -10 * log2(newFTP / oldFTP)
+```
+
+applied identically to every structured cycling zone the rider already has a
+level for — the ratio is the same for all of them, since none of the
+ladders' percentage bands vary by zone in a way that changes how a given FTP
+jump translates into "how many levels of time this is worth." The result
+feeds the same `progression.Apply(cur, delta)` every other level change
+already goes through — no new rounding or clamping: still one decimal,
+still clamped to [1.0, 10.0].
+
+**Worked example:** FTP 255 W → 268 W (a 5.1% rise, the exact example this
+codebase already uses for a threshold-detection toast). `r = 268/255 =
+1.0510`, `log2(r) = 0.0718`, `delta = -0.718`. A rider at threshold level 5.3
+becomes `Apply(5.3, -0.718) = 4.6`. Every other structured cycling zone the
+rider has a level for drops by the same ~0.7 (clamped/rounded per zone,
+so a zone already near the floor stops at 1.0 rather than going negative).
+
+This is a deliberately simple, monotonic approximation, not an exact inverse
+of the ladder tables (which are hand-authored and not smooth — an exact
+per-zone inversion would need a numeric search over `workoutlib.Rung`s at
+recalibration time for a result no more defensible than this closed form).
+The ordinary per-workout correction (`progression.Delta`) keeps correcting
+from here exactly as it always has, the same self-healing property the
+progression-levels design already relies on for every other misestimate.
+
+## Idempotency
+
+`FTPLevelsCalibratedAt` (new `rider_profiles` column, watts, 0 = never) is
+the single guard: recalibration runs at most once per FTP rise past it, and
+is set to the new FTP the moment it runs, before the per-zone level writes.
+A process crash between that profile write and the level writes leaves the
+marker moved but one or more zones unadjusted for that rise — the same kind
+of narrow, undo-nothing race `handleResolveThreshold`'s own accept path
+already accepts for suggestion status vs. profile write (see that handler's
+comment on why there is nothing to roll back). Acceptable here for the same
+reason: the next FTP rise, or an ordinary struggled/incomplete session,
+converges it regardless.
+
+## How the rider is told
+
+No new UI surface for the ordinary case — the existing Progression card
+(`ProgressionCard.vue`, `GET /api/training/progression`) already renders
+each zone's `Reason` string, and recalibration writes one:
+
+```
+FTP 255 → 268 W — threshold 5.3 → 4.6
+```
+
+(mirroring `progression.Reason`'s own em-dash shape, built by a new
+`progression.RecalibrationReason(oldFTP, newFTP, from, to float64) string`).
+A rider who saved their own profile or just accepted a threshold suggestion
+already lands back on a page with the Progression card one glance away.
+
+The one case that needs an explicit nudge is the **background sync** path —
+nobody is looking at a screen when auto-apply fires. `syncMetricsResultDTO`
+(`internal/api/metricssync.go`) gains an optional
+`levelsRecalibrated: {fromFtpWatts, toFtpWatts}`, the same shape
+`EstimatedFTPWatts` already uses for "something changed, tell the toast."
+The sync toast adds one line: "Levels adjusted for your new FTP (255 → 268
+W)." The same small struct is reused on the threshold-accept response
+(`handleResolveThreshold`) and the manual profile-save response
+(`handleSaveRiderProfile`) as an optional sibling field, so all three
+triggers can show the identical toast line without three different shapes.
+
+## Replan
+
+Recalibration does not touch any already-generated `workout.Workout` row —
+a rung stays whatever it was built as; only the *level* used to build the
+*next* one moves. Whichever of the three triggers just recalibrated offers
+the same "Replan the rest of this week" action the threshold-suggestion
+banner already offers after Update (`api.replan()`), never fires it
+automatically — rewriting a rider's already-scheduled week is a bigger,
+less-reversible action than adjusting a number, and the existing UI already
+established "offer, don't force" for the adjacent case of an FTP change.
+
+## Data
+
+- `rider_profiles` gains `ftp_levels_calibrated_watts DOUBLE PRECISION NOT
+  NULL DEFAULT 0` (idempotent add-column in `UseDB`, the same pattern every
+  other column added to this table already follows).
+- No new table. `progression_levels` rows are updated in place through the
+  existing `SaveLevel` upsert — a recalibration is a level move like any
+  other, not a new kind of row.
+
+## Package
+
+`internal/progression` (pure, no new dependency):
+
+```go
+const RecalibrationUpFactor = 1.03 // mirrors thresholds.upFactor by hand
+
+func RecalibrationDelta(oldFTP, newFTP float64) float64
+func RecalibrationReason(oldFTP, newFTP, from, to float64) string
+```
+
+`RecalibrationDelta` returns the formula's result unconditionally; the
+caller (API layer) is the one that checks `newFTP >= oldFTP *
+RecalibrationUpFactor` before calling it at all — the same split
+`thresholds.Detect` vs. its caller already uses (the pure package computes,
+the API layer decides whether the trigger condition holds and persists).
+
+## API
+
+`internal/api/recalibration.go` (new file): one shared helper,
+
+```go
+func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, before workout.RiderProfile) (levelsRecalibratedDTO, bool, error)
+```
+
+called after each of the three places `workout.RiderProfile.FTPWatts` can
+change and be persisted — `syncRiderMetrics` (after its own `SaveProfile`,
+`internal/api/metricssync.go`), `handleResolveThreshold`'s accept branch
+(`internal/api/thresholds.go`), and `handleSaveRiderProfile`
+(`internal/api/training.go`). `before` is the profile as it stood before
+this save (already loaded at every one of those three call sites for other
+reasons); the helper re-reads the just-saved profile for the new FTP rather
+than trusting a caller-passed "after" value, so it can never recalibrate
+against a number that didn't actually make it to storage. It loads the
+rider's existing cycling structured-zone levels via `ListLevels`, computes
+`RecalibrationDelta` once, and writes each affected zone via `SaveLevel`
+with `RecalibrationReason`, then saves the bumped
+`FTPLevelsCalibratedAt` back onto the profile. Owner-only by construction —
+`rider` always comes from the session at every one of the three call sites,
+never a request body, same as every other training write.
+
+## Testing
+
+- `progression`: `RecalibrationDelta` at the 3% boundary (exactly 1.03×:
+  fires; just under: the API layer's own gate, not this function, decides
+  not to call it) and the 255→268 worked example to the stated 0.1
+  precision; a decrease or unchanged FTP produces a delta the caller must
+  not apply (tested by the caller-side gate, not by this pure function
+  refusing — it is intentionally unconditional); clamping at both ends
+  (level already at 1.0 through a huge FTP jump stays at 1.0, never
+  negative).
+- `recalibrateLevelsForFTP`: fires exactly once per qualifying rise
+  (idempotency via `FTPLevelsCalibratedAt`); never fires on a decrease or a
+  rise under 3%; only touches zones with an existing row; leaves running
+  zones untouched; first-ever save seeds the marker without moving any
+  level; storage under `TestEachEngine`.
+- Acceptance: all three triggers (sync auto-apply, threshold accept, manual
+  save) produce the same Progression-card Reason text and, where
+  applicable, the same `levelsRecalibrated` toast field; a second sync pass
+  at the same FTP does nothing further.
+- Fixed clocks are not needed here — this feature has no date window of its
+  own — but every new test still runs under both `TZ=UTC` and
+  `TZ=Europe/Brussels` per the repo-wide constraint, since it shares process
+  state with tests that do.
+
+## Out of scope
+
+Recalibrating running zones after a threshold-pace change (the same
+mechanism, a different trigger field — a natural follow-up, not folded in
+here); recalibrating on a decrease; an exact per-rung inversion of the
+ladder tables; surfacing `FTPLevelsCalibratedAt` itself anywhere in the UI;
+any change to already-generated (past or already-scheduled) workouts.
