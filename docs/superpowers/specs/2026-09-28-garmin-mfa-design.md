@@ -72,18 +72,20 @@ implements the *same* HTML/CSRF widget this app already talks to:
    Content-Type: application/x-www-form-urlencoded
    Referer: <the challenge page's own URL>
 
-   mfa-code=<code>&embed=true&_csrf=<the challenge page's csrf>&fromPage=setupEnterMfaCode
+   mfa-code=<code>&mfa-verification-code=<code>&embed=true&_csrf=<the challenge page's csrf>&fromPage=setupEnterMfaCode
    ```
-   (The task brief that kicked this off named the field
-   `mfa-verification-code`; the source actually read says `mfa-code`. Treat
-   the field name as **unconfirmed** until it is checked against a real
-   MFA-enabled account — see Risks.)
+   **The code is sent under both field names.** The current
+   `python-garminconnect` source says `mfa-code`; older `garth` widget code
+   (and the brief that started this design) used `mfa-verification-code`.
+   Garmin's widget ignores form fields it does not know in practice, so
+   sending both costs nothing and survives whichever one is live today or
+   after the next drift. `ResumeMFA` carries a comment saying exactly this,
+   so nobody "tidies" it to one name. The test fake accepts either. Still
+   **unconfirmed** which one Garmin reads — see Manual verification.
 4. Success looks exactly like the non-MFA success page: title `"Success"`,
    ticket picked out of `?ticket=ST-...` the same way `ticketPattern` already
-   does. Failure (wrong code) re-renders the same challenge page — no
-   dedicated error status observed, so it is detected the same way this
-   codebase already detects "no ticket, and it is not blocked" for a bad
-   password: title/shape, not a status code.
+   does. A wrong code re-renders the challenge page with no dedicated status,
+   so classification must not hang on one HTML string (see next section).
 5. From the ticket, the rest is `internal/garmin`'s existing
    `exchangeTicket` unchanged — Garmin does not care whether the ticket came
    from a plain sign-in or an MFA one.
@@ -104,6 +106,34 @@ Sources (fetched 2026-09-28): `github.com/matin/garth`, `src/garth/sso.py` at
 commit `f99159a`; `github.com/cyberjunky/python-garminconnect`,
 `garminconnect/client.py` at its current default branch.
 
+### Classifying the verify response
+
+`ResumeMFA` checks, in this order, and stops at the first match:
+
+1. `blocked(status, body)` (Cloudflare page) or status 429 from Garmin ->
+   `ErrBlocked` (503; says nothing about the code, does not count as an
+   attempt).
+2. A ticket matches `ticketPattern` -> success, continue to `exchangeTicket`.
+3. **No ticket AND the response is still an MFA page** — `mfaPattern`
+   matches, or the page still carries the `mfa-code`/`mfa-verification-code`
+   input or the widget's MFA script vars (`mfaMethod`, `customerGuid`) ->
+   `ErrMFACodeRejected`. The store counts an attempt; the API answers
+   **422 `{"mfaInvalid": true, "challenge": "<id>", "attemptsRemaining": n}`**
+   and the UI says "That code didn't work — check it and try again".
+   Deliberately a disjunction of markers, not one string: Garmin has changed
+   this page's wording before (`garmin.go` documents two such drifts).
+4. Anything else (unrecognised page, unexpected status) -> a plain error
+   mapped to **502** "Garmin could not be signed in to just now", logged at
+   **Warn** with `classifyGarminError` and the existing `fingerprint(body)`
+   (title, size, field *names* only) — never the body, never cookies. An
+   unexpected page does **not** consume an attempt: the rider did nothing
+   wrong, and burning their budget on our parsing gap would be worse than
+   the gap.
+
+This replaces an earlier idea of 401 for a wrong code: 401 already means
+"Garmin rejected the password" in this handler, and the UI keys off the JSON
+flag (`mfaInvalid`), not the status text.
+
 ## Resuming a login across two requests
 
 `internal/garmin.Client` holds an in-memory `*http.CookieJar` and issues every
@@ -113,9 +143,13 @@ Garmin-specific methods:
 
 - `ExportCookies() map[string][]*http.Cookie` — `jar.Cookies(u)` for each of
   `SSOBase`/`APIBase`/`WebBase`, the only hosts this client ever talks to
-  (`allowedHost` already enumerates exactly these three).
+  (`allowedHost` already enumerates exactly these three). **Scoped on
+  purpose:** only cookies the jar would send to those hosts are exported,
+  nothing enumerated wholesale, so the sealed blob can never hold a cookie
+  for anywhere else.
 - `ImportCookies(map[string][]*http.Cookie)` — the inverse, into a fresh
-  jar on a fresh `Client` built with the same three bases.
+  jar on a fresh `Client` built with the same three bases; it only sets
+  cookies under those bases and drops anything for another host.
 
 What a resumed login needs is exactly: those cookies, the CSRF token read off
 the challenge page, and the email (not a credential — already stored
@@ -125,6 +159,12 @@ request body carries no email). `signinParams()` is deterministic — no random
 component — so it is recomputed, not stored. The password is never part of
 this state; it was used once inside `Client.Login`'s call to
 `submitCredentials` and is gone by the time `ErrMFARequired` comes back.
+
+**Size cap:** the marshalled `MFAChallenge` must be at most 64 KiB, checked
+in `garminmfa.Create` *before* sealing; over the cap is an error (logged at
+Warn with the size only, and the rider sees the generic 502), never a
+truncation. Cookies come from a third party; an unbounded blob per attempt
+would be a cheap way to fill the table.
 
 `garmin.Client` gains:
 
@@ -194,6 +234,12 @@ CREATE TABLE garmin_mfa_challenges (
   between Garmin and Komoot) covers the same endpoint too, for the same
   reason it covers step 1: this server must not become a laundered
   credential-stuffing proxy.
+- **Live challenges per rider: 3.** Creating a fourth deletes that rider's
+  oldest live one first (expired rows are also pruned on every create, as in
+  `sessions.Create`). The per-challenge attempt cap alone does not bound how
+  many challenges a rider can open — each fresh step 1 gets a fresh five
+  tries — so the count is capped too; step 1 is also under
+  `rateLimitConnect`. Enough for v1; no global cap.
 - **Ownership**: `rider` is copied from the session at *creation* time
   (step 1), the same rule as everywhere else a connection is made — never
   from the request body. Step 2 checks the caller's session rider against
@@ -209,7 +255,8 @@ CREATE TABLE garmin_mfa_challenges (
 | Case | Status | Body |
 |---|---|---|
 | Step 1, MFA required | 409 | `{"mfa": true, "challenge": "<id>", "method": "email"\|"sms"\|"totp"\|""}` |
-| Step 2, wrong code | 401 | `{"error": "...", "mfa": true, "challenge": "<id>"}` — same challenge id, so the UI keeps the code field open |
+| Step 2, wrong code (no ticket, still an MFA page) | 422 | `{"error": "That code didn't work — check it and try again", "mfaInvalid": true, "challenge": "<id>", "attemptsRemaining": n}` — same challenge id, so the UI keeps the code field open |
+| Step 2, unexpected Garmin response | 502 | `{"error": "Garmin could not be signed in to just now — try again later"}`; no attempt consumed |
 | Step 2, attempts exhausted | 409 | `{"error": "too many wrong codes — sign in again"}` |
 | Step 2, expired or already used | 409 | `{"error": "this code has expired — sign in again"}` |
 | Step 2, unknown / another rider's challenge | 404 | `{"error": "no such sign-in in progress"}` |
@@ -270,6 +317,31 @@ Store tests for `internal/garminmfa` run under `TestEachEngine`. All new
 tests use a fixed clock (the store takes `Now func() time.Time` the way
 `garmin.Client` already does) so TTL/expiry assertions don't depend on
 wall-clock timing or the machine's timezone.
+
+## Manual verification before release
+
+Nothing above has touched a real two-factor Garmin account, and the fake SSO
+proves only that the code matches the fake. **This is a release gate:** no
+"two-factor supported" copy in the UI (or in docs/README) flips until it
+passes. The maintainer, on a **deployed build** (real Cloudflare, real
+`sso.garmin.com`, not `just demo`), signs in once with a real 2FA-enabled
+Garmin account — email method, and the authenticator app too if one is
+available — and checks:
+
+- Step 1 returns the **409 with a `challenge`** (and the right `method`),
+  and Garmin actually delivers the email/SMS code without any resend call.
+- A **correct code is accepted**: the dialog closes, the connection shows as
+  connected, and the head unit is **linked** (Head units card lists it).
+- A **wrong code** yields "That code didn't work — check it and try again"
+  with the field still open, and the correct code then still works on the
+  same challenge.
+- Which field name Garmin reads (`mfa-code` vs `mfa-verification-code`) and
+  what the wrong-code page looks like; record both back in this spec.
+- Logs: a challenge-created Info line and a Warn on the wrong code, with no
+  code, cookie or password in either.
+
+Until then the UI keeps its existing dead-end copy; only after this passes is
+the copy changed to promise two-factor works.
 
 ## Risks and open questions (flagged honestly)
 

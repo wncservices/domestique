@@ -68,6 +68,7 @@ request sequence, error table, TTL/attempt values and copy are binding.
 | 1 | 1 `internal/garmin` resume support | `claude/garmin-mfa-1-resume` |
 | 2 | 2 `internal/garminmfa` storage + API wiring | `claude/garmin-mfa-2-challenges` |
 | 3 | 3 UI | `claude/garmin-mfa-3-ui` |
+| — | 4 manual verification gate (no PR) | — |
 
 Restack right after each squash merge.
 
@@ -99,12 +100,17 @@ func (c *Client) ResumeMFA(ctx context.Context, consumer consumerKey, ch MFAChal
   zero `MFAChallenge{}`; extend `newFakeConnect`'s fake with a
   `/sso/verifyMFA/loginEnterMfaCode` handler and give the fake's MFA page its
   own embedded `_csrf` (distinct from the sign-in page's, so a test that
-  reuses the wrong one fails); `ResumeMFA` posts `mfa-code`, `embed=true`,
+  reuses the wrong one fails); `ResumeMFA` posts `mfa-code` **and** `mfa-verification-code` (same value, with a comment
+  saying why — the fake accepts either), `embed=true`,
   the *challenge page's* `_csrf`, `fromPage=setupEnterMfaCode` to that
   endpoint and completes the same OAuth1/OAuth2 exchange `Login` does on
-  success; wrong code → `ErrMFACodeRejected`; the fake's 429 → `ErrBlocked`;
+  success; classification per the spec's "Classifying the verify response": no
+  ticket + still an MFA page (tested with two different page
+  wordings/markers, so one string is not load-bearing) → `ErrMFACodeRejected`;
+  an unrecognised page → a plain error, not `ErrMFACodeRejected`; the fake's 429 → `ErrBlocked`;
   `ExportCookies`/`ImportCookies` round-trip cookies for all three configured
-  bases across two separate `Client` instances (proving a real cross-process
+  bases (and **drop cookies for any other host** — a foreign-host cookie set in
+  the fake never appears in the export) across two separate `Client` instances (proving a real cross-process
   resume is possible, not just same-object reuse).
 - [ ] GREEN; `just check`; commit `"Let a Garmin sign-in resume after an MFA
   challenge"`.
@@ -125,7 +131,9 @@ func (c *Client) ResumeMFA(ctx context.Context, consumer consumerKey, ch MFAChal
   attempts count before deciding; `RecordAttempt(token string) (attempts int,
   err error)` increments and deletes the row (returning
   `ErrAttemptsExhausted`) once it reaches 5; `Consume(token string) error`
-  deletes on success. Fixed clock. `TestEachEngine`, idempotent `UseDB`
+  deletes on success. `Create` rejects a marshalled challenge over 64 KiB before sealing, and a
+  fourth live challenge for a rider deletes that rider's oldest (other
+  riders' untouched). Fixed clock. `TestEachEngine`, idempotent `UseDB`
   schema.
 - [ ] RED, API: `handleGarminConnect`'s MFA branch (`writeGarminLoginError`)
   creates a challenge and returns `409 {"mfa": true, "challenge": "<id>",
@@ -133,12 +141,16 @@ func (c *Client) ResumeMFA(ctx context.Context, consumer consumerKey, ch MFAChal
   `POST /api/garmin/connection/mfa` `{challenge, code}` — success stores the
   session and links the account exactly like step 1's success path (same
   `Links.Save`/`ensureAccount` calls, verify via a shared helper rather than
-  copy-pasted); wrong code → 401 with the same challenge id and an
-  `attemptsRemaining` count; 5th wrong code → 409 "too many wrong codes" and
+  copy-pasted); wrong code (no ticket, still an MFA page) → 422
+  `{mfaInvalid: true, challenge, attemptsRemaining}`, attempt counted; an
+  unexpected Garmin page → 502, Warn log with the fingerprint only, **no
+  attempt counted**; 5th wrong code → 409 "too many wrong codes" and
   the challenge is gone (a 6th attempt is 404); expired → 409; another
   rider's own challenge id → 404; reusing a consumed challenge → 404; both
   endpoints run through `rateLimitConnect`; owner-only via the same
   `require(w, r, auth.PermManageAccounts)` as today.
+- [ ] Logging assertion: capture the logger in a test and confirm no line
+  contains the submitted code, a cookie value or the password.
 - [ ] GREEN; `just check`; commit `"Store a resumable Garmin MFA challenge
   and add the second sign-in step"`.
 
@@ -151,9 +163,11 @@ func (c *Client) ResumeMFA(ctx context.Context, consumer consumerKey, ch MFAChal
   `challenge`, `method`, `attemptsRemaining?`); `api.garminConnectMFA(challenge,
   code)` in `client.ts`.
 - [ ] `GarminSignIn.vue`: on `kind === 'mfa'`, replace the "cannot complete"
-  alert with a code-entry form (`inputmode="numeric"`,
-  `autocomplete="one-time-code"`) whose copy varies by `method`; wrong code
-  re-shows the same step with the error and, once Garmin starts saying
+  alert (keep the old dead-end copy until Task 4's gate passes; the new copy
+  promising two-factor support is gated behind it) with a code-entry form (`inputmode="numeric"`,
+  `autocomplete="one-time-code"`) whose copy varies by `method`; `mfaInvalid` (422)
+  re-shows the same step with "That code didn't work — check it and try
+  again" and, once Garmin starts saying
   attempts are limited, that count; expired/exhausted resets fully to the
   email/password step with an explanation. Reopening the dialog still clears
   everything, code included.
@@ -161,3 +175,15 @@ func (c *Client) ResumeMFA(ctx context.Context, consumer consumerKey, ch MFAChal
   `components.d.ts`/`auto-imports.d.ts` aside, `npx vue-tsc --noEmit`, move
   back), browser check of the code step in light/dark and at 375px; commit
   `"Show a code-entry step for Garmin two-factor sign-in"`.
+
+### Task 4: Manual verification gate (no code)
+
+- [ ] Maintainer signs in once on a deployed build with a real 2FA-enabled
+  Garmin account (email method; authenticator app too if available) and works
+  through the spec's "Manual verification before release" checklist: 409
+  challenge, code accepted, account linked, wrong code → retry message, which
+  field name Garmin reads, clean logs.
+- [ ] Record the findings (field name, wrong-code page) back into the spec and
+  fix the classification markers if they differ. **Only then** flip any
+  "two-factor supported" copy in the UI/docs. If it fails, the copy change does
+  not ship.
