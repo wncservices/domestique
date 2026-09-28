@@ -168,3 +168,67 @@ func TestReason(t *testing.T) {
 		})
 	}
 }
+
+func TestRecalibrationDelta(t *testing.T) {
+	near := func(got, want float64) bool { return math.Abs(got-want) < 0.0005 }
+
+	t.Run("the worked example, 255 to 268 W", func(t *testing.T) {
+		if got := RecalibrationDelta(255, 268); !near(got, -0.717) {
+			t.Errorf("RecalibrationDelta(255, 268) = %v, want about -0.717 (the spec rounds to -0.718)", got)
+		}
+		if got := Apply(5.3, RecalibrationDelta(255, 268)); got != 4.6 {
+			t.Errorf("Apply(5.3, delta) = %v, want 4.6", got)
+		}
+	})
+
+	t.Run("unchanged FTP is no move", func(t *testing.T) {
+		if got := RecalibrationDelta(255, 255); got != 0 {
+			t.Errorf("RecalibrationDelta(255, 255) = %v, want 0", got)
+		}
+	})
+
+	t.Run("a +10% rise is under the cap", func(t *testing.T) {
+		if got := RecalibrationDelta(255, 280.5); !near(got, -1.375) {
+			t.Errorf("RecalibrationDelta(255, 280.5) = %v, want about -1.375", got)
+		}
+	})
+
+	t.Run("a +20% rise is capped at -2.0 (raw -2.63)", func(t *testing.T) {
+		if got := RecalibrationDelta(255, 306); got != -2.0 {
+			t.Errorf("RecalibrationDelta(255, 306) = %v, want exactly -2.0", got)
+		}
+		if got := RecalibrationDelta(255, 318.75); got != -2.0 {
+			t.Errorf("RecalibrationDelta(255, 318.75) = %v, want exactly -2.0", got)
+		}
+	})
+
+	t.Run("a decrease is unconditional and positive; gating is the caller's job", func(t *testing.T) {
+		if got := RecalibrationDelta(255, 240); got <= 0 {
+			t.Errorf("RecalibrationDelta(255, 240) = %v, want a positive delta (caller must never apply it)", got)
+		}
+	})
+
+	t.Run("Apply still floors at 1.0 and never goes negative", func(t *testing.T) {
+		if got := Apply(1.4, RecalibrationDelta(255, 306)); got != 1.0 {
+			t.Errorf("Apply(1.4, -2.0) = %v, want 1.0", got)
+		}
+		if got := Apply(1.0, RecalibrationDelta(255, 2550)); got != 1.0 {
+			t.Errorf("Apply(1.0, huge jump) = %v, want 1.0", got)
+		}
+	})
+}
+
+func TestRecalibrationReason(t *testing.T) {
+	got := RecalibrationReason(255, 268, "threshold", 5.3, 4.6)
+	want := "FTP 255 → 268 W — threshold 5.3 → 4.6"
+	if got != want {
+		t.Errorf("RecalibrationReason = %q, want %q", got, want)
+	}
+}
+
+func TestRecalibrationConstants(t *testing.T) {
+	if RecalibrationUpFactor != 1.03 || RecalibrationMaxFactor != 1.25 ||
+		RecalibrationLevelsPerDoubling != 10 || RecalibrationMaxDrop != 2.0 {
+		t.Error("recalibration constants drifted from the spec")
+	}
+}
