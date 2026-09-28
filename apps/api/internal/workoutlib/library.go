@@ -140,7 +140,10 @@ func HRRange(sport model.Sport, profile workout.RiderProfile, zone string) (low,
 		lowFrac, highFrac := lthrHRRange(sport, zone)
 		low = float64(profile.ThresholdHR) * lowFrac
 		high = float64(profile.ThresholdHR) * highFrac
-		if profile.MaxHR > 0 {
+		// A max HR below LTHR is stale or mistyped (LTHR cannot exceed max
+		// HR), and capping at it would collapse every zone to one zero-width
+		// value, so the cap only applies when the ceiling is plausible.
+		if profile.MaxHR > 0 && profile.MaxHR >= profile.ThresholdHR {
 			ceiling := float64(profile.MaxHR)
 			low, high = math.Min(low, ceiling), math.Min(high, ceiling)
 		}

@@ -298,6 +298,9 @@ var lthrZoneEdges = map[string][4]float64{
 	"running": {0.85, 0.90, 0.95, 1.00},
 }
 
+// Stored buckets reflect whichever basis (LTHR or max HR) was known when the
+// ride was analysed; nothing re-analyses a ride when the profile changes.
+//
 // HRZoneSecondsLTHR is HRZoneSeconds against threshold heart rate and the
 // sport's Friel edges, for a rider who has one. lthr <= 0 puts every second
 // in Z1, like HRZoneSeconds does for a missing max HR.
@@ -398,6 +401,8 @@ func BestHR(s []Sample) int {
 	if len(s) < heartRateWindow1200Seconds {
 		return 0
 	}
+	// Samples without a reading stay 0 in the window: dropouts drag the mean
+	// down, which errs low — the safe direction for an LTHR estimate.
 	hasHR := false
 	hr := make([]float64, len(s))
 	for i, sample := range s {

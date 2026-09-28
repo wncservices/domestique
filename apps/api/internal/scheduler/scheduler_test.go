@@ -621,8 +621,7 @@ func TestEnduranceZoneTargetUsesFrielZone2WhenThresholdHRKnown(t *testing.T) {
 		{"cycling LTHR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160}, 160 * 0.81, 160 * 0.89},
 		{"running LTHR", model.SportRunning, workout.RiderProfile{ThresholdHR: 160}, 160 * 0.85, 160 * 0.89},
 		{"LTHR wins over max HR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160, MaxHR: 190}, 160 * 0.81, 160 * 0.89},
-		{"high capped at max HR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160, MaxHR: 140}, 160 * 0.81, 140},
-		{"both ends capped at max HR", model.SportCycling, workout.RiderProfile{ThresholdHR: 160, MaxHR: 120}, 120, 120},
+		{"max HR below LTHR is not a ceiling", model.SportCycling, workout.RiderProfile{ThresholdHR: 170, MaxHR: 165}, 170 * 0.81, 170 * 0.89},
 	}
 	for _, c := range cases {
 		tt, low, high := enduranceZoneTarget(c.sport, c.profile)

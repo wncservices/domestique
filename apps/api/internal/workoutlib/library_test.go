@@ -550,6 +550,11 @@ func TestHRRangeCapsAtMaxHR(t *testing.T) {
 	if low != 185 || high != 185 {
 		t.Errorf("got [%v, %v], want [185, 185]", low, high)
 	}
+	// A max HR below LTHR is stale or mistyped: skip the cap, keep Friel's targets.
+	low, high, _ = HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 170, MaxHR: 165}, "tempo")
+	if !approx(low, 170*0.90) || !approx(high, 170*0.93) {
+		t.Errorf("MaxHR < LTHR: got [%v, %v], want uncapped [%v, %v]", low, high, 170*0.90, 170*0.93)
+	}
 	// Below the ceiling nothing changes.
 	low, high, _ = HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 150, MaxHR: 190}, "tempo")
 	if !approx(low, 135) || !approx(high, 139.5) {

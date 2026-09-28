@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     best_speed_1200      DOUBLE PRECISION NOT NULL DEFAULT 0,
     best_speed_1800      DOUBLE PRECISION NOT NULL DEFAULT 0,
     power_zone_seconds   TEXT NOT NULL DEFAULT '',
-    hr_zone_seconds      TEXT NOT NULL DEFAULT '',
+    hr_zone_seconds      TEXT NOT NULL DEFAULT '', -- basis (LTHR or max HR) known at analysis time; never re-analysed
     power_curve          TEXT NOT NULL DEFAULT '',
     steps                TEXT NOT NULL DEFAULT '',
     analysed_at          TEXT NOT NULL
