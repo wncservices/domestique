@@ -504,7 +504,7 @@ func TestEachEngine(t *testing.T) {
 					SessionID: session.ID, Rider: "Wilant", WorkoutID: "threshold-6x3",
 					Outcome: "struggled", LoadSource: "power",
 					NormalizedPower: 245.5, IntensityFactor: 0.98, TSS: 92.3, DurationRatio: 1.02,
-					MaxHR: 178, BestSpeed1200: 4.2, BestSpeed1800: 3.9,
+					MaxHR: 178, BestHR1200: 165, BestSpeed1200: 4.2, BestSpeed1800: 3.9,
 					PowerZoneSeconds: []int{100, 200, 900, 1200, 800, 400},
 					HRZoneSeconds:    []int{300, 600, 1500, 900, 300},
 					PowerCurve:       map[string]float64{"5": 550, "60": 400, "300": 260, "1200": 230},
@@ -532,7 +532,7 @@ func TestEachEngine(t *testing.T) {
 					fetched.TSS != analysis.TSS || fetched.DurationRatio != analysis.DurationRatio {
 					t.Errorf("fetched numbers = %+v, want %+v", fetched, analysis)
 				}
-				if fetched.MaxHR != analysis.MaxHR || fetched.BestSpeed1200 != analysis.BestSpeed1200 ||
+				if fetched.MaxHR != analysis.MaxHR || fetched.BestHR1200 != analysis.BestHR1200 || fetched.BestSpeed1200 != analysis.BestSpeed1200 ||
 					fetched.BestSpeed1800 != analysis.BestSpeed1800 {
 					t.Errorf("fetched threshold fields = %+v, want %+v", fetched, analysis)
 				}
@@ -563,6 +563,7 @@ func TestEachEngine(t *testing.T) {
 				analysis.TSS = 95
 				analysis.MaxHR = 182
 				analysis.BestSpeed1200 = 4.5
+				analysis.BestHR1200 = 168
 				if err := db.SaveAnalysis(ctx, analysis); err != nil {
 					t.Fatalf("re-save analysis: %v", err)
 				}
@@ -570,7 +571,7 @@ func TestEachEngine(t *testing.T) {
 				if err != nil || !ok || replaced.Outcome != "nailed_it" || replaced.TSS != 95 {
 					t.Fatalf("replaced = %+v, ok=%v, err=%v, want outcome nailed_it tss 95", replaced, ok, err)
 				}
-				if replaced.MaxHR != 182 || replaced.BestSpeed1200 != 4.5 {
+				if replaced.MaxHR != 182 || replaced.BestSpeed1200 != 4.5 || replaced.BestHR1200 != 168 {
 					t.Errorf("replaced threshold fields = %+v, want max_hr 182 best_speed_1200 4.5", replaced)
 				}
 
@@ -774,7 +775,7 @@ VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
 	if err != nil || !ok {
 		t.Fatalf("get pre-existing row after migration: ok=%v err=%v", ok, err)
 	}
-	if old.MaxHR != 0 || old.BestSpeed1200 != 0 || old.BestSpeed1800 != 0 {
+	if old.BestHR1200 != 0 || old.MaxHR != 0 || old.BestSpeed1200 != 0 || old.BestSpeed1800 != 0 {
 		t.Errorf("pre-existing row threshold fields = %+v, want all zero", old)
 	}
 
@@ -782,7 +783,7 @@ VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
 	// carrying real threshold values, not just tolerate the old row.
 	if err := db.SaveAnalysis(t.Context(), SessionAnalysis{
 		SessionID: "garmin:new-ride", Rider: "wilant", Outcome: "completed",
-		MaxHR: 175, BestSpeed1200: 4.1, BestSpeed1800: 3.8,
+		MaxHR: 175, BestHR1200: 160, BestSpeed1200: 4.1, BestSpeed1800: 3.8,
 	}); err != nil {
 		t.Fatalf("save analysis after migration: %v", err)
 	}
@@ -790,7 +791,7 @@ VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
 	if err != nil || !ok {
 		t.Fatalf("get new row after migration: ok=%v err=%v", ok, err)
 	}
-	if saved.MaxHR != 175 || saved.BestSpeed1200 != 4.1 || saved.BestSpeed1800 != 3.8 {
+	if saved.BestHR1200 != 160 || saved.MaxHR != 175 || saved.BestSpeed1200 != 4.1 || saved.BestSpeed1800 != 3.8 {
 		t.Errorf("saved threshold fields = %+v, want 175/4.1/3.8", saved)
 	}
 

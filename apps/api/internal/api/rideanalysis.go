@@ -188,6 +188,7 @@ func (s *Server) analyseNewSessions(
 			TSS:              analysis.TSS,
 			DurationRatio:    analysis.DurationRatio,
 			MaxHR:            analysis.MaxHR,
+			BestHR1200:       analysis.BestHR1200,
 			BestSpeed1200:    analysis.BestSpeed1200,
 			BestSpeed1800:    analysis.BestSpeed1800,
 			PowerZoneSeconds: analysis.PowerZoneSeconds[:],

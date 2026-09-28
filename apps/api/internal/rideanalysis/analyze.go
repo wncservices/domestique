@@ -107,6 +107,7 @@ type Analysis struct {
 	// reasoning that leaves PowerZoneSeconds/HRZoneSeconds/PowerCurve empty
 	// in that case.
 	MaxHR         int
+	BestHR1200    int // best 20-minute mean heart rate; LTHR detection's raw material
 	BestSpeed1200 float64
 	BestSpeed1800 float64
 
@@ -544,6 +545,7 @@ func Analyze(in Input) Analysis {
 		a.HRZoneSeconds = HRZoneSeconds(samples, in.Profile.MaxHR)
 		a.PowerCurve = PowerCurve(samples)
 		a.MaxHR = MaxHR(samples)
+		a.BestHR1200 = BestHR(samples)
 		a.BestSpeed1200, a.BestSpeed1800 = BestSpeeds(samples)
 	} else {
 		// No FIT file decoded (never fetched, or the download/decode

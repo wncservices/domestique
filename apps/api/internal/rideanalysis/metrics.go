@@ -350,6 +350,36 @@ func MaxHR(s []Sample) int {
 	return max
 }
 
+// heartRateWindow1200Seconds is the 20-minute window LTHR detection reads:
+// Friel's shorter field test averages heart rate over 20 minutes.
+const heartRateWindow1200Seconds = 1200
+
+// BestHR returns the highest 20-minute rolling mean of the ride's heart-rate
+// samples, rounded to a whole bpm, built with the same bestRollingMean that
+// builds PowerCurve and BestSpeeds. Unlike MaxHR it is an average, so one
+// spike cannot move it; readings above maxHRSpikeThreshold are treated as no
+// reading anyway. 0 when the ride is shorter than 20 minutes (a window longer
+// than the ride has no meaningful best, as PowerCurve leaves it out rather
+// than reporting a low 0) or carries no HR data.
+func BestHR(s []Sample) int {
+	if len(s) < heartRateWindow1200Seconds {
+		return 0
+	}
+	hasHR := false
+	hr := make([]float64, len(s))
+	for i, sample := range s {
+		if !sample.HasHR || sample.HeartRate > maxHRSpikeThreshold {
+			continue
+		}
+		hasHR = true
+		hr[i] = sample.HeartRate
+	}
+	if !hasHR {
+		return 0
+	}
+	return int(math.Round(bestRollingMean(hr, heartRateWindow1200Seconds)))
+}
+
 // speedCurveWindows are the two windows the threshold-detection design
 // needs a best average speed for: 20 and 30 minutes, the same running-pace
 // windows a rider's threshold pace is judged against — see docs/superpowers/

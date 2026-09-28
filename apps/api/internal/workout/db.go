@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     tss                  DOUBLE PRECISION NOT NULL DEFAULT 0,
     duration_ratio       DOUBLE PRECISION NOT NULL DEFAULT 0,
     max_hr               INTEGER NOT NULL DEFAULT 0,
+    best_hr_1200         INTEGER NOT NULL DEFAULT 0,
     best_speed_1200      DOUBLE PRECISION NOT NULL DEFAULT 0,
     best_speed_1800      DOUBLE PRECISION NOT NULL DEFAULT 0,
     power_zone_seconds   TEXT NOT NULL DEFAULT '',
@@ -321,7 +322,7 @@ func (d *DB) addAnalysisFeelColumns() error {
 	return nil
 }
 
-// addThresholdColumns adds max_hr/best_speed_1200/best_speed_1800 to a
+// addThresholdColumns adds max_hr/best_hr_1200/best_speed_1200/best_speed_1800 to a
 // session_analyses table that predates them — the same "table exists,
 // column doesn't" situation addAnalysisFeelColumns already handles.
 // Defaulting to 0 is correct for every pre-existing row: a ride analysed
@@ -332,6 +333,7 @@ func (d *DB) addAnalysisFeelColumns() error {
 func (d *DB) addThresholdColumns() error {
 	for _, stmt := range []string{
 		`ALTER TABLE session_analyses ADD COLUMN max_hr INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE session_analyses ADD COLUMN best_hr_1200 INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_analyses ADD COLUMN best_speed_1200 DOUBLE PRECISION NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_analyses ADD COLUMN best_speed_1800 DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {

@@ -287,3 +287,43 @@ func TestBestSpeedsZeroWithNoSpeedData(t *testing.T) {
 		t.Errorf("BestSpeeds = (%v, %v), want (0, 0) with no speed data", best1200, best1800)
 	}
 }
+
+func TestBestHRIsHighestTwentyMinuteMean(t *testing.T) {
+	// 10 min easy, then exactly 20 min at 170 bpm, then 5 min easy: the best
+	// 20-minute window is the hard block, not the whole-ride average.
+	fixtures := constantHR(600, 120)
+	for i := 0; i < 1200; i++ {
+		fixtures = append(fixtures, fixture{Sec: 600 + i, HR: 170})
+	}
+	for i := 0; i < 300; i++ {
+		fixtures = append(fixtures, fixture{Sec: 1800 + i, HR: 110})
+	}
+	samples := Resample(buildActivity(t, fixtures, nil).Records)
+
+	if got := BestHR(samples); got != 170 {
+		t.Errorf("BestHR = %d, want 170", got)
+	}
+}
+
+func TestBestHRZeroForRideUnderTwentyMinutes(t *testing.T) {
+	samples := Resample(buildActivity(t, constantHR(1199, 170), nil).Records)
+	if got := BestHR(samples); got != 0 {
+		t.Errorf("BestHR = %d, want 0 for a 19:59 ride", got)
+	}
+}
+
+func TestBestHRZeroWithNoHRData(t *testing.T) {
+	samples := Resample(buildActivity(t, constantPower(1500, 200), nil).Records)
+	if got := BestHR(samples); got != 0 {
+		t.Errorf("BestHR = %d, want 0 with no HR data", got)
+	}
+}
+
+func TestBestHRUnaffectedBySingleSpike(t *testing.T) {
+	fixtures := constantHR(1500, 150)
+	fixtures[700] = fixture{Sec: 700, HR: 250} // sensor spike
+	samples := Resample(buildActivity(t, fixtures, nil).Records)
+	if got := BestHR(samples); got != 150 {
+		t.Errorf("BestHR = %d, want 150 (spike must not move a 20-minute mean)", got)
+	}
+}

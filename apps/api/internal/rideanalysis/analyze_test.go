@@ -620,3 +620,14 @@ func TestMatchPlannedPicksClosestDurationSameSportAndDate(t *testing.T) {
 		t.Errorf("matched workout planned seconds = %v, want 7200 (the 120-min one)", workout.PlannedSeconds(got.Steps))
 	}
 }
+
+func TestAnalyzeReportsBestHR1200(t *testing.T) {
+	act := buildActivity(t, constantHR(1500, 160), nil)
+	a := Analyze(Input{Activity: act, Profile: workout.RiderProfile{MaxHR: 190}})
+	if a.BestHR1200 != 160 {
+		t.Errorf("BestHR1200 = %d, want 160", a.BestHR1200)
+	}
+	if none := Analyze(Input{Profile: workout.RiderProfile{MaxHR: 190}}); none.BestHR1200 != 0 {
+		t.Errorf("BestHR1200 = %d, want 0 without a decoded activity", none.BestHR1200)
+	}
+}
