@@ -178,7 +178,8 @@ onMounted(load)
         <p v-else-if="searched" class="text-sm text-muted">No matching town found.</p>
         <p class="text-xs text-muted">
           Domestique sends only this town's approximate location (rounded to about 1 km) to Open-Meteo to fetch the
-          forecast. Your routes and rides are never shared. Remove it any time.
+          forecast. Your routes and rides are never shared. Remove it any time. Only the town and country are kept,
+          never a street address.
         </p>
       </div>
 
