@@ -9,9 +9,11 @@ import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type { ReadinessVerdict, RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
+import { todayISO } from '@/utils/rideDates'
 import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
 import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import FeelRating from './FeelRating.vue'
+import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
@@ -40,6 +42,9 @@ const emit = defineEmits<{
   push: [w: Workout]
   edit: [w: Workout]
   move: [w: Workout, date: string]
+  // The page owns the confirm modal and the calls (useIndoor).
+  indoor: [w: Workout]
+  outdoor: [w: Workout]
   // A feel rating can change the ride's own progression-level change (see
   // api.setSessionFeel's own doc comment) — the level and week state live on
   // the page, not here, so this just asks it to reload both rather than
@@ -109,6 +114,18 @@ function moveMenuItems(w: Workout, fromDate: string) {
     onSelect: () => emit('move', w, date),
   }))
 }
+
+// The indoor version can be made or undone until the session is ridden or its
+// day has passed — the same rule the API enforces with a 409. Running has no
+// indoor version.
+const canChangeIndoor = computed(() => {
+  const w = firstWorkout.value
+  const day = props.day
+  if (!w || !day || w.sport !== 'cycling') return false
+  return day.completed.length === 0 && day.date >= todayISO()
+})
+const canConvertIndoor = computed(() => canChangeIndoor.value && !firstWorkout.value?.indoor)
+const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.value?.canRevertIndoor)
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 
@@ -242,6 +259,7 @@ function onRated(analysis: SessionAnalysis) {
             <div class="flex flex-wrap items-center gap-2">
               <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
               <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
+              <IndoorBadge v-if="firstWorkout.indoor" :description="firstWorkout.description" />
               <UBadge v-if="firstWorkout.testProtocol" color="primary" variant="subtle" icon="i-lucide-gauge">
                 {{ ftpTestLabel(firstWorkout.testProtocol) }}
               </UBadge>
@@ -282,6 +300,12 @@ function onRated(analysis: SessionAnalysis) {
             <UDropdownMenu :items="moveMenuItems(firstWorkout, day.date)">
               <UButton color="neutral" variant="outline" icon="i-lucide-calendar-clock">Move</UButton>
             </UDropdownMenu>
+            <UButton v-if="canConvertIndoor" color="neutral" variant="outline" icon="i-lucide-house" @click="emit('indoor', firstWorkout)">
+              Indoor version
+            </UButton>
+            <UButton v-if="canRevertIndoor" color="neutral" variant="outline" icon="i-lucide-undo-2" @click="emit('outdoor', firstWorkout)">
+              Back to outdoor version
+            </UButton>
             <UButton color="neutral" variant="outline" icon="i-lucide-download" :to="api.workoutFitUrl(firstWorkout.id)" target="_blank">
               FIT
             </UButton>

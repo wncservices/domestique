@@ -9,6 +9,7 @@ import type { RiderProfile, Sport, WorkoutStep } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { sports } from '@/components/plan/forms'
+import IndoorBadge from '@/components/plan/IndoorBadge.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import ZoneLevelBadge from '@/components/plan/ZoneLevelBadge.vue'
 import { flattenSteps, formatDuration } from '@/utils/workoutMath'
@@ -36,8 +37,9 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
 
 <template>
   <USlideover v-model:open="open" side="right" :title="editing ? 'Edit workout' : 'Build a workout'" :ui="{ content: 'max-w-2xl' }">
-    <template v-if="form.zone && (form.level ?? 0) > 0" #actions>
-      <ZoneLevelBadge :zone="form.zone" :level="form.level!" />
+    <template v-if="(form.zone && (form.level ?? 0) > 0) || form.indoor" #actions>
+      <ZoneLevelBadge v-if="form.zone && (form.level ?? 0) > 0" :zone="form.zone" :level="form.level!" />
+      <IndoorBadge v-if="form.indoor" :description="form.description" />
     </template>
     <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">

@@ -7,6 +7,7 @@ import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { AnalysisStep, RiderProfile, SessionAnalysis, TrainingWeek, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
 import StepResultsTable from './StepResultsTable.vue'
@@ -279,7 +280,7 @@ watch(
           role="button"
           tabindex="0"
           :aria-pressed="w.id === selectedWorkoutId"
-          :aria-label="`Show ${w.name} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
+          :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
           :draggable="canDrag(day.date)"
           @dragstart="onDragStart($event, w)"
           @click="emit('select', w, day.date)"
@@ -302,6 +303,7 @@ watch(
           </div>
           <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
           <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
+          <IndoorBadge v-if="w.indoor" :description="w.description" compact />
           <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
             {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
           </UBadge>

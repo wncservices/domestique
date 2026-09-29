@@ -37,6 +37,9 @@ export interface WorkoutForm {
    *  a fresh/create form. */
   zone?: string
   level?: number
+  /** Likewise carried through only for the header badge; the convert and
+   *  revert actions own it, not this form. */
+  indoor?: boolean
 }
 
 // Reka UI's <SelectItem> forbids an empty-string value — it reserves '' to
