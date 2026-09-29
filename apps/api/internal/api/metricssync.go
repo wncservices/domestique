@@ -148,13 +148,28 @@ func (s *Server) garminBiometrics(ctx context.Context, rider string, session gar
 	// reading — the watch was not worn to bed — is normal and not a reason
 	// to give up after one try.
 	if wantResting {
+		// Collects which sources came back empty and the daily summary's
+		// key names (never values) across every date tried, for the one
+		// Warn below.
+		ctx, diag := garmin.WithRHRDiagnostics(ctx)
+		lookupFailed := false
 		for daysAgo := 0; daysAgo < 3 && out.restingHR == 0; daysAgo++ {
 			bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, time.Now().AddDate(0, 0, -daysAgo))
 			if err != nil {
 				s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
+				lookupFailed = true
 				break
 			}
 			out.restingHR = bpm
+		}
+		// Once per rider per sync, and only when every date came back empty
+		// from every source: the next production log then shows what Garmin
+		// actually returned. Warn, not Error — the sync itself succeeded.
+		if out.restingHR == 0 && !lookupFailed {
+			if sources := diag.Sources(); len(sources) > 0 {
+				s.logger().Warn("garmin resting heart rate: no reading from any source",
+					"rider", rider, "sources", sources, "summary_keys", diag.SummaryKeys())
+			}
 		}
 	}
 
