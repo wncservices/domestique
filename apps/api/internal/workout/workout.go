@@ -329,8 +329,13 @@ type Workout struct {
 	// has been captured. Written once: it is what stops a second sync from
 	// toasting or suggesting the same result again.
 	TestResultWatts float64
-	CreatedAt       string
-	UpdatedAt       string
+	// Indoor marks a workout that has been converted to its trainer version
+	// (internal/indoor): time-based steps, power targets where FTP is known.
+	// Conversion is idempotent on this flag, so a second click shortens
+	// nothing.
+	Indoor    bool
+	CreatedAt string
+	UpdatedAt string
 }
 
 // TestResultUnreadable is what Workout.TestResultWatts holds for a test ride
