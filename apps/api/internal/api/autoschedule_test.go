@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -28,6 +29,10 @@ type autoScheduleHarness struct {
 	store    *workout.DB
 	settings *settings.Store
 	srv      *api.Server
+	// conn is the same database, for a test that has to plant a row the
+	// store deliberately has no method for (a fitness snapshot with a chosen
+	// date — RecomputeFitnessSnapshots always runs to the real today).
+	conn *sql.DB
 }
 
 func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
@@ -62,7 +67,7 @@ func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &autoScheduleHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, settings: appSettings, srv: srv}
+	return &autoScheduleHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, settings: appSettings, srv: srv, conn: db.Conn()}
 }
 
 func (h *autoScheduleHarness) as(user, groups, method, path, body string) *http.Response {

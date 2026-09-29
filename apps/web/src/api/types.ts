@@ -958,6 +958,25 @@ export interface ReadinessResponse {
     wellness?: DailyWellnessDTO
   }
   days: DailyWellnessDTO[]
+  /** Forecast for tomorrow's hard session — absent when tomorrow has no
+   *  eligible workout or the forecast is ready. Mirrors tomorrowForecastDTO. */
+  tomorrow?: TomorrowForecast
+}
+
+/** A forecast, not a verdict: tomorrow morning's own readiness check still
+ *  runs. `reasons` are the plain forms from internal/readiness.ForecastTomorrow
+ *  (the form reason reads "tomorrow's form is projected at −34"). */
+export interface TomorrowForecast {
+  date: string
+  risk: 'caution' | 'rest'
+  reasons?: string[]
+  workoutId: string
+  workoutName: string
+}
+
+/** POST /api/training/readiness/tomorrow/ease's 200 body. */
+export interface EaseTomorrowResult {
+  reason: string
 }
 
 export interface CompletedSession {

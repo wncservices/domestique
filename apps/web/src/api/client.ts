@@ -71,6 +71,7 @@ import type {
   ProgressionLevel,
   SessionAnalysis,
   ReadinessResponse,
+  EaseTomorrowResult,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -809,7 +810,18 @@ export const api = {
    *  load) plus the last 7 days of Garmin wellness — the Today card's chip
    *  and the Fitness page's Recovery card share this one call. See
    *  handleGetReadiness. */
-  readiness: () => request<ReadinessResponse>('/api/training/readiness'),
+  readiness: (today?: string) =>
+    request<ReadinessResponse>(`/api/training/readiness${today ? `?today=${encodeURIComponent(today)}` : ''}`),
+  /** Eases tomorrow's hard session ahead of time, after the server has
+   *  recomputed the forecast itself. today is the browser's local date
+   *  (YYYY-MM-DD), the same reasoning upcomingRides' own from param gives.
+   *  A 409 carries a plain message and means nothing was changed. See
+   *  handleEaseTomorrow. */
+  easeTomorrow: (today?: string) =>
+    request<EaseTomorrowResult>(
+      `/api/training/readiness/tomorrow/ease${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'POST' },
+    ),
   /** Rates (or re-rates) how a completed, analysed session felt, 1 (easy) to
    *  5 (all-out) — re-applies that ride's own progression-level change with
    *  the new feel factored in rather than stacking a second one on top. See

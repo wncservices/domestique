@@ -96,17 +96,23 @@ const (
 // rider planning today's session actually wants, not how fatigued today's
 // own session left them.
 func ComputeFitness(loads []DailyLoad) []FitnessSnapshot {
-	ctlAlpha := 1 - math.Exp(-1/ctlDays)
-	atlAlpha := 1 - math.Exp(-1/atlDays)
-
 	out := make([]FitnessSnapshot, 0, len(loads))
 	var ctl, atl float64
 	for _, d := range loads {
 		out = append(out, FitnessSnapshot{Date: d.Date, CTL: ctl, ATL: atl, TSB: ctl - atl})
-		ctl += (d.Load - ctl) * ctlAlpha
-		atl += (d.Load - atl) * atlAlpha
+		ctl, atl = RollFitness(ctl, atl, d.Load)
 	}
 	return out
+}
+
+// RollFitness folds one day's load into CTL and ATL — the single step
+// ComputeFitness repeats per day, exported so a caller can project form
+// forward from a stored snapshot (whose CTL/ATL are the values at the start
+// of its date) without duplicating the time constants.
+func RollFitness(ctl, atl, load float64) (newCTL, newATL float64) {
+	ctlAlpha := 1 - math.Exp(-1/ctlDays)
+	atlAlpha := 1 - math.Exp(-1/atlDays)
+	return ctl + (load-ctl)*ctlAlpha, atl + (load-atl)*atlAlpha
 }
 
 // TrainingLoad estimates one session's training load — TrainingPeaks' TSS
