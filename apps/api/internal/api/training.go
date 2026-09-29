@@ -184,6 +184,10 @@ type workoutDTO struct {
 	// there is an original to restore and it is time-based.
 	Indoor                bool    `json:"indoor,omitempty"`
 	OutdoorPlannedSeconds float64 `json:"outdoorPlannedSeconds,omitempty"`
+	// CanRevertIndoor is whether "Back to outdoor version" would do anything:
+	// an indoor workout that still has its outdoor steps. A manual edit of the
+	// steps or the sport retires them (see handleUpdateWorkout).
+	CanRevertIndoor bool `json:"canRevertIndoor,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -211,6 +215,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 	if w.OutdoorSteps != nil {
 		dto.OutdoorPlannedSeconds = workout.PlannedSeconds(*w.OutdoorSteps)
 	}
+	dto.CanRevertIndoor = w.Indoor && w.OutdoorSteps != nil
 	return dto
 }
 
@@ -1171,6 +1176,7 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		req.Zone = &zone
 	}
 	req.Description = recordManualMove(wk, req)
+	s.retireOutdoorSteps(&req, wk)
 
 	updated, err := s.Training.UpdateWorkout(r.Context(), id, req)
 	if err != nil {

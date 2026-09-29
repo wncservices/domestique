@@ -29,6 +29,7 @@ type indoorOut struct {
 	Level                 float64 `json:"level"`
 	Description           string  `json:"description"`
 	Indoor                bool    `json:"indoor"`
+	CanRevertIndoor       bool    `json:"canRevertIndoor"`
 	PlannedSeconds        float64 `json:"plannedSeconds"`
 	OutdoorPlannedSeconds float64 `json:"outdoorPlannedSeconds"`
 }

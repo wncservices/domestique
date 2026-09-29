@@ -109,6 +109,11 @@ Two rules that are easy to break:
 - **An unknown permission denies.** `Role.Can` returns false for anything not
   in `minimumRole`, so a typo in a handler cannot open a hole.
 
+The indoor endpoints (`/api/training/workouts/{id}/indoor`) answer 404, not 403, for
+another rider's workout, so they do not confirm it exists; the older training
+endpoints still answer 403. Match whichever the neighbouring endpoints do unless the
+spec says otherwise.
+
 The frontend mirrors these rules to decide what to *show*. That is a courtesy,
 not a control — the server enforces, the UI only avoids offering buttons that
 would 403.

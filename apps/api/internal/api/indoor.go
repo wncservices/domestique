@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -145,6 +148,7 @@ func (s *Server) handleIndoorConvert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger().Info("workout converted to indoor", "workout", wk.ID)
+	s.repushToday(r.Context(), updated)
 	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
 }
 
@@ -180,7 +184,92 @@ func (s *Server) handleIndoorRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger().Info("workout reverted to outdoor", "workout", wk.ID)
+	s.repushToday(r.Context(), updated)
 	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+}
+
+// repushToday updates today's copy of the session on Garmin right away, so a
+// rider who converts (or reverts) this morning's ride does not wait for the next
+// auto-push pass to see it on the head unit. Only for a session dated today that
+// already has a copy: a future day pushes when its day comes (the automatic pass
+// withdraws copies for days ahead, so pushing one now would fight it), and a
+// session never sent is the rider's to send. The origin recorded on the copy is
+// kept, so a manual push stays the rider's.
+//
+// Best effort, like every push that follows a plan change: a failure is a Warn
+// and the conversion, which has already been saved, still succeeds.
+func (s *Server) repushToday(ctx context.Context, wk workout.Workout) {
+	if s.Garmin == nil || s.Training == nil || wk.Date == "" || wk.Date != s.localToday() {
+		return
+	}
+	push, have, err := s.Training.GetPush(ctx, wk.ID, garminProvider)
+	if err != nil {
+		s.logger().Warn("indoor: could not read push state to update today's copy", "workout", wk.ID, "err", err)
+		return
+	}
+	if !have || push.RemoteID == "" {
+		return
+	}
+	session, ok := s.garminSessionForRider(wk.Rider)
+	if !ok {
+		s.logger().Warn("indoor: today's Garmin copy was left as it was, no connected session", "workout", wk.ID)
+		return
+	}
+	origin := push.Origin
+	if origin == "" {
+		origin = workout.PushOriginManual
+	}
+	if _, err := s.syncWorkoutToGarmin(ctx, session, wk, origin); err != nil {
+		s.logger().Warn("indoor: could not update today's Garmin copy", "workout", wk.ID, "err", err)
+	}
+}
+
+// retireOutdoorSteps drops the stored outdoor original when a manual edit makes
+// it stale: the steps changed, or the sport did. Reverting would otherwise
+// silently throw the rider's edit away (or restore a cycling session into a run).
+// The workout stays indoor. The comparison is on the steps as they round-trip
+// through the DTO, because the slideover re-sends the steps on every save and a
+// rename alone must not kill revert.
+func (s *Server) retireOutdoorSteps(req *workout.UpdateWorkoutRequest, wk workout.Workout) {
+	if !wk.Indoor || wk.OutdoorSteps == nil {
+		return
+	}
+	sportChanged := req.Sport != nil && *req.Sport != wk.Sport
+	stepsChanged := req.Steps != nil && !sameSteps(*req.Steps, wk.Steps)
+	if !sportChanged && !stepsChanged {
+		return
+	}
+	var none []workout.WorkoutStep
+	req.OutdoorSteps = &none
+	s.logger().Info("indoor original dropped by a manual edit", "workout", wk.ID)
+}
+
+// sameSteps is DeepEqual, except that no steps and an empty list are the same
+// thing (a DTO decodes an absent list to an empty one).
+func sameSteps(a, b []workout.WorkoutStep) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+// indoorNoteRE matches the note an indoor conversion writes (see
+// internal/indoor): the first sentence, then whichever of its optional
+// follow-on sentences apply. Mirrored by indoorNote in the web app's
+// workoutMath.ts.
+var indoorNoteRE = regexp.MustCompile(`Indoor version of .*?(?:on the trainer|are unchanged)\.` +
+	`(?: The rest can be ridden outside on another day\.)?` +
+	`(?: No FTP set, so the trainer cannot control resistance\. Ride by heart rate\.)?` +
+	`(?: Heart-rate steps stay as heart rate because the session's zone is not known, so the trainer cannot control them\.)?`)
+
+// replaceIndoorNote swaps the conversion note in description for note, so the
+// durations it quotes follow the session after an automatic change; with no
+// note to replace it adds one.
+func replaceIndoorNote(description, note string) string {
+	if loc := indoorNoteRE.FindStringIndex(description); loc != nil {
+		return description[:loc[0]] + note + description[loc[1]:]
+	}
+	return addNote(description, note)
 }
 
 // addNote appends note to a description. When the workout carries an
@@ -238,5 +327,12 @@ func (s *Server) keepIndoor(req *workout.UpdateWorkoutRequest, wk workout.Workou
 	}
 	yes := true
 	req.Steps, req.Indoor, req.OutdoorSteps = &res.Steps, &yes, &outdoor
+	// The note the conversion wrote quotes the durations of the session it was
+	// made from, which the easing just replaced.
+	description := replaceIndoorNote(wk.Description, res.Note)
+	if req.Description != nil {
+		description = replaceIndoorNote(*req.Description, res.Note)
+	}
+	req.Description = &description
 	s.logger().Info("indoor session kept through an automatic change", "workout", wk.ID)
 }
