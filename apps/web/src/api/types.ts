@@ -1305,7 +1305,6 @@ export interface WeatherPrefs {
   window: { start: number; end: number }
   attribution: string
 }
-
 /** Which reason is worst on a day or for a session; picks the chip's icon. */
 export type WeatherWorst = 'thunder' | 'wintry' | 'rain' | 'wind' | 'cold' | 'heat'
 
