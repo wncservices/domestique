@@ -31,6 +31,7 @@
 5. **Every suggestion fits N; `rest` gives easy only; `caution` one rung down; a third hard day drops `wanted`.** (Task 3)
 6. **"Use this" replaces only a plan-made untouched session, otherwise adds; it never overwrites a rider's own session.** (Task 3)
 7. **Nothing applies without a POST.** (Tasks 2, 3)
+8. **No harder, and no structured longer, in a recovery or taper week; endurance longer still scales time.** (Task 1)
 
 ## Stack
 
@@ -54,11 +55,11 @@ Restack right after each squash merge.
 ```go
 type Kind string // easier | harder | shorter | longer
 type Option struct { Kind Kind; Name string; Zone workout.Zone; Level float64; Seconds float64; TSS float64; Difficulty string; Steps []workout.WorkoutStep }
-func Options(w workout.Workout, riderLevel float64, profile workout.RiderProfile) []Option
+func Options(w workout.Workout, riderLevel float64, reducedWeek bool, profile workout.RiderProfile) []Option // reducedWeek: recovery or taper
 func Difficulty(rung, riderLevel float64) string
 ```
 
-- [ ] RED: rung 1 has no easier; harder is `cur + 1` and stops at `floor(L) + 1` (L 4.3 gives 5, a session at 6 offers none); shorter takes the longest rung with level <= cur and total <= 0.75 x current, longer the shortest with level >= cur, <= the cap and >= 1.25 x, and both are omitted when no rung qualifies; endurance and long rides scale the main step 75 % / 125 %, round to 5 minutes, floor at 30 and cap at 6 hours, with no easier or harder; `Difficulty` at every boundary (-2, -0.5, 0.5, 1); a test, a ridden, a past, a rider-built and a zone-less session return nil; every ladder for cycling and running is exercised, and a table asserts what `shorter`/`longer` return per rung (if a ladder's durations are not monotone in level the test documents it and the rule stays as specced); `IsGenerated` and `isPlanMade` are false once `Swapped by you:` is in the description, true otherwise.
+- [ ] RED: rung 1 has no easier; harder is `cur + 1` and stops at `floor(L) + 1` (L 4.3 gives 5, a session at 6 offers none); shorter takes the longest rung with level <= cur and total <= 0.75 x current, longer the shortest with level >= cur, <= the cap and >= 1.25 x, and both are omitted when no rung qualifies; endurance and long rides scale the main step 75 % / 125 %, round to 5 minutes, floor at 30 and cap at 6 hours, with no easier or harder; with `reducedWeek` (recovery or taper) no harder and no structured longer while an endurance longer, easier and shorter are unchanged, and a session with no plan week behaves as ordinary (the API derives `reducedWeek` from the periodization week of the session's date); `Difficulty` at every boundary (-2, -0.5, 0.5, 1); a test, a ridden, a past, a rider-built and a zone-less session return nil; every ladder for cycling and running is exercised, and a table asserts what `shorter`/`longer` return per rung (if a ladder's durations are not monotone in level the test documents it and the rule stays as specced); `IsGenerated` and `isPlanMade` are false once `Swapped by you:` is in the description, true otherwise.
 - [ ] GREEN; `just check`; commit `"Compute workout alternates and their predicted difficulty"`.
 
 ### Task 2: Swap, snapshot and revert

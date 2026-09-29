@@ -33,9 +33,19 @@ zone (`progression`), and `total(r)` = `workoutlib.TotalSeconds(r)`.
 | Option | Structured session (has a ladder) | Endurance or long ride |
 |---|---|---|
 | **Easier** | rung `cur - 1`, floor 1 | not offered |
-| **Harder** | rung `cur + 1`, capped at `floor(L) + 1` | not offered |
+| **Harder** | rung `cur + 1`, capped at `floor(L) + 1`; never in a recovery or taper week | not offered |
 | **Shorter** | the longest rung with level <= `cur` and `total <= 0.75 x total(cur)` | main step scaled to 75 % |
-| **Longer** | the shortest rung with level >= `cur`, <= the harder cap, and `total >= 1.25 x total(cur)` | main step scaled to 125 % |
+| **Longer** | the shortest rung with level >= `cur`, <= the harder cap, and `total >= 1.25 x total(cur)`; not in a recovery or taper week | main step scaled to 125 % (also in recovery and taper weeks) |
+
+**Recovery and taper weeks.** In a recovery week (`periodization.Week.Recovery`) or a taper week
+(`PhaseTaper`) the plan is deliberately shedding load, so **Harder is not offered** and **Longer
+only scales endurance time**: a structured session gets no Longer (it would climb the ladder
+by the back door), an endurance or long ride keeps its 125 % time scaling. Easier and Shorter are
+unchanged. The rider who really wants more can still Edit the session by hand; alternates
+do not argue with the plan's rest weeks. The week is read from the periodization plan for the
+session's date, and a session with no plan week (no goal plan) is treated as an ordinary week.
+"I have N minutes" adds no second week-type filter; it is shaped only by readiness and load as
+specced there.
 
 An option with no rung behind it is **not offered** (rung 1 has no easier, the cap has no harder)
 rather than shown disabled. Endurance time scaling rounds to 5 minutes, floors at 30 minutes
@@ -226,7 +236,9 @@ NULL when none). Reads scan it as NULL-able. No new settings or config.
 ## Testing
 
 - `alternates`: each option on a table of rungs (rung 1 has no easier, the cap has no harder,
-  cap = floor(L)+1, shorter/longer thresholds at exactly 75 % and 125 %, none-available omitted);
+  cap = floor(L)+1, shorter/longer thresholds at exactly 75 % and 125 %, none-available omitted;
+  in a recovery or taper week no harder and no structured longer, endurance longer still
+  offered, easier and shorter unchanged, and a session with no plan week behaves as ordinary);
   endurance scaling (rounding, 30-minute floor, 6-hour ceiling); every difficulty boundary;
   ladders as shipped for both sports; a test, a ridden day and a past day yield no options.
 - `trainnow`: fit under N for every N in the picker on every ladder, demotion to endurance
