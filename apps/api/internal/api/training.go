@@ -1011,6 +1011,7 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		zone := workout.Zone(*body.Zone)
 		req.Zone = &zone
 	}
+	req.Description = recordManualMove(wk, req)
 
 	updated, err := s.Training.UpdateWorkout(r.Context(), id, req)
 	if err != nil {
@@ -1020,6 +1021,37 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("workout updated", "id", id, "by", identity.User)
 	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+}
+
+// recordManualMove returns the description to save when an update moves a
+// plan-made workout to another day: the rider's own description (or the
+// stored one) with the original date noted in scheduler.MovedFrom's form.
+// Without it the vacated day reads as empty to scheduleGoal, and the next
+// schedule run — every 30 minutes in the background — plans the same
+// session there again, so a move looked like a duplicate. An automatic move
+// already records this; a manual one never did. The first original date is
+// kept across repeated moves, and a workout the rider built by hand (no
+// goal) needs nothing, since it never blocks or triggers scheduling.
+func recordManualMove(wk workout.Workout, req workout.UpdateWorkoutRequest) *string {
+	if req.Date == nil || *req.Date == wk.Date || wk.Date == "" {
+		return req.Description
+	}
+	goalID := wk.GoalID
+	if req.GoalID != nil {
+		goalID = *req.GoalID
+	}
+	if goalID == "" {
+		return req.Description
+	}
+	desc := wk.Description
+	if req.Description != nil {
+		desc = *req.Description
+	}
+	if _, ok := scheduler.MovedFrom(desc); ok {
+		return req.Description
+	}
+	desc = strings.TrimRight(desc, " \n") + "\n\nRescheduled by you: moved from " + wk.Date + "."
+	return &desc
 }
 
 func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {
