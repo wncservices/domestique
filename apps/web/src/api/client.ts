@@ -77,6 +77,8 @@ import type {
   IndoorPreview,
   WeatherPrefs,
   WeatherResponse,
+  AlternateKind,
+  WorkoutAlternates,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -795,6 +797,30 @@ export const api = {
   /** "Stop using weather": removes the stored town. */
   removeWeatherLocation: () =>
     request<WeatherPrefs>('/api/training/weather/location', { method: 'DELETE' }),
+  /** The easier, harder, shorter and longer versions of a plan-made session.
+   *  Writes nothing; `today` is the browser's own day. */
+  workoutAlternates: (id: string, today?: string) =>
+    request<WorkoutAlternates>(
+      `/api/training/workouts/${encodeURIComponent(id)}/alternates${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+    ),
+  /** Swaps the session in place for one alternate. A 409 means it is ridden,
+   *  past, or the option is not offered any more: refetch the options. */
+  swapWorkout: (id: string, kind: AlternateKind, today?: string) =>
+    request<Workout>(
+      `/api/training/workouts/${encodeURIComponent(id)}/alternates${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind }),
+      },
+    ),
+  /** "Back to planned version": restores the session as the plan made it.
+   *  Idempotent. */
+  revertSwap: (id: string, today?: string) =>
+    request<Workout>(
+      `/api/training/workouts/${encodeURIComponent(id)}/alternates/revert${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'POST' },
+    ),
   /** The URL a plain link/download button points at — a structured FIT
    *  workout file, the same "copy it onto a device over USB" role
    *  api's route-FIT download plays; see internal/fitworkout's own doc
