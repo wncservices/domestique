@@ -849,6 +849,8 @@ export interface Workout {
   testProtocol?: FtpTestProtocolId
   /** The FTP the test ride measured; omitted until a result is captured. */
   testResultWatts?: number
+  /** The test ride was read and gave no usable result. */
+  testUnreadable?: boolean
   /** How long the step list is meant to take, in seconds — time steps
    *  only; 0 means unknown (open/distance-only steps have no honest
    *  duration). See workout.PlannedSeconds. */
@@ -1093,8 +1095,13 @@ export interface SyncMetricsResult {
 export interface FtpTestResult {
   workoutId: string
   protocol: FtpTestProtocolId
-  /** The FTP the test measured; 0 when the ride was unreadable. */
+  /** The FTP that was applied or suggested: the test's own, or (source
+   *  "rides") the ordinary rides' when a breakthrough there outranked the
+   *  test. 0 when the ride was unreadable. */
   ftpWatts: number
+  source: 'test' | 'rides'
+  /** What the test itself measured, only when source is "rides". */
+  testWatts?: number
   /** The day the test was ridden, YYYY-MM-DD. */
   date: string
   /** applied: written to an empty or estimated FTP. suggested: waiting for

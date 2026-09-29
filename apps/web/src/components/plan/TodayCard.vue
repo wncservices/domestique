@@ -116,6 +116,10 @@ const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 // what it measured.
 const testResult = computed(() => props.day?.planned.find((w) => w.testProtocol && (w.testResultWatts ?? 0) > 0))
 
+// A test ridden but not readable (no power, ride cut short): say so, rather
+// than leave a done day that looks like nothing happened.
+const testUnreadable = computed(() => !testResult.value && !!props.day?.planned.some((w) => w.testProtocol && w.testUnreadable))
+
 // Testing tired under-reads FTP. On the day of a test, a low readiness verdict
 // says so and offers the same Move the missed-session nudge does.
 const tiredForTest = computed(
@@ -205,6 +209,9 @@ function onRated(analysis: SessionAnalysis) {
             <UBadge v-if="testResult" color="primary" variant="subtle" icon="i-lucide-gauge">
               Result: {{ Math.round(testResult.testResultWatts!) }} W
             </UBadge>
+            <UBadge v-else-if="testUnreadable" color="warning" variant="subtle" icon="i-lucide-triangle-alert">
+              Test couldn't be read
+            </UBadge>
             <button
               v-if="analysedSession"
               type="button"
@@ -216,6 +223,9 @@ function onRated(analysis: SessionAnalysis) {
               <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
             </button>
           </div>
+          <p v-if="testUnreadable" class="text-xs text-muted">
+            The ride had no usable power for this test, so your FTP is unchanged. You can schedule another.
+          </p>
           <p v-if="hardStepsLine" class="text-xs text-muted">{{ hardStepsLine }}</p>
           <FeelRating
             v-if="analysedSession?.analysis"

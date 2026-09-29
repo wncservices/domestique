@@ -28,6 +28,7 @@ import type {
 } from '@/api/types'
 import FtpTestBanner from '@/components/plan/FtpTestBanner.vue'
 import FtpTestModal from '@/components/plan/FtpTestModal.vue'
+import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import GoalsSection from '@/components/plan/GoalsSection.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
@@ -739,10 +740,9 @@ onMounted(() => {
     />
 
     <FtpTestModal
-      v-if="ftpTests"
       v-model:open="ftpModalOpen"
-      :protocols="ftpTests.protocols"
-      :recommended="ftpTests.suggestion?.recommended"
+      :protocols="ftpTests?.protocols ?? FALLBACK_FTP_PROTOCOLS"
+      :recommended="ftpTests?.suggestion?.recommended"
       :has-ftp="hasFtp"
       :scheduling="schedulingFtpTest"
       @schedule="scheduleFtpTest"

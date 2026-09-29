@@ -303,7 +303,7 @@ watch(
           <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
           <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
           <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
-            {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : 'FTP test' }}
+            {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
           </UBadge>
           <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
           <UTooltip v-if="adjustmentNote(w.description)" :text="adjustmentNote(w.description)">
