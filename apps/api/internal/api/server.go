@@ -508,6 +508,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/workouts/{id}/alternates", s.handleAlternates)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates", s.handleAlternateApply)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates/revert", s.handleAlternateRevert)
+	mux.HandleFunc("GET /api/training/trainnow", s.handleTrainNow)
+	mux.HandleFunc("POST /api/training/trainnow/apply", s.handleTrainNowApply)
 	mux.HandleFunc("POST /api/training/workouts/{id}/indoor", s.handleIndoorConvert)
 	mux.HandleFunc("DELETE /api/training/workouts/{id}/indoor", s.handleIndoorRevert)
 	mux.HandleFunc("POST /api/training/workouts/{id}/push/garmin", s.handlePushWorkoutToGarmin)
