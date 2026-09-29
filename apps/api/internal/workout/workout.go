@@ -469,8 +469,10 @@ const (
 	PushOriginManual = "manual"
 )
 
-// ContentHash fingerprints what a provider is shown of a workout — name,
-// sport and steps. The date is deliberately not part of it: moving a workout
+// ContentHash fingerprints what a provider is shown of a workout — name (as
+// DeviceName shows it, so flagging a workout indoor changes it even when its
+// steps do not, as with an FTP test), sport and steps. The date is
+// deliberately not part of it: moving a workout
 // to another day changes where it sits, not what it is, and is tracked as
 // Push.ScheduledDate.
 func ContentHash(w Workout) string {
@@ -478,9 +480,24 @@ func ContentHash(w Workout) string {
 		Name  string
 		Sport model.Sport
 		Steps []WorkoutStep
-	}{w.Name, w.Sport, w.Steps})
+	}{DeviceName(w.Name, w.Indoor), w.Sport, w.Steps})
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
+}
+
+// IndoorSuffix marks an indoor workout's name on a device and in an exported
+// file. Only at export and push time: the stored name is never changed, since
+// scheduler.IsKeySession's legacy fallback matches the exact name ("Long ride").
+const IndoorSuffix = " (indoor)"
+
+// DeviceName is name as a head unit, an export file or a Garmin calendar
+// shows it: the suffix appended for an indoor workout. The one place that
+// decides it, so a push, a download and the content hash cannot disagree.
+func DeviceName(name string, indoor bool) string {
+	if indoor {
+		return name + IndoorSuffix
+	}
+	return name
 }
 
 // PlannedSeconds is how long a step list is meant to take — time steps only,
