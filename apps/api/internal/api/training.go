@@ -173,6 +173,9 @@ type workoutDTO struct {
 	// until a result has been captured.
 	TestProtocol    string  `json:"testProtocol,omitempty"`
 	TestResultWatts float64 `json:"testResultWatts,omitempty"`
+	// TestUnreadable is set when the test ride was read and gave no result, so
+	// the day card can say so instead of showing nothing.
+	TestUnreadable bool `json:"testUnreadable,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -195,6 +198,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 	if w.TestResultWatts > 0 {
 		dto.TestResultWatts = w.TestResultWatts
 	}
+	dto.TestUnreadable = w.TestResultWatts < 0
 	return dto
 }
 

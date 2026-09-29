@@ -334,7 +334,14 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 	if body.Date != "" {
 		replaced, err = s.replacePlanMadeOn(ctx, rider, body.Date, wk.ID)
 		if err != nil {
-			s.logger().Error("ftp test scheduled but the day's plan-made session could not be removed", "rider", rider, "err", err)
+			s.logger().Error("ftp test not scheduled: the day's plan-made session could not be removed", "rider", rider, "err", err)
+			// Take the test back out, so a retry cannot leave two tests on the
+			// day. Whatever sessions were removed before the failure stay
+			// removed; the tick does not refill a week it has filled, so this
+			// is the smaller of the two evils.
+			if delErr := s.Training.DeleteWorkout(ctx, wk.ID); delErr != nil {
+				s.logger().Error("ftp test rollback failed", "rider", rider, "err", delErr)
+			}
 			s.fail(w, err)
 			return
 		}
