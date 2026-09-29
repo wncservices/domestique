@@ -191,6 +191,10 @@ func untouchedPlanSession(wk workout.Workout) bool {
 	return scheduler.IsGenerated(wk) &&
 		wk.Description == scheduler.GeneratedDescription &&
 		wk.TestProtocol == "" &&
+		// An indoor version is the rider's own choice. Converting already makes
+		// a session touched (the note changes its description), but that must
+		// not be the only thing keeping the refresh off it.
+		!wk.Indoor &&
 		wk.UpdatedAt == wk.CreatedAt
 }
 

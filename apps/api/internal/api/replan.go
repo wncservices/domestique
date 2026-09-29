@@ -194,6 +194,11 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		if !isPlanMade(wk) {
 			continue
 		}
+		// An indoor version is the rider's own choice, made by hand. Rebuilding
+		// the day would put the road session back and lose it silently.
+		if wk.Indoor {
+			continue
+		}
 		if wk.Date == today && riddenToday[wk.ID] {
 			continue
 		}

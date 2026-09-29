@@ -413,6 +413,7 @@ func (d *DB) addEstimatedColumns() error {
 		`ALTER TABLE rider_profiles ADD COLUMN threshold_hr INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE rider_profiles ADD COLUMN ftp_verified_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE rider_profiles ADD COLUMN ftp_test_snoozed_until TEXT NOT NULL DEFAULT ''`,
+		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN smart_trainer %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -439,6 +440,9 @@ func (d *DB) addZoneLevelColumns() error {
 		`ALTER TABLE workouts ADD COLUMN level DOUBLE PRECISION NOT NULL DEFAULT 0`,
 		`ALTER TABLE workouts ADD COLUMN test_protocol TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workouts ADD COLUMN test_result_watts DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		fmt.Sprintf(`ALTER TABLE workouts ADD COLUMN indoor %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
+		// The steps before the workout became indoor; NULL unless it is.
+		`ALTER TABLE workouts ADD COLUMN outdoor_steps TEXT`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -725,11 +729,11 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, threshold_hr, resting_hr,
                available_days, hours_per_available_day, experience_level, estimated_fields,
-               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, updated_at
+               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, smart_trainer, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
 		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.ThresholdHR, &p.RestingHR,
 		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt,
-		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.UpdatedAt)
+		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
@@ -786,18 +790,19 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr,
                     threshold_hr, resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields,
-                    auto_push_workouts, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    auto_push_workouts, smart_trainer, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET
             ftp_watts = excluded.ftp_watts, ftp_estimated = excluded.ftp_estimated,
             threshold_pace_sec_per_km = excluded.threshold_pace_sec_per_km,
             max_hr = excluded.max_hr, threshold_hr = excluded.threshold_hr, resting_hr = excluded.resting_hr,
             available_days = excluded.available_days, hours_per_available_day = excluded.hours_per_available_day,
             experience_level = excluded.experience_level, estimated_fields = excluded.estimated_fields,
-            auto_push_workouts = excluded.auto_push_workouts, updated_at = excluded.updated_at`),
+            auto_push_workouts = excluded.auto_push_workouts, smart_trainer = excluded.smart_trainer,
+            updated_at = excluded.updated_at`),
 		profile.Rider, profile.FTPWatts, profile.FTPEstimated, profile.ThresholdPaceSecPerKM, profile.MaxHR, profile.ThresholdHR, profile.RestingHR,
 		joinList(profile.AvailableDays), profile.HoursPerAvailableDay, profile.ExperienceLevel,
-		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.UpdatedAt)
+		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.SmartTrainer, profile.UpdatedAt)
 	if err != nil {
 		return RiderProfile{}, err
 	}
@@ -859,7 +864,7 @@ func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64)
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -879,7 +884,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -896,13 +901,14 @@ type rowScanner interface {
 
 func scanWorkout(row rowScanner) (Workout, error) {
 	var (
-		w     Workout
-		sport string
-		steps []byte
-		zone  string
+		w       Workout
+		sport   string
+		steps   []byte
+		zone    string
+		outdoor sql.NullString
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.Indoor, &outdoor, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
@@ -911,6 +917,16 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		if err := json.Unmarshal(steps, &w.Steps); err != nil {
 			return Workout{}, fmt.Errorf("workout: decode steps for %s: %w", w.ID, err)
 		}
+	}
+	if outdoor.Valid {
+		original := []WorkoutStep{}
+		if err := json.Unmarshal([]byte(outdoor.String), &original); err != nil {
+			return Workout{}, fmt.Errorf("workout: decode outdoor steps for %s: %w", w.ID, err)
+		}
+		if original == nil {
+			original = []WorkoutStep{}
+		}
+		w.OutdoorSteps = &original
 	}
 	return w, nil
 }
@@ -987,17 +1003,42 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 	if req.Level != nil {
 		current.Level = *req.Level
 	}
+	if req.Indoor != nil {
+		current.Indoor = *req.Indoor
+	}
+	if req.OutdoorSteps != nil {
+		if *req.OutdoorSteps == nil {
+			current.OutdoorSteps = nil
+		} else {
+			if err := validateSteps(*req.OutdoorSteps); err != nil {
+				return Workout{}, err
+			}
+			original := *req.OutdoorSteps
+			current.OutdoorSteps = &original
+		}
+	}
 
 	steps, err := json.Marshal(current.Steps)
 	if err != nil {
 		return Workout{}, fmt.Errorf("workout: encode steps: %w", err)
 	}
+	// NULL, not "null": nothing stored must stay distinguishable from a stored
+	// original that happens to have no steps.
+	var outdoor any
+	if current.OutdoorSteps != nil {
+		encoded, err := json.Marshal(*current.OutdoorSteps)
+		if err != nil {
+			return Workout{}, fmt.Errorf("workout: encode outdoor steps: %w", err)
+		}
+		outdoor = string(encoded)
+	}
 
 	_, err = d.db.ExecContext(ctx, d.query(`
-        UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?, updated_at=?
+        UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?,
+               indoor=?, outdoor_steps=?, updated_at=?
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
-		steps, string(current.Zone), current.Level, timestamp(), id)
+		steps, string(current.Zone), current.Level, current.Indoor, outdoor, timestamp(), id)
 	if err != nil {
 		return Workout{}, err
 	}

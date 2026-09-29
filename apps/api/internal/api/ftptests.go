@@ -579,9 +579,11 @@ func (s *Server) easeBeforeFTPTests(ctx context.Context, rider string, workouts 
 		easy := scheduler.EasyVariant(wk, profile)
 		note := adapter.Note(adapter.Change{Reason: scheduler.EasedBeforeTestReason})
 		description := wk.Description + " " + note + " Replaces: " + wk.Name + "."
-		if _, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
+		update := workout.UpdateWorkoutRequest{
 			Name: &easy.Name, Steps: &easy.Steps, Zone: &easy.Zone, Level: &easy.Level, Description: &description,
-		}); err != nil {
+		}
+		s.keepIndoor(&update, wk, profile, easy.Zone)
+		if _, err := s.Training.UpdateWorkout(ctx, wk.ID, update); err != nil {
 			s.logger().Warn("adapt: could not ease the day before an FTP test", "workout", wk.ID, "rider", rider, "err", err)
 			continue
 		}

@@ -799,6 +799,9 @@ export interface RiderProfile {
   /** Standing permission to place scheduled workouts on the rider's Garmin
    *  account automatically, and keep them in step as the plan moves. */
   autoPushWorkouts?: boolean
+  /** "I have a smart trainer": gates the ERG wording and the midpoint
+   *  collapse of an indoor version's power ranges. */
+  smartTrainer?: boolean
   /** Fields (other than FTP, which has ftpEstimated) that were filled in
    *  automatically — from Garmin's own biometrics or the rider's recent
    *  training — and not yet confirmed. Names match internal/workout's Field*
@@ -851,6 +854,12 @@ export interface Workout {
   testResultWatts?: number
   /** The test ride was read and gave no usable result. */
   testUnreadable?: boolean
+  /** This is the trainer version of a session (time-based steps, power
+   *  targets where FTP is known). */
+  indoor?: boolean
+  /** What "Back to outdoor version" restores the length to, in seconds;
+   *  absent unless there is a stored original and it is time-based. */
+  outdoorPlannedSeconds?: number
   /** How long the step list is meant to take, in seconds — time steps
    *  only; 0 means unknown (open/distance-only steps have no honest
    *  duration). See workout.PlannedSeconds. */
@@ -1273,4 +1282,14 @@ export interface ProfileChangeProposal {
   availableDays?: string[]
   hoursPerAvailableDay?: number
   explanation?: string
+}
+
+/** What POST .../indoor?preview=1 says a conversion would do; nothing is
+ *  stored. `erg` picks "Trainer control (ERG)" over "Ride by feel". */
+export interface IndoorPreview {
+  note: string
+  erg: boolean
+  changed: boolean
+  plannedSeconds: number
+  originalSeconds?: number
 }

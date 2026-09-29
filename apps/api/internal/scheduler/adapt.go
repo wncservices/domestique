@@ -74,7 +74,15 @@ func IsHardSession(w workout.Workout) bool {
 // level), a fifth shorter than what it replaces — a rider swapped off a hard
 // day because they are tired should not also be handed a long one.
 func EasyVariant(w workout.Workout, profile workout.RiderProfile) workout.CreateWorkoutRequest {
-	hours := workout.PlannedSeconds(w.Steps) * 0.8 / 3600
+	// An indoor session's own steps are already the shortened trainer version.
+	// Sizing the easy ride a fifth under that would shrink it twice (the
+	// conversion is applied again to the replacement), so an indoor session is
+	// sized from the outdoor steps it was made from.
+	steps := w.Steps
+	if w.OutdoorSteps != nil {
+		steps = *w.OutdoorSteps
+	}
+	hours := workout.PlannedSeconds(steps) * 0.8 / 3600
 	if hours <= 0 {
 		hours = 1
 	}
