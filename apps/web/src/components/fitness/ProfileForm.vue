@@ -293,6 +293,22 @@ const experienceItems = computed(() => {
       </div>
     </div>
 
+    <!-- Trainer -->
+    <div>
+      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed mb-3">Trainer</p>
+      <label class="flex items-start gap-3 text-sm">
+        <USwitch :model-value="profile.smartTrainer" class="mt-0.5" @update:model-value="(v: boolean) => update({ smartTrainer: v })" />
+        <span>
+          <span class="font-medium">I have a smart trainer</span>
+          <span class="block text-xs text-muted">
+            An indoor version of a session then asks for one wattage per step, which a smart trainer can hold (ERG
+            mode), instead of a range. Anyone can make a session indoor from the plan; this only changes how its
+            targets are set. Takes effect when you press Save profile.
+          </span>
+        </span>
+      </label>
+    </div>
+
     <!-- Automation -->
     <div v-if="canSyncGarmin">
       <p class="text-[0.7rem] uppercase tracking-wide text-dimmed mb-3">Automation</p>

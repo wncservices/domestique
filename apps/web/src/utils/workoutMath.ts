@@ -208,6 +208,18 @@ function percentRange(low: number, high: number, threshold: number): string {
 // is never left wondering why Thursday's session is not what it was on Monday.
 const ADJUSTED_MARKER = 'Adjusted automatically:'
 
+// The note an indoor conversion writes into the description (see
+// internal/api/indoor.go): "Indoor version of Long ride (3h00), 2h15 on the
+// trainer.", optionally followed by the sentences the API may add, or the
+// FTP-test variant that ends "steps are unchanged.". Read back for the Indoor
+// badge's tooltip; '' when the description has no such note.
+const INDOOR_NOTE =
+  /Indoor version of .*?(?:on the trainer|are unchanged)\.(?: The rest can be ridden outside on another day\.)?(?: No FTP set, so the trainer cannot control resistance\. Ride by heart rate\.)?/
+
+export function indoorNote(description?: string): string {
+  return INDOOR_NOTE.exec(description ?? '')?.[0].trim() ?? ''
+}
+
 export function adjustmentNote(description?: string): string {
   const at = (description ?? '').indexOf(ADJUSTED_MARKER)
   return at < 0 ? '' : description!.slice(at + ADJUSTED_MARKER.length).trim()

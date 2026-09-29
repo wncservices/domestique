@@ -31,6 +31,7 @@ import FtpTestModal from '@/components/plan/FtpTestModal.vue'
 import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import GoalsSection from '@/components/plan/GoalsSection.vue'
+import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
@@ -41,6 +42,7 @@ import type { WorkoutForm } from '@/components/plan/forms'
 import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
+import { useIndoor } from '@/composables/useIndoor'
 import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
@@ -154,6 +156,7 @@ async function openEditWorkout(w: Workout) {
     steps: w.steps,
     zone: w.zone,
     level: w.level,
+    indoor: w.indoor,
   }
   workoutModalOpen.value = true
 }
@@ -204,6 +207,19 @@ async function deleteWorkout(w: Workout) {
     deletingWorkout.value = ''
   }
 }
+
+// --- the indoor version: preview, convert and revert (useIndoor). The
+// reload re-reads the week and the list so the badge, length and buttons
+// follow the change. ---
+
+const indoor = useIndoor({
+  toast,
+  errorMessage,
+  reload: async () => {
+    await loadWeek()
+    await loadWorkouts()
+  },
+})
 
 const pushingWorkout = ref('')
 
@@ -644,6 +660,8 @@ onMounted(() => {
           @push="pushWorkoutToGarmin"
           @edit="openEditWorkout"
           @move="moveWorkout"
+          @indoor="indoor.openConvert"
+          @outdoor="indoor.openRevert"
           @rated="loadWeek"
           @back-to-today="backToToday"
         />
@@ -739,6 +757,17 @@ onMounted(() => {
       @save="saveWorkout"
     />
 
+    <IndoorConvertModal
+      v-model:open="indoor.open.value"
+      :mode="indoor.mode.value"
+      :workout="indoor.target.value"
+      :preview="indoor.preview.value"
+      :loading="indoor.loading.value"
+      :busy="indoor.busy.value"
+      :error="indoor.error.value"
+      @confirm="indoor.confirm"
+    />
+
     <FtpTestModal
       v-model:open="ftpModalOpen"
       :protocols="ftpTests?.protocols ?? FALLBACK_FTP_PROTOCOLS"
@@ -751,8 +780,8 @@ onMounted(() => {
     <UModal v-model:open="replanModalOpen" title="Replan the rest of this week?">
       <template #body>
         <p class="text-sm text-toned">
-          Rebuilds today → Sunday from your current levels, availability and readiness. Rides you've done and sessions you made
-          yourself stay.
+          Rebuilds today → Sunday from your current levels, availability and readiness. Rides you've done, sessions you made
+          yourself and indoor versions you chose stay.
         </p>
       </template>
       <template #footer>
