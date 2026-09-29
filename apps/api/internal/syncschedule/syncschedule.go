@@ -21,6 +21,10 @@ type Schedule struct {
 
 type slot struct{ hour, minute int }
 
+// Location is the zone the schedule's times are local to — also what "today"
+// means for anything else that is a rider's morning rather than the server's.
+func (s Schedule) Location() *time.Location { return s.loc }
+
 // Parse builds a Schedule from strict "HH:MM" strings and an IANA zone name.
 // An empty list, a duplicate, a malformed time or an unknown zone is an error,
 // so a typo is caught by `domestique validate` instead of at 06:30.

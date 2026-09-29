@@ -79,7 +79,7 @@ const trainingFeatures = [
     icon: 'i-lucide-flag',
     color: 'primary',
     title: 'A plan toward your goal',
-    body: 'Set an event, start from a route, or just keep training. Domestique builds the weeks and puts each workout on your Garmin calendar.',
+    body: 'Set an event, start from a route, or just keep training. Domestique builds the weeks and sends the day\'s workout to your Garmin every morning.',
   },
   {
     icon: 'i-lucide-activity',

@@ -236,6 +236,35 @@ ON CONFLICT (goal_id, week_start) DO NOTHING`),
 	return err
 }
 
+// addPushOriginColumn adds workout_pushes.origin. A push made before the
+// column existed carries no record of who made it, so the migration decides
+// once, when the column appears: a plan-made workout (it has a goal) of a
+// rider who has auto-push on was almost certainly put there by the automatic
+// pass, which sent every plan-made workout of the next fortnight; everything
+// else (a hand-built workout, or any push by a rider who never opted in) can
+// only have come from the rider pressing the button. Guessing "auto" for the
+// first group is what lets the fortnight already sitting on a rider's device
+// be cleared down to today; the cost is that a plan-made workout such a rider
+// also sent by hand loses that protection and would have to be sent again.
+// Stamped only when the ALTER adds the column, never on a later start.
+func (d *DB) addPushOriginColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE workout_pushes ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'`)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			return nil
+		}
+		return err
+	}
+	_, err = d.db.Exec(d.query(`
+        UPDATE workout_pushes SET origin = 'auto'
+        WHERE workout_id IN (
+            SELECT w.id FROM workouts w
+            WHERE w.goal_id <> '' AND w.rider IN (SELECT rider FROM rider_profiles WHERE auto_push_workouts = ?)
+        )`), true)
+	return err
+}
+
 // DB stores goals, rider profiles and workouts as rows. The one
 // implementation, no separate interface — the same choice internal/crew and
 // internal/schedule make for their own stores (unlike source.Library, which
@@ -277,6 +306,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addThresholdSuggestionDirectionColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.addPushOriginColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.backfillFTPVerified(); err != nil {

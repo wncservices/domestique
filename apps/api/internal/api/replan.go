@@ -145,8 +145,7 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 		return replanResultDTO{}, err
 	}
 	if profile.AutoPushWorkouts {
-		horizon := now.Add(autoPushWindow).Format(dateLayout)
-		s.pushWorkoutsForRider(ctx, rider, today, horizon)
+		s.pushWorkoutsForRider(ctx, rider)
 	}
 
 	adjusted, err := s.countAdjustedAmong(ctx, rider, createdIDs)

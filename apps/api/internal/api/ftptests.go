@@ -350,7 +350,7 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 		// should carry the test in place of what it replaced.
 		s.adaptRider(ctx, rider)
 		if profile.AutoPushWorkouts {
-			s.pushWorkoutsForRider(ctx, rider, today, now.Add(autoPushWindow).Format(dateLayout))
+			s.pushWorkoutsForRider(ctx, rider)
 		}
 	}
 	s.logger().Info("ftp test workout built", "rider", rider, "protocol", protocol, "scheduled", body.Date != "", "replaced", replaced)

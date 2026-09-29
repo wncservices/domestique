@@ -301,9 +301,9 @@ const experienceItems = computed(() => {
         <span>
           <span class="font-medium">Send my workouts to Garmin automatically</span>
           <span class="block text-xs text-muted">
-            Each planned workout lands on your Garmin calendar for its day, and is updated or removed when the plan
-            changes — nothing to press. Needs your Garmin account connected in Settings, and takes effect when you
-            press Save profile.
+            Today's session is sent to your Garmin each morning, and updated if the plan changes it during the day —
+            nothing to press. Later days stay in the app until their morning; "Send to Garmin" still sends any day
+            you choose. Needs your Garmin account connected in Settings, and takes effect when you press Save profile.
           </span>
         </span>
       </label>

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -39,7 +38,12 @@ type workoutPushResult struct {
 // Progress is saved as it is made, not at the end: if creating succeeded and
 // scheduling failed, the next pass must schedule the copy that exists, not
 // create a second one.
-func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session, wk workout.Workout) (workoutPushResult, error) {
+//
+// origin says who is asking, and is recorded on the copy: the rider pressing
+// "Send to Garmin" (PushOriginManual) or the unattended pass
+// (PushOriginAuto). Manual is sticky: an automatic pass keeping a copy in step
+// never turns the rider's own push into one it may withdraw later.
+func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session, wk workout.Workout, origin string) (workoutPushResult, error) {
 	consumer, _ := s.garminConsumer()
 	steps := workout.FITSteps(wk.Steps)
 	hash := workout.ContentHash(wk)
@@ -48,6 +52,18 @@ func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session
 	push, have, err := s.Training.GetPush(ctx, wk.ID, garminProvider)
 	if err != nil {
 		return res, err
+	}
+	stamp := origin
+	if have && push.Origin == workout.PushOriginManual {
+		stamp = workout.PushOriginManual
+	}
+	if have && push.Origin != stamp {
+		// A manual push over a copy the automatic pass made: take ownership
+		// now, even when nothing else about it changes.
+		push.Origin = stamp
+		if err := s.Training.SavePush(ctx, push); err != nil {
+			return res, err
+		}
 	}
 
 	create := !have || push.RemoteID == ""
@@ -60,6 +76,7 @@ func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session
 			return res, err
 		default:
 			push.ContentHash = hash
+			push.Origin = stamp
 			res.Outcome = pushUpdated
 			if err := s.Training.SavePush(ctx, push); err != nil {
 				return res, err
@@ -73,7 +90,7 @@ func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session
 			return res, err
 		}
 		// Whatever calendar entry the old copy had went with it.
-		push = workout.Push{WorkoutID: wk.ID, Provider: garminProvider, RemoteID: id, ContentHash: hash}
+		push = workout.Push{WorkoutID: wk.ID, Provider: garminProvider, RemoteID: id, ContentHash: hash, Origin: stamp}
 		res.Outcome = pushCreated
 		if err := s.Training.SavePush(ctx, push); err != nil {
 			return res, err
@@ -144,23 +161,50 @@ func (s *Server) removeWorkoutFromGarmin(ctx context.Context, wk workout.Workout
 	}
 }
 
-// autoPushWindow is how far ahead the unattended pass places workouts: enough
-// that a week is on the watch before it starts and next week's arrives before
-// the weekend, not so far that an edit to the plan leaves a month of stale
-// entries to chase.
-const autoPushWindow = 14 * 24 * time.Hour
+// withdrawFromGarmin takes a workout's copy off the rider's account and forgets
+// the push record — the copy and its calendar entry, the same two calls a
+// deleted workout's removal makes. Unlike removeWorkoutFromGarmin it reports
+// failure, and keeps the record when it fails: the workout still exists, so
+// the record is what lets the next pass find the copy and try again, where
+// forgetting it would strand the copy on the calendar for good. A copy the
+// rider already deleted in Connect counts as removed.
+func (s *Server) withdrawFromGarmin(ctx context.Context, session garmin.Session, push workout.Push) error {
+	consumer, _ := s.garminConsumer()
+	if push.ScheduleID != "" {
+		if err := s.Garmin.UnscheduleWorkout(ctx, consumer, session, push.ScheduleID); err != nil {
+			return fmt.Errorf("removing calendar entry: %w", err)
+		}
+	}
+	if push.RemoteID != "" {
+		if err := s.Garmin.DeleteWorkout(ctx, consumer, session, push.RemoteID); err != nil && !errors.Is(err, garmin.ErrWorkoutGone) {
+			return fmt.Errorf("deleting the copy: %w", err)
+		}
+	}
+	return s.Training.DeletePush(ctx, push.WorkoutID, garminProvider)
+}
 
-// autoPushWorkouts keeps every opted-in rider's Garmin account in step with
-// their planned workouts: what the scheduler just created goes on, what was
-// edited updates, what moved moves. Runs at the end of AutoScheduleTick, so
-// it only ever runs when auto-schedule is on, and only for riders who set
-// AutoPushWorkouts themselves.
-//
-// Which workouts: those inside autoPushWindow that came from a goal (what
-// the scheduler made), plus anything already pushed, so an edit to a copy
-// that exists keeps flowing. A workout the rider built by hand and never
-// pushed is left for them to push — auto-push places the plan on the watch,
-// it does not decide which of their own experiments deserve to be there.
+// localToday is today's date, "YYYY-MM-DD", in the deployment's zone
+// (training.timezone, Europe/Brussels unless set) — the same zone the
+// fixed-time sync runs in. A rider's own zone is not stored, and the pod runs
+// in UTC, where the day changes hours before a rider's does. Falls back to the
+// server's own zone only when the configured one cannot be loaded, which
+// config validation already refuses.
+func (s *Server) localToday() string {
+	now := s.now()
+	if sched, err := s.syncSchedule(); err == nil {
+		if loc := sched.Location(); loc != nil {
+			now = now.In(loc)
+		}
+	}
+	return now.Format(dateLayout)
+}
+
+// autoPushWorkouts keeps every opted-in rider's head unit showing today: the
+// day's planned session is placed on their Garmin calendar, kept in step if it
+// changes, and nothing else is left ahead of it. Runs at the end of
+// AutoScheduleTick — every 30 minutes, so the first pass of the day delivers
+// the session — and so only when auto-schedule is on, and only for riders who
+// set AutoPushWorkouts themselves.
 func (s *Server) autoPushWorkouts(ctx context.Context) {
 	if s.Training == nil || s.Garmin == nil || s.Links == nil {
 		return
@@ -171,35 +215,39 @@ func (s *Server) autoPushWorkouts(ctx context.Context) {
 		return
 	}
 
-	today := time.Now().Format("2006-01-02")
-	horizon := time.Now().Add(autoPushWindow).Format("2006-01-02")
-
 	for _, rider := range riders {
 		if ctx.Err() != nil {
 			return
 		}
-		if pushed := s.pushWorkoutsForRider(ctx, rider, today, horizon); pushed > 0 {
+		if pushed := s.pushWorkoutsForRider(ctx, rider); pushed > 0 {
 			s.logger().Info("auto-pushed workouts to garmin", "rider", rider, "changed", pushed)
 		}
 	}
 }
 
 // pushWorkoutsForRider is autoPushWorkouts' own per-rider body, factored
-// out so handleReplan (see replan.go) can push one rider's week right after
-// replanning it — via the same idempotent syncWorkoutToGarmin, the same
-// "only what's inside the window and either already pushed or came from a
-// goal" rule — without a second copy of this loop to keep in sync with the
-// unattended one. today/horizon are passed in rather than read from
-// time.Now() here so a caller with a fixed clock (a test, or replan's own
-// s.now()) controls the window the same way it controls everything else.
+// out so handleReplan and the FTP test scheduler can run it for one rider
+// right after they change the plan — the same idempotent syncWorkoutToGarmin,
+// the same rules, without a second copy of this loop.
+//
+// The rules:
+//
+//   - Only workouts dated today (local, see localToday) are sent, and only
+//     ones that came from a goal or were already pushed: a workout the rider
+//     built by hand and never sent is left for them to send.
+//   - A copy this pass made earlier for a day that is now in the future is
+//     withdrawn (withdrawFromGarmin): a plan that used to be pushed a fortnight
+//     ahead is cleared down to today, and a session moved off today by an
+//     adjustment leaves no copy behind on today's calendar. Only copies
+//     recorded as automatic; what the rider sent by hand, whatever its day, is
+//     theirs.
+//   - Past days' copies are left. They are history the head unit may already
+//     have ridden, removing them would only erase it, and they cost nothing.
 //
 // Every failure is logged and swallowed, never returned: a lapsed Garmin
-// session or a provider outage pushing nothing must not fail the caller —
-// an unattended tick already treats this as best-effort, and AGENTS.md's
-// own reasoning for handleReplan says the same ("a Garmin removal/push
-// failure is Warn and doesn't fail the replan"). Returns how many workouts
-// actually changed on the account, for the caller's own logging.
-func (s *Server) pushWorkoutsForRider(ctx context.Context, rider, today, horizon string) int {
+// session or a provider outage must not fail the caller. Returns how many
+// copies changed on the account, for the caller's own logging.
+func (s *Server) pushWorkoutsForRider(ctx context.Context, rider string) int {
 	session, ok := s.garminSessionForRider(rider)
 	if !ok {
 		return 0
@@ -209,21 +257,38 @@ func (s *Server) pushWorkoutsForRider(ctx context.Context, rider, today, horizon
 		s.logger().Warn("auto-push: listing workouts failed", "rider", rider, "err", err)
 		return 0
 	}
+	pushes, err := s.Training.ListPushes(ctx, rider, garminProvider)
+	if err != nil {
+		s.logger().Warn("auto-push: reading push state failed", "rider", rider, "err", err)
+		return 0
+	}
 
-	pushed := 0
+	today := s.localToday()
+	changed := 0
 	for _, wk := range workouts {
-		if wk.Date == "" || wk.Date < today || wk.Date > horizon {
+		if wk.Date > today {
+			// Withdraw before anything is sent, so today's session goes on a
+			// calendar that is already clear of the days ahead.
+			push, have := pushes[wk.ID]
+			if !have || push.Origin != workout.PushOriginAuto {
+				continue
+			}
+			if err := s.withdrawFromGarmin(ctx, session, push); err != nil {
+				s.logger().Warn("auto-push: could not take a future workout off garmin", "rider", rider, "workout", wk.ID, "err", err)
+				break
+			}
+			changed++
+		}
+	}
+	for _, wk := range workouts {
+		if wk.Date != today {
 			continue
 		}
-		_, have, err := s.Training.GetPush(ctx, wk.ID, garminProvider)
-		if err != nil {
-			s.logger().Warn("auto-push: reading push state failed", "workout", wk.ID, "err", err)
-			continue
-		}
+		_, have := pushes[wk.ID]
 		if !have && wk.GoalID == "" {
 			continue
 		}
-		res, err := s.syncWorkoutToGarmin(ctx, session, wk)
+		res, err := s.syncWorkoutToGarmin(ctx, session, wk, workout.PushOriginAuto)
 		if err != nil {
 			// One failure ends this rider's pass, not the whole tick:
 			// the likely causes (a lapsed session, Garmin being down)
@@ -234,8 +299,8 @@ func (s *Server) pushWorkoutsForRider(ctx context.Context, rider, today, horizon
 			break
 		}
 		if res.Outcome != pushUnchanged {
-			pushed++
+			changed++
 		}
 	}
-	return pushed
+	return changed
 }
