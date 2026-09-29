@@ -184,12 +184,16 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		ID: w.ID, Sport: string(w.Sport), Name: w.Name, GoalID: w.GoalID, Date: w.Date,
 		Description: w.Description, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 		Zone: string(w.Zone), Level: w.Level,
-		TestProtocol: w.TestProtocol, TestResultWatts: w.TestResultWatts,
+		TestProtocol:   w.TestProtocol,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
 		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
 	}
 	for _, s := range w.Steps {
 		dto.Steps = append(dto.Steps, stepDTOFrom(s))
+	}
+	// The unreadable marker is bookkeeping, not a result to show.
+	if w.TestResultWatts > 0 {
+		dto.TestResultWatts = w.TestResultWatts
 	}
 	return dto
 }
@@ -737,31 +741,13 @@ func (s *Server) handleExplainPlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"text": text})
 }
 
-// handleBuildFTPTest and handleBuildMaxHRTest each create one ordinary,
-// plannable workout from internal/fitnesstest's fixed protocol — the "set
-// up a test" answer for a rider whose profile has no number to estimate
-// from (FTP) or that this app never attempts to estimate at all (max HR;
-// see fitnesstest's own doc comment for why). Deliberately no
-// already-exists check the way handleGoalSchedule has for a scheduled
-// date: this is an explicit, one-off rider action with no natural key to
-// dedupe against, the same as clicking "Build a workout" by hand — asking
-// for a second one is not a mistake to guard against.
-func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
-	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
-		return
-	}
-	rider := auth.FromContext(r.Context()).User
-	req := fitnesstest.FTPTestWorkout()
-	req.Rider = rider
-	wk, err := s.Training.CreateWorkout(r.Context(), req)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.logger().Info("ftp test workout built", "rider", rider, "id", wk.ID)
-	writeJSON(w, http.StatusCreated, workoutDTOFrom(wk))
-}
-
+// handleBuildMaxHRTest creates one ordinary, plannable max-heart-rate field
+// test workout from internal/fitnesstest's fixed protocol — max HR is never
+// estimated from synced data at all (see fitnesstest's own doc comment for
+// why), so this is the only path to a number besides the rider typing one.
+// Deliberately no already-exists check: this is an explicit, one-off rider
+// action with no natural key to dedupe against, the same as clicking "Build a
+// workout" by hand. The FTP test's handler is in ftptests.go.
 func (s *Server) handleBuildMaxHRTest(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return

@@ -4,6 +4,7 @@ import type {
   AssignableRole,
   AutoScheduleSetting,
   AutoSyncSetting,
+  BuildFtpTestRequest,
   BasemapUpdate,
   Crew,
   CreateCrewRequest,
@@ -797,7 +798,11 @@ export const api = {
   /** Builds and persists the classic 20-minute FTP test as an ordinary,
    *  plannable workout — see internal/fitnesstest for why this is the
    *  answer when there isn't enough synced data to estimate FTP from. */
-  buildFTPTest: () => request<Workout>('/api/training/tests/ftp', { method: 'POST' }),
+  buildFTPTest: (body?: BuildFtpTestRequest) =>
+    request<Workout>('/api/training/tests/ftp', {
+      method: 'POST',
+      ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+    }),
   /** The FTP test menu, the test worth suggesting right now (if any), the
    *  next scheduled test and the last one read. Owner-only. */
   ftpTests: () => request<FtpTests>('/api/training/tests'),

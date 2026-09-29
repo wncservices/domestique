@@ -333,6 +333,13 @@ type Workout struct {
 	UpdatedAt       string
 }
 
+// TestResultUnreadable is what Workout.TestResultWatts holds for a test ride
+// that was read and yielded nothing (no power data, a ride cut short). It is
+// negative so it can never be mistaken for a wattage, and non-zero so the
+// ride is not read again: without it a ride the app cannot read would be
+// re-reported on every sync.
+const TestResultUnreadable = -1
+
 // CreateGoalRequest creates a goal. Rider must be set by the caller from the
 // authenticated session — see AGENTS.md's "the rider comes from the
 // session, never the request body," the same rule every other owned thing

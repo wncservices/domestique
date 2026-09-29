@@ -53,6 +53,10 @@ type syncMetricsResultDTO struct {
 	// UI toasts one line for all three. Background syncs have nobody
 	// looking at a screen; the Progression card's Reason is what they see.
 	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
+	// FTPTests lists every FTP test ride this sync read for the first time,
+	// with what came of it. A test is reported once, ever: a second sync
+	// finds the result stored and says nothing.
+	FTPTests []ftpTestResultDTO `json:"ftpTests,omitempty"`
 }
 
 // handleSyncTrainingMetrics is a rider's own "Sync now" click — a thin HTTP
@@ -369,10 +373,16 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// before the cruder EstimateFTP fallback below, whose own condition
 	// reads tdr.HasFTPPowerCurve to decide whether Detect already had
 	// something better to say about FTP.
-	tdr, err := s.detectThresholds(ctx, rider, profile, sessions, time.Now())
+	testRides, err := s.readFTPTestRides(ctx, rider, sessions, time.Now())
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
+	profileFTPBefore := profile.FTPWatts
+	tdr, err := s.detectThresholdsFresh(ctx, rider, profile, sessions, time.Now(), freshTestSessions(testRides))
+	if err != nil {
+		return syncMetricsResultDTO{}, err
+	}
+	ftpTests := s.ftpTestResults(ctx, rider, testRides, tdr, profileFTPBefore)
 	profile = tdr.Profile
 	autoFilled = append(autoFilled, tdr.AutoFields...)
 
@@ -427,6 +437,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	return syncMetricsResultDTO{
 		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
 		AutoFilled: autoFilled, Detected: tdr.Detected, LevelsRecalibrated: recalibrated,
+		FTPTests: ftpTests,
 	}, nil
 }
 
