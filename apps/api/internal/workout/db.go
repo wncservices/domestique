@@ -242,7 +242,28 @@ CREATE TABLE IF NOT EXISTS scheduled_weeks (
     week_start TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (goal_id, week_start)
-);`, d.Blob, d.Boolean)
+);
+
+-- adjustments is the structured reason behind every automatic change to a
+-- rider's plan (internal/why owns the rules and the inputs). subject_kind is
+-- 'workout' (subject_id is the workout id) or 'level' (subject_id is
+-- 'sport:zone'). The unique key includes rider because a level subject is
+-- only unique within one rider: without it two riders' rows for the same zone
+-- on the same day would overwrite each other. inputs is JSON, read and
+-- written as a whole, like workouts.steps.
+CREATE TABLE IF NOT EXISTS adjustments (
+    id           TEXT PRIMARY KEY,
+    rider        TEXT NOT NULL,
+    subject_kind TEXT NOT NULL,
+    subject_id   TEXT NOT NULL,
+    rule         TEXT NOT NULL,
+    inputs       TEXT NOT NULL DEFAULT '',
+    text         TEXT NOT NULL DEFAULT '',
+    day          TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS adjustments_subject_day_rule_idx ON adjustments (rider, subject_kind, subject_id, day, rule);
+CREATE INDEX IF NOT EXISTS adjustments_rider_subject_idx ON adjustments (rider, subject_kind, subject_id);`, d.Blob, d.Boolean)
 }
 
 // WeekScheduled reports whether goalID's plan week starting weekStart (a
@@ -1132,13 +1153,17 @@ func (d *DB) DeleteWorkout(ctx context.Context, id string) error {
 	// workout gone there is nothing left for it to describe. (Removing that
 	// copy is the API layer's job, which has the session to do it with — by
 	// this point it has already read what it needs.)
-	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM workout_pushes WHERE workout_id = ?`), id)
-	if err != nil {
+	if _, err = d.db.ExecContext(ctx, d.query(`DELETE FROM workout_pushes WHERE workout_id = ?`), id); err != nil {
 		return err
 	}
 	// A ride linked by hand to this workout goes back to the automatic match,
 	// rather than pointing at nothing forever.
-	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM session_links WHERE workout_id = ?`), id)
+	if _, err = d.db.ExecContext(ctx, d.query(`DELETE FROM session_links WHERE workout_id = ?`), id); err != nil {
+		return err
+	}
+	// Its reasons went with it: they explain a session that no longer exists.
+	// The workout id is unique across riders, so this needs no rider filter.
+	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM adjustments WHERE subject_kind = ? AND subject_id = ?`), SubjectWorkout, id)
 	return err
 }
 
