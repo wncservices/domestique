@@ -1305,3 +1305,35 @@ export interface WeatherPrefs {
   window: { start: number; end: number }
   attribution: string
 }
+
+/** Which reason is worst on a day or for a session; picks the chip's icon. */
+export type WeatherWorst = 'thunder' | 'wintry' | 'rain' | 'wind' | 'cold' | 'heat'
+
+export interface WeatherDay {
+  date: string
+  bad: boolean
+  summary: { tempMin: number; tempMax: number; rainProb: number; gustMax: number }
+  reasons: string[]
+  worst?: WeatherWorst
+}
+
+/** Something offered for one planned session. Only ever offered: nothing here
+ *  changes a workout until the rider acts. */
+export interface WeatherSuggestion {
+  workoutId: string
+  date: string
+  reasons: string[]
+  worst?: WeatherWorst
+  /** True only for a rider with the smart-trainer preference. */
+  canSwitch: boolean
+  /** A later dry, free, available day, for riders who cannot switch. */
+  altDate?: string
+}
+
+/** GET /api/training/weather. `days` and `suggestions` are always arrays, empty
+ *  when weather is not set up or `unavailable`. No coordinates anywhere. */
+export interface WeatherResponse extends WeatherPrefs {
+  unavailable?: boolean
+  days: WeatherDay[]
+  suggestions: WeatherSuggestion[]
+}

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/weather"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // This file is the rider's side of weather: opting in with a town, choosing the
@@ -80,11 +83,78 @@ func (s *Server) weatherRider(w http.ResponseWriter, r *http.Request) (string, b
 	return auth.FromContext(r.Context()).User, true
 }
 
-// handleGetWeather reports whether the rider has opted in, their town's name and
-// their ride window. It never returns coordinates and makes no request to
-// Open-Meteo.
+type weatherSummaryDTO struct {
+	TempMin  float64 `json:"tempMin"`
+	TempMax  float64 `json:"tempMax"`
+	RainProb float64 `json:"rainProb"`
+	GustMax  float64 `json:"gustMax"`
+}
+
+type weatherDayDTO struct {
+	Date    string            `json:"date"`
+	Bad     bool              `json:"bad"`
+	Summary weatherSummaryDTO `json:"summary"`
+	Reasons []string          `json:"reasons"`
+	// Worst is the most severe reason's code (thunder, wintry, rain, wind,
+	// cold, heat), which is what picks the chip's icon. Empty for a good day.
+	Worst string `json:"worst,omitempty"`
+}
+
+type weatherSuggestionDTO struct {
+	WorkoutID string   `json:"workoutId"`
+	Date      string   `json:"date"`
+	Reasons   []string `json:"reasons"`
+	Worst     string   `json:"worst,omitempty"`
+	CanSwitch bool     `json:"canSwitch"`
+	AltDate   string   `json:"altDate,omitempty"`
+}
+
+// weatherDTO is the rider's opt-in plus, when they have one, what the forecast
+// says. Days and Suggestions are always arrays (never null), and the response
+// carries no coordinates.
+type weatherDTO struct {
+	weatherPrefsDTO
+	// Unavailable means the forecast could not be fetched: the lists are empty
+	// and the Plan page simply renders without weather.
+	Unavailable bool                   `json:"unavailable,omitempty"`
+	Days        []weatherDayDTO        `json:"days"`
+	Suggestions []weatherSuggestionDTO `json:"suggestions"`
+}
+
+// weatherToday is the caller's local date: ?today= when sent (bounded by
+// parseTodayParam, the browser knows its own day), otherwise the date in the
+// configured training zone, since the server's process zone is no guarantee.
+func (s *Server) weatherToday(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if r.URL.Query().Get("today") != "" {
+		t, ok := parseTodayParam(w, r, s.now())
+		return t.Format(dateFormat), ok
+	}
+	zone := config.DefaultSyncTimezone
+	if s.Config != nil && s.Config.Training.Timezone != "" {
+		zone = s.Config.Training.Timezone
+	}
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		// config.Validate rejects a bad zone at startup; a Server built in
+		// code with one falls back to UTC rather than failing the page.
+		loc = time.UTC
+	}
+	return s.now().In(loc).Format(dateFormat), true
+}
+
+// handleGetWeather reports the rider's weather opt-in and, when they have one,
+// the next four days and a suggestion for each planned session the forecast
+// makes a bad idea. It never returns coordinates and makes no request to
+// Open-Meteo for a rider with no saved town.
+//
+// It only suggests. A failed forecast is a 200 with unavailable: true and empty
+// lists, never an error, and never a stale forecast.
 func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 	rider, ok := s.weatherRider(w, r)
+	if !ok {
+		return
+	}
+	today, ok := s.weatherToday(w, r)
 	if !ok {
 		return
 	}
@@ -93,7 +163,73 @@ func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, weatherPrefsDTOFrom(pref, found))
+	out := weatherDTO{
+		weatherPrefsDTO: weatherPrefsDTOFrom(pref, found),
+		Days:            []weatherDayDTO{},
+		Suggestions:     []weatherSuggestionDTO{},
+	}
+	if !found {
+		// The normal state of a rider who has not opted in, not a fault, so
+		// not a Warn: this fires on every plan-page load for them.
+		s.logger().Debug("weather not requested: this rider has no saved town")
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	forecast, err := s.Weather.Forecast(r.Context(), pref.Location())
+	if err != nil {
+		// The error is built without the request URL, so neither coordinates
+		// nor the API key are in it; and no rider beside the failure.
+		s.logger().Warn("weather forecast unavailable", "err", err)
+		out.Unavailable = true
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	opts := weather.Options{
+		StartHour: pref.WindowStart, EndHour: pref.WindowEnd,
+		Today: today, Now: s.now(),
+	}
+	var workouts []workout.Workout
+	var ridden map[string]bool
+	if s.Training != nil {
+		profile, _, err := s.Training.GetProfile(r.Context(), rider)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		opts.SmartTrainer, opts.AvailableDays = profile.SmartTrainer, profile.AvailableDays
+		if workouts, err = s.Training.ListWorkouts(r.Context(), rider); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if ridden, err = s.riddenToday(r.Context(), rider, today, workouts); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
+	for _, d := range weather.Days(forecast, opts) {
+		v := d.Verdict
+		out.Days = append(out.Days, weatherDayDTO{
+			Date: d.Date, Bad: v.Bad, Reasons: nonNilStrings(v.Reasons), Worst: weather.WorstCode(v.Codes),
+			Summary: weatherSummaryDTO{TempMin: v.TempMin, TempMax: v.TempMax, RainProb: v.RainProbMax, GustMax: v.GustMax},
+		})
+	}
+	for _, sg := range weather.Suggest(forecast, workouts, ridden, opts) {
+		out.Suggestions = append(out.Suggestions, weatherSuggestionDTO{
+			WorkoutID: sg.WorkoutID, Date: sg.Date, Reasons: nonNilStrings(sg.Reasons),
+			Worst: weather.WorstCode(sg.Codes), CanSwitch: sg.CanSwitch, AltDate: sg.AltDate,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 func (s *Server) weatherStoreError(w http.ResponseWriter, err error) {
