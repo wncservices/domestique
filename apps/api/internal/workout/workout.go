@@ -435,8 +435,19 @@ type Push struct {
 	ScheduledDate string
 	// ContentHash is ContentHash of the workout as last sent.
 	ContentHash string
-	PushedAt    string
+	// Origin is who put it there: PushOriginAuto for the unattended pass,
+	// PushOriginManual for the rider's own "Send to Garmin". The automatic
+	// pass withdraws only copies it made itself, and never takes a copy the
+	// rider sent back off the calendar.
+	Origin   string
+	PushedAt string
 }
+
+// Who placed a pushed workout.
+const (
+	PushOriginAuto   = "auto"
+	PushOriginManual = "manual"
+)
 
 // ContentHash fingerprints what a provider is shown of a workout — name,
 // sport and steps. The date is deliberately not part of it: moving a workout
