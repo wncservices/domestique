@@ -33,6 +33,7 @@ type metricsSyncHarness struct {
 	base       string
 	links      *providerlink.Store
 	settings   *settings.Store
+	training   *workout.DB
 	srv        *api.Server
 	wahooFake  *httptest.Server
 	wahooCalls []string
@@ -77,7 +78,7 @@ func newMetricsSyncHarness(t *testing.T, garminConnector *fakeGarmin) *metricsSy
 		t.Fatal(err)
 	}
 
-	h := &metricsSyncHarness{t: t, links: links, settings: appSettings}
+	h := &metricsSyncHarness{t: t, links: links, settings: appSettings, training: trainingStore}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/workouts", func(w http.ResponseWriter, r *http.Request) {
 		h.wahooCalls = append(h.wahooCalls, r.Header.Get("Authorization"))

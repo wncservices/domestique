@@ -314,3 +314,50 @@ func TestUnknownTargetsAreReported(t *testing.T) {
 		t.Errorf("unknown = %v, want none", unknown)
 	}
 }
+
+func TestTrainingSyncDefaults(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "nope.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Training.SyncTimes; len(got) != 2 || got[0] != "06:30" || got[1] != "21:00" {
+		t.Errorf("sync_times = %v, want [06:30 21:00]", got)
+	}
+	if cfg.Training.Timezone != "Europe/Brussels" {
+		t.Errorf("timezone = %q, want Europe/Brussels", cfg.Training.Timezone)
+	}
+	if _, err := cfg.Training.Schedule(); err != nil {
+		t.Errorf("default schedule does not parse: %v", err)
+	}
+}
+
+func TestTrainingSyncIsConfigurable(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+training:
+  sync_times: ["05:00", "18:45", "23:00"]
+  timezone: America/New_York
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Training.SyncTimes; len(got) != 3 || got[1] != "18:45" {
+		t.Errorf("sync_times = %v", got)
+	}
+	if cfg.Training.Timezone != "America/New_York" {
+		t.Errorf("timezone = %q", cfg.Training.Timezone)
+	}
+}
+
+func TestTrainingSyncRejectsBadValues(t *testing.T) {
+	for name, body := range map[string]string{
+		"bad time":     "training:\n  sync_times: [\"25:99\"]\n",
+		"not a time":   "training:\n  sync_times: [\"morning\"]\n",
+		"unknown zone": "training:\n  timezone: Mars/Olympus_Mons\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, body)); err == nil {
+				t.Error("expected an error, got none")
+			}
+		})
+	}
+}

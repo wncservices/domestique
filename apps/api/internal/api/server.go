@@ -67,6 +67,13 @@ type Server struct {
 	// own doc comment. Zero value is ready to use.
 	wellnessBackfill wellnessBackfillCache
 
+	// metricsMu serialises metrics-sync passes inside this process (the
+	// advisory lock does nothing on SQLite), and lastMetricsSync is the
+	// fallback "when did one last finish" for a deployment with no settings
+	// store — see metricssyncloop.go.
+	metricsMu       sync.Mutex
+	lastMetricsSync time.Time
+
 	// Clock, when set, replaces time.Now for the parts of training that
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time

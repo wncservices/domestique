@@ -252,6 +252,13 @@ func (s *Store) DescribeFlag(name string) (Meta, error) {
 // Set/Get: a flag is not a credential, and there is no reason a deployment
 // with nothing to encrypt yet should be unable to use one.
 func (s *Store) SetFlag(name string, enabled bool, updatedBy string) error {
+	return s.SetFlagAt(name, enabled, updatedBy, time.Now())
+}
+
+// SetFlagAt is SetFlag with the timestamp supplied, for a flag row used as a
+// "last happened at" marker (DescribeFlag's UpdatedAt) where the caller's
+// clock — a fixed one in tests — is the one that counts.
+func (s *Store) SetFlagAt(name string, enabled bool, updatedBy string, at time.Time) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return errors.New("a flag needs a name")
@@ -264,7 +271,7 @@ ON CONFLICT (name) DO UPDATE SET
     updated_by = excluded.updated_by,
     updated_at = excluded.updated_at`),
 		name, enabled, strings.ToLower(strings.TrimSpace(updatedBy)),
-		time.Now().UTC().Format(time.RFC3339))
+		at.UTC().Format(time.RFC3339))
 	if err != nil {
 		return fmt.Errorf("save flag %s: %w", name, err)
 	}
