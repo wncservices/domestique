@@ -23,6 +23,7 @@ import type {
   ReadinessResponse,
   RiderProfile,
   TrainingWeek,
+  WeatherSuggestion,
   WeekFocus,
   Workout,
 } from '@/api/types'
@@ -43,6 +44,7 @@ import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { useIndoor } from '@/composables/useIndoor'
+import { useWeather } from '@/composables/useWeather'
 import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
@@ -218,8 +220,24 @@ const indoor = useIndoor({
   reload: async () => {
     await loadWeek()
     await loadWorkouts()
+    // A converted session is no longer a candidate for a weather suggestion.
+    await loadWeather()
   },
 })
+
+// --- weather: an optional extra like readiness. Nothing renders unless the
+// rider has opted in and the forecast is available; the banner's "Switch to
+// indoor version" is the same confirm as the day card's "Indoor version"
+// (indoor.openConvert), and its move is the ordinary move. ---
+
+const {
+  load: loadWeather,
+  attribution: weatherAttribution,
+  badDays: weatherBadDays,
+  badDay: weatherBadDay,
+  suggestionFor: weatherSuggestionFor,
+  keepOutdoors: weatherKeepOutdoors,
+} = useWeather()
 
 const pushingWorkout = ref('')
 
@@ -423,6 +441,7 @@ async function moveWorkout(w: Workout, date: string) {
     toast.add({ title: `Moved ${w.name} to ${weekdayLong(date)}`, icon: 'i-lucide-calendar-check' })
     await loadWeek()
     await loadWorkouts()
+    await loadWeather()
   } catch (err) {
     toast.add({ title: `Could not move ${w.name}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   }
@@ -593,6 +612,14 @@ const cardDay = computed(() => selectedDay.value ?? today.value)
 const cardIsToday = computed(() => !selectedDay.value || selectedDay.value.date === week.value?.today)
 const dayCardEl = useTemplateRef<HTMLElement>('dayCardEl')
 
+// What the forecast says about the sessions in the day card, minus any the
+// rider already waved off with "Keep outdoors".
+const cardWeatherSuggestions = computed(() =>
+  (cardDay.value?.planned ?? [])
+    .map((w) => weatherSuggestionFor(w.id))
+    .filter((s): s is WeatherSuggestion => !!s),
+)
+
 function selectWorkout(w: Workout, date: string) {
   selectedDate.value = date
   selectedWorkoutId.value = w.id
@@ -618,6 +645,7 @@ onMounted(() => {
   loadWeek()
   loadReadiness()
   loadFtpTests()
+  loadWeather()
   startGoalFromRoute()
 })
 </script>
@@ -657,6 +685,10 @@ onMounted(() => {
           :pushing="pushingWorkout"
           :readiness-verdict="readiness?.today.verdict"
           :readiness-reasons="readiness?.today.reasons"
+          :weather-day="weatherBadDay(cardDay?.date)"
+          :weather-suggestions="cardWeatherSuggestions"
+          :weather-attribution="weatherAttribution"
+          @weather-keep="weatherKeepOutdoors"
           @push="pushWorkoutToGarmin"
           @edit="openEditWorkout"
           @move="moveWorkout"
@@ -692,6 +724,8 @@ onMounted(() => {
         :profile="profile"
         :can-fill="canFillWeek"
         :filling="fillingWeek"
+        :weather-days="weatherBadDays"
+        :weather-attribution="weatherAttribution"
         @prev="prevWeek"
         @next="nextWeek"
         @this-week="thisWeek"

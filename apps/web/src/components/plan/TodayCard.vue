@@ -7,7 +7,16 @@
 // straight away; "Back to today" returns.
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
-import type { ReadinessVerdict, RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
+import type {
+  ReadinessVerdict,
+  RiderProfile,
+  SessionAnalysis,
+  WeatherDay,
+  WeatherSuggestion,
+  WeekDay,
+  Workout,
+  WorkoutStep,
+} from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
 import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
@@ -17,6 +26,8 @@ import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
+import WeatherBanner from './WeatherBanner.vue'
+import WeatherChip from './WeatherChip.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
@@ -36,6 +47,13 @@ const props = defineProps<{
   isToday?: boolean
   // Which of the day's sessions to show; the first one when unset.
   selectedWorkoutId?: string
+  // Weather is optional like readiness: absent whenever it is not set up, the
+  // forecast is unavailable or the day is fine, and then nothing renders.
+  // Suggestions the rider already waved off ("Keep outdoors") are filtered out
+  // by the page before they get here.
+  weatherDay?: WeatherDay
+  weatherSuggestions?: WeatherSuggestion[]
+  weatherAttribution?: string
 }>()
 
 const emit = defineEmits<{
@@ -45,6 +63,8 @@ const emit = defineEmits<{
   // The page owns the confirm modal and the calls (useIndoor).
   indoor: [w: Workout]
   outdoor: [w: Workout]
+  // "Keep outdoors" on the weather banner: the page remembers it.
+  weatherKeep: [s: WeatherSuggestion]
   // A feel rating can change the ride's own progression-level change (see
   // api.setSessionFeel's own doc comment) — the level and week state live on
   // the page, not here, so this just asks it to reload both rather than
@@ -129,6 +149,15 @@ const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.v
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 
+// The weather banner belongs to the session on show, and only while it can
+// still change: a done day has nothing left to move or switch.
+const weatherBanner = computed(() => {
+  const w = firstWorkout.value
+  if (!w || props.day?.status === 'done') return undefined
+  const suggestion = props.weatherSuggestions?.find((s) => s.workoutId === w.id)
+  return suggestion ? { workout: w, suggestion } : undefined
+})
+
 // An FTP test on this day that has been ridden and read: the day card shows
 // what it measured.
 const testResult = computed(() => props.day?.planned.find((w) => w.testProtocol && (w.testResultWatts ?? 0) > 0))
@@ -198,20 +227,32 @@ function onRated(analysis: SessionAnalysis) {
       </template>
     </UAlert>
 
+    <WeatherBanner
+      v-if="weatherBanner"
+      :suggestion="weatherBanner.suggestion"
+      :workout="weatherBanner.workout"
+      @switch="emit('indoor', weatherBanner.workout)"
+      @keep="emit('weatherKeep', weatherBanner.suggestion)"
+      @move="(date: string) => emit('move', weatherBanner!.workout, date)"
+    />
+
     <UCard variant="outline">
       <div class="flex items-center justify-between gap-2">
         <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ eyebrow }}</p>
-        <ReadinessChip v-if="showingToday && readinessVerdict" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
-        <UButton
-          v-else-if="!showingToday"
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          icon="i-lucide-undo-2"
-          @click="emit('backToToday')"
-        >
-          Back to today
-        </UButton>
+        <div class="flex items-center gap-2">
+          <WeatherChip v-if="weatherDay" :day="weatherDay" :attribution="weatherAttribution" />
+          <ReadinessChip v-if="showingToday && readinessVerdict" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
+          <UButton
+            v-else-if="!showingToday"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            icon="i-lucide-undo-2"
+            @click="emit('backToToday')"
+          >
+            Back to today
+          </UButton>
+        </div>
       </div>
 
       <template v-if="day">

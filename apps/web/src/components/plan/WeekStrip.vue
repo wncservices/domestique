@@ -4,13 +4,14 @@
 // it in the day card above. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
-import type { AnalysisStep, RiderProfile, SessionAnalysis, TrainingWeek, WeekDay, Workout } from '@/api/types'
+import type { AnalysisStep, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
 import StepResultsTable from './StepResultsTable.vue'
+import WeatherChip from './WeatherChip.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
@@ -21,6 +22,10 @@ const props = defineProps<{
   filling: boolean
   // The session shown in the day card above, highlighted here.
   selectedWorkoutId?: string
+  // The days the forecast calls bad, each getting a chip. Empty whenever
+  // weather is not set up or unavailable.
+  weatherDays?: WeatherDay[]
+  weatherAttribution?: string
 }>()
 
 const emit = defineEmits<{
@@ -78,6 +83,10 @@ function tileClass(day: WeekDay): string {
   if (day.date === props.week.today) return 'border-primary ring-1 ring-primary'
   if (day.status === 'rest') return 'border-dashed text-dimmed'
   return 'border-default'
+}
+
+function weatherOn(date: string): WeatherDay | undefined {
+  return props.weatherDays?.find((d) => d.date === date)
 }
 
 function otherDates(date: string): string[] {
@@ -271,6 +280,8 @@ watch(
           <span class="text-xs font-medium">{{ weekdayShort(day.date) }} {{ dayNumber(day.date) }}</span>
           <UIcon v-if="statusIcon[day.status]" :name="statusIcon[day.status]" :class="statusColor[day.status]" class="size-3.5" />
         </div>
+
+        <WeatherChip v-if="weatherOn(day.date)" :day="weatherOn(day.date)!" :attribution="weatherAttribution" compact />
 
         <div
           v-for="w in day.planned"
