@@ -145,7 +145,12 @@ type RiderProfile struct {
 	// test suggestion stays quiet after the rider dismissed it. Written only
 	// by SnoozeFTPTest; SaveProfile never touches it.
 	FTPTestSnoozedUntil string
-	UpdatedAt           string
+	// SmartTrainer is "I have a smart trainer": it gates the midpoint collapse
+	// of power ranges in an indoor version (and, later, the offer to switch a
+	// ride indoors). The manual "Indoor version" action is available to every
+	// cycling rider regardless.
+	SmartTrainer bool
+	UpdatedAt    string
 }
 
 // Names a field can appear under in RiderProfile.Estimated. FTP has its own
@@ -329,8 +334,13 @@ type Workout struct {
 	// has been captured. Written once: it is what stops a second sync from
 	// toasting or suggesting the same result again.
 	TestResultWatts float64
-	CreatedAt       string
-	UpdatedAt       string
+	// Indoor marks a workout that has been converted to its trainer version
+	// (internal/indoor): time-based steps, power targets where FTP is known.
+	// Conversion is idempotent on this flag, so a second click shortens
+	// nothing.
+	Indoor    bool
+	CreatedAt string
+	UpdatedAt string
 }
 
 // TestResultUnreadable is what Workout.TestResultWatts holds for a test ride
