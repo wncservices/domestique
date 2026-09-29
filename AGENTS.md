@@ -249,6 +249,41 @@ uses the rider's levels *now*. Next week's workouts are inside the 14-day
 auto-push window, so for riders who opted in they reach the watch a week
 earlier than before.
 
+## FTP tests
+
+Three protocols in `internal/fitnesstest` (ramp, 20-minute, 2 x 8-minute), one
+formula each in `FTPFromTest`: 0.75 x best minute, 0.95 x best 20 minutes, 0.90
+x the higher 8-minute power. Do not write a second copy of a formula. Design:
+`docs/superpowers/specs/2026-09-29-ftp-tests-design.md`.
+
+- **A test is a workout with `test_protocol` set.** Ride analysis already links
+  a ride to its planned workout; `thresholds.Ride.TestProtocol` (joined in
+  `detectThresholds`) makes that ride's FTP candidate the test value and
+  suppresses its eFTP. A test fires at 1% either way, needs no 90-day history to
+  go down, and is a suggestion, never auto-applied, when it moves FTP by more
+  than 25% or FTP was typed by the rider.
+- **One result per test, ever.** `SetTestResult` is a compare-and-set on
+  `test_result_watts = 0`; `-1` (`workout.TestResultUnreadable`) means the ride
+  was read and gave nothing, so it is not reported again on every sync. The
+  first sync to read a test shows its suggestion even inside a dismissed one's
+  margin; later syncs do not (`detectThresholdsFresh`).
+- **When to suggest** is `internal/testschedule.Suggest`, pure, computed on read.
+  Nothing is stored but the snooze (`ftp_test_snoozed_until`).
+  `ftp_verified_at` only moves forward (`MarkFTPVerified`): FTP changed, a test
+  read, or a ride whose eFTP is within 3% of FTP.
+- **A scheduled test is goal-linked but not plan-made.** It carries the focus
+  goal's id so scheduling treats its day as taken, and a description that is not
+  `scheduler.GeneratedDescription` so replan leaves it. `autoScheduleGoalWeek`
+  ignores it when deciding whether a week is already filled, or a test scheduled
+  into next week would leave that week holding the test alone.
+- **Effort steps stay `open`.** ERG would lock the watts and the test would
+  measure the target, not the rider; only the ramp's steps are power targets.
+  Anything that converts workouts for an indoor trainer must skip a workout with
+  `test_protocol` set (the indoor spec already says so).
+- The day before a scheduled test, a generated, unadjusted hard session is eased
+  by `easeBeforeFTPTests`, inside `adaptRider`, so it follows every replan.
+- No watts (FTP, test result) in log lines next to a rider name.
+
 ## Fixed-time metrics sync
 
 `RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and

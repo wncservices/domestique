@@ -680,7 +680,11 @@ func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekS
 	}
 	endStr := weekStart.AddDate(0, 0, 6).Format(dateLayout)
 	for _, wk := range existing {
-		if wk.GoalID == g.ID && wk.Date >= startStr && wk.Date <= endStr {
+		// An FTP test is linked to the goal so its day reads as taken, but it
+		// is not a plan-made session: a rider who scheduled a test into a week
+		// the tick has not reached yet has not had that week filled, and
+		// counting the test as "filled" would leave it holding the test alone.
+		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.Date >= startStr && wk.Date <= endStr {
 			return nil, 0, s.Training.MarkWeekScheduled(ctx, g.ID, startStr)
 		}
 	}
