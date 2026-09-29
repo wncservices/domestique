@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // What the rider does today, front and centre — the one thing the old
 // Goals/Workouts list-of-everything view never answered without scanning
-// past a whole week of other rows. Only ever shown for the current week
-// (TrainingPlanPage.vue looks up `day`/`yesterday` from `week.today`).
+// past a whole week of other rows. Clicking a session in the week strip
+// shows that day here instead (`isToday` false), with the same actions, so
+// any day can be looked at closely and edited without opening the editor
+// straight away; "Back to today" returns.
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type { ReadinessVerdict, RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
@@ -26,6 +28,11 @@ const props = defineProps<{
   // dependency of the plan) — the chip simply doesn't render.
   readinessVerdict?: ReadinessVerdict
   readinessReasons?: string[]
+  // False when the rider picked another day in the week strip — then the
+  // today-only parts (yesterday's missed nudge, the readiness chip) hide.
+  isToday?: boolean
+  // Which of the day's sessions to show; the first one when unset.
+  selectedWorkoutId?: string
 }>()
 
 const emit = defineEmits<{
@@ -37,9 +44,15 @@ const emit = defineEmits<{
   // the page, not here, so this just asks it to reload both rather than
   // this card trying to patch props it doesn't own.
   rated: []
+  backToToday: []
 }>()
 
-const eyebrow = computed(() => (props.day ? `Today · ${weekdayDateShort(props.day.date)}` : 'Today'))
+const showingToday = computed(() => props.isToday !== false)
+
+const eyebrow = computed(() => {
+  if (!showingToday.value) return props.day ? weekdayDateShort(props.day.date) : ''
+  return props.day ? `Today · ${weekdayDateShort(props.day.date)}` : 'Today'
+})
 
 function plannedSecondsOf(day: WeekDay): number {
   return day.planned.reduce((sum, w) => sum + w.plannedSeconds, 0)
@@ -48,7 +61,9 @@ function completedSecondsOf(day: WeekDay): number {
   return day.completed.reduce((sum, c) => sum + c.durationSeconds, 0)
 }
 
-const firstWorkout = computed(() => props.day?.planned[0])
+const firstWorkout = computed(
+  () => props.day?.planned.find((w) => w.id === props.selectedWorkoutId) ?? props.day?.planned[0],
+)
 const extraCount = computed(() => Math.max(0, (props.day?.planned.length ?? 0) - 1))
 
 function firstTargetedStep(steps: WorkoutStep[]): WorkoutStep | undefined {
@@ -135,7 +150,7 @@ function onRated(analysis: SessionAnalysis) {
 <template>
   <div class="flex flex-col gap-3">
     <UAlert
-      v-if="yesterday?.status === 'missed' && yesterdayWorkout"
+      v-if="showingToday && yesterday?.status === 'missed' && yesterdayWorkout"
       color="warning"
       variant="subtle"
       icon="i-lucide-triangle-alert"
@@ -151,7 +166,17 @@ function onRated(analysis: SessionAnalysis) {
     <UCard variant="outline">
       <div class="flex items-center justify-between gap-2">
         <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ eyebrow }}</p>
-        <ReadinessChip v-if="readinessVerdict" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
+        <ReadinessChip v-if="showingToday && readinessVerdict" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
+        <UButton
+          v-else-if="!showingToday"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          icon="i-lucide-undo-2"
+          @click="emit('backToToday')"
+        >
+          Back to today
+        </UButton>
       </div>
 
       <template v-if="day">
@@ -196,7 +221,7 @@ function onRated(analysis: SessionAnalysis) {
               <template v-if="firstWorkoutTarget"> · {{ firstWorkoutTarget }}</template>
             </p>
           </div>
-          <WorkoutProfile :steps="firstWorkout.steps" :profile="profile" />
+          <WorkoutProfile :steps="firstWorkout.steps" :profile="profile" interactive />
           <p v-if="adjustmentNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-info">
             <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
             <span>{{ adjustmentNote(firstWorkout.description) }}</span>
@@ -243,7 +268,7 @@ function onRated(analysis: SessionAnalysis) {
         <div v-else class="mt-2 flex items-center gap-2">
           <UIcon name="i-lucide-coffee" class="size-5 text-dimmed" />
           <span class="font-medium text-highlighted">Rest day</span>
-          <span class="text-sm text-muted">Nothing planned today.</span>
+          <span class="text-sm text-muted">{{ showingToday ? 'Nothing planned today.' : 'Nothing planned.' }}</span>
         </div>
       </template>
     </UCard>

@@ -8,6 +8,7 @@ import type {
   Crew,
   CreateCrewRequest,
   GarminConnection,
+  GarminConnectMFA,
   GarminConsumer,
   GarminCourse,
   GarminCourseImportResult,
@@ -90,6 +91,18 @@ export class ApiError extends Error {
   ) {
     super(message)
     this.name = 'ApiError'
+  }
+}
+
+/** The two-factor fields of a failed Garmin sign-in, typed; the ApiError body is untyped JSON. */
+export function garminMFABody(err: ApiError): GarminConnectMFA {
+  const { mfa, challenge, method, mfaInvalid, attemptsRemaining } = err.body
+  return {
+    mfa: mfa === true,
+    challenge: typeof challenge === 'string' ? challenge : undefined,
+    method: method === 'email' || method === 'sms' || method === 'totp' ? method : '',
+    mfaInvalid: mfaInvalid === true,
+    attemptsRemaining: typeof attemptsRemaining === 'number' ? attemptsRemaining : undefined,
   }
 }
 
@@ -209,6 +222,13 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
+    }),
+  /** Second step of a two-factor sign-in: the code, for the challenge the first step returned. */
+  garminConnectMFA: (challenge: string, code: string) =>
+    request<GarminConnection>('/api/garmin/connection/mfa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challenge, code }),
     }),
   garminDisconnect: () =>
     request<GarminConnection>('/api/garmin/connection', { method: 'DELETE' }),

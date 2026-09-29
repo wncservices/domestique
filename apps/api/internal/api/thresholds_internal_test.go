@@ -57,6 +57,8 @@ func TestThresholdMovedFurtherGatesByDirectionAndMargin(t *testing.T) {
 		{"ftp down short of 3% fails", thresholds.Finding{Field: "ftp", Direction: "down", Value: 265}, workout.ThresholdSuggestion{Value: 268}, false},
 		{"max_hr up needs only +1 bpm", thresholds.Finding{Field: workout.FieldMaxHR, Direction: "up", Value: 192}, workout.ThresholdSuggestion{Value: 191}, true},
 		{"max_hr up short of 1 bpm fails", thresholds.Finding{Field: workout.FieldMaxHR, Direction: "up", Value: 191}, workout.ThresholdSuggestion{Value: 191}, false},
+		{"threshold_hr up needs only +1 bpm", thresholds.Finding{Field: workout.FieldThresholdHR, Direction: "up", Value: 163}, workout.ThresholdSuggestion{Value: 162}, true},
+		{"threshold_hr up short of 1 bpm fails", thresholds.Finding{Field: workout.FieldThresholdHR, Direction: "up", Value: 162}, workout.ThresholdSuggestion{Value: 162}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -559,5 +561,102 @@ func TestFailThresholdResolveRaceMapsNotFoundTo409(t *testing.T) {
 	s.failThresholdResolveRace(rec, errors.New("boom"))
 	if rec.Code != 500 {
 		t.Errorf("status = %d, want 500 for an unrelated error", rec.Code)
+	}
+}
+
+// saveHRRide stores one analysed session with a best 20-minute HR.
+func saveHRRide(t *testing.T, s *Server, extID, sport, date string, bestHR int) {
+	t.Helper()
+	ctx := t.Context()
+	session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: extID, Sport: sport,
+		Date: date, DurationSeconds: 1800,
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: session.ID, Rider: "wilant", Outcome: "unplanned", BestHR1200: bestHR,
+	}); err != nil {
+		t.Fatalf("save analysis: %v", err)
+	}
+}
+
+// TestDetectThresholdsAppliesAutoThresholdHRToAnEmptyField: the fourth rule
+// actually runs during a sync — best 20-minute HR 180 estimates 171, applied
+// through autoprofile.Apply, marked estimated and reported in Detected.
+func TestDetectThresholdsAppliesAutoThresholdHRToAnEmptyField(t *testing.T) {
+	s := newThresholdTestServer(t)
+	saveHRRide(t, s, "hr1", "cycling", "2026-03-10", 180)
+	sessions, err := s.Training.ListSessions(t.Context(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := s.detectThresholds(t.Context(), "wilant", workout.RiderProfile{Rider: "wilant"}, sessions, fixedNow)
+	if err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+	if result.Profile.ThresholdHR != 171 || !result.Profile.IsEstimated(workout.FieldThresholdHR) {
+		t.Fatalf("profile = %+v, want threshold_hr 171 marked estimated", result.Profile)
+	}
+	if len(result.Detected) != 1 || result.Detected[0].Field != "threshold_hr" || result.Detected[0].Value != 171 {
+		t.Fatalf("detected = %+v, want one threshold_hr at 171", result.Detected)
+	}
+	if len(result.AutoFields) != 1 || result.AutoFields[0] != workout.FieldThresholdHR {
+		t.Errorf("autoFields = %v, want [threshold_hr]", result.AutoFields)
+	}
+	pending, err := s.Training.ListPendingSuggestions(t.Context(), "wilant")
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending = %+v, err=%v, want none for an Auto finding", pending, err)
+	}
+}
+
+// TestDetectThresholdsSuggestsForARiderTypedThresholdHR: review focus 1 — a
+// rider-typed threshold HR is never changed by a sync, only suggested.
+func TestDetectThresholdsSuggestsForARiderTypedThresholdHR(t *testing.T) {
+	s := newThresholdTestServer(t)
+	saveHRRide(t, s, "hr2", "running", "2026-03-10", 180)
+	sessions, err := s.Training.ListSessions(t.Context(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	profile := workout.RiderProfile{Rider: "wilant", ThresholdHR: 158} // rider-typed
+	result, err := s.detectThresholds(t.Context(), "wilant", profile, sessions, fixedNow)
+	if err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+	if result.Profile.ThresholdHR != 158 || result.Profile.IsEstimated(workout.FieldThresholdHR) {
+		t.Fatalf("profile = %+v, want threshold_hr untouched at 158", result.Profile)
+	}
+	if len(result.Detected) != 0 {
+		t.Fatalf("detected = %+v, want none", result.Detected)
+	}
+	pending, err := s.Training.ListPendingSuggestions(t.Context(), "wilant")
+	if err != nil || len(pending) != 1 || pending[0].Field != "threshold_hr" {
+		t.Fatalf("pending = %+v, err=%v, want one threshold_hr suggestion", pending, err)
+	}
+	if pending[0].Value != 171 || pending[0].Previous != 158 || pending[0].Direction != "up" {
+		t.Errorf("suggestion = %+v, want 171 (was 158) up", pending[0])
+	}
+}
+
+// TestDetectThresholdsDeletesAStaleThresholdHRSuggestion: thresholdFields
+// includes threshold_hr, so a pending suggestion with no finding this pass is
+// cleared like the other fields'.
+func TestDetectThresholdsDeletesAStaleThresholdHRSuggestion(t *testing.T) {
+	s := newThresholdTestServer(t)
+	if _, err := s.Training.CreateSuggestion(t.Context(), workout.ThresholdSuggestion{
+		Rider: "wilant", Field: workout.FieldThresholdHR, Value: 171, Previous: 158, Direction: "up",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.detectThresholds(t.Context(), "wilant", workout.RiderProfile{Rider: "wilant", ThresholdHR: 158}, nil, fixedNow); err != nil {
+		t.Fatalf("detectThresholds: %v", err)
+	}
+	pending, err := s.Training.ListPendingSuggestions(t.Context(), "wilant")
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending = %+v, err=%v, want the stale threshold_hr suggestion cleared", pending, err)
 	}
 }

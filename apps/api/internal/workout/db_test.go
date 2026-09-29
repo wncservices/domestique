@@ -205,14 +205,14 @@ func TestEachEngine(t *testing.T) {
 				}
 
 				saved, err := db.SaveProfile(ctx, RiderProfile{
-					Rider: "Wilant", FTPWatts: 280, MaxHR: 185, RestingHR: 48,
+					Rider: "Wilant", FTPWatts: 280, MaxHR: 185, ThresholdHR: 166, RestingHR: 48,
 					AvailableDays: []string{"tue", "thu", "sat", "sun"}, HoursPerAvailableDay: 1.5,
 					ExperienceLevel: "intermediate",
 				})
 				if err != nil {
 					t.Fatalf("save profile: %v", err)
 				}
-				if saved.Rider != "wilant" || saved.FTPWatts != 280 {
+				if saved.Rider != "wilant" || saved.FTPWatts != 280 || saved.ThresholdHR != 166 {
 					t.Errorf("saved = %+v", saved)
 				}
 				if len(saved.AvailableDays) != 4 {
@@ -263,6 +263,67 @@ func TestEachEngine(t *testing.T) {
 				}
 				if !fetched.FTPEstimated || fetched.FTPWatts != 260 {
 					t.Errorf("fetched = %+v, want FTPWatts=260 FTPEstimated=true", fetched)
+				}
+			})
+
+			t.Run("ftp_levels_calibrated_watts: SaveProfile never writes it, SetFTPCalibrated is a compare-and-set", func(t *testing.T) {
+				db := open(t)
+				ctx := t.Context()
+
+				saved, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 250})
+				if err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if saved.FTPLevelsCalibratedAt != 0 {
+					t.Errorf("FTPLevelsCalibratedAt = %v, want 0 by default", saved.FTPLevelsCalibratedAt)
+				}
+
+				marker := func() float64 {
+					p, _, err := db.GetProfile(ctx, "wilant")
+					if err != nil {
+						t.Fatalf("get profile: %v", err)
+					}
+					return p.FTPLevelsCalibratedAt
+				}
+
+				// A struct carrying a marker does not write it, on insert...
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "other", FTPWatts: 250, FTPLevelsCalibratedAt: 999}); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if p, _, _ := db.GetProfile(ctx, "other"); p.FTPLevelsCalibratedAt != 0 {
+					t.Errorf("insert wrote the marker: %v", p.FTPLevelsCalibratedAt)
+				}
+
+				won, err := db.SetFTPCalibrated(ctx, "wilant", 0, 255)
+				if err != nil || !won {
+					t.Fatalf("first CAS 0 -> 255: won=%v err=%v", won, err)
+				}
+				if got := marker(); got != 255 {
+					t.Fatalf("marker = %v, want 255", got)
+				}
+				// ...nor on update, whatever the struct says.
+				if _, err := db.SaveProfile(ctx, RiderProfile{Rider: "wilant", FTPWatts: 268, FTPLevelsCalibratedAt: 0}); err != nil {
+					t.Fatalf("save profile: %v", err)
+				}
+				if got := marker(); got != 255 {
+					t.Errorf("SaveProfile changed the marker to %v", got)
+				}
+
+				won, err = db.SetFTPCalibrated(ctx, "wilant", 255, 268)
+				if err != nil || !won {
+					t.Fatalf("CAS 255 -> 268: won=%v err=%v", won, err)
+				}
+				// A second CAS with the now-stale from loses and changes nothing.
+				won, err = db.SetFTPCalibrated(ctx, "wilant", 255, 300)
+				if err != nil || won {
+					t.Errorf("stale CAS: won=%v err=%v, want a clean loss", won, err)
+				}
+				if got := marker(); got != 268 {
+					t.Errorf("marker = %v, want 268", got)
+				}
+				// No row at all is a loss too, not an error.
+				if won, err := db.SetFTPCalibrated(ctx, "nobody", 0, 1); err != nil || won {
+					t.Errorf("CAS on a missing rider: won=%v err=%v", won, err)
 				}
 			})
 
@@ -504,7 +565,7 @@ func TestEachEngine(t *testing.T) {
 					SessionID: session.ID, Rider: "Wilant", WorkoutID: "threshold-6x3",
 					Outcome: "struggled", LoadSource: "power",
 					NormalizedPower: 245.5, IntensityFactor: 0.98, TSS: 92.3, DurationRatio: 1.02,
-					MaxHR: 178, BestSpeed1200: 4.2, BestSpeed1800: 3.9,
+					MaxHR: 178, BestHR1200: 165, BestSpeed1200: 4.2, BestSpeed1800: 3.9,
 					PowerZoneSeconds: []int{100, 200, 900, 1200, 800, 400},
 					HRZoneSeconds:    []int{300, 600, 1500, 900, 300},
 					PowerCurve:       map[string]float64{"5": 550, "60": 400, "300": 260, "1200": 230},
@@ -532,7 +593,7 @@ func TestEachEngine(t *testing.T) {
 					fetched.TSS != analysis.TSS || fetched.DurationRatio != analysis.DurationRatio {
 					t.Errorf("fetched numbers = %+v, want %+v", fetched, analysis)
 				}
-				if fetched.MaxHR != analysis.MaxHR || fetched.BestSpeed1200 != analysis.BestSpeed1200 ||
+				if fetched.MaxHR != analysis.MaxHR || fetched.BestHR1200 != analysis.BestHR1200 || fetched.BestSpeed1200 != analysis.BestSpeed1200 ||
 					fetched.BestSpeed1800 != analysis.BestSpeed1800 {
 					t.Errorf("fetched threshold fields = %+v, want %+v", fetched, analysis)
 				}
@@ -563,6 +624,7 @@ func TestEachEngine(t *testing.T) {
 				analysis.TSS = 95
 				analysis.MaxHR = 182
 				analysis.BestSpeed1200 = 4.5
+				analysis.BestHR1200 = 168
 				if err := db.SaveAnalysis(ctx, analysis); err != nil {
 					t.Fatalf("re-save analysis: %v", err)
 				}
@@ -570,7 +632,7 @@ func TestEachEngine(t *testing.T) {
 				if err != nil || !ok || replaced.Outcome != "nailed_it" || replaced.TSS != 95 {
 					t.Fatalf("replaced = %+v, ok=%v, err=%v, want outcome nailed_it tss 95", replaced, ok, err)
 				}
-				if replaced.MaxHR != 182 || replaced.BestSpeed1200 != 4.5 {
+				if replaced.MaxHR != 182 || replaced.BestSpeed1200 != 4.5 || replaced.BestHR1200 != 168 {
 					t.Errorf("replaced threshold fields = %+v, want max_hr 182 best_speed_1200 4.5", replaced)
 				}
 
@@ -774,7 +836,7 @@ VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
 	if err != nil || !ok {
 		t.Fatalf("get pre-existing row after migration: ok=%v err=%v", ok, err)
 	}
-	if old.MaxHR != 0 || old.BestSpeed1200 != 0 || old.BestSpeed1800 != 0 {
+	if old.BestHR1200 != 0 || old.MaxHR != 0 || old.BestSpeed1200 != 0 || old.BestSpeed1800 != 0 {
 		t.Errorf("pre-existing row threshold fields = %+v, want all zero", old)
 	}
 
@@ -782,7 +844,7 @@ VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
 	// carrying real threshold values, not just tolerate the old row.
 	if err := db.SaveAnalysis(t.Context(), SessionAnalysis{
 		SessionID: "garmin:new-ride", Rider: "wilant", Outcome: "completed",
-		MaxHR: 175, BestSpeed1200: 4.1, BestSpeed1800: 3.8,
+		MaxHR: 175, BestHR1200: 160, BestSpeed1200: 4.1, BestSpeed1800: 3.8,
 	}); err != nil {
 		t.Fatalf("save analysis after migration: %v", err)
 	}
@@ -790,7 +852,7 @@ VALUES ('garmin:old-ride', 'wilant', '', 'completed', 'fit_power',
 	if err != nil || !ok {
 		t.Fatalf("get new row after migration: ok=%v err=%v", ok, err)
 	}
-	if saved.MaxHR != 175 || saved.BestSpeed1200 != 4.1 || saved.BestSpeed1800 != 3.8 {
+	if saved.BestHR1200 != 160 || saved.MaxHR != 175 || saved.BestSpeed1200 != 4.1 || saved.BestSpeed1800 != 3.8 {
 		t.Errorf("saved threshold fields = %+v, want 175/4.1/3.8", saved)
 	}
 
@@ -815,5 +877,104 @@ func TestValidateStepDepth(t *testing.T) {
 	}
 	if err := validateSteps(nest(maxStepDepth + 1)); err == nil {
 		t.Errorf("depth %d should be rejected", maxStepDepth+1)
+	}
+}
+
+// TestRiderProfilesTableGainsFTPLevelsCalibratedColumn: a rider_profiles
+// table that predates ftp_levels_calibrated_watts migrates cleanly, existing
+// rows read 0 ("never calibrated"), and UseDB stays idempotent.
+func TestRiderProfilesTableGainsFTPLevelsCalibratedColumn(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	if _, err := src.Conn().Exec(`
+CREATE TABLE rider_profiles (
+    rider                      TEXT PRIMARY KEY,
+    ftp_watts                  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ftp_estimated              BOOLEAN NOT NULL DEFAULT FALSE,
+    estimated_fields           TEXT NOT NULL DEFAULT '',
+    auto_push_workouts         BOOLEAN NOT NULL DEFAULT FALSE,
+    threshold_pace_sec_per_km  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_hr                     INTEGER NOT NULL DEFAULT 0,
+    resting_hr                 INTEGER NOT NULL DEFAULT 0,
+    available_days             TEXT NOT NULL DEFAULT '',
+    hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    experience_level           TEXT NOT NULL DEFAULT '',
+    updated_at                 TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`
+INSERT INTO rider_profiles (rider, ftp_watts, updated_at) VALUES ('wilant', 255, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+	old, ok, err := db.GetProfile(t.Context(), "wilant")
+	if err != nil || !ok {
+		t.Fatalf("get pre-existing row after migration: ok=%v err=%v", ok, err)
+	}
+	if old.FTPWatts != 255 || old.FTPLevelsCalibratedAt != 0 {
+		t.Errorf("pre-existing row = %+v, want FTPWatts 255 and marker 0", old)
+	}
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
+	}
+}
+
+// TestRiderProfilesTableGainsThresholdHR simulates a database created before
+// rider_profiles.threshold_hr existed and checks UseDB adds it (defaulting to
+// 0, "unset") rather than requiring a fresh database, and is idempotent.
+func TestRiderProfilesTableGainsThresholdHR(t *testing.T) {
+	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer src.Close()
+
+	if _, err := src.Conn().Exec(`
+CREATE TABLE rider_profiles (
+    rider                      TEXT PRIMARY KEY,
+    ftp_watts                  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ftp_estimated              BOOLEAN NOT NULL DEFAULT FALSE,
+    estimated_fields           TEXT NOT NULL DEFAULT '',
+    auto_push_workouts         BOOLEAN NOT NULL DEFAULT FALSE,
+    threshold_pace_sec_per_km  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_hr                     INTEGER NOT NULL DEFAULT 0,
+    resting_hr                 INTEGER NOT NULL DEFAULT 0,
+    available_days             TEXT NOT NULL DEFAULT '',
+    hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    experience_level           TEXT NOT NULL DEFAULT '',
+    updated_at                 TEXT NOT NULL
+)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	if _, err := src.Conn().Exec(`INSERT INTO rider_profiles (rider, max_hr, updated_at) VALUES ('wilant', 190, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	db, err := UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatalf("UseDB (migrate): %v", err)
+	}
+	old, ok, err := db.GetProfile(t.Context(), "wilant")
+	if err != nil || !ok {
+		t.Fatalf("get pre-existing row: ok=%v err=%v", ok, err)
+	}
+	if old.MaxHR != 190 || old.ThresholdHR != 0 {
+		t.Errorf("pre-existing row = %+v, want max_hr 190 and threshold_hr 0", old)
+	}
+	saved, err := db.SaveProfile(t.Context(), RiderProfile{Rider: "wilant", MaxHR: 190, ThresholdHR: 165})
+	if err != nil || saved.ThresholdHR != 165 {
+		t.Fatalf("save after migration = %+v, err=%v, want threshold_hr 165", saved, err)
+	}
+	if _, err := UseDB(src.Conn(), src.DSN()); err != nil {
+		t.Errorf("second UseDB call: %v", err)
 	}
 }

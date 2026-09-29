@@ -13,7 +13,7 @@
 // this is purely how the rider enters it.
 import { reactive } from 'vue'
 import type { RiderProfile, Sport, StepDuration, StepIntensity, StepTarget, WorkoutStep } from '@/api/types'
-import { formatClock, fromPercent, parseClock, thresholdFor, toPercent } from '@/utils/workoutMath'
+import { formatClock, formatTargetValue, fromPercent, parseClock, thresholdFor, toPercent } from '@/utils/workoutMath'
 
 const steps = defineModel<WorkoutStep[]>({ required: true })
 
@@ -166,8 +166,17 @@ function setTarget(index: number, step: WorkoutStep, field: 'targetLow' | 'targe
 function otherUnitHint(index: number, step: WorkoutStep, threshold: number | null): string {
   if (threshold === null || step.targetLow === undefined || step.targetHigh === undefined) return ''
   if (isPercent(index)) {
+    // Pace reads as m:ss per km, not the m/s the field stores — and a faster
+    // (higher) speed is the smaller pace, so the pair swaps to read low→high.
+    if (step.target === 'pace') {
+      const fast = formatTargetValue('pace', step.targetHigh)
+      const slow = formatTargetValue('pace', step.targetLow)
+      return fast === slow ? `${fast} /km` : `${fast}–${slow} /km`
+    }
     const unit = unitFor(step.target)
-    return step.targetLow === step.targetHigh ? `${step.targetLow} ${unit}` : `${step.targetLow}–${step.targetHigh} ${unit}`
+    const low = formatTargetValue(step.target, step.targetLow)
+    const high = formatTargetValue(step.target, step.targetHigh)
+    return low === high ? `${low} ${unit}` : `${low}–${high} ${unit}`
   }
   const pLow = toPercent(step.targetLow, threshold)
   const pHigh = toPercent(step.targetHigh, threshold)

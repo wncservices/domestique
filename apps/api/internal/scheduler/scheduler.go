@@ -508,9 +508,9 @@ func enduranceZoneTarget(sport model.Sport, profile workout.RiderProfile) (worko
 	case sport == model.SportRunning && profile.ThresholdPaceSecPerKM > 0:
 		threshold := 1000 / profile.ThresholdPaceSecPerKM // m/s
 		return workout.TargetPace, threshold * 0.80, threshold * 0.90
-	case profile.MaxHR > 0:
-		return workout.TargetHeartRate, float64(profile.MaxHR) * 0.60, float64(profile.MaxHR) * 0.75
-	default:
-		return workout.TargetOpen, 0, 0
 	}
+	if low, high, ok := workoutlib.HRRange(sport, profile, "endurance"); ok {
+		return workout.TargetHeartRate, low, high
+	}
+	return workout.TargetOpen, 0, 0
 }

@@ -643,6 +643,22 @@ export interface GarminConnection {
   consumer?: GarminConsumer
 }
 
+/**
+ * What the Garmin sign-in answers when the account wants a two-factor code
+ * (409 from the first step) or the code was wrong (422 from the second).
+ * Mirrors `internal/api/garminconnect.go` by hand, like every DTO here.
+ */
+export interface GarminConnectMFA {
+  mfa?: boolean
+  /** Opaque id of the sign-in in progress; absent when the server could not keep one. */
+  challenge?: string
+  /** How Garmin sent the code, when it said. */
+  method?: 'email' | 'sms' | 'totp' | ''
+  /** Set on a wrong code: the challenge is still open. */
+  mfaInvalid?: boolean
+  attemptsRemaining?: number
+}
+
 /** One route already on the rider's own Wahoo account — sync-back, the
  *  reverse direction from pushing. */
 export interface WahooRoute {
@@ -773,6 +789,8 @@ export interface RiderProfile {
   ftpEstimated?: boolean
   thresholdPaceSecPerKm?: number
   maxHr?: number
+  /** Lactate threshold heart rate (LTHR) — the anchor for HR zones when known. */
+  thresholdHr?: number
   restingHr?: number
   /** Lowercase three-letter weekday abbreviations, e.g. ["tue","thu","sat","sun"]. */
   availableDays?: string[]
@@ -784,10 +802,13 @@ export interface RiderProfile {
   /** Fields (other than FTP, which has ftpEstimated) that were filled in
    *  automatically — from Garmin's own biometrics or the rider's recent
    *  training — and not yet confirmed. Names match internal/workout's Field*
-   *  constants: max_hr, threshold_pace, resting_hr, available_days,
+   *  constants: max_hr, threshold_pace, threshold_hr, resting_hr, available_days,
    *  hours_per_available_day, experience_level. Output only. */
   estimated?: string[]
   updatedAt?: string
+  /** Output only, and only on the response to a save that lowered the
+   *  rider's progression levels for a new FTP. */
+  levelsRecalibrated?: LevelsRecalibrated
 }
 
 export type StepDuration = 'time' | 'distance' | 'open'
@@ -986,8 +1007,17 @@ export interface FitnessResponse {
   sessions: CompletedSession[]
 }
 
+/** Present on a response only when an FTP change just lowered the rider's
+ *  progression levels — mirrors internal/api's levelsRecalibratedDTO. The same
+ *  shape on the sync, threshold-accept and profile-save responses. */
+export interface LevelsRecalibrated {
+  fromFtpWatts: number
+  toFtpWatts: number
+}
+
 export interface SyncMetricsResult {
   synced: number
+  levelsRecalibrated?: LevelsRecalibrated
   warnings?: string[]
   /** Present only when this sync just produced a fresh FTP estimate and
    *  saved it to the rider's profile. */
@@ -1009,7 +1039,7 @@ export interface SyncMetricsResult {
  *  sync — what the sync toast lists ("FTP updated to 268 W from Saturday's
  *  20-minute effort"). Mirrors internal/api's detectedThresholdDTO. */
 export interface DetectedThreshold {
-  field: 'ftp' | 'max_hr' | 'threshold_pace'
+  field: 'ftp' | 'max_hr' | 'threshold_pace' | 'threshold_hr'
   value: number
   reason?: string
 }
@@ -1019,12 +1049,15 @@ export interface DetectedThreshold {
  *  overwrites on its own. Mirrors internal/api's thresholdSuggestionDTO. */
 export interface ThresholdSuggestion {
   id: string
-  field: 'ftp' | 'max_hr' | 'threshold_pace'
+  field: 'ftp' | 'max_hr' | 'threshold_pace' | 'threshold_hr'
   value: number
   previous?: number
   direction: 'up' | 'down'
   reason?: string
   sourceDate?: string
+  /** Only on the response to accepting an FTP suggestion that lowered the
+   *  rider's progression levels. */
+  levelsRecalibrated?: LevelsRecalibrated
 }
 
 export interface ThresholdSuggestionsResponse {

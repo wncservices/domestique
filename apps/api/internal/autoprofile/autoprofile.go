@@ -201,6 +201,7 @@ type Suggestion struct {
 	FTPWatts              float64
 	MaxHR                 int
 	ThresholdPaceSecPerKM float64
+	ThresholdHR           int
 	RestingHR             int
 	AvailableDays         []string
 	HoursPerAvailableDay  float64
@@ -230,6 +231,11 @@ func Apply(p workout.RiderProfile, s Suggestion) (workout.RiderProfile, []string
 		p.ThresholdPaceSecPerKM = s.ThresholdPaceSecPerKM
 		p.MarkEstimated(workout.FieldThresholdPace)
 		changed = append(changed, workout.FieldThresholdPace)
+	}
+	if s.ThresholdHR > 0 && fillable(p.ThresholdHR == 0, p.IsEstimated(workout.FieldThresholdHR)) && s.ThresholdHR != p.ThresholdHR {
+		p.ThresholdHR = s.ThresholdHR
+		p.MarkEstimated(workout.FieldThresholdHR)
+		changed = append(changed, workout.FieldThresholdHR)
 	}
 	if s.RestingHR > 0 && fillable(p.RestingHR == 0, p.IsEstimated(workout.FieldRestingHR)) && s.RestingHR != p.RestingHR {
 		p.RestingHR = s.RestingHR

@@ -291,3 +291,96 @@ func TestThresholdsDismissIsOwnerOnlyAnd409sWhenNotPending(t *testing.T) {
 		t.Fatalf("second resolve status = %d, want 409", resp.StatusCode)
 	}
 }
+
+// TestThresholdsAcceptThresholdHRAndListRoundTrip proves the suggestion
+// store and API are field-name-agnostic for the new field: a threshold_hr
+// suggestion lists with its field, and accepting it writes the profile and
+// clears the estimated marker.
+func TestThresholdsAcceptThresholdHRAndListRoundTrip(t *testing.T) {
+	h := newMetricsSyncHarness(t, &fakeGarmin{})
+	ctx := context.Background()
+
+	p := workout.RiderProfile{Rider: "wilant", ThresholdHR: 158}
+	p.MarkEstimated(workout.FieldThresholdHR)
+	if _, err := h.srv.Training.SaveProfile(ctx, p); err != nil {
+		t.Fatalf("seed profile: %v", err)
+	}
+	sug, err := h.srv.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
+		Rider: "wilant", Field: workout.FieldThresholdHR, Value: 162, Previous: 158, Direction: "up",
+		SourceDate: "2026-01-12", Reason: "from Saturday's best 20-minute heart rate (171 bpm)",
+	})
+	if err != nil {
+		t.Fatalf("create suggestion: %v", err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/thresholds", "")
+	var listed struct {
+		Suggestions []struct {
+			Field string  `json:"field"`
+			Value float64 `json:"value"`
+		} `json:"suggestions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Suggestions) != 1 || listed.Suggestions[0].Field != "threshold_hr" || listed.Suggestions[0].Value != 162 {
+		t.Fatalf("listed = %+v, want one threshold_hr at 162", listed.Suggestions)
+	}
+
+	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/thresholds/"+sug.ID, `{"action":"accept"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("accept status = %d", resp.StatusCode)
+	}
+	got := h.profile("wilant")
+	if got.ThresholdHR != 162 {
+		t.Errorf("thresholdHr = %d, want 162", got.ThresholdHR)
+	}
+	for _, f := range got.Estimated {
+		if f == workout.FieldThresholdHR {
+			t.Errorf("estimated = %v, want threshold_hr cleared after accept", got.Estimated)
+		}
+	}
+}
+
+// TestThresholdsSyncDetectsThresholdHRFromARealRide drives the fourth rule
+// end to end: a synced ride with 25 minutes of heart rate at 180 bpm is
+// analysed, its best 20-minute HR feeds Detect, and an empty threshold HR is
+// filled with round(0.95 x 180) = 171, estimated and reported as detected.
+func TestThresholdsSyncDetectsThresholdHRFromARealRide(t *testing.T) {
+	start := time.Now().AddDate(0, 0, -1)
+	fake := &fakeGarmin{
+		activities: []garmin.Activity{
+			{ID: "8101", Sport: "running", StartTime: start, DurationSeconds: 1500, AvgHR: 180},
+		},
+		fitByID: map[string][]byte{"8101": buildRideFITWithHR(t, start, 1500, 0, 180)},
+	}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Detected []struct {
+			Field string  `json:"field"`
+			Value float64 `json:"value"`
+		} `json:"detected"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range out.Detected {
+		if d.Field == "threshold_hr" && d.Value == 171 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("detected = %+v, want threshold_hr 171", out.Detected)
+	}
+	p := h.profile("wilant")
+	if p.ThresholdHR != 171 {
+		t.Errorf("thresholdHr = %d, want 171", p.ThresholdHR)
+	}
+}

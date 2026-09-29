@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A Monday–Sunday grid of planned vs completed sessions — drag a chip onto
-// another day (or use its own overflow menu) to move it, click one to open
-// it. The one place a rider sees the whole week at once instead of just
+// another day (or use its own overflow menu) to move it, click one to show
+// it in the day card above. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { AnalysisStep, RiderProfile, SessionAnalysis, TrainingWeek, WeekDay, Workout } from '@/api/types'
@@ -18,6 +18,8 @@ const props = defineProps<{
   profile: RiderProfile
   canFill: boolean
   filling: boolean
+  // The session shown in the day card above, highlighted here.
+  selectedWorkoutId?: string
 }>()
 
 const emit = defineEmits<{
@@ -25,7 +27,9 @@ const emit = defineEmits<{
   next: []
   thisWeek: []
   move: [w: Workout, date: string]
-  open: [w: Workout]
+  // Shows the session in the day card above (TodayCard), where it can be
+  // edited — rather than jumping straight into the editor.
+  select: [w: Workout, date: string]
   fill: []
   // See TodayCard.vue's own 'rated' emit — a feel rating can move a
   // progression level, and the week/level state lives on the page.
@@ -251,10 +255,17 @@ watch(
         <div
           v-for="w in day.planned"
           :key="w.id"
-          class="flex flex-col gap-0.5 rounded border border-default bg-default p-1 cursor-pointer"
+          class="flex flex-col gap-0.5 rounded border bg-default p-1 cursor-pointer"
+          :class="w.id === selectedWorkoutId ? 'border-primary ring-1 ring-primary' : 'border-default hover:bg-elevated'"
+          role="button"
+          tabindex="0"
+          :aria-pressed="w.id === selectedWorkoutId"
+          :aria-label="`Show ${w.name} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
           :draggable="canDrag(day.date)"
           @dragstart="onDragStart($event, w)"
-          @click="emit('open', w)"
+          @click="emit('select', w, day.date)"
+          @keydown.enter.prevent="emit('select', w, day.date)"
+          @keydown.space.prevent="emit('select', w, day.date)"
         >
           <div class="flex items-center justify-between gap-1">
             <span class="truncate text-xs font-medium">{{ w.name }}</span>

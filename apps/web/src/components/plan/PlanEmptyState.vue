@@ -9,7 +9,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  describe: []
+  goal: []
   fromRoute: []
   general: []
 }>()
@@ -27,15 +27,20 @@ const emit = defineEmits<{
       </div>
 
       <div class="grid w-full gap-3 sm:grid-cols-3">
+        <!-- Always offered: a goal needs an event date, not a route. With
+             narration on, the same form also takes a one-sentence
+             description; without it, this card used to be hidden, leaving a
+             route or a generic plan as the only ways in. -->
         <button
-          v-if="narrationEnabled"
           type="button"
           class="flex flex-col items-start gap-2 rounded-lg border border-default p-4 text-left hover:bg-elevated"
-          @click="emit('describe')"
+          @click="emit('goal')"
         >
-          <UIcon name="i-lucide-sparkles" class="size-5 text-muted" />
-          <span class="font-medium text-highlighted">Describe it</span>
-          <span class="text-xs text-muted">Tell us what you're training for in a sentence.</span>
+          <UIcon name="i-lucide-flag" class="size-5 text-muted" />
+          <span class="font-medium text-highlighted">Set a goal</span>
+          <span class="text-xs text-muted">
+            {{ narrationEnabled ? 'Describe it in a sentence, or pick an event date, distance and climbing.' : 'Pick an event date, distance and climbing. No route needed.' }}
+          </span>
         </button>
 
         <button

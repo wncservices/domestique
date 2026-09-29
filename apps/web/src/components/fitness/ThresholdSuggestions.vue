@@ -15,6 +15,7 @@ import { ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type { ThresholdSuggestion } from '@/api/types'
+import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
 import { formatThresholdNumber, formatThresholdValue, thresholdFieldLabel, thresholdFieldTitle } from '@/utils/fitnessMath'
 
 const props = defineProps<{ suggestions: ThresholdSuggestion[] }>()
@@ -25,6 +26,7 @@ const props = defineProps<{ suggestions: ThresholdSuggestion[] }>()
 const emit = defineEmits<{ resolved: [profileChanged: boolean] }>()
 
 const toast = useToast()
+const { replanAction } = useRecalibration()
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
@@ -50,6 +52,12 @@ function titleFor(s: ThresholdSuggestion): string {
       return down
         ? `Your threshold pace may have slipped: ${value}${was}`
         : `New threshold pace detected: ${value}${was}`
+    case 'threshold_hr':
+      // Detection never suggests a decrease (spec: no down rule), but the
+      // switch stays exhaustive over Direction like the other fields.
+      return down
+        ? `Your threshold heart rate may have dropped: ${value}${was}`
+        : `New threshold heart rate detected: ${value}${was}`
   }
 }
 
@@ -67,30 +75,18 @@ function describeReason(reason: string | undefined): string | undefined {
 const resolvingId = ref<string | null>(null)
 const dismissingId = ref<string | null>(null)
 
-async function replanAfterUpdate() {
-  try {
-    const result = await api.replan()
-    toast.add({ title: `Replanned — ${result.created} sessions rebuilt`, icon: 'i-lucide-refresh-ccw', color: 'success' })
-  } catch (err) {
-    // Same 409 handling as the Plan page's own Replan action — a background
-    // auto-schedule tick held the lock, nothing broke.
-    if (err instanceof ApiError && err.status === 409) {
-      toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
-    } else {
-      toast.add({ title: 'Could not replan this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
-    }
-  }
-}
-
 async function acceptSuggestion(s: ThresholdSuggestion) {
   resolvingId.value = s.id
   try {
-    await api.resolveThreshold(s.id, 'accept')
+    const resolved = await api.resolveThreshold(s.id, 'accept')
     toast.add({
       title: `${thresholdFieldTitle(s.field)} set to ${formatThresholdValue(s.field, s.value)}`,
+      // When the accepted FTP also lowered the rider's levels, say so in the
+      // same toast — the Replan action below is already offered here.
+      description: resolved.levelsRecalibrated ? levelsRecalibratedText(resolved.levelsRecalibrated) : undefined,
       icon: 'i-lucide-check',
       color: 'success',
-      actions: [{ label: 'Replan the rest of this week', onClick: (): void => { replanAfterUpdate() } }],
+      actions: [replanAction],
     })
     emit('resolved', true)
   } catch (err) {

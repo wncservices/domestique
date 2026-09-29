@@ -89,7 +89,7 @@ func TestTicketIsRedeemedForTheServiceItWasIssuedFor(t *testing.T) {
 	// The sign-in request records what service the ticket is issued for.
 	service := c.signinParams().Get("service")
 
-	_ = c.Login(t.Context(), "rider@example.com", "pw")
+	_, _ = c.Login(t.Context(), "rider@example.com", "pw")
 
 	if loginURL == "" {
 		t.Fatal("the ticket was never presented for exchange")
