@@ -126,6 +126,7 @@ type riderProfileDTO struct {
 	FTPEstimated          bool     `json:"ftpEstimated,omitempty"`
 	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm,omitempty"`
 	MaxHR                 int      `json:"maxHr,omitempty"`
+	ThresholdHR           int      `json:"thresholdHr,omitempty"`
 	RestingHR             int      `json:"restingHr,omitempty"`
 	AvailableDays         []string `json:"availableDays,omitempty"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay,omitempty"`
@@ -138,12 +139,16 @@ type riderProfileDTO struct {
 	// rider. Output only — handleSaveRiderProfile never reads it back.
 	Estimated []string `json:"estimated,omitempty"`
 	UpdatedAt string   `json:"updatedAt,omitempty"`
+	// LevelsRecalibrated is output only, and only on the response to a save
+	// that lowered the rider's progression levels for a new FTP.
+	// handleSaveRiderProfile never reads it back from the request.
+	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
 }
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 	return riderProfileDTO{
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
-		MaxHR: p.MaxHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
+		MaxHR: p.MaxHR, ThresholdHR: p.ThresholdHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
 		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, UpdatedAt: p.UpdatedAt,
 	}
@@ -331,6 +336,7 @@ type periodizationWeekDTO struct {
 
 type periodizationPlanDTO struct {
 	GoalID     string                 `json:"goalId"`
+	TotalWeeks int                    `json:"totalWeeks,omitempty"`
 	Weeks      []periodizationWeekDTO `json:"weeks"`
 	Adjustment float64                `json:"adjustment,omitempty"`
 }
@@ -369,7 +375,7 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	dto := periodizationPlanDTO{GoalID: plan.GoalID, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment}
+	dto := periodizationPlanDTO{GoalID: plan.GoalID, TotalWeeks: plan.TotalWeeks, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment}
 	for _, wk := range plan.Weeks {
 		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
 			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
@@ -728,6 +734,13 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	rider := auth.FromContext(r.Context()).User
+	// before is what recalibrateLevelsForFTP needs; the marker is not carried
+	// forward into the save below because SaveProfile never writes it.
+	before, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	saved, err := s.Training.SaveProfile(r.Context(), workout.RiderProfile{
 		// FTPEstimated and Estimated are deliberately not read from body:
 		// this is the manual save form, and a rider willing to click Save
@@ -735,7 +748,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		// RiderProfile.FTPEstimated's own doc comment on why those only
 		// ever mean "not yet looked at and confirmed."
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
-		MaxHR: body.MaxHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
+		MaxHR: body.MaxHR, ThresholdHR: body.ThresholdHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
 		AutoPushWorkouts: body.AutoPushWorkouts,
 	})
@@ -743,9 +756,17 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before)
+	if err != nil {
+		s.logger().Error("level recalibration failed", "rider", rider, "err", err)
+	}
 
 	s.logger().Info("rider profile saved", "rider", rider)
-	writeJSON(w, http.StatusOK, profileDTOFrom(saved))
+	out := profileDTOFrom(saved)
+	if changed {
+		out.LevelsRecalibrated = &dto
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 type profileProposalDTO struct {
@@ -991,6 +1012,7 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		zone := workout.Zone(*body.Zone)
 		req.Zone = &zone
 	}
+	req.Description = recordManualMove(wk, req)
 
 	updated, err := s.Training.UpdateWorkout(r.Context(), id, req)
 	if err != nil {
@@ -1000,6 +1022,37 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("workout updated", "id", id, "by", identity.User)
 	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+}
+
+// recordManualMove returns the description to save when an update moves a
+// plan-made workout to another day: the rider's own description (or the
+// stored one) with the original date noted in scheduler.MovedFrom's form.
+// Without it the vacated day reads as empty to scheduleGoal, and the next
+// schedule run — every 30 minutes in the background — plans the same
+// session there again, so a move looked like a duplicate. An automatic move
+// already records this; a manual one never did. The first original date is
+// kept across repeated moves, and a workout the rider built by hand (no
+// goal) needs nothing, since it never blocks or triggers scheduling.
+func recordManualMove(wk workout.Workout, req workout.UpdateWorkoutRequest) *string {
+	if req.Date == nil || *req.Date == wk.Date || wk.Date == "" {
+		return req.Description
+	}
+	goalID := wk.GoalID
+	if req.GoalID != nil {
+		goalID = *req.GoalID
+	}
+	if goalID == "" {
+		return req.Description
+	}
+	desc := wk.Description
+	if req.Description != nil {
+		desc = *req.Description
+	}
+	if _, ok := scheduler.MovedFrom(desc); ok {
+		return req.Description
+	}
+	desc = strings.TrimRight(desc, " \n") + "\n\nRescheduled by you: moved from " + wk.Date + "."
+	return &desc
 }
 
 func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {

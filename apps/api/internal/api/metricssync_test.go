@@ -1,9 +1,11 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -40,7 +42,7 @@ type metricsSyncHarness struct {
 	wahooCalls []string
 }
 
-func newMetricsSyncHarness(t *testing.T, garminConnector *fakeGarmin) *metricsSyncHarness {
+func newMetricsSyncHarness(t *testing.T, garminConnector api.GarminConnector) *metricsSyncHarness {
 	t.Helper()
 
 	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
@@ -560,6 +562,7 @@ type profileBody struct {
 	FTPWatts              float64  `json:"ftpWatts"`
 	FTPEstimated          bool     `json:"ftpEstimated"`
 	MaxHR                 int      `json:"maxHr"`
+	ThresholdHR           int      `json:"thresholdHr"`
 	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm"`
 	AvailableDays         []string `json:"availableDays"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay"`
@@ -599,6 +602,47 @@ func TestSyncFillsTheProfileFromGarminBiometrics(t *testing.T) {
 	}
 	if len(p.Estimated) != 2 {
 		t.Errorf("estimated = %v, want max_hr and threshold_pace", p.Estimated)
+	}
+}
+
+func TestSyncFillsThresholdHRFromGarminBiometricsOnlyWhenEmpty(t *testing.T) {
+	fake := &fakeGarmin{biometrics: garmin.Biometrics{ThresholdPaceSecPerKM: 290, ThresholdHR: 165}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		AutoFilled []string `json:"autoFilled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.AutoFilled) != 2 {
+		t.Errorf("autoFilled = %v, want threshold_pace and threshold_hr in the same pass", out.AutoFilled)
+	}
+	p := h.profile("wilant")
+	if p.ThresholdHR != 165 {
+		t.Errorf("thresholdHr = %d, want Garmin's 165", p.ThresholdHR)
+	}
+	found := false
+	for _, f := range p.Estimated {
+		found = found || f == "threshold_hr"
+	}
+	if !found {
+		t.Errorf("estimated = %v, want threshold_hr labelled as an estimate", p.Estimated)
+	}
+
+	// A rider-typed value is never overwritten, even by a fresh Garmin reading.
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"thresholdHr":170}`)
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	p = h.profile("wilant")
+	for _, f := range p.Estimated {
+		if f == "threshold_hr" {
+			t.Errorf("estimated = %v, want the rider-typed threshold_hr confirmed", p.Estimated)
+		}
+	}
+	if p.ThresholdHR != 170 {
+		t.Errorf("thresholdHr = %d, want the rider-typed 170 untouched", p.ThresholdHR)
 	}
 }
 
@@ -687,11 +731,102 @@ func TestSyncInfersTheTrainingPatternFromHistory(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 // newReplica is a second server process on the same database, links and
 // providers — another pod of the same deployment.
 func (h *metricsSyncHarness) newReplica() *api.Server {
 	return &api.Server{
 		Source: h.srv.Source, Auth: h.srv.Auth, Links: h.srv.Links, Training: h.srv.Training,
 		Settings: h.srv.Settings, Garmin: h.srv.Garmin, Wahoo: h.srv.Wahoo, Config: h.srv.Config,
+=======
+// liveGarminFake serves the Connect endpoints RestingHeartRate reads, so the
+// real garmin.Client (behind LiveGarmin) runs end to end through a sync.
+func liveGarminFake(t *testing.T, summary, stats, sleep string) *api.LiveGarmin {
+	t.Helper()
+	t.Setenv("GARMIN_OAUTH_CONSUMER_KEY", "ck")
+	t.Setenv("GARMIN_OAUTH_CONSUMER_SECRET", "cs")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth-service/oauth/exchange/user/2.0", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"access_token":"b","expires_in":3600}`)
+	})
+	reply := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, body) }
+	}
+	mux.HandleFunc("/usersummary-service/usersummary/daily/wilant-n", reply(summary))
+	mux.HandleFunc("/userstats-service/wellness/daily/wilant-n", reply(stats))
+	mux.HandleFunc("/wellness-service/wellness/dailySleepData/wilant-n", reply(sleep))
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return &api.LiveGarmin{APIBase: server.URL}
+}
+
+func (h *metricsSyncHarness) seedNamedGarminSession(rider string) {
+	h.t.Helper()
+	sealed, err := json.Marshal(garmin.Session{OAuth1Token: "tok", OAuth1Secret: "sec", DisplayName: "wilant-n"})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.links.Save("garmin", rider, providerlink.Connection{Secret: string(sealed)}); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// TestSyncFillsRestingHeartRateFromTheFallbackEndpoint is the production bug
+// end to end: the daily summary carries a null restingHeartRate, and the
+// value that reaches the rider's profile comes from the dedicated endpoint.
+func TestSyncFillsRestingHeartRateFromTheFallbackEndpoint(t *testing.T) {
+	live := liveGarminFake(t,
+		`{"restingHeartRate":null}`,
+		`{"allMetrics":{"metricsMap":{"WELLNESS_RESTING_HEART_RATE":[{"value":49}]}}}`,
+		`{}`)
+	h := newMetricsSyncHarness(t, live)
+	h.seedNamedGarminSession("wilant")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		RestingHRBpm int `json:"restingHrBpm"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.RestingHRBpm != 49 {
+		t.Fatalf("restingHrBpm = %d, want 49", out.RestingHRBpm)
+	}
+}
+
+func syncLogs(t *testing.T, live *api.LiveGarmin) string {
+	t.Helper()
+	h := newMetricsSyncHarness(t, live)
+	var logs bytes.Buffer
+	h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	h.seedNamedGarminSession("wilant")
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	resp.Body.Close()
+	return logs.String()
+}
+
+func TestSyncWarnsOnceWithKeyNamesWhenNoSourceHasRestingHeartRate(t *testing.T) {
+	live := liveGarminFake(t, `{"totalSteps":8123,"restingHeartRate":null}`, `{}`, `{}`)
+	logs := syncLogs(t, live)
+
+	const msg = "garmin resting heart rate: no reading from any source"
+	if n := strings.Count(logs, msg); n != 1 {
+		t.Fatalf("diagnostic warn count = %d, want exactly 1 (three dates are tried); logs:\n%s", n, logs)
+	}
+	for _, want := range []string{"totalSteps", "restingHeartRate", "daily_summary"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("logs missing %q:\n%s", want, logs)
+		}
+	}
+	if strings.Contains(logs, "8123") {
+		t.Errorf("logs contain a summary value:\n%s", logs)
+	}
+}
+
+func TestSyncDoesNotWarnWhenRestingHeartRateWasFound(t *testing.T) {
+	live := liveGarminFake(t, `{"restingHeartRate":48}`, `{}`, `{}`)
+	if logs := syncLogs(t, live); strings.Contains(logs, "no reading from any source") {
+		t.Errorf("unexpected diagnostic warn:\n%s", logs)
+>>>>>>> origin/main
 	}
 }

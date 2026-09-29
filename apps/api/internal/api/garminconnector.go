@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
@@ -32,7 +33,17 @@ func (c GarminConsumer) Configured() bool { return c.Key != "" && c.Secret != ""
 type GarminConnector interface {
 	// Connect signs in with a password. The password is used here and nowhere
 	// else — what comes back is a session to store in its place.
+	//
+	// When the account has two-factor on, the error is a
+	// *GarminMFAChallengeError (errors.Is garmin.ErrMFARequired) carrying what
+	// ResumeMFA needs.
 	Connect(ctx context.Context, consumer GarminConsumer, email, password string) (garmin.Session, error)
+	// ResumeMFA answers a challenge Connect returned with the rider's code and
+	// finishes the sign-in. No password: it was used once and is gone.
+	// garmin.ErrMFACodeRejected means the code was wrong, and the returned
+	// challenge is then the refreshed state (new CSRF, moved cookies) to keep
+	// for the next attempt. Otherwise the returned challenge is unused.
+	ResumeMFA(ctx context.Context, consumer GarminConsumer, challenge garmin.MFAChallenge, code string) (garmin.Session, garmin.MFAChallenge, error)
 	// Devices lists the head units on an account, from a stored session. No
 	// password: this is what the session is for.
 	Devices(ctx context.Context, consumer GarminConsumer, session garmin.Session) ([]garmin.Device, error)
@@ -97,6 +108,20 @@ type GarminConnector interface {
 	UnscheduleWorkout(ctx context.Context, consumer GarminConsumer, session garmin.Session, scheduleID string) error
 }
 
+// GarminMFAChallengeError is Connect's answer when Garmin wants a code: the
+// resumable state, wrapped so errors.Is(err, garmin.ErrMFARequired) still
+// holds for every caller that only cares that MFA was asked for.
+//
+// Its Error() text is the sentinel's and never includes the challenge, which
+// holds cookies and must not reach a log line by accident.
+type GarminMFAChallengeError struct {
+	Challenge garmin.MFAChallenge
+}
+
+func (*GarminMFAChallengeError) Error() string { return garmin.ErrMFARequired.Error() }
+
+func (*GarminMFAChallengeError) Unwrap() error { return garmin.ErrMFARequired }
+
 // LiveGarmin is the real connector: it talks to Garmin.
 //
 // It lives here rather than in internal/garmin because it exists to satisfy
@@ -106,6 +131,10 @@ type LiveGarmin struct {
 	// Log receives the one thing that is worth knowing and not worth failing
 	// over: that the profile lookup did not work. Nil is fine.
 	Log func(msg string, args ...any)
+
+	// APIBase overrides Connect's API host, for tests that point the real
+	// client at an httptest fake. Empty means the real one.
+	APIBase string
 }
 
 // Connect signs in and returns the session to keep in the password's place.
@@ -126,17 +155,41 @@ func (l LiveGarmin) Connect(ctx context.Context, consumer GarminConsumer, email,
 	// pair an admin pasted into the UI is the one that signs the request.
 	client.SetConsumer(consumer.Key, consumer.Secret)
 
-	if err := client.Login(ctx, email, password); err != nil {
+	challenge, err := client.Login(ctx, email, password)
+	if errors.Is(err, garmin.ErrMFARequired) {
+		return garmin.Session{}, &GarminMFAChallengeError{Challenge: challenge}
+	}
+	if err != nil {
 		return garmin.Session{}, err
 	}
+	return l.named(ctx, client), nil
+}
 
+// ResumeMFA is the second half of an MFA sign-in.
+func (l LiveGarmin) ResumeMFA(ctx context.Context, consumer GarminConsumer, challenge garmin.MFAChallenge, code string) (garmin.Session, garmin.MFAChallenge, error) {
+	if !consumer.Configured() {
+		return garmin.Session{}, challenge, garmin.ErrNoConsumer
+	}
+
+	client := garmin.New()
+	client.SetConsumer(consumer.Key, consumer.Secret)
+	_, refreshed, err := client.ResumeMFA(ctx, challenge, code)
+	if err != nil {
+		return garmin.Session{}, refreshed, err
+	}
+	return l.named(ctx, client), garmin.MFAChallenge{}, nil
+}
+
+// named adds the account's display name to a freshly signed-in client's
+// session — see Connect for why a failed lookup is not fatal.
+func (l LiveGarmin) named(ctx context.Context, client *garmin.Client) garmin.Session {
 	session := client.Session()
 	if profile, err := client.Profile(ctx); err == nil {
 		session.DisplayName = profile.Name()
 	} else if l.Log != nil {
 		l.Log("garmin profile lookup failed; the connection is kept without a name", "err", err)
 	}
-	return session, nil
+	return session
 }
 
 // resume rebuilds a signed-in client from a stored session.
@@ -155,6 +208,9 @@ func (l LiveGarmin) resume(consumer GarminConsumer, session garmin.Session) (*ga
 
 	client := garmin.New()
 	client.SetConsumer(consumer.Key, consumer.Secret)
+	if l.APIBase != "" {
+		client.APIBase = l.APIBase
+	}
 	client.Resume(session)
 	return client, nil
 }

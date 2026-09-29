@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -904,6 +905,80 @@ func TestGoalScheduleIsIdempotentPerDate(t *testing.T) {
 	}
 	if len(listed) != len(first.Created) {
 		t.Errorf("total workouts after two schedules = %d, want %d (no duplicates)", len(listed), len(first.Created))
+	}
+}
+
+// A rider moving a plan-made workout to another day must not leave its
+// original day looking empty: the next schedule run (every 30 minutes in the
+// background) would plan the same session there again, and the move would
+// read as a duplicate. The original date is recorded the same way an
+// automatic move records it (scheduler.MovedFrom).
+func TestMovingAPlanWorkoutDoesNotGetItScheduledAgain(t *testing.T) {
+	h := newTrainingHarness(t)
+
+	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	g := decodeGoal(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate)))
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+
+	first := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
+	if len(first.Created) == 0 {
+		t.Fatal("first schedule created nothing")
+	}
+	taken := map[string]bool{}
+	for _, w := range first.Created {
+		taken[w.Date] = true
+	}
+	moved := first.Created[0]
+	orig, err := time.Parse("2006-01-02", moved.Date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := ""
+	for d := 1; d < 7; d++ {
+		if c := orig.AddDate(0, 0, d).Format("2006-01-02"); !taken[c] {
+			target = c
+			break
+		}
+	}
+	if target == "" {
+		t.Fatal("no free day to move to")
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+moved.ID, fmt.Sprintf(`{"date":%q}`, target))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("move status = %d, want 200", resp.StatusCode)
+	}
+	var updated struct {
+		Date        string `json:"date"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Date != target {
+		t.Errorf("date = %q, want %q", updated.Date, target)
+	}
+	if from, ok := scheduler.MovedFrom(updated.Description); !ok || from != moved.Date {
+		t.Errorf("description %q does not record the original date %s", updated.Description, moved.Date)
+	}
+
+	// Moving it again keeps the first original date, not the in-between one.
+	again := orig.AddDate(0, 0, -1).Format("2006-01-02")
+	if !taken[again] {
+		resp = h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+moved.ID, fmt.Sprintf(`{"date":%q}`, again))
+		_ = json.NewDecoder(resp.Body).Decode(&updated)
+		if from, _ := scheduler.MovedFrom(updated.Description); from != moved.Date {
+			t.Errorf("after a second move, recorded original = %q, want %q", from, moved.Date)
+		}
+	}
+
+	second := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
+	for _, w := range second.Created {
+		if w.Date == moved.Date {
+			t.Errorf("schedule re-created a session on %s, the day the rider moved it away from", moved.Date)
+		}
 	}
 }
 

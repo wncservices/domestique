@@ -10,7 +10,7 @@
 // Still no Wahoo structured-workout push — it needs a further-gated
 // partner entitlement this deployment does not have; see the plan doc's
 // own "Structured workouts and the providers".
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
@@ -22,6 +22,7 @@ import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
+import TomorrowForecastBanner from '@/components/plan/TomorrowForecastBanner.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
@@ -29,6 +30,7 @@ import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, weekdayLong } from '@/utils/planDates'
+import { todayISO } from '@/utils/rideDates'
 
 const toast = useToast()
 const route = useRoute()
@@ -222,12 +224,56 @@ const weekStart = ref<string | undefined>(undefined)
 
 const readiness = ref<ReadinessResponse | null>(null)
 
+// Ticketed like loadWeek: an ease click refetches while an earlier load may
+// still be in flight, and a slower stale response must not put a banner back
+// that the newer one just removed.
+let readinessRequest = 0
+
 async function loadReadiness() {
+  const requestId = ++readinessRequest
   try {
-    readiness.value = await api.readiness()
+    // The browser's own local day, so "tomorrow" is the rider's tomorrow
+    // even near local midnight — see utils/rideDates.ts's todayISO.
+    const result = await api.readiness(todayISO())
+    if (requestId === readinessRequest) readiness.value = result
   } catch {
-    readiness.value = null
+    if (requestId === readinessRequest) readiness.value = null
   }
+}
+
+// --- tomorrow's forecast: a banner with an "Ease tomorrow" button. The
+// server recomputes on click, so a 409 just means the forecast moved on. ---
+
+const easingTomorrow = ref(false)
+
+// The forecast carries the workout's id and name only; the zone for the
+// banner's wording comes from the workouts already loaded here.
+const tomorrowZone = computed(() => {
+  const id = readiness.value?.tomorrow?.workoutId
+  return id ? workouts.value.find((w) => w.id === id)?.zone : undefined
+})
+
+async function easeTomorrow() {
+  easingTomorrow.value = true
+  try {
+    const result = await api.easeTomorrow(todayISO())
+    toast.add({ title: "Eased tomorrow's session", description: result.reason, icon: 'i-lucide-feather', color: 'success' })
+  } catch (err) {
+    // 409: the fresh forecast no longer calls for easing, or the session
+    // has already been changed — nothing was changed. Same handling as the
+    // replan 409: a warning showing the server's own message.
+    if (err instanceof ApiError && err.status === 409) {
+      toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
+    } else {
+      toast.add({ title: "Could not ease tomorrow's session", description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    }
+  } finally {
+    easingTomorrow.value = false
+  }
+  // Refetch either way: on success the eased workout carries its
+  // "Adjusted automatically" note and the banner disappears on its own once
+  // `tomorrow` comes back absent; after a 409 the banner may no longer apply.
+  await Promise.all([loadReadiness(), loadWorkouts(), loadWeek()])
 }
 
 // Same reasoning as seasonRequest below: prevWeek/nextWeek/thisWeek/
@@ -437,6 +483,29 @@ const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && prof
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
 const today = computed(() => (isCurrentWeek.value ? week.value?.days.find((d) => d.date === week.value!.today) : undefined))
+
+// A session picked in the week strip, shown in the day card instead of
+// today's. Kept as ids, not objects: the week reloads after every edit/move,
+// and a held WeekDay would go stale. A pick that isn't in the displayed week
+// any more (the rider browsed away) simply falls back to today.
+const selectedDate = ref<string | null>(null)
+const selectedWorkoutId = ref<string | null>(null)
+const selectedDay = computed(() => (selectedDate.value ? week.value?.days.find((d) => d.date === selectedDate.value) : undefined))
+const cardDay = computed(() => selectedDay.value ?? today.value)
+const cardIsToday = computed(() => !selectedDay.value || selectedDay.value.date === week.value?.today)
+const dayCardEl = useTemplateRef<HTMLElement>('dayCardEl')
+
+function selectWorkout(w: Workout, date: string) {
+  selectedDate.value = date
+  selectedWorkoutId.value = w.id
+  // On a phone the card sits a screen above the strip; bring it into view.
+  nextTick(() => dayCardEl.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+}
+
+function backToToday() {
+  selectedDate.value = null
+  selectedWorkoutId.value = null
+}
 const yesterday = computed(() => {
   if (!isCurrentWeek.value || !week.value) return undefined
   const index = week.value.days.findIndex((d) => d.date === week.value!.today)
@@ -478,19 +547,31 @@ onMounted(() => {
         @select-goal="selectGoal"
       />
 
-      <TodayCard
-        v-if="week && isCurrentWeek"
-        :day="today"
-        :yesterday="yesterday"
-        :profile="profile"
-        :can-sync-garmin="canSyncGarmin"
-        :pushing="pushingWorkout"
-        :readiness-verdict="readiness?.today.verdict"
-        :readiness-reasons="readiness?.today.reasons"
-        @push="pushWorkoutToGarmin"
-        @edit="openEditWorkout"
-        @move="moveWorkout"
-        @rated="loadWeek"
+      <div v-if="week && (isCurrentWeek || selectedDay)" ref="dayCardEl" class="scroll-mt-4">
+        <TodayCard
+          :day="cardDay"
+          :is-today="cardIsToday"
+          :selected-workout-id="selectedWorkoutId ?? undefined"
+          :yesterday="yesterday"
+          :profile="profile"
+          :can-sync-garmin="canSyncGarmin"
+          :pushing="pushingWorkout"
+          :readiness-verdict="readiness?.today.verdict"
+          :readiness-reasons="readiness?.today.reasons"
+          @push="pushWorkoutToGarmin"
+          @edit="openEditWorkout"
+          @move="moveWorkout"
+          @rated="loadWeek"
+          @back-to-today="backToToday"
+        />
+      </div>
+
+      <TomorrowForecastBanner
+        v-if="readiness?.tomorrow && isCurrentWeek"
+        :forecast="readiness.tomorrow"
+        :zone="tomorrowZone"
+        :easing="easingTomorrow"
+        @ease="easeTomorrow"
       />
 
       <WeekStrip
@@ -503,7 +584,8 @@ onMounted(() => {
         @next="nextWeek"
         @this-week="thisWeek"
         @move="moveWorkout"
-        @open="openEditWorkout"
+        :selected-workout-id="selectedWorkoutId ?? undefined"
+        @select="selectWorkout"
         @fill="fillWeek"
         @rated="loadWeek"
         @replan="openReplanConfirm"

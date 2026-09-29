@@ -226,9 +226,14 @@ func blocked(status int, body []byte) bool {
 //
 // The password is used here and nowhere else: what comes back is a Session,
 // and that is what a caller stores in its place.
-func (c *Client) Login(ctx context.Context, email, password string) error {
+//
+// When Garmin asks for a two-factor code instead of issuing a ticket, the
+// error is ErrMFARequired and the returned MFAChallenge is what ResumeMFA
+// needs to answer it from a later request. It never contains the password.
+// On every other outcome the challenge is the zero value.
+func (c *Client) Login(ctx context.Context, email, password string) (MFAChallenge, error) {
 	if email == "" || password == "" {
-		return errors.New("garmin: email and password are both required")
+		return MFAChallenge{}, errors.New("garmin: email and password are both required")
 	}
 
 	// Connect's own page loads the embedded widget before the form, which
@@ -236,25 +241,25 @@ func (c *Client) Login(ctx context.Context, email, password string) error {
 	// worked for a while and is the kind of difference from a real browser
 	// that bot protection notices, so it is no longer skipped.
 	if err := c.preflight(ctx); err != nil {
-		return err
+		return MFAChallenge{}, err
 	}
 
 	csrf, err := c.signinPage(ctx)
 	if err != nil {
-		return err
+		return MFAChallenge{}, err
 	}
 
-	ticket, err := c.submitCredentials(ctx, email, password, csrf)
+	ticket, challenge, err := c.submitCredentials(ctx, email, password, csrf)
 	if err != nil {
-		return err
+		return challenge, err
 	}
 
 	if err := c.exchangeTicket(ctx, ticket); err != nil {
-		return err
+		return MFAChallenge{}, err
 	}
 
 	c.session.ObtainedAt = c.now()
-	return nil
+	return MFAChallenge{}, nil
 }
 
 func (c *Client) now() time.Time {
@@ -330,7 +335,7 @@ func (c *Client) signinPage(ctx context.Context) (csrf string, err error) {
 	return string(match[1]), nil
 }
 
-func (c *Client) submitCredentials(ctx context.Context, email, password, csrf string) (ticket string, err error) {
+func (c *Client) submitCredentials(ctx context.Context, email, password, csrf string) (ticket string, challenge MFAChallenge, err error) {
 	form := url.Values{
 		"username": {email},
 		"password": {password},
@@ -345,11 +350,11 @@ func (c *Client) submitCredentials(ctx context.Context, email, password, csrf st
 		// the request looks like it came from nowhere.
 		header{"Referer", endpoint})
 	if err != nil {
-		return "", err
+		return "", MFAChallenge{}, err
 	}
 
 	if match := ticketPattern.FindSubmatch(body); match != nil {
-		return string(match[1]), nil
+		return string(match[1]), MFAChallenge{}, nil
 	}
 
 	// No ticket. Work out why, because "login failed" covers four very
@@ -363,19 +368,19 @@ func (c *Client) submitCredentials(ctx context.Context, email, password, csrf st
 	// check what you typed.
 	switch {
 	case blocked(status, body):
-		return "", ErrBlocked
+		return "", MFAChallenge{}, ErrBlocked
 	case mfaPattern.Match(body):
-		return "", ErrMFARequired
+		return "", c.challengeFrom(email, body), ErrMFARequired
 	case status == http.StatusOK, status == http.StatusUnauthorized:
 		// Carry the status and a description of the page. Both codes mean "no
 		// ticket", and the status alone was enough to learn that a rejected
 		// password answers 401 — which makes a 200 something else, and the
 		// question becomes *what*. The fingerprint answers that without
 		// quoting the body, which can echo the request.
-		return "", fmt.Errorf("%w (sign-in returned %d, %s)",
+		return "", MFAChallenge{}, fmt.Errorf("%w (sign-in returned %d, %s)",
 			ErrBadCredentials, status, fingerprint(body))
 	default:
-		return "", fmt.Errorf("garmin: sign-in returned %d and no ticket", status)
+		return "", MFAChallenge{}, fmt.Errorf("garmin: sign-in returned %d and no ticket", status)
 	}
 }
 

@@ -41,8 +41,10 @@ CREATE TABLE IF NOT EXISTS rider_profiles (
     ftp_estimated              %[2]s NOT NULL DEFAULT FALSE,
     estimated_fields           TEXT NOT NULL DEFAULT '',
     auto_push_workouts         %[2]s NOT NULL DEFAULT FALSE,
+    ftp_levels_calibrated_watts DOUBLE PRECISION NOT NULL DEFAULT 0,
     threshold_pace_sec_per_km  DOUBLE PRECISION NOT NULL DEFAULT 0,
     max_hr                     INTEGER NOT NULL DEFAULT 0,
+    threshold_hr               INTEGER NOT NULL DEFAULT 0,
     resting_hr                 INTEGER NOT NULL DEFAULT 0,
     available_days             TEXT NOT NULL DEFAULT '',
     hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -122,10 +124,11 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     tss                  DOUBLE PRECISION NOT NULL DEFAULT 0,
     duration_ratio       DOUBLE PRECISION NOT NULL DEFAULT 0,
     max_hr               INTEGER NOT NULL DEFAULT 0,
+    best_hr_1200         INTEGER NOT NULL DEFAULT 0,
     best_speed_1200      DOUBLE PRECISION NOT NULL DEFAULT 0,
     best_speed_1800      DOUBLE PRECISION NOT NULL DEFAULT 0,
     power_zone_seconds   TEXT NOT NULL DEFAULT '',
-    hr_zone_seconds      TEXT NOT NULL DEFAULT '',
+    hr_zone_seconds      TEXT NOT NULL DEFAULT '', -- basis (LTHR or max HR) known at analysis time; never re-analysed
     power_curve          TEXT NOT NULL DEFAULT '',
     steps                TEXT NOT NULL DEFAULT '',
     analysed_at          TEXT NOT NULL
@@ -259,6 +262,8 @@ func (d *DB) addEstimatedColumns() error {
 		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN ftp_estimated %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
 		`ALTER TABLE rider_profiles ADD COLUMN estimated_fields TEXT NOT NULL DEFAULT ''`,
 		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN auto_push_workouts %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
+		`ALTER TABLE rider_profiles ADD COLUMN ftp_levels_calibrated_watts DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		`ALTER TABLE rider_profiles ADD COLUMN threshold_hr INTEGER NOT NULL DEFAULT 0`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -321,7 +326,7 @@ func (d *DB) addAnalysisFeelColumns() error {
 	return nil
 }
 
-// addThresholdColumns adds max_hr/best_speed_1200/best_speed_1800 to a
+// addThresholdColumns adds max_hr/best_hr_1200/best_speed_1200/best_speed_1800 to a
 // session_analyses table that predates them — the same "table exists,
 // column doesn't" situation addAnalysisFeelColumns already handles.
 // Defaulting to 0 is correct for every pre-existing row: a ride analysed
@@ -332,6 +337,7 @@ func (d *DB) addAnalysisFeelColumns() error {
 func (d *DB) addThresholdColumns() error {
 	for _, stmt := range []string{
 		`ALTER TABLE session_analyses ADD COLUMN max_hr INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE session_analyses ADD COLUMN best_hr_1200 INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_analyses ADD COLUMN best_speed_1200 DOUBLE PRECISION NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_analyses ADD COLUMN best_speed_1800 DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {
@@ -561,12 +567,12 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 		estimated string
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
-        SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, resting_hr,
+        SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, threshold_hr, resting_hr,
                available_days, hours_per_available_day, experience_level, estimated_fields,
-               auto_push_workouts, updated_at
+               auto_push_workouts, ftp_levels_calibrated_watts, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
-		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.RestingHR,
-		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.UpdatedAt)
+		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.ThresholdHR, &p.RestingHR,
+		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
@@ -576,6 +582,25 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 	p.AvailableDays = splitList(days)
 	p.Estimated = splitList(estimated)
 	return p, true, nil
+}
+
+// SetFTPCalibrated is a compare-and-set on the FTP the rider's levels were
+// last calibrated against: it writes to only if the stored value is still
+// from, and reports whether it did. SaveProfile deliberately never writes
+// this column — a whole-row save carrying a marker loaded earlier could
+// revert one a concurrent save had just moved, and that is what lets two
+// racing saves of the same FTP rise both lower the levels. Routing every
+// marker write through here means exactly one of them wins. A missing rider
+// is a clean loss, not an error.
+func (d *DB) SetFTPCalibrated(ctx context.Context, rider string, from, to float64) (bool, error) {
+	result, err := d.db.ExecContext(ctx, d.query(`
+        UPDATE rider_profiles SET ftp_levels_calibrated_watts = ?
+        WHERE rider = ? AND ftp_levels_calibrated_watts = ?`), to, normalizeRider(rider), from)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
 }
 
 // SaveProfile upserts — a rider has exactly one profile, and setting it up
@@ -596,17 +621,17 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	// already rely on.
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr,
-                    resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields,
+                    threshold_hr, resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields,
                     auto_push_workouts, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET
             ftp_watts = excluded.ftp_watts, ftp_estimated = excluded.ftp_estimated,
             threshold_pace_sec_per_km = excluded.threshold_pace_sec_per_km,
-            max_hr = excluded.max_hr, resting_hr = excluded.resting_hr,
+            max_hr = excluded.max_hr, threshold_hr = excluded.threshold_hr, resting_hr = excluded.resting_hr,
             available_days = excluded.available_days, hours_per_available_day = excluded.hours_per_available_day,
             experience_level = excluded.experience_level, estimated_fields = excluded.estimated_fields,
             auto_push_workouts = excluded.auto_push_workouts, updated_at = excluded.updated_at`),
-		profile.Rider, profile.FTPWatts, profile.FTPEstimated, profile.ThresholdPaceSecPerKM, profile.MaxHR, profile.RestingHR,
+		profile.Rider, profile.FTPWatts, profile.FTPEstimated, profile.ThresholdPaceSecPerKM, profile.MaxHR, profile.ThresholdHR, profile.RestingHR,
 		joinList(profile.AvailableDays), profile.HoursPerAvailableDay, profile.ExperienceLevel,
 		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.UpdatedAt)
 	if err != nil {

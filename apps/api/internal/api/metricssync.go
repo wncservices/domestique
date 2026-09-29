@@ -47,6 +47,12 @@ type syncMetricsResultDTO struct {
 	// appears here, it gets a stored suggestion instead (GET
 	// /api/training/thresholds).
 	Detected []detectedThresholdDTO `json:"detected,omitempty"`
+	// LevelsRecalibrated is set only when this sync's FTP change lowered the
+	// rider's progression levels (see recalibrateLevelsForFTP) — the same
+	// shape the threshold-accept and profile-save responses carry, so the
+	// UI toasts one line for all three. Background syncs have nobody
+	// looking at a screen; the Progression card's Reason is what they see.
+	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
 }
 
 // handleSyncTrainingMetrics is a rider's own "Sync now" click — a thin HTTP
@@ -142,13 +148,28 @@ func (s *Server) garminBiometrics(ctx context.Context, rider string, session gar
 	// reading — the watch was not worn to bed — is normal and not a reason
 	// to give up after one try.
 	if wantResting {
+		// Collects which sources came back empty and the daily summary's
+		// key names (never values) across every date tried, for the one
+		// Warn below.
+		ctx, diag := garmin.WithRHRDiagnostics(ctx)
+		lookupFailed := false
 		for daysAgo := 0; daysAgo < 3 && out.restingHR == 0; daysAgo++ {
 			bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, time.Now().AddDate(0, 0, -daysAgo))
 			if err != nil {
 				s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
+				lookupFailed = true
 				break
 			}
 			out.restingHR = bpm
+		}
+		// Once per rider per sync, and only when every date came back empty
+		// from every source: the next production log then shows what Garmin
+		// actually returned. Warn, not Error — the sync itself succeeded.
+		if out.restingHR == 0 && !lookupFailed {
+			if sources := diag.Sources(); len(sources) > 0 {
+				s.logger().Warn("garmin resting heart rate: no reading from any source",
+					"rider", rider, "sources", sources, "summary_keys", diag.SummaryKeys())
+			}
 		}
 	}
 
@@ -178,6 +199,9 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// GetProfile returns a zero-value RiderProfile (Rider == "") when the
 	// rider has never saved one yet — SaveProfile refuses that as ownerless.
 	profile.Rider = rider
+	// What the profile held before this sync touched it: the shared
+	// recalibration helper needs it to tell a first save from a rise.
+	before := profile
 
 	var warnings []string
 	synced := 0
@@ -210,6 +234,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 			FTPWatts:              bio.biometrics.CyclingFTPWatts,
 			MaxHR:                 bio.biometrics.MaxHR,
 			ThresholdPaceSecPerKM: bio.biometrics.ThresholdPaceSecPerKM,
+			ThresholdHR:           bio.biometrics.ThresholdHR,
 			RestingHR:             bio.restingHR,
 		}
 		restingHR = bio.restingHR
@@ -377,17 +402,31 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		restingHR = 0
 	}
 
+	var recalibrated *levelsRecalibratedDTO
 	if len(autoFilled) > 0 {
 		if _, err := s.Training.SaveProfile(ctx, profile); err != nil {
 			return syncMetricsResultDTO{}, err
 		}
 		s.logger().Info("training profile auto-filled", "rider", rider, "fields", autoFilled)
+		// Whichever source produced a new FTP (Garmin, threshold detection,
+		// the EstimateFTP fallback), the over-reach risk is the same, so all
+		// of them go through the one helper. The profile write has already
+		// landed, so a failure here is logged rather than failing the sync.
+		if profile.FTPWatts != before.FTPWatts {
+			dto, changed, err := s.recalibrateLevelsForFTP(ctx, rider, before)
+			if err != nil {
+				s.logger().Error("level recalibration failed", "rider", rider, "err", err)
+			}
+			if changed {
+				recalibrated = &dto
+			}
+		}
 	}
 
 	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
 	return syncMetricsResultDTO{
 		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
-		AutoFilled: autoFilled, Detected: tdr.Detected,
+		AutoFilled: autoFilled, Detected: tdr.Detected, LevelsRecalibrated: recalibrated,
 	}, nil
 }
 
