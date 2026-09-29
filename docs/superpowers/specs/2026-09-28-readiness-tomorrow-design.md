@@ -260,6 +260,30 @@ way a dashboard would watch yet.
   clicking Ease; a second click (or the next morning's own pass) makes no
   further change.
 
+## Build rulings
+
+Decisions made while building, binding alongside the sections above:
+
+- **`?today=` is bounded.** Both endpoints reject with 400 any `today` more
+  than one day either side of the server's UTC date. That window covers every
+  real zone (twelve hours behind UTC to fourteen ahead); without it a rider
+  could point the ease at an arbitrary future day, and a browser clock one day
+  behind would make "tomorrow" the server's today.
+- **Missed days do not count toward consecutive hard days.** A day strictly
+  before today counts only if its hard session was actually done
+  (`adapter.WorkoutDone`); today counts as planned. Two skipped hard days
+  followed by today's session make tomorrow the second hard day, not the
+  third.
+- **Projected form is rolled forward from the snapshot's own date.** A
+  snapshot's CTL/ATL are the values at the start of its date, so every day
+  from that date through today is folded in (`workout.RollFitness`, the one
+  step `ComputeFitness` repeats): days before today from synced loads, today
+  from actual load or the planned-session estimate. A snapshot dated up to two
+  days back is therefore still projected correctly.
+- **A caution is only offered when it can be applied.** The workout needs a
+  ladder for its sport and zone and a rung below its level; otherwise no
+  banner is shown, rather than one whose click fails.
+
 ## Out of scope
 
 Garmin Recovery Time (would need a new endpoint and a new stored field —
