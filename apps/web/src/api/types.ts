@@ -1084,6 +1084,33 @@ export interface SyncMetricsResult {
    *  field never appears here; it gets a stored suggestion instead (see
    *  GET /api/training/thresholds). */
   detected?: DetectedThreshold[]
+  /** Every FTP test ride this sync read for the first time. A test is
+   *  reported once, ever. */
+  ftpTests?: FtpTestResult[]
+}
+
+/** What a sync made of one FTP test ride. Mirrors ftpTestResultDTO. */
+export interface FtpTestResult {
+  workoutId: string
+  protocol: FtpTestProtocolId
+  /** The FTP the test measured; 0 when the ride was unreadable. */
+  ftpWatts: number
+  /** The day the test was ridden, YYYY-MM-DD. */
+  date: string
+  /** applied: written to an empty or estimated FTP. suggested: waiting for
+   *  the rider to accept it. confirmed: within 1% of the FTP on file.
+   *  unreadable: the ride had no usable result. */
+  outcome: 'applied' | 'suggested' | 'confirmed' | 'unreadable'
+}
+
+/** The body of POST /api/training/tests/ftp. Every field is optional: an
+ *  empty body builds the unscheduled 20-minute test. */
+export interface BuildFtpTestRequest {
+  protocol?: FtpTestProtocolId
+  /** Schedules the test on this day, YYYY-MM-DD. */
+  date?: string
+  /** The ramp's starting point when the profile has no FTP; not saved. */
+  estimatedFtp?: number
 }
 
 /** One threshold internal/thresholds.Detect applied automatically during a

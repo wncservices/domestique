@@ -67,6 +67,19 @@ type thresholdDetectionResult struct {
 	Detected         []detectedThresholdDTO
 	AutoFields       []string
 	HasFTPPowerCurve bool
+	// TestOutcomes maps a freshly read FTP test ride's session id to what
+	// became of its finding: "applied" (written to an empty or estimated FTP)
+	// or "suggested" (a rider-typed FTP). A test that moved FTP by less than
+	// 1% has no entry: it confirmed the number.
+	TestOutcomes map[string]string
+	// FTPOutcome is the same for whichever finding FTP produced, from a test
+	// or not, "" when there was none. It is only read when a test's own
+	// finding was overridden by an eFTP breakthrough.
+	FTPOutcome string
+	// FTPValue is that finding's own value, and FTPFromTest whether it came
+	// from an FTP test rather than from the rider's ordinary rides.
+	FTPValue    float64
+	FTPFromTest bool
 }
 
 // detectThresholds runs internal/thresholds.Detect against a rider's last
@@ -80,6 +93,15 @@ type thresholdDetectionResult struct {
 // joined here to each analysis for the Sport/Date thresholds.Ride needs,
 // since session_analyses itself carries neither.
 func (s *Server) detectThresholds(ctx context.Context, rider string, profile workout.RiderProfile, sessions []workout.CompletedSession, now time.Time) (thresholdDetectionResult, error) {
+	return s.detectThresholdsFresh(ctx, rider, profile, sessions, now, nil)
+}
+
+// detectThresholdsFresh is detectThresholds told which test rides were read
+// on this very sync (by session id). Such a test's suggestion is shown even
+// inside the margin of an earlier dismissal — the rider asked for that
+// measurement — where the same finding recurring on a later sync is held by
+// it, so a dismissed test suggestion stays dismissed.
+func (s *Server) detectThresholdsFresh(ctx context.Context, rider string, profile workout.RiderProfile, sessions []workout.CompletedSession, now time.Time, fresh map[string]bool) (thresholdDetectionResult, error) {
 	// hasFTPHistoryBefore/hasPaceHistoryBefore need to see a ride strictly
 	// before the HistoryWindowDays window ending today — that is the whole
 	// point of the check, "does history reach back further than the window
@@ -165,7 +187,7 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 		}
 	}
 
-	result := thresholdDetectionResult{Profile: profile, HasFTPPowerCurve: hasFTPPowerCurve}
+	result := thresholdDetectionResult{Profile: profile, HasFTPPowerCurve: hasFTPPowerCurve, TestOutcomes: map[string]string{}}
 	findings := thresholds.Detect(rides, tp, now)
 	foundField := make(map[string]bool, len(findings))
 	for _, f := range findings {
@@ -188,12 +210,20 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 				result.AutoFields = append(result.AutoFields, changed...)
 				result.Detected = append(result.Detected, detectedThresholdDTO{Field: f.Field, Value: f.Value, Reason: f.Reason})
 				s.logger().Info("threshold auto-applied", "rider", rider, "field", f.Field)
+				result.recordFTPOutcome(f, "applied")
 			}
 			continue
 		}
-		if err := s.upsertThresholdSuggestion(ctx, rider, f); err != nil {
+		var err error
+		if f.FromTest && fresh[f.SourceSessionID] {
+			err = s.storeThresholdSuggestion(ctx, rider, f)
+		} else {
+			err = s.upsertThresholdSuggestion(ctx, rider, f)
+		}
+		if err != nil {
 			return thresholdDetectionResult{}, err
 		}
+		result.recordFTPOutcome(f, "suggested")
 	}
 
 	// Stale-suggestion cleanup: a field this pass found nothing to say about
@@ -217,6 +247,18 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 	return result, nil
 }
 
+// recordFTPOutcome notes what became of an FTP finding, keyed by its source
+// ride when it came from a test.
+func (r *thresholdDetectionResult) recordFTPOutcome(f thresholds.Finding, outcome string) {
+	if f.Field != "ftp" {
+		return
+	}
+	r.FTPOutcome, r.FTPValue, r.FTPFromTest = outcome, f.Value, f.FromTest
+	if f.FromTest {
+		r.TestOutcomes[f.SourceSessionID] = outcome
+	}
+}
+
 // thresholdFields is every field internal/thresholds.Detect can report on,
 // in Detect's own fixed order — what the stale-suggestion cleanup above
 // walks to find a field with nothing to say this pass.
@@ -232,16 +274,19 @@ var thresholdFields = []string{"ftp", workout.FieldMaxHR, workout.FieldThreshold
 // unrelated claims ("FTP dropped" and "FTP rose" are not the same estimate
 // moving further, one replacing a dismissal of the other would be a bug).
 func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f thresholds.Finding) error {
-	if !f.FromTest {
-		dismissed, ok, err := s.Training.LatestDismissedSuggestion(ctx, rider, f.Field, f.Direction)
-		if err != nil {
-			return err
-		}
-		if ok && !thresholdMovedFurther(f, dismissed) {
-			return nil
-		}
+	dismissed, ok, err := s.Training.LatestDismissedSuggestion(ctx, rider, f.Field, f.Direction)
+	if err != nil {
+		return err
 	}
+	if ok && !thresholdMovedFurther(f, dismissed) {
+		return nil
+	}
+	return s.storeThresholdSuggestion(ctx, rider, f)
+}
 
+// storeThresholdSuggestion writes f as the pending suggestion for its field,
+// replacing any pending one.
+func (s *Server) storeThresholdSuggestion(ctx context.Context, rider string, f thresholds.Finding) error {
 	if _, err := s.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
 		Rider: rider, Field: f.Field, Value: f.Value, Previous: f.Previous, Direction: f.Direction,
 		SourceSessionID: f.SourceSessionID, SourceDate: f.SourceDate, Reason: f.Reason,

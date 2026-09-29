@@ -3,6 +3,7 @@ package scheduler
 import (
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -78,6 +79,33 @@ func EasyVariant(w workout.Workout, profile workout.RiderProfile) workout.Create
 		hours = 1
 	}
 	return buildEnduranceSession(hours, false, w.Sport, profile)
+}
+
+// EasedBeforeTestReason is the note on a hard session eased because an FTP test
+// follows it the next day.
+const EasedBeforeTestReason = "eased the day before your FTP test"
+
+// NeedsEasingBeforeTest reports whether w should be swapped for an easy
+// session because one of workouts is an FTP test dated the following day. A
+// test read on tired legs under-reads FTP, so the day before it is easy.
+// Only a generated, unadjusted hard session qualifies: a session the rider
+// built is theirs, one already adjusted has been dealt with once, and the
+// test itself is never eased.
+func NeedsEasingBeforeTest(w workout.Workout, workouts []workout.Workout) bool {
+	if w.TestProtocol != "" || w.Date == "" || !IsGenerated(w) || !IsHardSession(w) {
+		return false
+	}
+	day, err := time.Parse("2006-01-02", w.Date)
+	if err != nil {
+		return false
+	}
+	next := day.AddDate(0, 0, 1).Format("2006-01-02")
+	for _, t := range workouts {
+		if t.TestProtocol != "" && t.Date == next {
+			return true
+		}
+	}
+	return false
 }
 
 var movedFromRE = regexp.MustCompile(`moved from (\d{4}-\d{2}-\d{2})`)

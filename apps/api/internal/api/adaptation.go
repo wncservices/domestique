@@ -127,6 +127,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "reason", c.Reason)
 	}
 
+	s.easeBeforeFTPTests(ctx, rider, workouts, profile, appliedFor)
 	s.logTomorrowAdvisory(ctx, rider, sessions, latest, profile)
 }
 
