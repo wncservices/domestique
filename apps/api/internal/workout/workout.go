@@ -309,9 +309,17 @@ type Workout struct {
 	// means none (matches Zone's own "unset" convention, and is what an
 	// endurance workout — levels are out of scope for that zone — always
 	// carries).
-	Level     float64
-	CreatedAt string
-	UpdatedAt string
+	Level float64
+	// TestProtocol is the fitnesstest protocol id ("ramp", "twenty_minute",
+	// "two_by_eight") when this workout is an FTP test, "" for everything
+	// else. Ride analysis reads it to treat the linked ride as a test.
+	TestProtocol string
+	// TestResultWatts is the FTP read from the test ride, 0 until a result
+	// has been captured. Written once: it is what stops a second sync from
+	// toasting or suggesting the same result again.
+	TestResultWatts float64
+	CreatedAt       string
+	UpdatedAt       string
 }
 
 // CreateGoalRequest creates a goal. Rider must be set by the caller from the
@@ -354,6 +362,8 @@ type CreateWorkoutRequest struct {
 	// builder today, the scheduler once it is wired up — states them.
 	Zone  Zone
 	Level float64
+	// TestProtocol marks the workout as an FTP test; see Workout.TestProtocol.
+	TestProtocol string
 }
 
 // UpdateWorkoutRequest edits a workout. Nil fields are left alone.

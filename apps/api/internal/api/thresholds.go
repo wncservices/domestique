@@ -11,6 +11,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/autoprofile"
+	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/thresholds"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -99,6 +100,19 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 		sessionByID[sess.ID] = sess
 	}
 
+	// A ride linked to a planned FTP test is scored by the test's own
+	// formula, not as an ordinary ride; the protocol lives on the workout.
+	planned, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		return thresholdDetectionResult{}, err
+	}
+	protocolByWorkout := make(map[string]string)
+	for _, w := range planned {
+		if w.TestProtocol != "" {
+			protocolByWorkout[w.ID] = w.TestProtocol
+		}
+	}
+
 	ftpCutoff := now.AddDate(0, 0, -thresholds.DetectionWindowDays).Format("2006-01-02")
 	var rides []thresholds.Ride
 	hasFTPPowerCurve := false
@@ -122,8 +136,15 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 			SessionID: a.SessionID, Date: sess.Date, Sport: sess.Sport,
 			PowerCurve: curve, MaxHR: a.MaxHR, BestHR1200: a.BestHR1200,
 			BestSpeed1200: a.BestSpeed1200, BestSpeed1800: a.BestSpeed1800,
+			TestProtocol: protocolByWorkout[a.WorkoutID],
 		})
 		if sess.Sport == "cycling" && sess.Date >= ftpCutoff && (curve[1200] > 0 || curve[3600] > 0) {
+			hasFTPPowerCurve = true
+		}
+		// A test result is better evidence than the average-power fallback
+		// (a 65-minute 2 x 8 test session would otherwise read as an "FTP"
+		// of its own average).
+		if _, ok := fitnesstest.FTPFromTest(protocolByWorkout[a.WorkoutID], curve); ok && sess.Sport == "cycling" && sess.Date >= ftpCutoff {
 			hasFTPPowerCurve = true
 		}
 	}
@@ -202,12 +223,14 @@ var thresholdFields = []string{"ftp", workout.FieldMaxHR, workout.FieldThreshold
 // unrelated claims ("FTP dropped" and "FTP rose" are not the same estimate
 // moving further, one replacing a dismissal of the other would be a bug).
 func (s *Server) upsertThresholdSuggestion(ctx context.Context, rider string, f thresholds.Finding) error {
-	dismissed, ok, err := s.Training.LatestDismissedSuggestion(ctx, rider, f.Field, f.Direction)
-	if err != nil {
-		return err
-	}
-	if ok && !thresholdMovedFurther(f, dismissed) {
-		return nil
+	if !f.FromTest {
+		dismissed, ok, err := s.Training.LatestDismissedSuggestion(ctx, rider, f.Field, f.Direction)
+		if err != nil {
+			return err
+		}
+		if ok && !thresholdMovedFurther(f, dismissed) {
+			return nil
+		}
 	}
 
 	if _, err := s.Training.CreateSuggestion(ctx, workout.ThresholdSuggestion{
