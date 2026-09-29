@@ -49,6 +49,17 @@ func historicalWeeks(t *testing.T, today time.Time) []periodization.Week {
 	return plan.Weeks[:lookbackWeeks]
 }
 
+func TestReconcileKeepsTheWholePlanLength(t *testing.T) {
+	today := mustDate(t, "2026-01-05")
+	plan, err := periodization.BuildPlan(fixtureGoal, fixtureProfile, today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := Reconcile(fixtureGoal, fixtureProfile, plan, nil, today); out.TotalWeeks != plan.TotalWeeks || out.TotalWeeks == 0 {
+		t.Errorf("TotalWeeks = %d, want %d carried through", out.TotalWeeks, plan.TotalWeeks)
+	}
+}
+
 func TestReconcileNoOpWithoutAnySessionsEver(t *testing.T) {
 	today := mustDate(t, "2026-01-05") // a Monday
 	plan, err := periodization.BuildPlan(fixtureGoal, fixtureProfile, today)

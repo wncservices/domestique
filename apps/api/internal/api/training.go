@@ -336,6 +336,7 @@ type periodizationWeekDTO struct {
 
 type periodizationPlanDTO struct {
 	GoalID     string                 `json:"goalId"`
+	TotalWeeks int                    `json:"totalWeeks,omitempty"`
 	Weeks      []periodizationWeekDTO `json:"weeks"`
 	Adjustment float64                `json:"adjustment,omitempty"`
 }
@@ -374,7 +375,7 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	dto := periodizationPlanDTO{GoalID: plan.GoalID, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment}
+	dto := periodizationPlanDTO{GoalID: plan.GoalID, TotalWeeks: plan.TotalWeeks, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment}
 	for _, wk := range plan.Weeks {
 		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
 			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),

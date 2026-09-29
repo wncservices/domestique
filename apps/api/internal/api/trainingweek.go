@@ -183,7 +183,7 @@ func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Ti
 			}
 			f := &weekFocusDTO{
 				GoalID: g.ID, Name: g.Name, Priority: string(g.Priority), Sport: string(g.Sport),
-				EventDate: g.EventDate, WeekNumber: wk.Number, TotalWeeks: len(plan.Weeks),
+				EventDate: g.EventDate, WeekNumber: wk.Number, TotalWeeks: plan.TotalWeeks,
 				Phase: string(wk.Phase), Recovery: wk.Recovery, TargetHours: wk.TargetHours,
 			}
 			if g.EventDate != "" {
