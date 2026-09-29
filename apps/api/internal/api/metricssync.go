@@ -450,14 +450,19 @@ func uniq(in []string) []string {
 //
 // Called at the top of AutoScheduleTick, inside its lock, so a week is
 // always scheduled from history that has just been refreshed, never from
-// whatever the rider last synced by hand.
-func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
+// whatever the rider last synced by hand — and, independently of that flag,
+// twice a day by RunMetricsSyncLoop (see metricssyncloop.go). It reads from
+// the providers and writes the rider's own history and thresholds; it never
+// touches a workout, which is why it does not need auto-schedule's consent.
+//
+// Returns how many riders it tried and how many of those failed outright.
+func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed int) {
 	if s.Links == nil {
-		return
+		return 0, 0
 	}
 
 	seen := map[string]bool{}
-	var riders []string
+	var connected []string
 	for _, provider := range []string{garminProvider, wahooProvider} {
 		list, err := s.Links.ListRiders(provider)
 		if err != nil {
@@ -467,14 +472,14 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
 		for _, rider := range list {
 			if !seen[rider] {
 				seen[rider] = true
-				riders = append(riders, rider)
+				connected = append(connected, rider)
 			}
 		}
 	}
 
-	for _, rider := range riders {
+	for _, rider := range connected {
 		if ctx.Err() != nil {
-			return
+			return len(connected), failed
 		}
 		// A rider one provider's call failed for is still a rider the next
 		// one gets synced for — one bad account never aborts the pass, the
@@ -482,10 +487,12 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
 		result, err := s.syncRiderMetrics(ctx, rider, false)
 		if err != nil {
 			s.logger().Error("auto-sync metrics failed", "rider", rider, "err", err)
+			failed++
 			continue
 		}
 		for _, warning := range result.Warnings {
 			s.logger().Warn("auto-sync metrics warning", "rider", rider, "warning", warning)
 		}
 	}
+	return len(connected), failed
 }

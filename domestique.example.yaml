@@ -130,6 +130,20 @@ komoot:
 # general-purpose push (this button, auto-sync, the CLI) never reaches past
 # the route's own owner, no matter what it names in `targets`.
 
+# When every connected rider's Garmin / Wahoo data is pulled: activities,
+# ride analysis, wellness (sleep, HRV, readiness, resting HR) and threshold
+# detection. It runs at these local times whether or not auto-schedule is on
+# — it only reads, it never changes a workout. The morning run catches last
+# night's sleep before the day's readiness check; the evening one catches the
+# day's ride. If the process was down at a slot it catches up once on start.
+#
+# Times are 24-hour "HH:MM" in `timezone` (an IANA name). A pod runs in UTC,
+# so without the zone "06:30" would not mean the riders' morning. Both keys
+# are optional; these are the defaults. A typo fails `domestique validate`.
+training:
+  sync_times: ["06:30", "21:00"]
+  timezone: Europe/Brussels
+
 # Backfill elevation for a route that has none of its own worth trusting —
 # never queried at all, or (the case this exists for) every point stamped
 # with the same 0.00000 placeholder by a route-planning site that never

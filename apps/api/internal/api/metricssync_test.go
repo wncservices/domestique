@@ -35,6 +35,8 @@ type metricsSyncHarness struct {
 	base       string
 	links      *providerlink.Store
 	settings   *settings.Store
+	training   *workout.DB
+	db         *source.DB
 	srv        *api.Server
 	wahooFake  *httptest.Server
 	wahooCalls []string
@@ -79,7 +81,7 @@ func newMetricsSyncHarness(t *testing.T, garminConnector api.GarminConnector) *m
 		t.Fatal(err)
 	}
 
-	h := &metricsSyncHarness{t: t, links: links, settings: appSettings}
+	h := &metricsSyncHarness{t: t, links: links, settings: appSettings, training: trainingStore, db: db}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/workouts", func(w http.ResponseWriter, r *http.Request) {
 		h.wahooCalls = append(h.wahooCalls, r.Header.Get("Authorization"))
@@ -726,6 +728,15 @@ func TestSyncInfersTheTrainingPatternFromHistory(t *testing.T) {
 	}
 	if p.HoursPerAvailableDay != 1.5 || p.ExperienceLevel == "" {
 		t.Errorf("profile = %+v, want 1.5h per day and an experience label", p)
+	}
+}
+
+// newReplica is a second server process on the same database, links and
+// providers — another pod of the same deployment.
+func (h *metricsSyncHarness) newReplica() *api.Server {
+	return &api.Server{
+		Source: h.srv.Source, Auth: h.srv.Auth, Links: h.srv.Links, Training: h.srv.Training,
+		Settings: h.srv.Settings, Garmin: h.srv.Garmin, Wahoo: h.srv.Wahoo, Config: h.srv.Config,
 	}
 }
 

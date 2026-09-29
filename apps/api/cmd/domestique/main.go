@@ -23,6 +23,11 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	// The runtime image is Alpine with no tzdata, so time.LoadLocation
+	// ("Europe/Brussels") would fail there and the fixed-time sync (and
+	// config validation of training.timezone) would be unusable. Embedding
+	// the zone database costs about 450 KB and makes it work everywhere.
+	_ "time/tzdata"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
@@ -1169,6 +1174,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// auto-schedule is on — the unattended equivalent of a rider clicking
 	// "Schedule this week's workouts" themselves, same shutdown signal.
 	go srv.RunAutoScheduleLoop(ctx)
+
+	// Pulls every connected rider's Garmin/Wahoo activities and wellness at
+	// fixed morning and evening times (config: training.sync_times), whether
+	// or not auto-schedule is on — it only reads, it never changes a workout.
+	go srv.RunMetricsSyncLoop(ctx)
 
 	log.Info("listening", "addr", addr, "library", src.Describe(),
 		"auth", authenticator.Mode())
