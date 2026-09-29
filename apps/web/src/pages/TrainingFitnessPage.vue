@@ -20,6 +20,7 @@ import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
+import { ftpTestToast } from '@/utils/ftpTests'
 import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
 
 const toast = useToast()
@@ -281,12 +282,20 @@ async function syncMetrics() {
     // "When a value changes" table. A rider-typed field never appears here;
     // it gets a stored suggestion instead, surfaced by loadThresholdSuggestions.
     lastDetected.value = result.detected ?? []
+    // An FTP an FTP test just applied is announced once, by the test's own
+    // toast below ("FTP updated to 268 W, from Tuesday's ramp test").
+    const testApplied = (result.ftpTests ?? []).some((t) => t.outcome === 'applied')
     for (const d of lastDetected.value) {
+      if (d.field === 'ftp' && testApplied) continue
       toast.add({
         title: `${thresholdFieldTitle(d.field)} updated to ${formatThresholdValue(d.field, d.value)}`,
         description: d.reason,
         icon: 'i-lucide-sparkles',
       })
+    }
+    for (const t of result.ftpTests ?? []) {
+      const copy = ftpTestToast(t)
+      toast.add({ title: copy.title, icon: copy.icon, color: copy.color })
     }
     announceRecalibration(result.levelsRecalibrated)
     await loadFitness()
