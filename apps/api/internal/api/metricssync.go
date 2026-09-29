@@ -148,13 +148,28 @@ func (s *Server) garminBiometrics(ctx context.Context, rider string, session gar
 	// reading — the watch was not worn to bed — is normal and not a reason
 	// to give up after one try.
 	if wantResting {
+		// Collects which sources came back empty and the daily summary's
+		// key names (never values) across every date tried, for the one
+		// Warn below.
+		ctx, diag := garmin.WithRHRDiagnostics(ctx)
+		lookupFailed := false
 		for daysAgo := 0; daysAgo < 3 && out.restingHR == 0; daysAgo++ {
 			bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, time.Now().AddDate(0, 0, -daysAgo))
 			if err != nil {
 				s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
+				lookupFailed = true
 				break
 			}
 			out.restingHR = bpm
+		}
+		// Once per rider per sync, and only when every date came back empty
+		// from every source: the next production log then shows what Garmin
+		// actually returned. Warn, not Error — the sync itself succeeded.
+		if out.restingHR == 0 && !lookupFailed {
+			if sources := diag.Sources(); len(sources) > 0 {
+				s.logger().Warn("garmin resting heart rate: no reading from any source",
+					"rider", rider, "sources", sources, "summary_keys", diag.SummaryKeys())
+			}
 		}
 	}
 
@@ -435,14 +450,19 @@ func uniq(in []string) []string {
 //
 // Called at the top of AutoScheduleTick, inside its lock, so a week is
 // always scheduled from history that has just been refreshed, never from
-// whatever the rider last synced by hand.
-func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
+// whatever the rider last synced by hand — and, independently of that flag,
+// twice a day by RunMetricsSyncLoop (see metricssyncloop.go). It reads from
+// the providers and writes the rider's own history and thresholds; it never
+// touches a workout, which is why it does not need auto-schedule's consent.
+//
+// Returns how many riders it tried and how many of those failed outright.
+func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed int) {
 	if s.Links == nil {
-		return
+		return 0, 0
 	}
 
 	seen := map[string]bool{}
-	var riders []string
+	var connected []string
 	for _, provider := range []string{garminProvider, wahooProvider} {
 		list, err := s.Links.ListRiders(provider)
 		if err != nil {
@@ -452,14 +472,14 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
 		for _, rider := range list {
 			if !seen[rider] {
 				seen[rider] = true
-				riders = append(riders, rider)
+				connected = append(connected, rider)
 			}
 		}
 	}
 
-	for _, rider := range riders {
+	for _, rider := range connected {
 		if ctx.Err() != nil {
-			return
+			return len(connected), failed
 		}
 		// A rider one provider's call failed for is still a rider the next
 		// one gets synced for — one bad account never aborts the pass, the
@@ -467,10 +487,12 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) {
 		result, err := s.syncRiderMetrics(ctx, rider, false)
 		if err != nil {
 			s.logger().Error("auto-sync metrics failed", "rider", rider, "err", err)
+			failed++
 			continue
 		}
 		for _, warning := range result.Warnings {
 			s.logger().Warn("auto-sync metrics warning", "rider", rider, "warning", warning)
 		}
 	}
+	return len(connected), failed
 }

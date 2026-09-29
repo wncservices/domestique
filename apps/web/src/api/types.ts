@@ -958,6 +958,25 @@ export interface ReadinessResponse {
     wellness?: DailyWellnessDTO
   }
   days: DailyWellnessDTO[]
+  /** Forecast for tomorrow's hard session — absent when tomorrow has no
+   *  eligible workout or the forecast is ready. Mirrors tomorrowForecastDTO. */
+  tomorrow?: TomorrowForecast
+}
+
+/** A forecast, not a verdict: tomorrow morning's own readiness check still
+ *  runs. `reasons` are the plain forms from internal/readiness.ForecastTomorrow
+ *  (the form reason reads "tomorrow's form is projected at −34"). */
+export interface TomorrowForecast {
+  date: string
+  risk: 'caution' | 'rest'
+  reasons?: string[]
+  workoutId: string
+  workoutName: string
+}
+
+/** POST /api/training/readiness/tomorrow/ease's 200 body. */
+export interface EaseTomorrowResult {
+  reason: string
 }
 
 export interface CompletedSession {
@@ -1119,6 +1138,11 @@ export interface ReplanResult {
 export interface PeriodizationPlan {
   goalId: string
   weeks: PeriodizationWeek[]
+  /** Length of the whole plan, from the goal's first week to the event.
+   *  `weeks` only holds the part from the current week on, and each
+   *  week's `number` counts from the start, so "week 3 of 12" is
+   *  number of totalWeeks. */
+  totalWeeks?: number
   /** The compliance-based multiplier applied to this plan's upcoming
    *  Base/Build weeks — 1 (or absent) means unadjusted, whether because
    *  there is no training history yet or because recent weeks were right

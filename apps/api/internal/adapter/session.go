@@ -356,6 +356,14 @@ func stepDownReason(w workout.Workout) string {
 	return fmt.Sprintf("Stepped down after %s's %s session was under target", weekday, zone)
 }
 
+// WorkoutDone is done without any ride analysis — for a caller looking at a
+// day no analysis can exist for yet (tomorrow's session) or need not be read
+// (a past day's), where the ≥ 50 %
+// time rule is the whole test.
+func WorkoutDone(w workout.Workout, sessions []workout.CompletedSession) bool {
+	return done(w, sessions, nil)
+}
+
 // done reports whether the rider did this session. A ride-analysis outcome
 // wins when one exists — analyses is keyed by workout id, so a hit here
 // means a completed session actually matched this planned one: "incomplete"
@@ -582,6 +590,14 @@ func estimatePlannedTSS(w workout.Workout, ftpWatts float64) float64 {
 		intensity = mid / ftpWatts
 	}
 	return hours * intensity * intensity * 100
+}
+
+// EstimatePlannedTSS is estimatePlannedTSS for a caller outside this
+// package — the readiness forecast estimates a planned session's load the
+// same way overloadedWeek does, rather than carrying its own copy of the
+// formula.
+func EstimatePlannedTSS(w workout.Workout, ftpWatts float64) float64 {
+	return estimatePlannedTSS(w, ftpWatts)
 }
 
 // firstPowerTargetMid returns the midpoint of the first power-target step

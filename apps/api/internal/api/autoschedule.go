@@ -161,7 +161,7 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		// "Sync now" — see autoSyncTrainingMetrics. Runs for every connected
 		// rider, goal or not: the FTP and resting-HR estimates it fills in
 		// are useful before anyone has set a goal.
-		s.autoSyncTrainingMetrics(ctx)
+		s.runMetricsPass(ctx, false)
 
 		goals, err := s.Training.ListAllGoals(ctx)
 		if err != nil {

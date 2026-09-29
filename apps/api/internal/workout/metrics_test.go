@@ -114,3 +114,15 @@ func TestFillDailyLoadsProducesNoGaps(t *testing.T) {
 		}
 	}
 }
+
+// RollFitness is the one step ComputeFitness repeats per day: folding a
+// day's load in by hand must land exactly where ComputeFitness's next
+// snapshot does, or a forecast projected from a stored snapshot would drift
+// from the numbers the fitness chart shows.
+func TestRollFitnessMatchesComputeFitnessStep(t *testing.T) {
+	snaps := ComputeFitness([]DailyLoad{{Date: "2026-03-01", Load: 80}, {Date: "2026-03-02", Load: 120}, {Date: "2026-03-03", Load: 0}})
+	ctl, atl := RollFitness(snaps[1].CTL, snaps[1].ATL, 120)
+	if math.Abs(ctl-snaps[2].CTL) > 1e-9 || math.Abs(atl-snaps[2].ATL) > 1e-9 {
+		t.Errorf("RollFitness = %v/%v, want %v/%v", ctl, atl, snaps[2].CTL, snaps[2].ATL)
+	}
+}

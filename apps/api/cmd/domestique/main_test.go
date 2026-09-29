@@ -209,6 +209,24 @@ func TestCLIValidateWithNoConfigCreatesDatabase(t *testing.T) {
 	}
 }
 
+// A typo in the sync schedule is caught by `validate`, not at 06:30 the
+// morning it was meant to run.
+func TestCLIValidateRejectsABadSyncSchedule(t *testing.T) {
+	for name, body := range map[string]string{
+		"bad time":     "training:\n  sync_times: [\"6.30\"]\n",
+		"unknown zone": "training:\n  timezone: Mars/Olympus_Mons\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, filepath.Join(dir, "domestique.yaml"), body)
+			t.Chdir(dir)
+			if out, err := capture(t, "validate"); err == nil {
+				t.Errorf("validate accepted the config:\n%s", out)
+			}
+		})
+	}
+}
+
 // Nothing linked means nowhere to push, and plan says so by having nothing
 // to do.
 func TestCLIPlanWithNothingLinked(t *testing.T) {

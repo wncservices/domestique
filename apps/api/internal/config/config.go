@@ -20,6 +20,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
+	"github.com/wncservices/domestique/apps/api/internal/syncschedule"
 )
 
 // SourceConfig is where the route library lives.
@@ -147,7 +148,42 @@ type WebConfig struct {
 	LandingHost string `yaml:"landing_host,omitempty"`
 }
 
+// TrainingConfig is when the fixed-time metrics sync runs: the times of day
+// (24-hour "HH:MM", local to Timezone) at which every connected rider's
+// Garmin/Wahoo activities and wellness are pulled, whether or not
+// auto-schedule is on. Morning catches last night's sleep before the day's
+// readiness check; evening catches the day's ride.
+type TrainingConfig struct {
+	SyncTimes []string `yaml:"sync_times,omitempty"`
+	// Timezone is an IANA name. It matters because "06:30" has to mean the
+	// riders' morning, not the server's — a pod runs in UTC.
+	Timezone string `yaml:"timezone,omitempty"`
+}
+
+// Defaults for TrainingConfig.
+const (
+	DefaultSyncTimezone = "Europe/Brussels"
+)
+
+// DefaultSyncTimes is a function so no caller can mutate a shared slice.
+func DefaultSyncTimes() []string { return []string{"06:30", "21:00"} }
+
+// Schedule parses the sync times and zone.
+//
+// Unset fields mean the defaults, so a Config built in code (a test, or a
+// Validate after CLI flags rewrote it) behaves like one loaded from a file.
+func (t TrainingConfig) Schedule() (syncschedule.Schedule, error) {
+	if len(t.SyncTimes) == 0 {
+		t.SyncTimes = DefaultSyncTimes()
+	}
+	if t.Timezone == "" {
+		t.Timezone = DefaultSyncTimezone
+	}
+	return syncschedule.Parse(t.SyncTimes, t.Timezone)
+}
+
 type Config struct {
+	Training  TrainingConfig  `yaml:"training"`
 	Source    SourceConfig    `yaml:"source"`
 	Web       WebConfig       `yaml:"web"`
 	Auth      auth.Config     `yaml:"auth"`
@@ -203,6 +239,13 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Source.DSN == "" {
 		c.Source.DSN = DefaultDSN
+	}
+
+	if len(c.Training.SyncTimes) == 0 {
+		c.Training.SyncTimes = DefaultSyncTimes()
+	}
+	if c.Training.Timezone == "" {
+		c.Training.Timezone = DefaultSyncTimezone
 	}
 
 	// Same "only when opted in" rule as Basemap below — an operator who
@@ -264,6 +307,12 @@ func (c *Config) Validate() error {
 	// Surfaces a bad auth config at startup rather than on the first request.
 	if _, err := auth.New(c.Auth); err != nil {
 		return err
+	}
+
+	// A bad time or zone would otherwise surface as a sync that silently
+	// never runs, so it is caught here, where `domestique validate` sees it.
+	if _, err := c.Training.Schedule(); err != nil {
+		return fmt.Errorf("training: %w", err)
 	}
 
 	if c.Basemap.TilesNamespace != "" && c.Basemap.TilesPVCName == "" {

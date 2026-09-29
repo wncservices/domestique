@@ -249,6 +249,25 @@ uses the rider's levels *now*. Next week's workouts are inside the 14-day
 auto-push window, so for riders who opted in they reach the watch a week
 earlier than before.
 
+## Fixed-time metrics sync
+
+`RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and
+wellness at `training.sync_times` (default 06:30 and 21:00, in
+`training.timezone`, default Europe/Brussels) **whether or not the
+auto-schedule flag is on**. `autoSyncTrainingMetrics` only reads from the
+providers and writes the rider's own history, so it needs no consent to change
+workouts; scheduling, adaptation and pushing stay inside `AutoScheduleTick`
+behind `FlagAutoSchedule`. Keep the two apart: putting a workout-changing step
+in the metrics pass would let a deployment with auto-schedule off change
+workouts twice a day.
+
+The slots come from `internal/syncschedule` (pure, built from the local calendar
+date so 06:30 stays 06:30 across DST). "Last run" is the `updated_at` of the
+`metrics_sync_last_run` row in the flags table, so the on-start catch-up survives
+a restart. `time/tzdata` is imported in `main` because the Alpine image has no
+zone database. Log counts only (riders, failed): never a rider's name beside
+health values.
+
 ## Garmin sign-in
 
 `internal/garmin` does the four-step handshake (CSRF page → credentials →

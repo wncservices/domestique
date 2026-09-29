@@ -102,7 +102,7 @@ const (
 func Reconcile(goal workout.Goal, profile workout.RiderProfile, plan periodization.Plan, sessions []workout.CompletedSession, today time.Time) periodization.Plan {
 	factor := complianceFactor(goal, profile, sessions, periodization.MondayOf(today))
 
-	out := periodization.Plan{GoalID: plan.GoalID, Weeks: make([]periodization.Week, len(plan.Weeks)), Adjustment: factor}
+	out := periodization.Plan{GoalID: plan.GoalID, Weeks: make([]periodization.Week, len(plan.Weeks)), TotalWeeks: plan.TotalWeeks, Adjustment: factor}
 	for i, wk := range plan.Weeks {
 		if i > 0 && factor != 1 && (wk.Phase == periodization.PhaseBase || wk.Phase == periodization.PhaseBuild) {
 			wk.TargetHours *= factor

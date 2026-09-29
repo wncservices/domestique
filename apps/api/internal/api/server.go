@@ -68,6 +68,13 @@ type Server struct {
 	// own doc comment. Zero value is ready to use.
 	wellnessBackfill wellnessBackfillCache
 
+	// metricsMu serialises metrics-sync passes inside this process (the
+	// advisory lock does nothing on SQLite), and lastMetricsSync is the
+	// fallback "when did one last finish" for a deployment with no settings
+	// store — see metricssyncloop.go.
+	metricsMu       sync.Mutex
+	lastMetricsSync time.Time
+
 	// Clock, when set, replaces time.Now for the parts of training that
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time
@@ -475,6 +482,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/progression", s.handleGetProgression)
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)
+	mux.HandleFunc("POST /api/training/readiness/tomorrow/ease", s.handleEaseTomorrow)
 	mux.HandleFunc("PUT /api/training/sessions/{id}/feel", s.handleSetSessionFeel)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
