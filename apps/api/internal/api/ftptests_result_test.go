@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ type ftpResultHarness struct {
 	*metricsSyncHarness
 	testID string
 	date   string
+	fake   *fakeGarmin
 }
 
 // newFTPResultHarness plans protocol as a test yesterday and has the rider ride
@@ -40,10 +42,16 @@ type ftpResultHarness struct {
 // makes a ride with no power data at all.
 func newFTPResultHarness(t *testing.T, protocol string, watts int, profile workout.RiderProfile) *ftpResultHarness {
 	t.Helper()
+	return newFTPResultHarnessFor(t, protocol, watts, 1200, profile)
+}
+
+// newFTPResultHarnessFor is newFTPResultHarness with the ride's length chosen.
+func newFTPResultHarnessFor(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile) *ftpResultHarness {
+	t.Helper()
 	start := time.Now().AddDate(0, 0, -1)
 	fake := &fakeGarmin{
-		activities: []garmin.Activity{{ID: "9100", Sport: "cycling", StartTime: start, DurationSeconds: 1200, AvgPowerWatts: float64(watts)}},
-		fitByID:    map[string][]byte{"9100": buildRideFIT(t, start, 1200, watts)},
+		activities: []garmin.Activity{{ID: "9100", Sport: "cycling", StartTime: start, DurationSeconds: float64(seconds), AvgPowerWatts: float64(watts)}},
+		fitByID:    map[string][]byte{"9100": buildRideFIT(t, start, seconds, watts)},
 	}
 	h := newMetricsSyncHarness(t, fake)
 	h.seedGarminSession("wilant")
@@ -62,7 +70,7 @@ func newFTPResultHarness(t *testing.T, protocol string, watts int, profile worko
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &ftpResultHarness{metricsSyncHarness: h, testID: test.ID, date: req.Date}
+	return &ftpResultHarness{metricsSyncHarness: h, testID: test.ID, date: req.Date, fake: fake}
 }
 
 func (h *ftpResultHarness) sync() syncFTPTestsOut {
@@ -225,5 +233,47 @@ func TestSyncIgnoresATestThatWasNotRidden(t *testing.T) {
 	}
 	if out := h.sync(); len(out.FTPTests) != 0 {
 		t.Errorf("ftpTests = %+v for a test with no ride", out.FTPTests)
+	}
+}
+
+// A FIT that cannot be fetched or decoded says nothing about the ride: the
+// test is not spent, and the next sync that gets the file reads it.
+func TestATransientFITFailureDoesNotBurnTheTest(t *testing.T) {
+	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250})
+	fit := h.fake.fitByID["9100"]
+
+	h.fake.fitErr = errors.New("connect is having a moment")
+	if out := h.sync(); len(out.FTPTests) != 0 {
+		t.Fatalf("a failed download reported %+v", out.FTPTests)
+	}
+	stored, _ := h.srv.Training.GetWorkout(context.Background(), h.testID)
+	if stored.TestResultWatts != 0 {
+		t.Fatalf("result = %v after a failed download, want the test left open", stored.TestResultWatts)
+	}
+
+	h.fake.fitErr = nil
+	h.fake.fitByID["9100"] = []byte("not a fit file") // downloads, cannot be decoded
+	if out := h.sync(); len(out.FTPTests) != 0 {
+		t.Fatalf("a failed decode reported %+v", out.FTPTests)
+	}
+
+	h.fake.fitByID["9100"] = fit
+	out := h.sync()
+	if len(out.FTPTests) != 1 || out.FTPTests[0].Outcome != "suggested" || out.FTPTests[0].FTPWatts != 300 {
+		t.Fatalf("after the file arrived: %+v, want a suggested 300 W", out.FTPTests)
+	}
+}
+
+// A ride that decoded fine but is too short for the protocol's window is a
+// genuine "no result", and only that gets the unreadable marker.
+func TestADecodedRideTooShortForTheWindowIsUnreadable(t *testing.T) {
+	h := newFTPResultHarnessFor(t, "ramp", 400, 30, workout.RiderProfile{FTPWatts: 250})
+	out := h.sync()
+	if len(out.FTPTests) != 1 || out.FTPTests[0].Outcome != "unreadable" {
+		t.Fatalf("ftpTests = %+v, want one unreadable", out.FTPTests)
+	}
+	stored, _ := h.srv.Training.GetWorkout(context.Background(), h.testID)
+	if stored.TestResultWatts != workout.TestResultUnreadable {
+		t.Errorf("marker = %v, want the unreadable marker", stored.TestResultWatts)
 	}
 }

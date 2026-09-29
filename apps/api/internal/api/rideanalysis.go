@@ -165,6 +165,15 @@ func (s *Server) analyseNewSessions(
 		}
 
 		matched := rideanalysis.MatchPlanned(sess.Date, sess.Sport, summary.DurationSeconds, planned)
+		// An FTP test's whole result comes from the ride's own power curve. A
+		// FIT that could not be fetched or decoded says nothing about the ride,
+		// and saving a curve-less analysis now would stop the ride ever being
+		// analysed again, so the test would be read as "no power" for good. Leave
+		// it unanalysed; the next sync tries the file again.
+		if act == nil && matched != nil && matched.TestProtocol != "" {
+			s.logger().Warn("ride analysis: an FTP test ride has no readable FIT yet, will retry", "rider", rider, "provider", sess.Provider, "session", sess.ID)
+			continue
+		}
 		analysis := rideanalysis.Analyze(rideanalysis.Input{
 			Sport:    sess.Sport,
 			Activity: act,
