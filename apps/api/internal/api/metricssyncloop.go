@@ -9,10 +9,18 @@ import (
 )
 
 // metricsSyncLastRunFlag is a row in settings' plain flags table used only
-// for its updated_at: when the training-metrics sync last finished. It is the
-// one piece of state the missed-run rule needs to survive a restart — in
-// memory it would say "never synced" after every deploy and re-sync every
-// time a pod started. Its enabled column is always true and means nothing.
+// for its updated_at: when the training-metrics sync last finished. It is a
+// marker, not a flag — its enabled column is always true and means nothing.
+//
+// It is also what coordinates replicas: every pod's timer fires at the same
+// slot, and the pass re-reads this timestamp under the advisory lock, so the
+// first pod records the run and the rest see it and stand down. In memory it
+// would say "never synced" after every deploy and re-sync every time a pod
+// started.
+//
+// A dedicated job_runs table would be tidier, but it is a new table, schema,
+// and a two-engine test for one timestamp; the flags table already has the
+// timestamp column, the idempotent schema and the engine tests.
 const metricsSyncLastRunFlag = "metrics_sync_last_run"
 
 // syncSchedule is the configured morning/evening slots. A nil Config means
@@ -55,24 +63,47 @@ func (s *Server) markMetricsSynced(at time.Time) {
 // The caller holds the advisory lock (or, for AutoScheduleTick, the same one
 // it already took for the workout-changing steps).
 func (s *Server) runMetricsPass(ctx context.Context, onlyIfMissed bool) bool {
+	if !onlyIfMissed {
+		return s.runMetricsPassWith(ctx, nil)
+	}
+	sched, err := s.syncSchedule()
+	if err != nil {
+		return false
+	}
+	return s.runMetricsPassWith(ctx, &sched)
+}
+
+// runMetricsPassWith is runMetricsPass with the schedule already parsed (the
+// loop parses it once); nil means run unconditionally.
+func (s *Server) runMetricsPassWith(ctx context.Context, sched *syncschedule.Schedule) bool {
 	if s.Training == nil || s.Links == nil {
 		return false
 	}
 	s.metricsMu.Lock()
 	defer s.metricsMu.Unlock()
 
-	if onlyIfMissed {
-		sched, err := s.syncSchedule()
-		if err != nil || !sched.Missed(s.lastMetricsSyncAt(), s.now()) {
-			return false
-		}
+	if sched != nil && !sched.Missed(s.lastMetricsSyncAt(), s.now()) {
+		return false
 	}
 
 	riders, failed := s.autoSyncTrainingMetrics(ctx)
+
+	// Cut short by shutdown: not everyone was synced, so it is not a
+	// completed run. Left unrecorded, the next start catches up.
+	if ctx.Err() != nil {
+		return false
+	}
+	// Everyone failing is left unrecorded too, so a restart retries once
+	// instead of waiting for the next slot — and it is a Warn, not the Info
+	// of a healthy run. Counts only: a rider's name next to anything about
+	// their sleep or heart rate is health data in a log line.
+	if riders > 0 && failed == riders {
+		s.logger().Warn("metrics sync: every rider failed", "riders", riders, "failed", failed)
+		return true
+	}
+
 	s.markMetricsSynced(s.now())
 	if riders > 0 {
-		// Counts only. A rider's name next to anything about their sleep or
-		// heart rate is health data in a log line.
 		s.logger().Info("metrics sync finished", "riders", riders, "failed", failed)
 	}
 	return true
@@ -89,12 +120,23 @@ func (s *Server) SyncTrainingMetrics(ctx context.Context) {
 	})
 }
 
-// RunMetricsSyncIfMissed is the start-up catch-up: if the process was down at
-// a scheduled slot, sync once now. Reports whether it did.
+// RunMetricsSyncIfMissed syncs only if a scheduled slot has passed since the
+// last recorded run, re-checked under the lock. It is both the start-up
+// catch-up (the process was down at a slot) and the timer path (see
+// RunMetricsSyncLoop): the shared timestamp is what makes replicas whose
+// timers fire together sync once. Reports whether it synced.
 func (s *Server) RunMetricsSyncIfMissed(ctx context.Context) bool {
+	sched, err := s.syncSchedule()
+	if err != nil {
+		return false
+	}
+	return s.runMissedWith(ctx, sched)
+}
+
+func (s *Server) runMissedWith(ctx context.Context, sched syncschedule.Schedule) bool {
 	ran := false
 	withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
-		ran = s.runMetricsPass(ctx, true)
+		ran = s.runMetricsPassWith(ctx, &sched)
 	})
 	return ran
 }
@@ -113,19 +155,29 @@ func (s *Server) RunMetricsSyncLoop(ctx context.Context) {
 		return
 	}
 
-	s.RunMetricsSyncIfMissed(ctx)
+	s.runMissedWith(ctx, sched)
 
 	for {
 		now := s.now()
+		next := sched.Next(now)
+		if next.IsZero() {
+			// Cannot happen for a schedule Parse accepted, but a zero
+			// duration here would spin this loop hot, so refuse instead.
+			s.logger().Error("metrics sync: no next slot could be computed, fixed-time sync disabled")
+			return
+		}
 		// A second of slack so a timer that wakes a hair early does not
 		// compute the same slot again and sync twice.
-		timer := time.NewTimer(sched.Next(now).Sub(now) + time.Second)
+		timer := time.NewTimer(next.Sub(now) + time.Second)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-timer.C:
-			s.SyncTrainingMetrics(ctx)
+			// Not an unconditional sync: every replica's timer fires at this
+			// slot, and only the one that finds it still unrecorded, under
+			// the lock, runs it.
+			s.runMissedWith(ctx, sched)
 		}
 	}
 }

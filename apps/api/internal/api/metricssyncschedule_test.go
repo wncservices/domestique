@@ -1,7 +1,10 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,5 +133,98 @@ func TestFlaggedTickCountsAsALastRun(t *testing.T) {
 	}
 	if len(h.wahooCalls) != 1 {
 		t.Errorf("wahoo calls = %d, want 1", len(h.wahooCalls))
+	}
+}
+
+// Two replicas run the loop against one database. When the slot arrives both
+// timers fire, but the shared last-run timestamp — re-checked under the lock —
+// means one sync happens, not two. Replica B's clock runs half a second behind
+// A's so B checks after A has recorded its run: SQLite has no advisory lock to
+// make the two mutually exclusive, and this test is about the re-check.
+func TestTwoReplicasSyncOncePerSlot(t *testing.T) {
+	h := newMetricsSyncHarness(t, &fakeGarmin{})
+	h.seedWahooSession("other")
+	loc, _ := time.LoadLocation("Europe/Brussels")
+	start := time.Date(2026, 6, 10, 20, 59, 58, 500_000_000, loc)
+	realStart := time.Now()
+	clock := func(behind time.Duration) func() time.Time {
+		return func() time.Time { return start.Add(time.Since(realStart) - behind) }
+	}
+	a, b := h.srv, h.newReplica()
+	a.Config, b.Config = &config.Config{}, &config.Config{}
+	a.Clock, b.Clock = clock(0), clock(500*time.Millisecond)
+
+	// Already synced this morning: nothing to catch up on at start.
+	if err := h.settings.SetFlagAt("metrics_sync_last_run", true, "scheduler",
+		time.Date(2026, 6, 10, 6, 31, 0, 0, loc)); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{}, 2)
+	for _, srv := range []*api.Server{a, b} {
+		go func() { srv.RunMetricsSyncLoop(ctx); done <- struct{}{} }()
+	}
+	time.Sleep(4500 * time.Millisecond) // both timers (21:00 + 1s slack) have fired
+	cancel()
+	<-done
+	<-done
+
+	if len(h.wahooCalls) != 1 {
+		t.Errorf("wahoo calls = %d, want 1 — two replicas must not both sync the same slot", len(h.wahooCalls))
+	}
+}
+
+// A pass cut short by shutdown did not sync everyone, so it must not be
+// recorded as done: the next start catches up.
+func TestCancelledMetricsPassIsNotRecorded(t *testing.T) {
+	h := newMetricsSyncHarness(t, &fakeGarmin{})
+	h.seedWahooSession("other")
+	h.srv.Config = &config.Config{}
+	loc, _ := time.LoadLocation("Europe/Brussels")
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, loc)
+	h.srv.Clock = brusselsClock(t, &now)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if h.srv.RunMetricsSyncIfMissed(cancelled) {
+		t.Error("a cancelled pass reported that it synced")
+	}
+	if _, err := h.settings.DescribeFlag("metrics_sync_last_run"); err == nil {
+		t.Error("a cancelled pass was recorded as a completed sync")
+	}
+	if !h.srv.RunMetricsSyncIfMissed(context.Background()) {
+		t.Error("the next start did not catch up")
+	}
+}
+
+// Every rider failing is a Warn, and is not recorded, so a restart retries.
+func TestEveryRiderFailingIsWarnedAndNotRecorded(t *testing.T) {
+	h := newMetricsSyncHarness(t, &fakeGarmin{})
+	h.seedWahooSession("other")
+	h.srv.Config = &config.Config{}
+	var logs bytes.Buffer
+	h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	loc, _ := time.LoadLocation("Europe/Brussels")
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, loc)
+	h.srv.Clock = brusselsClock(t, &now)
+
+	// The one place a rider's sync returns an error rather than a warning is
+	// their own training data being unreadable.
+	if _, err := h.db.Conn().Exec("DROP TABLE rider_profiles"); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.RunMetricsSyncIfMissed(context.Background())
+
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "metrics sync: every rider failed") {
+		t.Errorf("want a Warn about every rider failing, got:\n%s", out)
+	}
+	if strings.Contains(out, "metrics sync finished") {
+		t.Errorf("logged the Info completion line for a run where everyone failed:\n%s", out)
+	}
+	if _, err := h.settings.DescribeFlag("metrics_sync_last_run"); err == nil {
+		t.Error("a run where every rider failed was recorded, so a restart would not retry")
 	}
 }
