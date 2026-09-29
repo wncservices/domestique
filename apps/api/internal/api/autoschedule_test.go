@@ -12,6 +12,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -89,6 +90,31 @@ func (h *autoScheduleHarness) as(user, groups, method, path, body string) *http.
 	return resp
 }
 
+// seasonSessions is how many sessions a rider's whole plan should hold once
+// every week to the event (or the rolling twelve) is planned: the goal's plan
+// weeks, one session per available day.
+func seasonSessions(t *testing.T, h *autoScheduleHarness, rider string) int {
+	t.Helper()
+	ctx := context.Background()
+	profile, _, err := h.store.GetProfile(ctx, rider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goals, err := h.store.ListGoals(ctx, rider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, g := range goals {
+		plan, err := periodization.Build(g, profile, time.Now())
+		if err != nil {
+			continue
+		}
+		total += len(plan.Weeks) * len(profile.AvailableDays)
+	}
+	return total
+}
+
 // A disabled deployment must make zero changes, not merely skip acting on
 // what it found — the same property TestAutoImportTickDoesNothingWhenDisabled
 // checks for the route-import poller.
@@ -150,8 +176,8 @@ func TestAutoScheduleTickSchedulesEveryRidersCurrentWeek(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(workouts) != 8 {
-			t.Errorf("%s: workouts = %d, want 8 (one per available day, this week and next)", rider, len(workouts))
+		if want := seasonSessions(t, h, rider); len(workouts) != want || want < 8 {
+			t.Errorf("%s: workouts = %d, want %d (one per available day, every week to the event)", rider, len(workouts), want)
 		}
 	}
 
@@ -161,8 +187,8 @@ func TestAutoScheduleTickSchedulesEveryRidersCurrentWeek(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 8 {
-		t.Errorf("after a second tick: workouts = %d, want still 8 (no duplicates)", len(workouts))
+	if want := seasonSessions(t, h, "wilant"); len(workouts) != want {
+		t.Errorf("after a second tick: workouts = %d, want still %d (no duplicates)", len(workouts), want)
 	}
 }
 
@@ -198,8 +224,8 @@ func TestAutoScheduleTickSkipsAPastGoalWithoutBlockingOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 8 {
-		t.Errorf("wilant's workouts = %d, want 8 (this week and next) — a different rider's stale goal must not block this", len(workouts))
+	if want := seasonSessions(t, h, "wilant"); len(workouts) != want || want < 8 {
+		t.Errorf("wilant's workouts = %d, want %d (the whole season) — a different rider's stale goal must not block this", len(workouts), want)
 	}
 }
 
@@ -254,8 +280,8 @@ func TestAutoScheduleTickSchedulesAGoalWithNoEventDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 6 {
-		t.Errorf("workouts = %d, want 6 (this week and next) — one per available day from the rolling plan", len(workouts))
+	if len(workouts) != 12*3 {
+		t.Errorf("workouts = %d, want 36 (twelve rolling weeks) — one per available day from the rolling plan", len(workouts))
 	}
 }
 
@@ -291,12 +317,30 @@ func TestAutoScheduleTickNeverDoubleBooksTwoGoals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 8 {
-		t.Fatalf("workouts = %d, want 8 (this week and next) — two goals must share one week, not double it", len(workouts))
-	}
+	// No two sessions on one day, whichever goal made them.
+	byDate := map[string]string{}
 	for _, wk := range workouts {
-		if wk.GoalID != dated.ID {
-			t.Errorf("workout %q belongs to goal %q, want the dated goal %q (not %q)", wk.Name, wk.GoalID, dated.ID, undated.ID)
+		if other, dup := byDate[wk.Date]; dup {
+			t.Errorf("%s holds two sessions: %q and %q — two goals must share a week, not double it", wk.Date, other, wk.Name)
 		}
+		byDate[wk.Date] = wk.Name
+	}
+	// Up to the event's own week the dated goal keeps every day; only the weeks
+	// after the event, which the dated goal has no plan for, fall to the
+	// rolling one.
+	eventWeekEnd := periodization.MondayOf(time.Now().AddDate(0, 0, 70)).AddDate(0, 0, 6).Format("2006-01-02")
+	datedCount := 0
+	for _, wk := range workouts {
+		if wk.Date <= eventWeekEnd {
+			datedCount++
+			if wk.GoalID != dated.ID {
+				t.Errorf("workout %q on %s belongs to goal %q, want the dated goal %q (not %q)", wk.Name, wk.Date, wk.GoalID, dated.ID, undated.ID)
+			}
+		} else if wk.GoalID != undated.ID {
+			t.Errorf("workout %q on %s, after the event, belongs to goal %q, want the rolling goal %q", wk.Name, wk.Date, wk.GoalID, undated.ID)
+		}
+	}
+	if datedCount < 8 {
+		t.Errorf("dated goal has %d sessions, want its whole season", datedCount)
 	}
 }

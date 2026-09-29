@@ -1156,6 +1156,9 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// holding since the last export tick.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Background work started by a request (planning a season after a goal is
+	// saved) runs on this, so it stops at shutdown rather than with the request.
+	srv.Lifecycle = ctx
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

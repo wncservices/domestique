@@ -54,7 +54,7 @@ func datesIn(t *testing.T, ws []workout.Workout, from, to time.Time) []workout.W
 	return out
 }
 
-func TestAutoScheduleTickPlansThisWeekAndNextWeek(t *testing.T) {
+func TestAutoScheduleTickPlansThisWeekNextWeekAndTheRest(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()
 	now := utcNoon(2026, time.October, 7) // a Wednesday
@@ -79,8 +79,8 @@ func TestAutoScheduleTickPlansThisWeekAndNextWeek(t *testing.T) {
 	if nextN == 0 {
 		t.Error("next week is empty — it must not stay empty")
 	}
-	if len(all) != thisN+nextN {
-		t.Errorf("total workouts = %d, want %d (nothing scheduled beyond next week)", len(all), thisN+nextN)
+	if len(all) <= thisN+nextN {
+		t.Errorf("total workouts = %d, want more than this and next week's %d — the whole season is planned", len(all), thisN+nextN)
 	}
 
 	h.srv.AutoScheduleTick(ctx)

@@ -257,6 +257,8 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("goal created", "id", g.ID, "rider", rider)
+	// Before the response, this week; after it, the rest of the season.
+	s.planGoalNow(r.Context(), g)
 	writeJSON(w, http.StatusCreated, goalDTOFrom(g))
 }
 
@@ -311,6 +313,8 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("goal updated", "id", id, "by", identity.User)
+	// A new event date or sport can add weeks to the plan.
+	s.planGoalNow(r.Context(), updated)
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))
 }
 
@@ -331,7 +335,12 @@ func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.Training.DeleteGoal(r.Context(), id); err != nil {
+	// Not while a season pass is writing this goal's weeks, or the pass could
+	// record one after the goal has forgotten them all.
+	s.seasonMu.Lock()
+	err = s.Training.DeleteGoal(r.Context(), id)
+	s.seasonMu.Unlock()
+	if err != nil {
 		s.failTrainingLookup(w, err)
 		return
 	}
@@ -587,36 +596,71 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate stri
 // of this week's. Levels are the rider's levels now; a week built ahead can
 // therefore be one progression step behind the one built on its own Monday.
 func (s *Server) scheduleGoalWeek(ctx context.Context, g workout.Goal, weekStart time.Time, fromDate string) ([]workout.Workout, int, error) {
-	plan, profile, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider)
+	sc, err := s.seasonContext(ctx, g)
 	if err != nil {
 		return nil, 0, err
 	}
-	startStr := weekStart.Format(dateLayout)
-	var week periodization.Week
-	found := false
-	for _, w := range plan.Weeks {
-		if w.StartDate == startStr {
-			week, found = w, true
-			break
-		}
-	}
+	week, found := sc.week(weekStart.Format(dateLayout))
 	if !found {
 		return nil, 0, nil
 	}
-
-	levels, err := s.levelsFor(ctx, g.Rider, profile, g.Sport)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	requests, err := scheduler.WeekWorkouts(week, profile, levels, g.Rider, g.ID, g.Sport)
-	if err != nil {
-		return nil, 0, err
-	}
-
 	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
 	if err != nil {
 		return nil, 0, err
+	}
+	return s.fillWeek(ctx, g, sc, week, existing, fromDate)
+}
+
+// seasonContext is everything filling or refreshing any week of g's plan
+// needs, read once: the reconciled plan, the rider's profile and their levels.
+// A pass over a whole season builds it once instead of once per week.
+type seasonContext struct {
+	plan    periodization.Plan
+	profile workout.RiderProfile
+	levels  map[string]float64
+}
+
+func (s *Server) seasonContext(ctx context.Context, g workout.Goal) (seasonContext, error) {
+	plan, profile, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider)
+	if err != nil {
+		return seasonContext{}, err
+	}
+	levels, err := s.levelsFor(ctx, g.Rider, profile, g.Sport)
+	if err != nil {
+		return seasonContext{}, err
+	}
+	return seasonContext{plan: plan, profile: profile, levels: levels}, nil
+}
+
+func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
+	for _, w := range sc.plan.Weeks {
+		if w.StartDate == startStr {
+			return w, true
+		}
+	}
+	return periodization.Week{}, false
+}
+
+// fillWeek creates the sessions of one plan week that have no workout on their
+// date yet, and records the week as filled. existing is the rider's workouts
+// as they stand.
+//
+// A week that yields no sessions at all (the rider has not said which days
+// they train, or how long) is *not* recorded: nothing was filled, and
+// recording it would leave the week empty for good once the profile is filled
+// in, because the tick never tops up a week it has recorded. That matters far
+// more now that a whole season is recorded in one go.
+//
+// A week that is this week or next is built from data as fresh as it will ever
+// be, so it is recorded as refreshed too; a week further out is refreshed when
+// it gets that close (see refreshWeek).
+func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(requests) == 0 {
+		return nil, 0, nil
 	}
 
 	// A date is taken if *any* goal has already put a workout on it, not
@@ -655,10 +699,21 @@ func (s *Server) scheduleGoalWeek(ctx context.Context, g workout.Goal, weekStart
 		}
 		created = append(created, wk)
 	}
-	if err := s.Training.MarkWeekScheduled(ctx, g.ID, startStr); err != nil {
+	if err := s.Training.MarkWeekScheduled(ctx, g.ID, week.StartDate); err != nil {
 		return created, skipped, err
 	}
+	if week.StartDate <= s.refreshHorizon() {
+		if err := s.Training.MarkWeekRefreshed(ctx, g.ID, week.StartDate); err != nil {
+			return created, skipped, err
+		}
+	}
 	return created, skipped, nil
+}
+
+// refreshHorizon is the last Monday, "YYYY-MM-DD", whose week counts as close
+// enough to be built from current levels and FTP: next week's.
+func (s *Server) refreshHorizon() string {
+	return periodization.MondayOf(s.now()).AddDate(0, 0, 7).Format(dateLayout)
 }
 
 // autoScheduleGoalWeek is what the unattended tick calls: it fills a goal's
@@ -689,7 +744,7 @@ func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekS
 		// the tick has not reached yet has not had that week filled, and
 		// counting the test as "filled" would leave it holding the test alone.
 		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.Date >= startStr && wk.Date <= endStr {
-			return nil, 0, s.Training.MarkWeekScheduled(ctx, g.ID, startStr)
+			return nil, 0, s.recordLegacyWeek(ctx, g, startStr)
 		}
 	}
 	return s.scheduleGoalWeek(ctx, g, weekStart, "")

@@ -236,6 +236,69 @@ ON CONFLICT (goal_id, week_start) DO NOTHING`),
 	return err
 }
 
+// ScheduledWeeks lists goalID's recorded weeks: week_start (a Monday) to
+// whether that week has been refreshed for roll-over (see MarkWeekRefreshed).
+// One query for the whole season, so a pass over 27 weeks does not ask 27
+// times.
+func (d *DB) ScheduledWeeks(ctx context.Context, goalID string) (map[string]bool, error) {
+	rows, err := d.db.QueryContext(ctx, d.query(
+		`SELECT week_start, refreshed_at FROM scheduled_weeks WHERE goal_id = ?`), goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var week, refreshed string
+		if err := rows.Scan(&week, &refreshed); err != nil {
+			return nil, err
+		}
+		out[week] = refreshed != ""
+	}
+	return out, rows.Err()
+}
+
+// DeleteScheduledWeeksAfter forgets goalID's recorded weeks that start after
+// lastWeekStart (a Monday): the weeks a plan that now ends earlier no longer
+// has.
+func (d *DB) DeleteScheduledWeeksAfter(ctx context.Context, goalID, lastWeekStart string) error {
+	_, err := d.db.ExecContext(ctx, d.query(
+		`DELETE FROM scheduled_weeks WHERE goal_id = ? AND week_start > ?`), goalID, lastWeekStart)
+	return err
+}
+
+// MarkWeekRefreshed records that a recorded week's untouched sessions have
+// been rebuilt from the plan and levels as they stand now (or were built from
+// them in the first place), so it is not done again. It never records a week
+// that was not filled: an unrecorded week has nothing to refresh, and the
+// refresh must not be what makes the fill think the week is done.
+func (d *DB) MarkWeekRefreshed(ctx context.Context, goalID, weekStart string) error {
+	_, err := d.db.ExecContext(ctx, d.query(
+		`UPDATE scheduled_weeks SET refreshed_at = ? WHERE goal_id = ? AND week_start = ? AND refreshed_at = ''`),
+		time.Now().UTC().Format(time.RFC3339), goalID, weekStart)
+	return err
+}
+
+// addScheduledWeekRefreshColumn adds refreshed_at to a scheduled_weeks table
+// that predates it. Rows that already exist were all filled when their week
+// was this week or next (that was all the tick filled), so they are stamped
+// as refreshed at the moment the column appears — otherwise the first start
+// after this ships would rebuild every rider's current sessions. Stamped only
+// when the ALTER actually adds the column, never on a later start, or a week
+// filled months ahead would be marked refreshed before it ever was.
+func (d *DB) addScheduledWeekRefreshColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE scheduled_weeks ADD COLUMN refreshed_at TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			return nil
+		}
+		return err
+	}
+	_, err = d.db.Exec(`UPDATE scheduled_weeks SET refreshed_at = created_at`)
+	return err
+}
+
 // addPushOriginColumn adds workout_pushes.origin. A push made before the
 // column existed carries no record of who made it, so the migration decides
 // once, when the column appears: a plan-made workout (it has a goal) of a
@@ -306,6 +369,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addThresholdSuggestionDirectionColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.addScheduledWeekRefreshColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addPushOriginColumn(); err != nil {
