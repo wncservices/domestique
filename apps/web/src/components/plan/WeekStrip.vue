@@ -45,6 +45,8 @@ const emit = defineEmits<{
   replan: []
   // Opens the page's manual "schedule an FTP test" modal.
   ftpTest: []
+  // Opens the "I have N minutes today" sheet.
+  trainNow: []
 }>()
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
@@ -234,7 +236,19 @@ watch(
         </span>
       </div>
 
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
+        <UButton
+          v-if="isCurrentWeek"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-timer"
+          class="shrink-0 whitespace-nowrap"
+          aria-label="I have some minutes today"
+          @click="emit('trainNow')"
+        >
+          <span class="hidden sm:inline">I have ... minutes</span>
+        </UButton>
         <UButton
           color="neutral"
           variant="outline"

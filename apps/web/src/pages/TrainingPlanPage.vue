@@ -37,6 +37,7 @@ import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
+import TrainNowSlideover from '@/components/plan/TrainNowSlideover.vue'
 import TomorrowForecastBanner from '@/components/plan/TomorrowForecastBanner.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
@@ -238,6 +239,15 @@ const {
   suggestionFor: weatherSuggestionFor,
   keepOutdoors: weatherKeepOutdoors,
 } = useWeather()
+
+// --- alternates and "I have N minutes": both change a session in place (or
+// add one), so the week and the list are re-read afterwards. ---
+
+const trainNowOpen = ref(false)
+
+async function reloadAfterSwap() {
+  await Promise.all([loadWeek(), loadWorkouts()])
+}
 
 const pushingWorkout = ref('')
 
@@ -694,6 +704,7 @@ onMounted(() => {
           @move="moveWorkout"
           @indoor="indoor.openConvert"
           @outdoor="indoor.openRevert"
+          @swapped="reloadAfterSwap"
           @rated="loadWeek"
           @back-to-today="backToToday"
         />
@@ -736,6 +747,7 @@ onMounted(() => {
         @rated="loadWeek"
         @replan="openReplanConfirm"
         @ftp-test="ftpModalOpen = true"
+        @train-now="trainNowOpen = true"
       />
 
       <SeasonTimeline
@@ -801,6 +813,8 @@ onMounted(() => {
       :error="indoor.error.value"
       @confirm="indoor.confirm"
     />
+
+    <TrainNowSlideover v-model:open="trainNowOpen" :today="today" @applied="reloadAfterSwap" />
 
     <FtpTestModal
       v-model:open="ftpModalOpen"
