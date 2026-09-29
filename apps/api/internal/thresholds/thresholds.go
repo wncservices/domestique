@@ -11,7 +11,10 @@ package thresholds
 
 import (
 	"fmt"
+	"math"
 	"time"
+
+	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 )
 
 // Ride is one analysed session, as much of it as detection needs. PowerCurve
@@ -27,6 +30,9 @@ type Ride struct {
 	BestHR1200    int // best 20-minute mean heart rate, internal/rideanalysis.BestHR
 	BestSpeed1200 float64
 	BestSpeed1800 float64
+	// TestProtocol is the fitnesstest protocol id when this ride was an FTP
+	// test (its planned workout carries test_protocol), else "".
+	TestProtocol string
 }
 
 // Profile is the rider's current fitness profile, as much of it as detection
@@ -56,6 +62,11 @@ type Finding struct {
 	// write on its own. Down never auto-applies, even for an estimated
 	// field: a downward move is always a suggestion a rider confirms.
 	Auto bool
+	// FromTest is true when the value comes from an FTP test ride rather
+	// than an eFTP estimate. A rider who just rode a test wants its result
+	// shown, so the dismissed-suggestion margin (meant to stop eFTP
+	// re-nagging with near-identical numbers) does not apply to it.
+	FromTest bool
 }
 
 // DetectionWindowDays is the window "What is detected" reads rides from:
@@ -216,7 +227,11 @@ type ftpCandidate struct {
 // not a valid critical-power model). ok is false for a non-cycling ride, or
 // one with neither a 20- nor 60-minute best to build an estimate from.
 func rideFTPCandidate(r Ride) (ftpCandidate, bool) {
-	if r.Sport != "cycling" {
+	// A test ride's FTP is its test value (see latestTestInWindow), never an
+	// eFTP: a maximal 1-minute or 8-minute effort read through the eFTP
+	// formulas would compete with, and usually beat, the number the rider
+	// just measured properly.
+	if r.Sport != "cycling" || r.TestProtocol != "" {
 		return ftpCandidate{}, false
 	}
 	p20, has20 := r.PowerCurve[powerCurveKey20Min]
@@ -283,19 +298,138 @@ func hasFTPHistoryBefore(rides []Ride, today time.Time, days int) bool {
 	return false
 }
 
+// FTP-test thresholds: a test result fires on a change of at least 1% either
+// way (it is a deliberate measurement, so it is trusted more than eFTP's 3%),
+// and a test that moves FTP by more than 25% is never auto-applied — the same
+// cap level recalibration uses, past which a result is more likely a bad test
+// than a real change.
+const (
+	testMoveFraction    = 0.01
+	testAutoCapFraction = 0.25
+	floatSlack          = 1e-9
+)
+
+// testLabels name each protocol's test and its raw power in a reason.
+var testLabels = map[string]struct{ test, raw string }{
+	fitnesstest.ProtocolRamp:         {"ramp test", "best minute"},
+	fitnesstest.ProtocolTwentyMinute: {"20-minute test", "best 20 minutes"},
+	fitnesstest.ProtocolTwoByEight:   {"2 x 8-minute test", "best 8 minutes"},
+}
+
+// latestTestInWindow finds the most recent test ride in the detection window
+// that yields a value. Only the latest counts: an older test in the window has
+// been superseded by the rider's own later measurement.
+func latestTestInWindow(rides []Ride, today time.Time) (value, raw float64, source Ride, found bool) {
+	var latest time.Time
+	for _, r := range rides {
+		if r.Sport != "cycling" || r.TestProtocol == "" {
+			continue
+		}
+		d, ok := parseDate(r.Date)
+		if !ok || !inWindow(d, today, DetectionWindowDays) {
+			continue
+		}
+		v, ok := fitnesstest.FTPFromTest(r.TestProtocol, r.PowerCurve)
+		if !ok {
+			continue
+		}
+		if !found || d.After(latest) {
+			latest, source, value, found = d, r, v, true
+			raw = testRawPower(r)
+		}
+	}
+	return value, raw, source, found
+}
+
+// testRawPower is the best-effort power a protocol's formula multiplies, for
+// the reason's parenthetical.
+func testRawPower(r Ride) float64 {
+	switch r.TestProtocol {
+	case fitnesstest.ProtocolRamp:
+		return r.PowerCurve[60]
+	case fitnesstest.ProtocolTwentyMinute:
+		return r.PowerCurve[powerCurveKey20Min]
+	case fitnesstest.ProtocolTwoByEight:
+		return r.PowerCurve[480]
+	}
+	return 0
+}
+
+// eftpUpFinding is the ordinary eFTP up finding, or ok=false when the
+// candidate is not at least 3% above the profile's FTP.
+func eftpUpFinding(c ftpCandidate, source Ride, p Profile) (Finding, bool) {
+	if c.value < p.FTPWatts*upFactor {
+		return Finding{}, false
+	}
+	return Finding{
+		Field:           "ftp",
+		Value:           roundInt(c.value),
+		Previous:        p.FTPWatts,
+		Direction:       "up",
+		SourceSessionID: source.SessionID,
+		SourceDate:      source.Date,
+		Reason:          fmt.Sprintf("from %s's %s (%d W)", weekday(source.Date), c.label, int(roundInt(c.raw))),
+		Auto:            p.FTPWatts == 0 || p.FTPEstimated,
+	}, true
+}
+
+// testFinding turns a test value into a finding, or ok=false when it is within
+// 1% of the current FTP (the test confirms it).
+func testFinding(value, raw float64, source Ride, p Profile) (Finding, bool) {
+	dir := "up"
+	if p.FTPWatts > 0 {
+		diff := value - p.FTPWatts
+		if math.Abs(diff) < p.FTPWatts*testMoveFraction-floatSlack {
+			return Finding{}, false
+		}
+		if diff < 0 {
+			dir = "down"
+		}
+	}
+	labels := testLabels[source.TestProtocol]
+	reason := fmt.Sprintf("from %s's %s (%d W %s)", weekday(source.Date), labels.test, int(roundInt(raw)), labels.raw)
+
+	// A down move never auto-applies (the existing rule for every field), and
+	// neither does one this large in either direction.
+	auto := dir == "up" && (p.FTPWatts == 0 || p.FTPEstimated)
+	if p.FTPWatts > 0 && math.Abs(value-p.FTPWatts) > p.FTPWatts*testAutoCapFraction+floatSlack {
+		auto = false
+		reason += ", more than 25% from your current FTP, so please review it"
+	}
+	return Finding{
+		Field:           "ftp",
+		Value:           roundInt(value),
+		Previous:        p.FTPWatts,
+		Direction:       dir,
+		SourceSessionID: source.SessionID,
+		SourceDate:      source.Date,
+		Reason:          reason,
+		Auto:            auto,
+		FromTest:        true,
+	}, true
+}
+
 func detectFTP(rides []Ride, p Profile, today time.Time) (Finding, bool) {
-	if c, source, found := bestFTPInWindow(rides, today, DetectionWindowDays); found &&
-		c.value >= p.FTPWatts*upFactor {
-		return Finding{
-			Field:           "ftp",
-			Value:           roundInt(c.value),
-			Previous:        p.FTPWatts,
-			Direction:       "up",
-			SourceSessionID: source.SessionID,
-			SourceDate:      source.Date,
-			Reason:          fmt.Sprintf("from %s's %s (%d W)", weekday(source.Date), c.label, int(roundInt(c.raw))),
-			Auto:            p.FTPWatts == 0 || p.FTPEstimated,
-		}, true
+	c, source, found := bestFTPInWindow(rides, today, DetectionWindowDays)
+
+	// A test ride in the window outranks eFTP: its value is the candidate,
+	// eFTP overrides it only with a real breakthrough (3% above the test),
+	// and eFTP alone never lowers an FTP a recent test set.
+	if value, raw, testSource, hasTest := latestTestInWindow(rides, today); hasTest {
+		if found && c.value >= value*upFactor {
+			// A breakthrough only wins when it is itself a finding against
+			// the current FTP; otherwise the test still has its say.
+			if f, ok := eftpUpFinding(c, source, p); ok {
+				return f, true
+			}
+		}
+		return testFinding(value, raw, testSource, p)
+	}
+
+	if found {
+		if f, ok := eftpUpFinding(c, source, p); ok {
+			return f, true
+		}
 	}
 
 	// Down direction: a suggestion only, and only once there is enough

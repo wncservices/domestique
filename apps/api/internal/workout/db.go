@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS workouts (
     steps        %[1]s NOT NULL,
     zone         TEXT NOT NULL DEFAULT '',
     level        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    test_protocol     TEXT NOT NULL DEFAULT '',
+    test_result_watts DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
@@ -317,6 +319,8 @@ func (d *DB) addZoneLevelColumns() error {
 	for _, stmt := range []string{
 		`ALTER TABLE workouts ADD COLUMN zone TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workouts ADD COLUMN level DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		`ALTER TABLE workouts ADD COLUMN test_protocol TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN test_result_watts DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -680,7 +684,7 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -700,7 +704,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -723,7 +727,7 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		zone  string
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
@@ -766,9 +770,9 @@ func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Worko
 
 	ts := timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
-        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, ts, ts)
+        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, ts, ts)
 	if err != nil {
 		return Workout{}, err
 	}
