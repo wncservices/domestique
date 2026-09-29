@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
@@ -158,7 +159,7 @@ func structuredOptions(w workout.Workout, riderLevel float64, reducedWeek bool, 
 		return Option{
 			Kind: kind, Name: req.Name, Zone: req.Zone, Level: req.Level,
 			Seconds:    workoutlib.TotalSeconds(r),
-			TSS:        plannedTSS(req.Steps, profile),
+			TSS:        TSS(w.Sport, req.Steps, profile.FTPWatts),
 			Difficulty: Difficulty(req.Level, riderLevel),
 			Steps:      req.Steps,
 		}
@@ -238,7 +239,7 @@ func enduranceOptions(w workout.Workout, profile workout.RiderProfile) []Option 
 		out = append(out, Option{
 			Kind: c.kind, Name: req.Name, Zone: req.Zone,
 			Seconds:    seconds,
-			TSS:        plannedTSS(req.Steps, profile),
+			TSS:        TSS(w.Sport, req.Steps, profile.FTPWatts),
 			Difficulty: LabelAchievable,
 			Steps:      req.Steps,
 		})
@@ -255,7 +256,10 @@ func scaleEndurance(main, factor float64) float64 {
 	return math.Min(math.Max(seconds, enduranceMinSeconds), enduranceMaxSeconds)
 }
 
-// plannedTSS is the adapter's planned-TSS estimate, 0 without an FTP.
-func plannedTSS(steps []workout.WorkoutStep, profile workout.RiderProfile) float64 {
-	return adapter.EstimatePlannedTSS(workout.Workout{Steps: steps}, profile.FTPWatts)
+// TSS is the planned TSS of steps for sport (adapter.PlannedTSS, the step-by-step
+// estimator the race-day projection shares), 0 without an FTP or for a run.
+// Shared by the alternates menu and "I have N minutes" so they price alike.
+func TSS(sport model.Sport, steps []workout.WorkoutStep, ftpWatts float64) float64 {
+	tss, _ := adapter.PlannedTSS(workout.Workout{Sport: sport, Steps: steps}, ftpWatts)
+	return tss
 }
