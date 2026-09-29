@@ -1272,8 +1272,9 @@ func (s *Server) handleDownloadWorkoutFIT(w http.ResponseWriter, r *http.Request
 	}
 
 	fitBytes, err := fitworkout.Encode(workout.FITSteps(wk.Steps), fitworkout.Options{
-		Name:  wk.Name,
-		Sport: fitworkout.SportFromString(string(wk.Sport)),
+		Name:   workout.DeviceName(wk.Name, wk.Indoor),
+		Sport:  fitworkout.SportFromString(string(wk.Sport)),
+		Indoor: wk.Indoor,
 	})
 	if err != nil {
 		// A step combination validateSteps allowed but fitworkout.Encode
@@ -1283,7 +1284,7 @@ func (s *Server) handleDownloadWorkoutFIT(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	writeFITAttachment(s.logger(), w, wk.ID, fitBytes)
+	writeFITAttachment(s.logger(), w, workout.DeviceName(wk.ID, wk.Indoor), fitBytes)
 }
 
 // handlePushWorkoutToGarmin puts a structured workout on the rider's own

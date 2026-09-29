@@ -353,15 +353,16 @@ func runFITWorkout(src *source.DB, args []string, out string) error {
 	}
 
 	fitBytes, err := fitworkout.Encode(workout.FITSteps(w.Steps), fitworkout.Options{
-		Name:  w.Name,
-		Sport: fitworkout.SportFromString(string(w.Sport)),
+		Name:   workout.DeviceName(w.Name, w.Indoor),
+		Sport:  fitworkout.SportFromString(string(w.Sport)),
+		Indoor: w.Indoor,
 	})
 	if err != nil {
 		return err
 	}
 
 	if out == "" {
-		out = filepath.Base(strings.NewReplacer("/", "-", `\`, "-").Replace(id)) + ".fit"
+		out = filepath.Base(strings.NewReplacer("/", "-", `\`, "-").Replace(workout.DeviceName(id, w.Indoor))) + ".fit"
 	}
 	// #nosec G703 -- --out is an operator-supplied path, the same as any
 	// shell redirect; an id-derived name is flattened above.

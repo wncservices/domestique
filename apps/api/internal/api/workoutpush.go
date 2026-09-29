@@ -47,6 +47,9 @@ func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session
 	consumer, _ := s.garminConsumer()
 	steps := workout.FITSteps(wk.Steps)
 	hash := workout.ContentHash(wk)
+	// What the account shows: the suffix marks an indoor session there, while
+	// the stored name stays the one the scheduler's legacy checks match.
+	name := workout.DeviceName(wk.Name, wk.Indoor)
 	res := workoutPushResult{Outcome: pushUnchanged}
 
 	push, have, err := s.Training.GetPush(ctx, wk.ID, garminProvider)
@@ -68,7 +71,7 @@ func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session
 
 	create := !have || push.RemoteID == ""
 	if !create && push.ContentHash != hash {
-		err := s.Garmin.UpdateWorkout(ctx, consumer, session, push.RemoteID, wk.Name, string(wk.Sport), steps)
+		err := s.Garmin.UpdateWorkout(ctx, consumer, session, push.RemoteID, name, string(wk.Sport), steps)
 		switch {
 		case errors.Is(err, garmin.ErrWorkoutGone):
 			create = true
@@ -85,7 +88,7 @@ func (s *Server) syncWorkoutToGarmin(ctx context.Context, session garmin.Session
 	}
 
 	if create {
-		id, err := s.Garmin.PushWorkout(ctx, consumer, session, wk.Name, string(wk.Sport), steps)
+		id, err := s.Garmin.PushWorkout(ctx, consumer, session, name, string(wk.Sport), steps)
 		if err != nil {
 			return res, err
 		}

@@ -121,6 +121,10 @@ type Options struct {
 	Sport typedef.Sport
 	// CreatedAt stamps the file. Zero uses the current time.
 	CreatedAt time.Time
+	// Indoor marks a trainer session: the workout message carries
+	// sub_sport = indoor_cycling, which is what tells a head unit to offer
+	// trainer control for it. Only meaningful for cycling; ignored otherwise.
+	Indoor bool
 }
 
 // Encode renders a structured workout as a FIT workout file.
@@ -163,6 +167,9 @@ func Encode(steps []Step, opts Options) ([]byte, error) {
 		SetWktName(name).
 		SetSport(sport).
 		SetNumValidSteps(numSteps)
+	if opts.Indoor && sport == typedef.SportCycling {
+		wkt.Workout.SetSubSport(typedef.SubSportIndoorCycling)
+	}
 	wkt.WorkoutSteps = fitSteps
 
 	fitFile := wkt.ToFIT(nil)
