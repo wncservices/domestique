@@ -88,8 +88,9 @@ type Week struct {
 
 // Plan is a full periodized structure for one goal.
 type Plan struct {
-	GoalID string
-	Weeks  []Week
+	GoalID     string
+	Weeks      []Week
+	TotalWeeks int
 	// Adjustment is the compliance-based multiplier internal/adapter.Reconcile
 	// applied to this plan's still-upcoming weeks — 1 (BuildPlan's own
 	// default) means unadjusted, whether because Reconcile was never called
@@ -140,9 +141,20 @@ const (
 	taperEndFraction   = 0.25
 )
 
-// BuildPlan builds a periodized structure from today until goal's event
-// date, sized to the rider's own weekly availability.
+// BuildPlan builds a periodized structure toward goal's event date, sized to
+// the rider's own weekly availability, and returns the weeks from today's on.
+//
+// The plan is rebuilt on every request and scheduler tick, so it must not
+// count weeks from "today": that would make this week index 0 of its phase
+// every single time — recovery weeks would never arrive and Base would never
+// ramp, with phases advancing only because the remaining span shrinks.
+// Phases are instead allocated over the whole span from a stable anchor (the
+// Monday of the goal's creation, see planAnchor) to the event, then trimmed
+// to the current week onward, so a calendar week keeps its phase, recovery
+// flag, volume and Number whichever day the plan is built on. This is the
+// same idea as BuildRollingPlan's fixed anchor.
 func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Plan, error) {
+	anchor := planAnchor(goal, today)
 	if goal.EventDate == "" {
 		return Plan{}, ErrNoEventDate
 	}
@@ -165,13 +177,15 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 		return Plan{}, ErrEventInThePast
 	}
 
+	anchorUTC := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.UTC)
+
 	// The week containing the event itself must be included even when the
-	// gap is an exact multiple of 7 days — event.Sub(start) is then exactly
+	// gap is an exact multiple of 7 days — event.Sub(anchor) is then exactly
 	// N weeks, and a plain ceil of that would stop one week short, landing
 	// the event on the Monday immediately after the last planned week
 	// rather than inside it. Integer division (floor, since both operands
 	// are non-negative here) plus one covers every case uniformly.
-	daysUntilEvent := int(event.Sub(startUTC).Hours() / 24)
+	daysUntilEvent := int(event.Sub(anchorUTC).Hours() / 24)
 	totalWeeks := daysUntilEvent/7 + 1
 
 	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
@@ -179,17 +193,23 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	lengths := allocateWeeks(totalWeeks)
 	order := []Phase{PhaseBase, PhaseBuild, PhasePeak, PhaseTaper}
 
-	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, totalWeeks), Adjustment: 1}
+	// Weeks before this one were already lived; only this week onward is
+	// returned, but they still count towards Number and each phase's index.
+	firstShown := max(0, int(startUTC.Sub(anchorUTC).Hours()/24)/7)
+	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, max(0, totalWeeks-firstShown)), TotalWeeks: totalWeeks, Adjustment: 1}
 	weekNumber := 0
 	for _, phase := range order {
 		n := lengths[phase]
 		for i := 0; i < n; i++ {
 			weekNumber++
+			if weekNumber-1 < firstShown {
+				continue
+			}
 			recovery := (phase == PhaseBase || phase == PhaseBuild) &&
 				(i+1)%recoveryEveryNWeeks == 0
 			plan.Weeks = append(plan.Weeks, Week{
 				Number:      weekNumber,
-				StartDate:   start.AddDate(0, 0, (weekNumber-1)*7).Format("2006-01-02"),
+				StartDate:   anchorUTC.AddDate(0, 0, (weekNumber-1)*7).Format("2006-01-02"),
 				Phase:       phase,
 				Recovery:    recovery,
 				TargetHours: peakHours * weekFraction(phase, i, n, recovery),
@@ -197,6 +217,24 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 		}
 	}
 	return plan, nil
+}
+
+// planAnchor is the Monday week 1 falls on: the Monday of the goal's
+// creation, in today's own zone. A goal with no usable creation date, or one
+// "created in the future" (clock skew, hand-built test goals), anchors to
+// this week instead. That clamp is also what lets internal/adapter build the
+// plan as of some past date: a goal younger than that date is anchored there.
+func planAnchor(goal workout.Goal, today time.Time) time.Time {
+	thisWeek := MondayOf(today)
+	created, err := time.Parse(time.RFC3339, goal.CreatedAt)
+	if err != nil {
+		return thisWeek
+	}
+	anchor := MondayOf(created.In(today.Location()))
+	if anchor.After(thisWeek) {
+		return thisWeek
+	}
+	return anchor
 }
 
 // rollingWeeks is how far ahead a plan with no event date looks.
@@ -243,7 +281,7 @@ func BuildRollingPlan(goal workout.Goal, profile workout.RiderProfile, today tim
 
 	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
 
-	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, rollingWeeks), Adjustment: 1}
+	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, rollingWeeks), TotalWeeks: rollingWeeks, Adjustment: 1}
 	for i := 0; i < rollingWeeks; i++ {
 		index := firstWeek + i
 		if index < 0 {
