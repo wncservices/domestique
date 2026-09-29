@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/alternates"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
@@ -93,7 +92,30 @@ func (s *Server) alternatesFor(ctx context.Context, wk workout.Workout, today ti
 		return alternateSet{}, err
 	}
 	reduced := s.inReducedWeek(ctx, wk, profile)
-	return alternateSet{options: alternates.Options(wk, level, reduced, profile), profile: profile}, nil
+	options := alternates.Options(wk, level, reduced, profile)
+	return alternateSet{options: dropUnchangedOnTrainer(wk, options, profile), profile: profile}, nil
+}
+
+// dropUnchangedOnTrainer hides a Shorter or Longer that would leave an indoor
+// session exactly as long as it is: the conversion caps an easy or long ride's
+// main work, so 5 and 6 outdoor hours are the same 2h20 on the trainer, and an
+// option that changes nothing there is not an option. Harder and Easier change
+// the work itself and always show.
+func dropUnchangedOnTrainer(wk workout.Workout, opts []alternates.Option, profile workout.RiderProfile) []alternates.Option {
+	if !wk.Indoor {
+		return opts
+	}
+	current := int(math.Round(workout.PlannedSeconds(wk.Steps) / 60))
+	kept := opts[:0:0]
+	for _, o := range opts {
+		if o.Kind == alternates.Shorter || o.Kind == alternates.Longer {
+			if int(math.Round(workout.PlannedSeconds(shownSteps(wk, o, profile))/60)) == current {
+				continue
+			}
+		}
+		kept = append(kept, o)
+	}
+	return kept
 }
 
 // riderLevelReadOnly is the rider's level in zone: the saved one, else the
@@ -218,7 +240,7 @@ func (s *Server) handleAlternates(w http.ResponseWriter, r *http.Request) {
 		out := alternateOptionDTO{
 			Kind: string(opt.Kind), Name: opt.Name, Zone: string(opt.Zone), Level: opt.Level,
 			Minutes:    int(math.Round(workout.PlannedSeconds(steps) / 60)),
-			TSS:        adapter.EstimatePlannedTSS(workout.Workout{Steps: steps}, set.profile.FTPWatts),
+			TSS:        alternates.TSS(wk.Sport, steps, set.profile.FTPWatts),
 			Difficulty: opt.Difficulty,
 		}
 		if opt.Kind == alternates.Harder && lowReadiness {
@@ -334,10 +356,14 @@ func (s *Server) handleAlternateRevert(w http.ResponseWriter, r *http.Request) {
 		outdoor = append([]workout.WorkoutStep{}, *snap.OutdoorSteps...)
 	}
 	description := addNote(snap.Description, scheduler.SwappedMarker+" "+revertPlannedNote)
-	updated, err := s.Training.UpdateWorkout(r.Context(), wk.ID, workout.UpdateWorkoutRequest{
+	req := workout.UpdateWorkoutRequest{
 		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description,
 		Indoor: &indoorFlag, OutdoorSteps: &outdoor, ClearPlannedSnapshot: true,
-	})
+	}
+	if snap.Sport != "" {
+		req.Sport = &snap.Sport
+	}
+	updated, err := s.Training.UpdateWorkout(r.Context(), wk.ID, req)
 	if err != nil {
 		s.logger().Error("could not revert a swapped workout", "rider", wk.Rider, "workout", wk.ID, "err", err)
 		s.fail(w, err)
@@ -352,7 +378,7 @@ func (s *Server) handleAlternateRevert(w http.ResponseWriter, r *http.Request) {
 // snapshot yet.
 func plannedSnapshotOf(wk workout.Workout) *workout.PlannedSnapshot {
 	snap := &workout.PlannedSnapshot{
-		Name: wk.Name, Zone: wk.Zone, Level: wk.Level, Description: wk.Description,
+		Sport: wk.Sport, Name: wk.Name, Zone: wk.Zone, Level: wk.Level, Description: wk.Description,
 		Steps: append([]workout.WorkoutStep{}, wk.Steps...), Indoor: wk.Indoor,
 	}
 	if wk.OutdoorSteps != nil {

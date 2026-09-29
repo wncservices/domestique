@@ -360,6 +360,9 @@ type Workout struct {
 // outdoor_steps column: that one undoes only the steps and is cleared by an
 // unrelated revert.
 type PlannedSnapshot struct {
+	// Sport is empty in a snapshot written before it was recorded; a revert
+	// then leaves the sport as it is.
+	Sport       model.Sport   `json:"sport,omitempty"`
 	Name        string        `json:"name"`
 	Zone        Zone          `json:"zone"`
 	Level       float64       `json:"level"`

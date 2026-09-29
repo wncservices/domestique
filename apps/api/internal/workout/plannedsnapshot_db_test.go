@@ -28,7 +28,7 @@ func TestPlannedSnapshotRoundTripsOnEachEngine(t *testing.T) {
 
 			outdoor := nestedSteps()
 			first := &PlannedSnapshot{
-				Name: w.Name, Zone: w.Zone, Level: w.Level, Description: w.Description, Steps: w.Steps,
+				Sport: w.Sport, Name: w.Name, Zone: w.Zone, Level: w.Level, Description: w.Description, Steps: w.Steps,
 				Indoor: true, OutdoorSteps: &outdoor,
 			}
 			newName, newZone, newLevel := "Threshold 4x12", ZoneThreshold, 6.0

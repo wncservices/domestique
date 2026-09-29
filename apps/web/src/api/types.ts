@@ -1341,6 +1341,8 @@ export interface WeatherResponse extends WeatherPrefs {
   unavailable?: boolean
   days: WeatherDay[]
   suggestions: WeatherSuggestion[]
+}
+
 export type AlternateKind = 'easier' | 'harder' | 'shorter' | 'longer'
 
 /** Predicted difficulty of an option: the distance between its rung and the

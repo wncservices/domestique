@@ -403,7 +403,7 @@ func TestRevertIsRefusedForARiddenOrPastSession(t *testing.T) {
 func TestAnIndoorSessionStaysIndoorThroughASwapAndRevertRestoresBothForms(t *testing.T) {
 	h := newReplanHarness(t)
 	goal := h.indoorSetup(false)
-	orig := h.indoorRide(goal, indoorFuture, 13200) // a 4 h ride: 3h05 after a shorter swap
+	orig := h.indoorRide(goal, indoorFuture, 9600) // a 3 h ride: 2h20 after a shorter swap
 	if resp, out := h.convert("wilant", orig.ID, ""); resp.StatusCode != http.StatusOK || !out.Indoor {
 		t.Fatalf("convert = %d indoor=%v", resp.StatusCode, out.Indoor)
 	}
@@ -414,8 +414,8 @@ func TestAnIndoorSessionStaysIndoorThroughASwapAndRevertRestoresBothForms(t *tes
 	if !ok {
 		t.Fatalf("kinds = %v, want a shorter option for an indoor session", listed.kinds())
 	}
-	if shorterOpt.Minutes >= 185 {
-		t.Errorf("shorter shows %d min; an indoor session is shown as its trainer version, under the 185 min outdoor form", shorterOpt.Minutes)
+	if shorterOpt.Minutes >= 140 {
+		t.Errorf("shorter shows %d min; an indoor session is shown as its trainer version, under the 140 min outdoor form", shorterOpt.Minutes)
 	}
 
 	resp, out := h.altSwap("wilant", "cyclists", orig.ID, "shorter")
@@ -423,10 +423,10 @@ func TestAnIndoorSessionStaysIndoorThroughASwapAndRevertRestoresBothForms(t *tes
 		t.Fatalf("swap = %d indoor=%v, want 200 and still indoor", resp.StatusCode, out.Indoor)
 	}
 	got := h.stored(orig.ID)
-	if got.OutdoorSteps == nil || workout.PlannedSeconds(*got.OutdoorSteps) != 11100 {
-		t.Fatalf("outdoor steps = %+v, want the rebuilt outdoor shorter ride (3h05)", got.OutdoorSteps)
+	if got.OutdoorSteps == nil || workout.PlannedSeconds(*got.OutdoorSteps) != 8400 {
+		t.Fatalf("outdoor steps = %+v, want the rebuilt outdoor shorter ride (2h20)", got.OutdoorSteps)
 	}
-	if workout.PlannedSeconds(got.Steps) >= 11100 {
+	if workout.PlannedSeconds(got.Steps) >= 8400 {
 		t.Errorf("indoor steps are %v s, want the trainer version, shorter than the outdoor one", workout.PlannedSeconds(got.Steps))
 	}
 	assertTrainerShape(t, got.Steps)
