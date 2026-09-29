@@ -156,6 +156,15 @@ func (s *Server) detectThresholds(ctx context.Context, rider string, profile wor
 		ThresholdHR: profile.ThresholdHR, ThresholdHREstimated: profile.IsEstimated(workout.FieldThresholdHR),
 	}
 
+	// A ride whose eFTP lands within 3% of the current FTP confirms it, which
+	// resets the "FTP last checked" clock the test suggestion reads. Best
+	// effort: it moves a nagging threshold, not the rider's numbers.
+	if date, ok := thresholds.FTPConfirmedBy(rides, tp, now); ok {
+		if err := s.Training.MarkFTPVerified(ctx, rider, date); err != nil {
+			s.logger().Warn("marking FTP verified from a confirming ride failed", "rider", rider, "err", err)
+		}
+	}
+
 	result := thresholdDetectionResult{Profile: profile, HasFTPPowerCurve: hasFTPPowerCurve}
 	findings := thresholds.Detect(rides, tp, now)
 	foundField := make(map[string]bool, len(findings))

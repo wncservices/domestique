@@ -134,7 +134,18 @@ type RiderProfile struct {
 	// twice is a ratio of 1, under the trigger. Read-only here: SaveProfile
 	// never writes it, only DB.SetFTPCalibrated does (a compare-and-set).
 	FTPLevelsCalibratedAt float64
-	UpdatedAt             string
+	// FTPVerifiedAt is the date ("YYYY-MM-DD") FTP was last known to be
+	// right: it last changed, a test measured it, or a recent ride's eFTP
+	// landed within 3% of it. "" when there is no FTP or it predates this
+	// column. Monotonic and read-only here: SaveProfile only ever moves it
+	// forward through MarkFTPVerified when it changes FTP, so a stale copy
+	// of the profile cannot walk it back.
+	FTPVerifiedAt string
+	// FTPTestSnoozedUntil is the date ("YYYY-MM-DD") until which the FTP
+	// test suggestion stays quiet after the rider dismissed it. Written only
+	// by SnoozeFTPTest; SaveProfile never touches it.
+	FTPTestSnoozedUntil string
+	UpdatedAt           string
 }
 
 // Names a field can appear under in RiderProfile.Estimated. FTP has its own

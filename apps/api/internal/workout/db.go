@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS rider_profiles (
     available_days             TEXT NOT NULL DEFAULT '',
     hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
     experience_level           TEXT NOT NULL DEFAULT '',
+    ftp_verified_at            TEXT NOT NULL DEFAULT '',
+    ftp_test_snoozed_until     TEXT NOT NULL DEFAULT '',
     updated_at                 TEXT NOT NULL
 );
 
@@ -277,7 +279,23 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addThresholdSuggestionDirectionColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.backfillFTPVerified(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	return store, nil
+}
+
+// backfillFTPVerified dates every FTP already on file to today, only where
+// no date exists. Without it every existing rider would read as "FTP never
+// checked" and be nagged to test the moment this ships. It is safe to run on
+// every start: once a profile has an FTP it always has a date (SaveProfile
+// sets one when FTP changes), so it only ever finds the rows that predate
+// the column.
+func (d *DB) backfillFTPVerified() error {
+	_, err := d.db.Exec(d.query(
+		`UPDATE rider_profiles SET ftp_verified_at = ? WHERE ftp_verified_at = '' AND ftp_watts > 0`),
+		time.Now().UTC().Format("2006-01-02"))
+	return err
 }
 
 // addEstimatedColumns adds the columns recording which profile values were
@@ -295,6 +313,8 @@ func (d *DB) addEstimatedColumns() error {
 		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN auto_push_workouts %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
 		`ALTER TABLE rider_profiles ADD COLUMN ftp_levels_calibrated_watts DOUBLE PRECISION NOT NULL DEFAULT 0`,
 		`ALTER TABLE rider_profiles ADD COLUMN threshold_hr INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE rider_profiles ADD COLUMN ftp_verified_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rider_profiles ADD COLUMN ftp_test_snoozed_until TEXT NOT NULL DEFAULT ''`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -607,10 +627,11 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, threshold_hr, resting_hr,
                available_days, hours_per_available_day, experience_level, estimated_fields,
-               auto_push_workouts, ftp_levels_calibrated_watts, updated_at
+               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
 		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.ThresholdHR, &p.RestingHR,
-		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt, &p.UpdatedAt)
+		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt,
+		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
@@ -653,11 +674,18 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	profile.Rider = rider
 	profile.UpdatedAt = timestamp()
 
+	// Whether this save changes FTP is decided against what is stored now,
+	// before the upsert overwrites it.
+	previous, _, err := d.GetProfile(ctx, rider)
+	if err != nil {
+		return RiderProfile{}, err
+	}
+
 	// ON CONFLICT ... DO UPDATE works on both engines without a dialect
 	// branch — the same upsert shape internal/settings, internal/blocklist,
 	// internal/providerlink and internal/state's own sync_state table
 	// already rely on.
-	_, err := d.db.ExecContext(ctx, d.query(`
+	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr,
                     threshold_hr, resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields,
                     auto_push_workouts, updated_at)
@@ -676,8 +704,57 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 		return RiderProfile{}, err
 	}
 
+	// Any change to FTP, by whatever path (the form, an accepted suggestion, a
+	// sync's auto-fill), is a verification: someone or something just
+	// established the number. ftp_verified_at is not part of the upsert above
+	// so an old copy of the profile cannot overwrite a newer date.
+	if profile.FTPWatts > 0 && profile.FTPWatts != previous.FTPWatts {
+		if err := d.MarkFTPVerified(ctx, rider, time.Now().UTC().Format("2006-01-02")); err != nil {
+			return RiderProfile{}, err
+		}
+	}
+
 	saved, _, err := d.GetProfile(ctx, rider)
 	return saved, err
+}
+
+// MarkFTPVerified moves ftp_verified_at forward to date. It never moves it
+// back (ISO dates compare correctly as strings, and "" is before all of them),
+// so a test, a confirming ride and a changed FTP can arrive in any order and
+// the latest wins. A rider with no profile row is a no-op: there is no FTP to
+// have verified.
+func (d *DB) MarkFTPVerified(ctx context.Context, rider, date string) error {
+	_, err := d.db.ExecContext(ctx, d.query(`
+        UPDATE rider_profiles SET ftp_verified_at = ? WHERE rider = ? AND ftp_verified_at < ?`),
+		date, normalizeRider(rider), date)
+	return err
+}
+
+// SnoozeFTPTest silences the FTP test suggestion until date. Its own writer,
+// like the calibration marker, so a whole-profile save can never revert it.
+// It creates the profile row when there is none: a rider with power rides but
+// no saved profile is offered a "set your FTP" test, and dismissing it has to
+// stick.
+func (d *DB) SnoozeFTPTest(ctx context.Context, rider, until string) error {
+	_, err := d.db.ExecContext(ctx, d.query(`
+        INSERT INTO rider_profiles (rider, ftp_test_snoozed_until, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT (rider) DO UPDATE SET ftp_test_snoozed_until = excluded.ftp_test_snoozed_until`),
+		normalizeRider(rider), until, timestamp())
+	return err
+}
+
+// SetTestResult records the FTP a test ride measured on its workout, once. It
+// reports whether it wrote: false means a result was already there, which is
+// what makes a repeated sync a no-op instead of a second toast and a second
+// suggestion.
+func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64) (bool, error) {
+	result, err := d.db.ExecContext(ctx, d.query(`
+        UPDATE workouts SET test_result_watts = ? WHERE id = ? AND test_result_watts = 0`), watts, workoutID)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	return affected > 0, err
 }
 
 // --- Workouts ---
