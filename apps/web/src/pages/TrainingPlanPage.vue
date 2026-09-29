@@ -224,13 +224,20 @@ const weekStart = ref<string | undefined>(undefined)
 
 const readiness = ref<ReadinessResponse | null>(null)
 
+// Ticketed like loadWeek: an ease click refetches while an earlier load may
+// still be in flight, and a slower stale response must not put a banner back
+// that the newer one just removed.
+let readinessRequest = 0
+
 async function loadReadiness() {
+  const requestId = ++readinessRequest
   try {
     // The browser's own local day, so "tomorrow" is the rider's tomorrow
     // even near local midnight — see utils/rideDates.ts's todayISO.
-    readiness.value = await api.readiness(todayISO())
+    const result = await api.readiness(todayISO())
+    if (requestId === readinessRequest) readiness.value = result
   } catch {
-    readiness.value = null
+    if (requestId === readinessRequest) readiness.value = null
   }
 }
 
