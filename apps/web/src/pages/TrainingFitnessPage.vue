@@ -12,6 +12,7 @@ import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, Progress
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
+import WeatherSettings from '@/components/plan/WeatherSettings.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
@@ -423,6 +424,8 @@ onMounted(() => {
         @build-max-hr-test="buildMaxHRTest"
       />
     </UCard>
+
+    <WeatherSettings />
 
     <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
   </div>
