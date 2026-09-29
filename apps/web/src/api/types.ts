@@ -845,6 +845,10 @@ export interface Workout {
   zone?: string
   /** Rung on this workout's zone's progression ladder; omitted when 0/unset. */
   level?: number
+  /** Set on an FTP test workout; omitted for everything else. */
+  testProtocol?: FtpTestProtocolId
+  /** The FTP the test ride measured; omitted until a result is captured. */
+  testResultWatts?: number
   /** How long the step list is meant to take, in seconds — time steps
    *  only; 0 means unknown (open/distance-only steps have no honest
    *  duration). See workout.PlannedSeconds. */
@@ -1013,6 +1017,53 @@ export interface FitnessResponse {
 export interface LevelsRecalibrated {
   fromFtpWatts: number
   toFtpWatts: number
+}
+
+/** The three FTP test protocols. Mirrors internal/fitnesstest. */
+export type FtpTestProtocolId = 'ramp' | 'twenty_minute' | 'two_by_eight'
+
+/** One entry of the FTP test menu. Mirrors fitnesstest.Protocol. */
+export interface FtpTestProtocol {
+  id: FtpTestProtocolId
+  name: string
+  durationMinutes: number
+  difficulty: string
+  /** erg: the trainer holds each step's watts. resistance: level or slope
+   *  mode, because ERG would cap an all-out effort at its target. */
+  trainerMode: 'erg' | 'resistance'
+  formula: string
+  forWhom: string
+  prerequisites: string
+}
+
+/** The test worth offering right now. Mirrors ftpTestSuggestionDTO. */
+export interface FtpTestSuggestion {
+  reason: 'no_ftp' | 'after_recovery' | 'block_start' | 'stale'
+  message: string
+  /** The suggested day, YYYY-MM-DD. */
+  date: string
+  /** The protocol to pre-select. */
+  recommended: FtpTestProtocolId
+  /** The plan-made session on that day scheduling the test would replace. */
+  replacesWorkoutId?: string
+}
+
+/** A test workout: the next scheduled one, or the last one ridden and read. */
+export interface FtpTestRef {
+  workoutId: string
+  protocol: FtpTestProtocolId
+  date: string
+  resultWatts?: number
+}
+
+/** GET /api/training/tests. Mirrors ftpTestsDTO. */
+export interface FtpTests {
+  protocols: FtpTestProtocol[]
+  suggestion?: FtpTestSuggestion
+  scheduled?: FtpTestRef
+  lastTest?: FtpTestRef
+  /** When FTP was last known to be right, YYYY-MM-DD; empty if unknown. */
+  ftpVerifiedAt: string
 }
 
 export interface SyncMetricsResult {

@@ -168,6 +168,11 @@ type workoutDTO struct {
 	// this column existed always carries.
 	Zone  string  `json:"zone,omitempty"`
 	Level float64 `json:"level,omitempty"`
+	// TestProtocol is set on an FTP test workout ("ramp", "twenty_minute",
+	// "two_by_eight"); TestResultWatts is the FTP its ride measured, omitted
+	// until a result has been captured.
+	TestProtocol    string  `json:"testProtocol,omitempty"`
+	TestResultWatts float64 `json:"testResultWatts,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -179,6 +184,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		ID: w.ID, Sport: string(w.Sport), Name: w.Name, GoalID: w.GoalID, Date: w.Date,
 		Description: w.Description, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 		Zone: string(w.Zone), Level: w.Level,
+		TestProtocol: w.TestProtocol, TestResultWatts: w.TestResultWatts,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
 		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
 	}

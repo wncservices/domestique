@@ -409,6 +409,38 @@ func testFinding(value, raw float64, source Ride, p Profile) (Finding, bool) {
 	}, true
 }
 
+// ftpConfirmFraction is how close a recent ride's eFTP has to be to the
+// current FTP to count as confirming it: the same 3% the up rule uses as its
+// noise floor, from either side.
+const ftpConfirmFraction = 0.03
+
+// FTPConfirmedBy reports the date of the most recent ordinary ride in the
+// detection window whose eFTP lands within 3% of the current FTP. Such a ride
+// is evidence the number is still right, which is what "last checked" means
+// for the FTP test suggestion: a rider who keeps riding hard enough to
+// re-derive their FTP is not nagged to test it. Test rides are excluded (a
+// test records its own result), as is a profile with no FTP.
+func FTPConfirmedBy(rides []Ride, p Profile, now time.Time) (date string, ok bool) {
+	if p.FTPWatts <= 0 {
+		return "", false
+	}
+	today := dateOnly(now)
+	for _, r := range rides {
+		d, parsed := parseDate(r.Date)
+		if !parsed || !inWindow(d, today, DetectionWindowDays) {
+			continue
+		}
+		c, has := rideFTPCandidate(r)
+		if !has || math.Abs(c.value-p.FTPWatts) > p.FTPWatts*ftpConfirmFraction+floatSlack {
+			continue
+		}
+		if !ok || r.Date > date {
+			date, ok = r.Date, true
+		}
+	}
+	return date, ok
+}
+
 func detectFTP(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	c, source, found := bestFTPInWindow(rides, today, DetectionWindowDays)
 

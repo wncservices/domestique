@@ -486,6 +486,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/training/sessions/{id}/feel", s.handleSetSessionFeel)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
+	mux.HandleFunc("GET /api/training/tests", s.handleGetFTPTests)
+	mux.HandleFunc("POST /api/training/tests/ftp/snooze", s.handleSnoozeFTPTest)
 	mux.HandleFunc("POST /api/training/tests/ftp", s.handleBuildFTPTest)
 	mux.HandleFunc("POST /api/training/tests/max-hr", s.handleBuildMaxHRTest)
 

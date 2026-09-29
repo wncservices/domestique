@@ -148,15 +148,11 @@ func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, 
 	return dto, nil
 }
 
-// weekFocus picks the goal the header talks about: the most important one
-// whose plan covers this week, nearest event first, dated before undated —
-// a race on the calendar outranks "keep training". A goal that cannot be
-// planned (event already past) is skipped rather than failing the page.
-func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Time) (*weekFocusDTO, error) {
-	goals, err := s.Training.ListGoals(ctx, rider)
-	if err != nil {
-		return nil, err
-	}
+// sortGoalsForFocus orders goals most important first: priority, then dated
+// before undated, then nearest event. The week header and the FTP test
+// suggestion both take the first goal whose plan covers the week, so they
+// agree on which goal the rider is training for.
+func sortGoalsForFocus(goals []workout.Goal) {
 	sort.SliceStable(goals, func(i, j int) bool {
 		a, b := goals[i], goals[j]
 		if a.Priority != b.Priority {
@@ -167,6 +163,18 @@ func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Ti
 		}
 		return a.EventDate < b.EventDate
 	})
+}
+
+// weekFocus picks the goal the header talks about: the most important one
+// whose plan covers this week, nearest event first, dated before undated —
+// a race on the calendar outranks "keep training". A goal that cannot be
+// planned (event already past) is skipped rather than failing the page.
+func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Time) (*weekFocusDTO, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
+	sortGoalsForFocus(goals)
 
 	startDate := start.Format(dateLayout)
 	for _, g := range goals {
