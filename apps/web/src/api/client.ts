@@ -774,6 +774,9 @@ export const api = {
    *  `unavailable`, not an error; a 412 means this deployment has weather off. */
   weather: (today?: string) =>
     request<WeatherResponse>(`/api/training/weather${today ? `?today=${encodeURIComponent(today)}` : ''}`),
+  /** Whether the rider opted in to weather, their town's name and ride window.
+   *  Never carries coordinates. A 412 means this deployment has weather off. */
+  weatherPrefs: () => request<WeatherPrefs>('/api/training/weather'),
   /** Opts in with a town from the geocoder search. The server rounds the
    *  coordinates to about 1 km and never sends them back. */
   setWeatherLocation: (place: string, lat: number, lon: number) =>
