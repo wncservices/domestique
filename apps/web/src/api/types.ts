@@ -1296,3 +1296,12 @@ export interface IndoorPreview {
   plannedSeconds: number
   originalSeconds?: number
 }
+
+/** The rider's weather opt-in. Deliberately has no coordinate fields: the
+ *  server keeps a town rounded to about 1 km and never returns it. */
+export interface WeatherPrefs {
+  configured: boolean
+  place?: string
+  window: { start: number; end: number }
+  attribution: string
+}

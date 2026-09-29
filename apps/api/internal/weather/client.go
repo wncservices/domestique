@@ -32,6 +32,12 @@ import (
 // weather.base_url at a self-hosted instance or the commercial endpoint.
 const DefaultBaseURL = "https://api.open-meteo.com"
 
+// EnvAPIKey is where the optional Open-Meteo API key comes from: never the
+// config file, never a log line.
+// #nosec G101 -- this is the *name* of an environment variable, not a
+// credential.
+const EnvAPIKey = "OPEN_METEO_API_KEY"
+
 const (
 	requestTimeout = 10 * time.Second
 
