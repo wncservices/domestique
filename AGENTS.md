@@ -245,8 +245,10 @@ no plan-made workout in it. It never tops up a week it filled before: a session
 the rider deleted, moved or rewrote stays that way, including on the Monday the
 week becomes current. **A week that yields no sessions (no profile days yet) is
 not recorded**, or the empty season would be permanent. Deleting a goal deletes
-its rows. Deleting an event-dated goal's future weeks, or shortening its date,
-does not remove sessions beyond the new end.
+its rows. Editing a goal so its plan ends earlier makes the goal-save pass
+`trimSeason` delete the untouched plan-made sessions dated after the new last
+week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,
+eased, test, ridden and past sessions are kept.
 
 **A week built months ahead uses that day's levels and FTP, so it is refreshed
 once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).

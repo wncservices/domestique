@@ -258,6 +258,15 @@ func (d *DB) ScheduledWeeks(ctx context.Context, goalID string) (map[string]bool
 	return out, rows.Err()
 }
 
+// DeleteScheduledWeeksAfter forgets goalID's recorded weeks that start after
+// lastWeekStart (a Monday): the weeks a plan that now ends earlier no longer
+// has.
+func (d *DB) DeleteScheduledWeeksAfter(ctx context.Context, goalID, lastWeekStart string) error {
+	_, err := d.db.ExecContext(ctx, d.query(
+		`DELETE FROM scheduled_weeks WHERE goal_id = ? AND week_start > ?`), goalID, lastWeekStart)
+	return err
+}
+
 // MarkWeekRefreshed records that a recorded week's untouched sessions have
 // been rebuilt from the plan and levels as they stand now (or were built from
 // them in the first place), so it is not done again. It never records a week

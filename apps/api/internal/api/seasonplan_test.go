@@ -439,3 +439,71 @@ func TestAnFTPTestReplacesThatDaysPreFilledSession(t *testing.T) {
 		}
 	}
 }
+
+// Moving the event earlier clears the sessions the old plan put beyond the new
+// end, but only the untouched ones: a session the rider moved or edited stays.
+func TestMovingTheEventEarlierClearsUntouchedSessionsBeyondTheNewEnd(t *testing.T) {
+	h := newSeasonHarness(t)
+	ctx := context.Background()
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Gran Fondo","eventDate":"2027-04-14"}`) // 28 weeks, event in week 28
+	h.srv.WaitForBackground()
+	h.backdate(t)
+
+	thisMon, _ := weekBounds(h.now)
+	weekN := func(n int) time.Time { return thisMon.AddDate(0, 0, 7*(n-1)) }
+	// Event in week 20 (n counts this week as 1): the Wednesday of that week.
+	newEvent := weekN(20).AddDate(0, 0, 2).Format("2006-01-02")
+	lastKept := weekN(20).AddDate(0, 0, 6).Format("2006-01-02")
+
+	w24 := h.week(t, weekN(24))
+	if len(w24) != 4 {
+		t.Fatalf("week 24 has %d sessions, want 4", len(w24))
+	}
+	moved, edited := w24[0], w24[1]
+	monday := weekN(24).Format("2006-01-02")
+	if resp := h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+moved.ID, `{"date":"`+monday+`"}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("move: status %d", resp.StatusCode)
+	}
+	newName := "My own name"
+	if _, err := h.store.UpdateWorkout(ctx, edited.ID, workout.UpdateWorkoutRequest{Name: &newName}); err != nil {
+		t.Fatal(err)
+	}
+
+	if resp := h.as("wilant", "cyclists", http.MethodPatch, "/api/training/goals/"+g.ID, `{"eventDate":"`+newEvent+`"}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("update goal: status %d", resp.StatusCode)
+	}
+	h.srv.WaitForBackground()
+
+	var beyond []workout.Workout
+	for _, w := range h.workouts(t) {
+		if w.Date > lastKept {
+			beyond = append(beyond, w)
+		}
+	}
+	if len(beyond) != 2 {
+		t.Fatalf("%d sessions remain beyond the new end, want just the moved and the edited one: %+v", len(beyond), beyond)
+	}
+	for _, w := range beyond {
+		if w.ID != moved.ID && w.ID != edited.ID {
+			t.Errorf("untouched session %s (%s) survived beyond the new end", w.ID, w.Date)
+		}
+	}
+	// Weeks up to the new end are intact.
+	for n := 1; n <= 20; n++ {
+		if got := len(h.week(t, weekN(n))); got != 4 {
+			t.Errorf("week %d has %d sessions, want 4", n, got)
+		}
+	}
+	// The dropped weeks are forgotten, the kept ones are not.
+	weeks, err := h.store.ScheduledWeeks(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 1; n <= 28; n++ {
+		_, recorded := weeks[weekN(n).Format("2006-01-02")]
+		if want := n <= 20; recorded != want {
+			t.Errorf("week %d recorded = %v, want %v", n, recorded, want)
+		}
+	}
+}

@@ -37,6 +37,7 @@ type seasonPassResult struct {
 	weeksRefreshed     int
 	sessionsRefreshed  int
 	weeksMarkedFromOld int
+	sessionsTrimmed    int
 }
 
 // planSeason fills every plan week of g that has not been filled, and refreshes
@@ -214,15 +215,58 @@ func stepsEqual(a, b []workout.WorkoutStep) bool {
 	return true
 }
 
+// trimSeason is the other half of editing a goal: when its plan now ends
+// earlier (the event moved up, or the goal became undated and so a shorter
+// window), the sessions the old plan put beyond the new last week are cleared.
+// Only untouched plan-made sessions go (the same test refreshWeek uses), and
+// only ones dated after today: whatever the rider moved, edited, had eased,
+// scheduled as an FTP test or rode is theirs now, and stays. Each removed
+// session's Garmin copy is taken off through the existing best-effort path,
+// and the dropped weeks' scheduled_weeks rows are forgotten, so a later
+// extension of the date fills them again. Returns how many sessions were
+// deleted. Runs in the background goal-save pass, under its lock.
+func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
+	s.seasonMu.Lock()
+	defer s.seasonMu.Unlock()
+
+	sc, err := s.seasonContext(ctx, g)
+	if err != nil {
+		return 0, err
+	}
+	if len(sc.plan.Weeks) == 0 {
+		return 0, nil
+	}
+	lastStart := sc.plan.Weeks[len(sc.plan.Weeks)-1].StartDate
+	_, lastEnd := weekBounds(sc.plan.Weeks[len(sc.plan.Weeks)-1])
+	today := s.now().Format(dateLayout)
+
+	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, wk := range existing {
+		if wk.GoalID != g.ID || wk.Date <= lastEnd || wk.Date <= today || !untouchedPlanSession(wk) {
+			continue
+		}
+		s.removeWorkoutFromGarmin(ctx, wk)
+		if err := s.Training.DeleteWorkout(ctx, wk.ID); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, s.Training.DeleteScheduledWeeksAfter(ctx, g.ID, lastStart)
+}
+
 // logSeasonPass writes what a pass did. Counts only, and only when something
 // happened: a tick that finds a settled season says nothing.
 func (s *Server) logSeasonPass(g workout.Goal, res seasonPassResult) {
-	if res.sessionsCreated == 0 && res.sessionsRefreshed == 0 {
+	if res.sessionsCreated == 0 && res.sessionsRefreshed == 0 && res.sessionsTrimmed == 0 {
 		return
 	}
 	s.logger().Info("season planned", "goal", g.ID, "rider", g.Rider,
 		"weeks", res.weeks, "weeksFilled", res.weeksFilled, "created", res.sessionsCreated,
-		"refreshed", res.sessionsRefreshed)
+		"refreshed", res.sessionsRefreshed, "trimmed", res.sessionsTrimmed)
 }
 
 // seasonPlanErr logs a failed pass for a goal, staying quiet about the two
@@ -323,6 +367,9 @@ func (s *Server) startSeasonFill(g workout.Goal) {
 					return
 				}
 				res, err = s.planSeason(ctx, cur)
+				if err == nil {
+					res.sessionsTrimmed, err = s.trimSeason(ctx, cur)
+				}
 			})
 			if ran {
 				if gone {

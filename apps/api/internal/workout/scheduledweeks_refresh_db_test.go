@@ -102,3 +102,34 @@ func TestScheduledWeeksRefreshColumnBackfillsOnlyOnce(t *testing.T) {
 		t.Error("restarting stamped a week that was filled after the migration")
 	}
 }
+
+func TestDeleteScheduledWeeksAfterEachEngine(t *testing.T) {
+	engines := map[string]func(*testing.T) *DB{
+		"sqlite":   openTestDB,
+		"postgres": openTestPostgres,
+	}
+	for engine, open := range engines {
+		t.Run(engine, func(t *testing.T) {
+			db := open(t)
+			ctx := t.Context()
+			for _, w := range []string{"2027-03-01", "2027-03-08", "2027-03-15"} {
+				if err := db.MarkWeekScheduled(ctx, "g", w); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := db.MarkWeekScheduled(ctx, "other", "2027-03-15"); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.DeleteScheduledWeeksAfter(ctx, "g", "2027-03-08"); err != nil {
+				t.Fatal(err)
+			}
+			weeks, _ := db.ScheduledWeeks(ctx, "g")
+			if len(weeks) != 2 {
+				t.Errorf("weeks = %v, want the first two kept", weeks)
+			}
+			if other, _ := db.ScheduledWeeks(ctx, "other"); len(other) != 1 {
+				t.Errorf("another goal's weeks = %v, want untouched", other)
+			}
+		})
+	}
+}
