@@ -230,16 +230,24 @@ deployment with a dead button.
 
 ## Auto-schedule plans this week and next
 
-`AutoScheduleTick` calls `scheduleGoalWeek` for this Monday and the next, so
-paging forward on the Plan page never shows an empty week. The current week
-is topped up date by date (Replan relies on that); a **future week is filled
-once, as a whole** — if the goal already has any plan-made workout in it the
-week is left alone, because a rider who dragged or deleted a session there
-would otherwise see the gap refilled on the next tick. Replan and the
-adapter stay scoped to the current week. The plan is built from today, so a
+`AutoScheduleTick` calls `autoScheduleGoalWeek` for this Monday and the next,
+so paging forward on the Plan page never shows an empty week. **A week is
+filled once per goal.** The `scheduled_weeks` table (goal, Monday) records it,
+and the tick fills a week only if it is unrecorded *and* the goal has no
+workout in it — so a deployment that predates the table needs no backfill. The
+tick never tops up a week it filled before: a session the rider deleted, moved
+or rewrote stays that way, including on the Monday the week becomes current.
+Deleting a goal deletes its rows.
+
+The explicit paths do top up gaps, because the rider asked: the Plan page's
+Fill button (`POST /api/training/goals/{id}/schedule`, optional
+`{"weekStart"}`, this week or later, a past week is a 400) and Replan (this
+week from today). Both go through `scheduleGoalWeek`, skip dates that already
+have a workout, and record the week. The plan is built from today, so a
 future week is that plan's later week (its own phase and recovery flag) but
-uses the rider's levels *now*. `POST /api/training/goals/{id}/schedule`
-takes an optional `{"weekStart"}`; a past week is a 400.
+uses the rider's levels *now*. Next week's workouts are inside the 14-day
+auto-push window, so for riders who opted in they reach the watch a week
+earlier than before.
 
 ## Garmin sign-in
 

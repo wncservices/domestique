@@ -172,11 +172,11 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		thisMonday := periodization.MondayOf(s.now())
 		for _, g := range goals {
 			// This week and next, so a rider paging forward on the Plan page
-			// finds next week planned instead of empty. Next week is a
-			// whole-week, once-only fill (see scheduleGoalWeek), so this stays
-			// idempotent and never undoes a rider's rearranging of it.
+			// finds next week planned instead of empty. Each week is filled
+			// once (see autoScheduleGoalWeek), so this stays idempotent and
+			// never undoes a rider's deleting, moving or rewriting of it.
 			for _, weekStart := range []time.Time{thisMonday, thisMonday.AddDate(0, 0, 7)} {
-				created, skipped, err := s.scheduleGoalWeek(ctx, g, weekStart, "")
+				created, skipped, err := s.autoScheduleGoalWeek(ctx, g, weekStart)
 				if err != nil {
 					// ErrEventInThePast is not a real problem — a rider's own
 					// goal simply outlived its event and nobody has deleted it

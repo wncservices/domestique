@@ -200,7 +200,36 @@ CREATE TABLE IF NOT EXISTS daily_wellness (
     resting_hr       INTEGER NOT NULL DEFAULT 0,
     updated_at       TEXT NOT NULL,
     PRIMARY KEY (rider, date)
+);
+
+-- scheduled_weeks remembers that a goal's plan week has been filled once, so
+-- a session the rider then deleted, moved or rewrote is not read as a gap and
+-- refilled by the next auto-schedule tick. week_start is that week's Monday.
+CREATE TABLE IF NOT EXISTS scheduled_weeks (
+    goal_id    TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (goal_id, week_start)
 );`, d.Blob, d.Boolean)
+}
+
+// WeekScheduled reports whether goalID's plan week starting weekStart (a
+// Monday, "YYYY-MM-DD") has been filled before.
+func (d *DB) WeekScheduled(ctx context.Context, goalID, weekStart string) (bool, error) {
+	var n int
+	err := d.db.QueryRowContext(ctx, d.query(
+		`SELECT COUNT(*) FROM scheduled_weeks WHERE goal_id = ? AND week_start = ?`),
+		goalID, weekStart).Scan(&n)
+	return n > 0, err
+}
+
+// MarkWeekScheduled records that a week has been filled. Idempotent.
+func (d *DB) MarkWeekScheduled(ctx context.Context, goalID, weekStart string) error {
+	_, err := d.db.ExecContext(ctx, d.query(`
+INSERT INTO scheduled_weeks (goal_id, week_start, created_at) VALUES (?, ?, ?)
+ON CONFLICT (goal_id, week_start) DO NOTHING`),
+		goalID, weekStart, time.Now().UTC().Format(time.RFC3339))
+	return err
 }
 
 // DB stores goals, rider profiles and workouts as rows. The one
@@ -554,7 +583,12 @@ func (d *DB) DeleteGoal(ctx context.Context, id string) error {
 	// planned session stays real even if the race it was built for falls
 	// through — just unlinked, the same "make it orphaned, not gone"
 	// choice routes make when the crew they were shared to disappears.
-	_, err = d.db.ExecContext(ctx, d.query(`UPDATE workouts SET goal_id = '' WHERE goal_id = ?`), id)
+	if _, err = d.db.ExecContext(ctx, d.query(`UPDATE workouts SET goal_id = '' WHERE goal_id = ?`), id); err != nil {
+		return err
+	}
+	// Its filled-week markers go too: they mean nothing without the goal, and
+	// a later goal that reuses the id must start with every week unfilled.
+	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM scheduled_weeks WHERE goal_id = ?`), id)
 	return err
 }
 

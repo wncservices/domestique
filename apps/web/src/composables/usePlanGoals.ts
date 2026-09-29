@@ -184,7 +184,7 @@ export function usePlanGoals(deps: {
         toast.add({ title: `Scheduled ${result.created.length} workout${result.created.length === 1 ? '' : 's'} ${label}`, icon: 'i-lucide-calendar-check' })
         await loadWorkouts()
       } else {
-        toast.add({ title: `${label[0]!.toUpperCase()}${label.slice(1)} is already scheduled`, icon: 'i-lucide-calendar-check' })
+        toast.add({ title: `${label.charAt(0).toUpperCase()}${label.slice(1)} is already scheduled`, icon: 'i-lucide-calendar-check' })
       }
       await loadWeek()
     } catch (err) {
