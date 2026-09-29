@@ -62,6 +62,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/targets"
 	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 	"github.com/wncservices/domestique/apps/api/internal/wahoo"
+	"github.com/wncservices/domestique/apps/api/internal/weather"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -954,6 +955,20 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// engine, so this is wired here rather than in openSource.
 	if cfg.Routing.Enabled {
 		srv.Routing = routing.New(cfg.Routing.URL, os.Getenv(routing.EnvAPIKey))
+	}
+
+	// Weather-aware suggestions. Wired unless switched off: it is inert for a
+	// rider who has not chosen a town (no row, no request), and what a rider
+	// opts in with is a town rounded to about 1 km — see docs/weather.md. The
+	// key, needed only for a commercial or self-hosted endpoint, comes from the
+	// environment and is never logged.
+	weatherPrefs, err := weather.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+	srv.WeatherPrefs = weatherPrefs
+	if cfg.Weather.On() {
+		srv.Weather = weather.New(cfg.Weather.BaseURL, os.Getenv(weather.EnvAPIKey), nil)
 	}
 
 	// The Job-triggering side is opt-in twice over: cfg.Basemap.TilesNamespace

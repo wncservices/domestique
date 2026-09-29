@@ -93,6 +93,11 @@ func (s *Server) runMetricsPassWith(ctx context.Context, sched *syncschedule.Sch
 	if ctx.Err() != nil {
 		return false
 	}
+
+	// After wellness, so the first plan-page load after a sync finds the
+	// forecast cached. Best effort and never part of whether the sync counts
+	// as done: a forecast outage must not make the pass look failed.
+	s.warmWeather(ctx)
 	// Everyone failing is left unrecorded too, so a restart retries once
 	// instead of waiting for the next slot — and it is a Warn, not the Info
 	// of a healthy run. Counts only: a rider's name next to anything about
