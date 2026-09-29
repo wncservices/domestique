@@ -21,6 +21,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/syncschedule"
+	"github.com/wncservices/domestique/apps/api/internal/weather"
 )
 
 // SourceConfig is where the route library lives.
@@ -91,6 +92,25 @@ type RoutingConfig struct {
 	// the public instance's free tier.
 	URL string `yaml:"url,omitempty"`
 }
+
+// WeatherConfig is the forecast source behind weather-aware suggestions — see
+// internal/weather. On by default, unlike Elevation and Routing: nothing is
+// ever sent for a rider who has not chosen a town themselves, and what is sent
+// is that town rounded to about 1 km, never a route.
+//
+// The API key is not here: OPEN_METEO_API_KEY in the environment, needed only
+// for the commercial endpoint. The free public API is non-commercial only and
+// requires attribution (docs/weather.md).
+type WeatherConfig struct {
+	// Enabled is a pointer so "absent" (on) and "false" (off) differ.
+	Enabled *bool `yaml:"enabled,omitempty"`
+	// BaseURL defaults to weather.DefaultBaseURL; set it for a self-hosted
+	// instance or the commercial endpoint.
+	BaseURL string `yaml:"base_url,omitempty"`
+}
+
+// On reports whether weather suggestions are enabled.
+func (w WeatherConfig) On() bool { return w.Enabled == nil || *w.Enabled }
 
 // BasemapConfig is how an admin-triggered tiles-basemap update Job runs —
 // mirrors domestique-chart's basemapUpdate values block field for field,
@@ -192,6 +212,7 @@ type Config struct {
 	Basemap   BasemapConfig   `yaml:"basemap"`
 	Elevation ElevationConfig `yaml:"elevation"`
 	Routing   RoutingConfig   `yaml:"routing"`
+	Weather   WeatherConfig   `yaml:"weather"`
 }
 
 // DefaultDSN is where a database library lives unless configured otherwise.
@@ -258,6 +279,10 @@ func (c *Config) applyDefaults() {
 	// Same "only when opted in" rule as Elevation just above.
 	if c.Routing.Enabled && c.Routing.URL == "" {
 		c.Routing.URL = routing.DefaultURL
+	}
+
+	if c.Weather.BaseURL == "" {
+		c.Weather.BaseURL = weather.DefaultBaseURL
 	}
 
 	// Only when the feature is actually opted into (a namespace is set) —
@@ -341,6 +366,15 @@ func (c *Config) Validate() error {
 		u, err := url.Parse(c.Routing.URL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return fmt.Errorf("routing.url %q is not a valid absolute URL", c.Routing.URL)
+		}
+	}
+
+	// Same reasoning: a malformed weather.base_url would otherwise degrade to
+	// "unavailable" on every request with nothing pointing at the cause.
+	if c.Weather.On() && c.Weather.BaseURL != "" { // empty means the default
+		u, err := url.Parse(c.Weather.BaseURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("weather.base_url %q is not a valid absolute URL", c.Weather.BaseURL)
 		}
 	}
 	return nil
