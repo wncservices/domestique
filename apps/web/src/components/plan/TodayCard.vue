@@ -9,6 +9,7 @@ import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type { ReadinessVerdict, RiderProfile, SessionAnalysis, WeekDay, Workout, WorkoutStep } from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
+import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
 import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import FeelRating from './FeelRating.vue'
 import OutcomeChip from './OutcomeChip.vue'
@@ -111,6 +112,19 @@ function moveMenuItems(w: Workout, fromDate: string) {
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 
+// An FTP test on this day that has been ridden and read: the day card shows
+// what it measured.
+const testResult = computed(() => props.day?.planned.find((w) => w.testProtocol && (w.testResultWatts ?? 0) > 0))
+
+// Testing tired under-reads FTP. On the day of a test, a low readiness verdict
+// says so and offers the same Move the missed-session nudge does.
+const tiredForTest = computed(
+  () =>
+    showingToday.value &&
+    !!firstWorkout.value?.testProtocol &&
+    (props.readinessVerdict === 'caution' || props.readinessVerdict === 'rest'),
+)
+
 // The chip/step-table pair shown in the done and unplanned-ride states —
 // see pickAnalysedSession's own doc comment for why this is one session per
 // day, not one per completed ride.
@@ -188,6 +202,9 @@ function onRated(analysis: SessionAnalysis) {
             <span class="font-mono tabular-nums text-sm text-muted">
               {{ formatDuration(completedSecondsOf(day)) }} of {{ formatDuration(plannedSecondsOf(day)) }} planned
             </span>
+            <UBadge v-if="testResult" color="primary" variant="subtle" icon="i-lucide-gauge">
+              Result: {{ Math.round(testResult.testResultWatts!) }} W
+            </UBadge>
             <button
               v-if="analysedSession"
               type="button"
@@ -215,6 +232,9 @@ function onRated(analysis: SessionAnalysis) {
             <div class="flex flex-wrap items-center gap-2">
               <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
               <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
+              <UBadge v-if="firstWorkout.testProtocol" color="primary" variant="subtle" icon="i-lucide-gauge">
+                {{ ftpTestLabel(firstWorkout.testProtocol) }}
+              </UBadge>
             </div>
             <p class="font-mono tabular-nums text-sm text-muted">
               {{ formatDuration(firstWorkout.plannedSeconds) }}
@@ -226,6 +246,18 @@ function onRated(analysis: SessionAnalysis) {
             <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
             <span>{{ adjustmentNote(firstWorkout.description) }}</span>
           </p>
+          <p v-if="firstWorkout.testProtocol" class="flex items-start gap-1 text-xs text-muted">
+            <UIcon name="i-lucide-bike" class="mt-0.5 shrink-0" />
+            <span>{{ ftpTestTrainerNote(firstWorkout.testProtocol) }}</span>
+          </p>
+          <UAlert
+            v-if="tiredForTest"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-battery-medium"
+            title="Testing tired under-reads your FTP"
+            description="Your readiness is low today. A test on fresher legs gives a number you can trust."
+          />
           <p v-if="extraCount > 0" class="text-xs text-dimmed">+{{ extraCount }} more this day</p>
           <div class="flex flex-wrap items-center gap-2">
             <UButton

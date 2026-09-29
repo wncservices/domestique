@@ -37,6 +37,8 @@ const emit = defineEmits<{
   // Opens TrainingPlanPage.vue's own confirm modal — this component never
   // calls the API itself, same as fill/move/open above.
   replan: []
+  // Opens the page's manual "schedule an FTP test" modal.
+  ftpTest: []
 }>()
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
@@ -224,6 +226,17 @@ watch(
 
       <div class="flex items-center gap-3">
         <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-gauge"
+          class="shrink-0 whitespace-nowrap"
+          aria-label="Schedule an FTP test"
+          @click="emit('ftpTest')"
+        >
+          <span class="hidden sm:inline">FTP test</span>
+        </UButton>
+        <UButton
           v-if="isCurrentWeek"
           color="neutral"
           variant="outline"
@@ -289,6 +302,9 @@ watch(
           </div>
           <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
           <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
+          <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
+            {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : 'FTP test' }}
+          </UBadge>
           <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
           <UTooltip v-if="adjustmentNote(w.description)" :text="adjustmentNote(w.description)">
             <UIcon name="i-lucide-wand-sparkles" class="size-3 text-info" />

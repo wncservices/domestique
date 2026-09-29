@@ -15,7 +15,19 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import { useLibrary } from '@/composables/useLibrary'
-import type { Me, PeriodizationPlan, ReadinessResponse, RiderProfile, TrainingWeek, WeekFocus, Workout } from '@/api/types'
+import type {
+  BuildFtpTestRequest,
+  FtpTests,
+  Me,
+  PeriodizationPlan,
+  ReadinessResponse,
+  RiderProfile,
+  TrainingWeek,
+  WeekFocus,
+  Workout,
+} from '@/api/types'
+import FtpTestBanner from '@/components/plan/FtpTestBanner.vue'
+import FtpTestModal from '@/components/plan/FtpTestModal.vue'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import GoalsSection from '@/components/plan/GoalsSection.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
@@ -276,6 +288,69 @@ async function easeTomorrow() {
   await Promise.all([loadReadiness(), loadWorkouts(), loadWeek()])
 }
 
+// --- FTP tests: a banner when a test is worth doing now, and a manual "FTP
+// test" action for any day. Optional like readiness: a failure just hides the
+// banner rather than raising a toast for a nice-to-have. Scheduling and
+// "Not now" go through the server, which owns every rule about when a test is
+// suggested (internal/testschedule). ---
+
+const ftpTests = ref<FtpTests | null>(null)
+const hasFtp = computed(() => (profile.value.ftpWatts ?? 0) > 0)
+const schedulingFtpTest = ref(false)
+const snoozingFtpTest = ref(false)
+const ftpModalOpen = ref(false)
+
+// Ticketed like loadWeek/loadReadiness: a schedule click refetches while an
+// earlier load may still be in flight.
+let ftpTestsRequest = 0
+
+async function loadFtpTests() {
+  const requestId = ++ftpTestsRequest
+  try {
+    const result = await api.ftpTests()
+    if (requestId === ftpTestsRequest) ftpTests.value = result
+  } catch {
+    if (requestId === ftpTestsRequest) ftpTests.value = null
+  }
+}
+
+async function scheduleFtpTest(req: BuildFtpTestRequest) {
+  schedulingFtpTest.value = true
+  try {
+    await api.buildFTPTest(req)
+    ftpModalOpen.value = false
+    toast.add({
+      title: req.date ? `FTP test scheduled for ${weekdayLong(req.date)}` : 'FTP test built',
+      description: 'Ease into it: the session before it is kept easy.',
+      icon: 'i-lucide-gauge',
+      color: 'success',
+    })
+  } catch (err) {
+    // 409: the day is past, already ridden, or the ramp has no FTP to start
+    // from. Nothing was created; the server's own message says which.
+    if (err instanceof ApiError && err.status === 409) {
+      toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
+    } else {
+      toast.add({ title: 'Could not schedule the FTP test', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    }
+  } finally {
+    schedulingFtpTest.value = false
+  }
+  await Promise.all([loadFtpTests(), loadWorkouts(), loadWeek()])
+}
+
+async function snoozeFtpTest() {
+  snoozingFtpTest.value = true
+  try {
+    await api.snoozeFTPTest()
+  } catch (err) {
+    toast.add({ title: 'Could not dismiss the suggestion', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    snoozingFtpTest.value = false
+  }
+  await loadFtpTests()
+}
+
 // Same reasoning as seasonRequest below: prevWeek/nextWeek/thisWeek/
 // selectSeasonWeek can all fire loadWeek again before an in-flight one
 // resolves (clicking next-week twice fast, or a save's own reload racing a
@@ -468,6 +543,7 @@ async function confirmReplan() {
     })
     await loadWeek()
     await loadReadiness()
+    await loadFtpTests()
   } catch (err) {
     // 409: a background auto-schedule tick held the lock at the same
     // moment — nothing broke, nothing ran either. Not an error the rider
@@ -524,6 +600,7 @@ onMounted(() => {
   loadWorkouts()
   loadWeek()
   loadReadiness()
+  loadFtpTests()
   startGoalFromRoute()
 })
 </script>
@@ -579,6 +656,17 @@ onMounted(() => {
         @ease="easeTomorrow"
       />
 
+      <FtpTestBanner
+        v-if="ftpTests?.suggestion"
+        :suggestion="ftpTests.suggestion"
+        :protocols="ftpTests.protocols"
+        :has-ftp="hasFtp"
+        :scheduling="schedulingFtpTest"
+        :snoozing="snoozingFtpTest"
+        @schedule="scheduleFtpTest"
+        @snooze="snoozeFtpTest"
+      />
+
       <WeekStrip
         v-if="week"
         :week="week"
@@ -594,6 +682,7 @@ onMounted(() => {
         @fill="fillWeek"
         @rated="loadWeek"
         @replan="openReplanConfirm"
+        @ftp-test="ftpModalOpen = true"
       />
 
       <SeasonTimeline
@@ -647,6 +736,16 @@ onMounted(() => {
       :saving="savingWorkout"
       @update:form="(f) => (workoutForm = f)"
       @save="saveWorkout"
+    />
+
+    <FtpTestModal
+      v-if="ftpTests"
+      v-model:open="ftpModalOpen"
+      :protocols="ftpTests.protocols"
+      :recommended="ftpTests.suggestion?.recommended"
+      :has-ftp="hasFtp"
+      :scheduling="schedulingFtpTest"
+      @schedule="scheduleFtpTest"
     />
 
     <UModal v-model:open="replanModalOpen" title="Replan the rest of this week?">
