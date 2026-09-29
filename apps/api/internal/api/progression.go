@@ -231,7 +231,7 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger().Info("session feel recorded", "session", id, "rider", identity.User, "feel", body.Feel)
+	s.logger().Info("session feel recorded", "session", id, "rider", identity.User)
 
 	analysis.Feel = body.Feel
 	analysis.LevelDelta = newDelta

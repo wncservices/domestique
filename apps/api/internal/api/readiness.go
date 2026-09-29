@@ -9,6 +9,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -244,7 +245,18 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reason := "Eased ahead of time — " + strings.Join(forecast.Reasons, "; ")
-	change := adapter.Change{WorkoutID: target.ID, Reason: reason}
+	// A rider-confirmed click on an automatic suggestion: the reason and the
+	// inputs are the forecast's, not the rider's, so it is recorded like any
+	// automatic change. The forecast's reasons already carry their numbers
+	// (projected form, load ratio), so each is kept as its own signal.
+	signals := make([]why.Signal, 0, len(forecast.Reasons))
+	for _, r := range forecast.Reasons {
+		signals = append(signals, why.Signal{Kind: "forecast", Label: "Forecast", Value: r})
+	}
+	change := adapter.Change{
+		WorkoutID: target.ID, Reason: reason,
+		Why: why.NewRecord(why.ReadinessTomorrow, reason, why.ReadinessInputs{Verdict: string(forecast.Verdict), Signals: signals}),
+	}
 	if forecast.Verdict == readiness.Rest {
 		change.Downgrade = true
 	} else {
