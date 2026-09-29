@@ -8,6 +8,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
@@ -124,7 +125,11 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 			// applyChange has already logged which step failed.
 			continue
 		}
-		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "reason", c.Reason)
+		// The rule id, never the reason: a reason quotes sleep scores, HRV and
+		// form, and a health value does not belong in a log line beside a
+		// rider's name. The stored adjustment (see recordAdjustment) is where
+		// the explanation lives, and it is only ever shown to its owner.
+		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "rule", string(c.Why.Rule))
 	}
 
 	s.easeBeforeFTPTests(ctx, rider, workouts, profile, appliedFor)
@@ -147,10 +152,16 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 	// A step-down replaces the workout's own content (name, steps, level)
 	// rather than moving or downgrading it wholesale — see applyStepDown.
 	if c.StepDown {
-		if err := s.applyStepDown(ctx, wk, profile, c); err != nil {
+		down, err := s.applyStepDown(ctx, wk, profile, c)
+		if err != nil {
 			s.logger().Warn("adapt: could not step a workout down", "workout", wk.ID, "rider", rider, "err", err)
 			return "", err
 		}
+		if c.Why.Rule == why.StruggleStepDown {
+			// Only the API layer knows which rung the step-down landed on.
+			c.Why.Inputs["levelFrom"], c.Why.Inputs["levelTo"] = float64(wk.Level), float64(down.toLevel)
+		}
+		s.recordAdjustment(ctx, rider, wk.ID, c.Why, down.keptIndoor)
 		return "stepped down", nil
 	}
 
@@ -185,7 +196,31 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 		s.logger().Warn("adapt: could not update a workout", "workout", wk.ID, "rider", rider, "err", err)
 		return "", err
 	}
+	// Recorded only now that the change has landed, so a change that failed
+	// never leaves a reason for something that did not happen.
+	s.recordAdjustment(ctx, rider, wk.ID, c.Why, req.Indoor != nil && *req.Indoor)
 	return what, nil
+}
+
+// recordAdjustment stores why a workout was changed. Keeping a session indoors
+// through the easing is part of the easing, so it is one more input on the same
+// row, never a row of its own. A failed write is a Warn and never undoes the
+// change: the workout description still carries the reason as text, and the
+// popover falls back to it.
+func (s *Server) recordAdjustment(ctx context.Context, rider, workoutID string, rec why.Record, keptIndoor bool) {
+	if rec.Rule == "" {
+		return
+	}
+	if keptIndoor {
+		if rec.Inputs == nil {
+			rec.Inputs = map[string]any{}
+		}
+		rec.Inputs["indoor"] = true
+	}
+	day := s.now().Format("2006-01-02")
+	if err := s.Training.RecordAdjustment(ctx, rider, workout.SubjectWorkout, workoutID, rec, day); err != nil {
+		s.logger().Warn("adapt: could not record why a workout was changed", "workout", workoutID, "rider", rider, "rule", string(rec.Rule), "err", err)
+	}
 }
 
 // stepDownRung finds the rung one level below wk's own on its zone's ladder.
@@ -215,10 +250,10 @@ func stepDownRung(wk workout.Workout) (workoutlib.Ladder, workoutlib.Rung, error
 // stepDownTarget picks which workout this is; this is the one place that
 // actually builds the lower rung, via workoutlib, the same library
 // scheduleGoal uses to build a workout in the first place).
-func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile workout.RiderProfile, c adapter.Change) error {
+func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile workout.RiderProfile, c adapter.Change) (stepDownResult, error) {
 	ladder, rung, err := stepDownRung(wk)
 	if err != nil {
-		return err
+		return stepDownResult{}, err
 	}
 
 	req := workoutlib.Instantiate(ladder, rung, profile)
@@ -237,8 +272,18 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 	// The step-down stays in the workout's own zone, so that is the zone the
 	// replacement's steps are converted under.
 	s.keepIndoor(&update, wk, profile, wk.Zone)
-	_, err = s.Training.UpdateWorkout(ctx, wk.ID, update)
-	return err
+	if _, err = s.Training.UpdateWorkout(ctx, wk.ID, update); err != nil {
+		return stepDownResult{}, err
+	}
+	return stepDownResult{toLevel: rung.Level, keptIndoor: update.Indoor != nil && *update.Indoor}, nil
+}
+
+// stepDownResult is what applyStepDown tells its caller about the session it
+// wrote, for the record of why: the rung it landed on, and whether an indoor
+// session stayed indoors.
+type stepDownResult struct {
+	toLevel    int
+	keptIndoor bool
 }
 
 // readinessHistoryDays bounds how far back assessReadiness reads
@@ -280,6 +325,7 @@ func (s *Server) assessReadinessAt(ctx context.Context, rider string, sessions [
 			SleepSeconds: row.SleepSeconds, SleepScore: row.SleepScore,
 			ReadinessScore: row.ReadinessScore, ReadinessLevel: row.ReadinessLevel,
 			RestingHR: row.RestingHR, Present: true,
+			HRVLastNight: row.HRVLastNight, HRVWeeklyAvg: row.HRVWeeklyAvg,
 		}
 		if row.Date == todayStr {
 			today = d

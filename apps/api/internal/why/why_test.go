@@ -172,6 +172,19 @@ func TestFactsForEveryRule(t *testing.T) {
 	}
 }
 
+func TestAnyEasingRuleCanSayItKeptTheSessionIndoors(t *testing.T) {
+	for _, rule := range []why.Rule{why.FatigueStruggles, why.StruggleStepDown, why.FTPTestEve} {
+		in := map[string]any{"testDate": "2026-03-25", "indoor": true}
+		facts := why.Facts(rule, in)
+		if len(facts) == 0 || facts[len(facts)-1] != (why.Fact{Label: "Indoor", Value: "kept indoors"}) {
+			t.Errorf("%s facts = %v, want the indoor row last", rule, facts)
+		}
+	}
+	if got := why.Facts(why.FTPTestEve, map[string]any{"testDate": "2026-03-25", "indoor": false}); len(got) != 1 {
+		t.Errorf("indoor false added a row: %v", got)
+	}
+}
+
 func TestAnUnknownRuleHasNoFactsAndNoTitle(t *testing.T) {
 	if got := why.Facts("nonsense", map[string]any{"a": 1}); len(got) != 0 {
 		t.Errorf("Facts = %v, want none", got)

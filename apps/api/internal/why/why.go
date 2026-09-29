@@ -72,7 +72,8 @@ type Signal struct {
 // ReadinessInputs is shared by the three readiness rules: today's rest and
 // caution, and the forecast the rider confirmed for tomorrow. Indoor records
 // that an indoor session was kept indoors through the easing, which is part
-// of the easing rather than a second change.
+// of the easing rather than a second change. Every easing rule may carry an
+// "indoor" input the same way; Facts reads it from the map, whatever the rule.
 type ReadinessInputs struct {
 	Verdict string   `json:"verdict"`
 	Signals []Signal `json:"signals"`
@@ -186,6 +187,16 @@ func Title(rule Rule) string {
 // unknown rule, or inputs that do not decode, give none: the sentence alone
 // still explains the change.
 func Facts(rule Rule, inputs map[string]any) []Fact {
+	out := ruleFacts(rule, inputs)
+	// An indoor session kept indoors through an automatic easing is part of
+	// that easing, so any rule that eases a workout can say so.
+	if Title(rule) != "" && inputs["indoor"] == true {
+		out = append(out, Fact{"Indoor", "kept indoors"})
+	}
+	return out
+}
+
+func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 	if len(inputs) == 0 {
 		return nil
 	}
@@ -198,9 +209,6 @@ func Facts(rule Rule, inputs map[string]any) []Fact {
 		var out []Fact
 		for _, s := range in.Signals {
 			out = append(out, Fact{s.Label, s.Value})
-		}
-		if in.Indoor {
-			out = append(out, Fact{"Indoor", "kept indoors"})
 		}
 		return out
 	case MissedMoved:

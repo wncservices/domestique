@@ -23,6 +23,9 @@ type purgeSummary struct {
 	ProviderLinks    int
 	CrewMemberships  int
 	RidesOrphaned    int
+	// AdjustmentsRemoved is the "Why?" records of the rider's plan changes:
+	// their sleep, HRV and load, so they go with the rider.
+	AdjustmentsRemoved int
 }
 
 // purgeRiderData removes every trace of rider from this app's own database —
@@ -115,6 +118,14 @@ func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary
 			return sum, fmt.Errorf("clearing ride authorship: %w", err)
 		}
 		sum.RidesOrphaned = n
+	}
+
+	if s.Training != nil {
+		n, err := s.Training.DeleteRiderAdjustments(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing plan-change reasons: %w", err)
+		}
+		sum.AdjustmentsRemoved = n
 	}
 
 	return sum, nil

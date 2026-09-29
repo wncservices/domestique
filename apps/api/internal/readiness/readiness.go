@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/wncservices/domestique/apps/api/internal/why"
 )
 
 // Verdict is how hard today should be allowed to be. Readiness only ever
@@ -32,7 +34,19 @@ const (
 type Assessment struct {
 	Verdict Verdict
 	Reasons []string
+	// Signals is Reasons again with the numbers kept apart from the prose:
+	// one Signal per reason, same order, so "HRV low two nights" can be shown
+	// with the 38 and 41 behind it. Reasons stays the sentence every existing
+	// caller reads; nothing has to parse it, and nothing reads Signals but the
+	// "Why?" record.
+	Signals []Signal
 }
+
+// Signal is one reason with its numbers: a kind (hrv, sleep, readiness,
+// resting_hr, form, load), a label, the value as it is displayed, and the
+// raw numbers behind it. It is internal/why's type so the record can carry
+// it without converting.
+type Signal = why.Signal
 
 // Day is one day's Garmin wellness row. Present is false when there is no
 // Garmin row for that day at all (Wahoo-only rider, watch not worn) — every
@@ -48,7 +62,13 @@ type Day struct {
 	ReadinessScore int
 	ReadinessLevel string
 	RestingHR      int
-	Present        bool
+	// HRVLastNight and HRVWeeklyAvg are the readings behind HRVStatus, in
+	// milliseconds; zero means no reading. They feed only the numbers a
+	// Signal shows, never a rule: HRVStatus is Garmin's own judgement and
+	// stays what decides.
+	HRVLastNight float64
+	HRVWeeklyAvg float64
+	Present      bool
 }
 
 // Load is one day's training load (TSS or equivalent), used for the
@@ -74,25 +94,25 @@ const dateLayout = "2006-01-02"
 func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load, now time.Time) Assessment {
 	nowDate := dateOnly(now)
 
-	var restReasons, cautionReasons []string
+	var rest, caution findings
 
 	if today.Present {
-		if r, ok := readinessRestReason(today); ok {
-			restReasons = append(restReasons, r)
-		} else if r, ok := readinessCautionReason(today); ok {
-			cautionReasons = append(cautionReasons, r)
+		if r, sig, ok := readinessRestReason(today); ok {
+			rest.add(r, sig)
+		} else if r, sig, ok := readinessCautionReason(today); ok {
+			caution.add(r, sig)
 		}
 
-		if r, ok := hrvRestReason(today, history); ok {
-			restReasons = append(restReasons, r)
-		} else if r, ok := hrvCautionReason(today); ok {
-			cautionReasons = append(cautionReasons, r)
+		if r, sig, ok := hrvRestReason(today, history); ok {
+			rest.add(r, sig)
+		} else if r, sig, ok := hrvCautionReason(today); ok {
+			caution.add(r, sig)
 		}
 
-		if r, ok := sleepRestReason(today); ok {
-			restReasons = append(restReasons, r)
-		} else if r, ok := sleepCautionReason(today); ok {
-			cautionReasons = append(cautionReasons, r)
+		if r, sig, ok := sleepRestReason(today); ok {
+			rest.add(r, sig)
+		} else if r, sig, ok := sleepCautionReason(today); ok {
+			caution.add(r, sig)
 		}
 
 		if today.RestingHR > 0 {
@@ -104,51 +124,76 @@ func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load
 				delta := math.Round(float64(today.RestingHR) - baseline)
 				switch {
 				case delta >= 7:
-					restReasons = append(restReasons, rhrReason(delta, baseline))
+					rest.add(rhrReason(delta, baseline), rhrSignal(today.RestingHR, delta, baseline))
 				case delta >= 4:
-					cautionReasons = append(cautionReasons, rhrReason(delta, baseline))
+					caution.add(rhrReason(delta, baseline), rhrSignal(today.RestingHR, delta, baseline))
 				}
 			}
 		}
 	}
 
 	if tsb != nil && *tsb < -30 && tsbFresh(tsbDate, nowDate) {
-		restReasons = append(restReasons, formReason(*tsb))
+		rest.add(formReason(*tsb), formSignal(*tsb))
 	}
 
 	// The load that decides how today may go is what came before today.
 	// Counted through today, the ride the verdict is about raises its own
 	// acute load: finish the session and the same day turns "take care".
 	if ratio, ok := acwr(loads, nowDate.AddDate(0, 0, -1)); ok && ratio >= 1.5 {
-		cautionReasons = append(cautionReasons, loadReason(ratio))
+		caution.add(loadReason(ratio), loadSignal(ratio))
 	}
 
 	switch {
-	case len(restReasons) > 0:
-		return Assessment{Verdict: Rest, Reasons: append(restReasons, cautionReasons...)}
-	case len(cautionReasons) > 0:
-		return Assessment{Verdict: Caution, Reasons: cautionReasons}
+	case len(rest.reasons) > 0:
+		return Assessment{
+			Verdict: Rest,
+			Reasons: append(rest.reasons, caution.reasons...),
+			Signals: append(rest.signals, caution.signals...),
+		}
+	case len(caution.reasons) > 0:
+		return Assessment{Verdict: Caution, Reasons: caution.reasons, Signals: caution.signals}
 	default:
 		return Assessment{Verdict: Ready}
 	}
 }
 
-// --- Garmin readiness -------------------------------------------------
-
-func readinessRestReason(d Day) (string, bool) {
-	poor := d.ReadinessLevel == "POOR" || (d.ReadinessScore > 0 && d.ReadinessScore < 25)
-	if !poor {
-		return "", false
-	}
-	return readinessReason("poor", d.ReadinessScore), true
+// findings collects reasons and their signals in step, so the two can never
+// drift out of line: every reason is added together with its numbers.
+type findings struct {
+	reasons []string
+	signals []Signal
 }
 
-func readinessCautionReason(d Day) (string, bool) {
+func (f *findings) add(reason string, sig Signal) {
+	f.reasons = append(f.reasons, reason)
+	f.signals = append(f.signals, sig)
+}
+
+// --- Garmin readiness -------------------------------------------------
+
+func readinessRestReason(d Day) (string, Signal, bool) {
+	poor := d.ReadinessLevel == "POOR" || (d.ReadinessScore > 0 && d.ReadinessScore < 25)
+	if !poor {
+		return "", Signal{}, false
+	}
+	return readinessReason("poor", d.ReadinessScore), readinessSignal("poor", d.ReadinessScore), true
+}
+
+func readinessCautionReason(d Day) (string, Signal, bool) {
 	low := d.ReadinessLevel == "LOW" || (d.ReadinessScore >= 25 && d.ReadinessScore <= 49)
 	if !low {
-		return "", false
+		return "", Signal{}, false
 	}
-	return readinessReason("low", d.ReadinessScore), true
+	return readinessReason("low", d.ReadinessScore), readinessSignal("low", d.ReadinessScore), true
+}
+
+func readinessSignal(word string, score int) Signal {
+	sig := Signal{Kind: "readiness", Label: "Garmin readiness", Value: word}
+	if score > 0 {
+		sig.Value = fmt.Sprintf("%s (%d)", word, score)
+		sig.Numbers = []float64{float64(score)}
+	}
+	return sig
 }
 
 func readinessReason(word string, score int) string {
@@ -172,45 +217,81 @@ func isAbnormalHRV(status string) bool {
 // POOR. A missing "yesterday" row (no history entry dated exactly one day
 // before today) is treated as not-low, so this rule needs both nights
 // present to fire.
-func hrvRestReason(today Day, history []Day) (string, bool) {
+func hrvRestReason(today Day, history []Day) (string, Signal, bool) {
 	if !isLowOrPoor(today.HRVStatus) {
-		return "", false
+		return "", Signal{}, false
 	}
 	todayDate, ok := parseDate(today.Date)
 	if !ok {
-		return "", false
+		return "", Signal{}, false
 	}
 	yesterday := todayDate.AddDate(0, 0, -1)
 	for _, h := range history {
 		hd, ok := parseDate(h.Date)
 		if ok && hd.Equal(yesterday) && isLowOrPoor(h.HRVStatus) {
-			return "HRV has been low for two nights", true
+			return "HRV has been low for two nights", hrvSignal("HRV low two nights", today, h.HRVLastNight), true
 		}
 	}
-	return "", false
+	return "", Signal{}, false
 }
 
-func hrvCautionReason(today Day) (string, bool) {
+func hrvCautionReason(today Day) (string, Signal, bool) {
 	if !isAbnormalHRV(today.HRVStatus) {
-		return "", false
+		return "", Signal{}, false
 	}
-	return fmt.Sprintf("HRV is %s today", strings.ToLower(today.HRVStatus)), true
+	status := strings.ToLower(today.HRVStatus)
+	return fmt.Sprintf("HRV is %s today", status), hrvSignal("HRV "+status, today, 0), true
+}
+
+// hrvSignal shows the readings behind an HRV reason, oldest first —
+// "38, 41 ms vs usual 52" — as far as there are readings: a night with no
+// reading (0) is left out, and with none at all the value falls back to the
+// status word rather than printing zeros.
+func hrvSignal(label string, today Day, earlier float64) Signal {
+	sig := Signal{Kind: "hrv", Label: label}
+	var shown []string
+	if earlier > 0 {
+		shown = append(shown, fmt.Sprintf("%.0f", earlier))
+		sig.Numbers = append(sig.Numbers, earlier)
+	}
+	if today.HRVLastNight > 0 {
+		shown = append(shown, fmt.Sprintf("%.0f", today.HRVLastNight))
+		sig.Numbers = append(sig.Numbers, today.HRVLastNight)
+	}
+	if len(shown) == 0 {
+		sig.Value = strings.ToLower(today.HRVStatus)
+		return sig
+	}
+	sig.Value = strings.Join(shown, ", ") + " ms"
+	if today.HRVWeeklyAvg > 0 {
+		sig.Value += fmt.Sprintf(" vs usual %.0f", today.HRVWeeklyAvg)
+		sig.Numbers = append(sig.Numbers, today.HRVWeeklyAvg)
+	}
+	return sig
 }
 
 // --- Sleep ----------------------------------------------------------------
 
-func sleepRestReason(d Day) (string, bool) {
+func sleepRestReason(d Day) (string, Signal, bool) {
 	if d.SleepScore <= 0 || d.SleepScore >= 40 {
-		return "", false
+		return "", Signal{}, false
 	}
-	return sleepReason(d), true
+	return sleepReason(d), sleepSignal(d), true
 }
 
-func sleepCautionReason(d Day) (string, bool) {
+func sleepCautionReason(d Day) (string, Signal, bool) {
 	if d.SleepScore < 40 || d.SleepScore > 59 {
-		return "", false
+		return "", Signal{}, false
 	}
-	return sleepReason(d), true
+	return sleepReason(d), sleepSignal(d), true
+}
+
+func sleepSignal(d Day) Signal {
+	return Signal{
+		Kind: "sleep", Label: "Sleep",
+		Value:   fmt.Sprintf("%s, score %d", formatDuration(d.SleepSeconds), d.SleepScore),
+		Numbers: []float64{float64(d.SleepSeconds), float64(d.SleepScore)},
+	}
 }
 
 func sleepReason(d Day) string {
@@ -263,6 +344,14 @@ func median(vals []float64) float64 {
 // value that decided rest vs. caution — so the number in the sentence never
 // disagrees with the verdict it explains. baseline is rounded here, once,
 // purely for display.
+func rhrSignal(rhr int, delta, baseline float64) Signal {
+	return Signal{
+		Kind: "resting_hr", Label: "Resting heart rate",
+		Value:   fmt.Sprintf("%d bpm, %d above your usual %d", rhr, int(delta), int(math.Round(baseline))),
+		Numbers: []float64{float64(rhr), delta, math.Round(baseline)},
+	}
+}
+
 func rhrReason(delta, baseline float64) string {
 	return fmt.Sprintf("resting heart rate is %d above your usual %d", int(delta), int(math.Round(baseline)))
 }
@@ -280,6 +369,10 @@ func tsbFresh(tsbDate string, referenceDate time.Time) bool {
 	}
 	age := referenceDate.Sub(d)
 	return age >= 0 && age <= 2*24*time.Hour
+}
+
+func formSignal(tsb float64) Signal {
+	return Signal{Kind: "form", Label: "Form", Value: formatSigned(tsb), Numbers: []float64{tsb}}
 }
 
 func formReason(tsb float64) string {
@@ -350,6 +443,10 @@ func acwr(loads []Load, referenceDate time.Time) (float64, bool) {
 // acute:chronic ratio says nothing: 10 a day is about an hour of endurance
 // riding a week and a half, and a load that light is no base to spike from.
 const minChronicLoad = 10.0
+
+func loadSignal(ratio float64) Signal {
+	return Signal{Kind: "load", Label: "Load this week", Value: fmt.Sprintf("%.1f× your usual", ratio), Numbers: []float64{ratio}}
+}
 
 func loadReason(ratio float64) string {
 	return fmt.Sprintf("your load this week is %.1f× your usual", ratio)
