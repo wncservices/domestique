@@ -387,3 +387,27 @@ func TestTheSameInstantGivesTheSameAnswerInAnyZone(t *testing.T) {
 		t.Errorf("Brussels date = %s", b.Date)
 	}
 }
+
+// A test ridden on the Tuesday of the after-recovery week ends the banner:
+// the reason still holds all week, but FTP was just checked.
+func TestARiddenTestSilencesTheBannerTheDayAfter(t *testing.T) {
+	plan := planFrom(base(), base(), rec(), base(), base())
+	in := input(plan)
+	in.Profile.FTPVerifiedAt = "2026-02-01"              // stale, so the banner is not in doubt
+	in.Now = time.Date(2026, 4, 7, 9, 0, 0, 0, brussels) // Tuesday, week after recovery
+	if s := Suggest(in); s == nil || s.Reason != ReasonAfterRecovery {
+		t.Fatalf("before the test: %+v, want after_recovery", s)
+	}
+	// The test is ridden and read: FTP is verified on the day.
+	in.Profile.FTPVerifiedAt = "2026-04-07"
+	in.LastTestDate = "2026-04-07"
+	in.Now = time.Date(2026, 4, 8, 9, 0, 0, 0, brussels) // Wednesday
+	if s := Suggest(in); s != nil {
+		t.Errorf("Wednesday after the test: %+v, want no banner", s)
+	}
+	// Only the last-test date known (e.g. an unreadable ride): still quiet.
+	in.Profile.FTPVerifiedAt = "2026-02-01"
+	if s := Suggest(in); s != nil {
+		t.Errorf("last test date alone: %+v, want no banner", s)
+	}
+}

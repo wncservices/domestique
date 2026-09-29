@@ -37,6 +37,9 @@ const (
 	// aEventQuietDays is how close to an A event no test is suggested: a test
 	// is a hard, all-out effort and costs a few days.
 	aEventQuietDays = 14
+	// justCheckedDays is how long after FTP was last checked (a test, a
+	// confirming ride, a change) no test is suggested.
+	justCheckedDays = 14
 	// noPlanHorizonDays is how far ahead a rider with no plan is offered a
 	// day; a two-week look is enough to find one of their available days.
 	noPlanHorizonDays = 14
@@ -61,6 +64,9 @@ type Input struct {
 	// LastTestProtocol is the protocol of the rider's most recent completed
 	// test ("" if none), so the recommendation is like for like.
 	LastTestProtocol string
+	// LastTestDate is the date of the rider's most recent test that has been
+	// ridden and read ("" if none).
+	LastTestDate string
 	// Now carries the rider's zone: "today" is its calendar date.
 	Now time.Time
 }
@@ -89,6 +95,12 @@ func Suggest(in Input) *Suggestion {
 
 	// A snoozed suggestion is silent until the snooze date arrives.
 	if p.FTPTestSnoozedUntil != "" && todayStr < p.FTPTestSnoozedUntil {
+		return nil
+	}
+	// A test just ridden, or FTP otherwise just checked, ends the nagging for a
+	// while: otherwise the reasons that hold all week (the week after
+	// recovery, a block start) would bring the banner back the day after.
+	if checked := (&suggester{today: today}); checked.recent(p.FTPVerifiedAt) || checked.recent(in.LastTestDate) {
 		return nil
 	}
 	// A test on the calendar ends the nagging: today or later counts.
@@ -351,4 +363,14 @@ func dateOf(t time.Time) time.Time {
 func parseDate(s string) (time.Time, bool) {
 	d, err := time.Parse(dateLayout, s)
 	return d, err == nil
+}
+
+// recent reports whether date (YYYY-MM-DD, "" for none) is fewer than
+// justCheckedDays before today. A date in the future counts as recent.
+func (s *suggester) recent(date string) bool {
+	d, ok := parseDate(date)
+	if !ok {
+		return false
+	}
+	return int(s.today.Sub(d).Hours()/24) < justCheckedDays
 }

@@ -80,10 +80,15 @@ func (s *Server) handleGetFTPTests(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := ftpTestsDTO{Protocols: fitnesstest.Protocols(), FTPVerifiedAt: profile.FTPVerifiedAt}
-	var lastProtocol string
+	var lastProtocol, lastReadDate string
 	for _, wk := range workouts {
 		if wk.TestProtocol == "" {
 			continue
+		}
+		// A test that was ridden and read, even one that gave nothing, means FTP
+		// was just checked: the banner stays quiet for a while afterwards.
+		if wk.Date <= todayStr && wk.TestResultWatts != 0 && wk.Date > lastReadDate {
+			lastReadDate = wk.Date
 		}
 		ref := &ftpTestRefDTO{WorkoutID: wk.ID, Protocol: wk.TestProtocol, Date: wk.Date, ResultWatts: wk.TestResultWatts}
 		switch {
@@ -122,7 +127,7 @@ func (s *Server) handleGetFTPTests(w http.ResponseWriter, r *http.Request) {
 	}
 	if sug := testschedule.Suggest(testschedule.Input{
 		Plan: plan, Profile: profile, Upcoming: upcoming, Goals: goals,
-		HasPower: hasPower, LastTestProtocol: lastProtocol, Now: now,
+		HasPower: hasPower, LastTestProtocol: lastProtocol, LastTestDate: lastReadDate, Now: now,
 	}); sug != nil {
 		out.Suggestion = &ftpTestSuggestionDTO{
 			Reason: sug.Reason, Message: sug.Message, Date: sug.Date,
