@@ -165,6 +165,7 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 		easy := scheduler.EasyVariant(wk, profile)
 		description += fmt.Sprintf(" Replaces: %s.", wk.Name)
 		req.Name, req.Steps = &easy.Name, &easy.Steps
+		s.keepIndoor(&req, wk, profile, easy.Zone)
 		what = "downgraded"
 	}
 
@@ -230,9 +231,13 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 	// hasStepDownSource can still find it — it just searches the whole
 	// description, position included.
 	description := wk.Description + " " + adapter.StepDownSourceNote(c.StepDownSourceID) + " " + adapter.Note(c)
-	_, err = s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
+	update := workout.UpdateWorkoutRequest{
 		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
-	})
+	}
+	// The step-down stays in the workout's own zone, so that is the zone the
+	// replacement's steps are converted under.
+	s.keepIndoor(&update, wk, profile, wk.Zone)
+	_, err = s.Training.UpdateWorkout(ctx, wk.ID, update)
 	return err
 }
 

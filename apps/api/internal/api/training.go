@@ -135,6 +135,9 @@ type riderProfileDTO struct {
 	// AutoPushWorkouts is the rider's standing permission to place their
 	// scheduled workouts on their Garmin account automatically.
 	AutoPushWorkouts bool `json:"autoPushWorkouts,omitempty"`
+	// SmartTrainer is "I have a smart trainer": it gates the ERG wording and
+	// the midpoint collapse of an indoor version's power ranges.
+	SmartTrainer bool `json:"smartTrainer,omitempty"`
 	// Estimated names the fields above (other than FTP, which has its own
 	// flag) that were filled in automatically and not yet confirmed by the
 	// rider. Output only — handleSaveRiderProfile never reads it back.
@@ -151,7 +154,7 @@ func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
 		MaxHR: p.MaxHR, ThresholdHR: p.ThresholdHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
-		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, UpdatedAt: p.UpdatedAt,
+		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, SmartTrainer: p.SmartTrainer, UpdatedAt: p.UpdatedAt,
 	}
 }
 
@@ -176,6 +179,11 @@ type workoutDTO struct {
 	// TestUnreadable is set when the test ride was read and gave no result, so
 	// the day card can say so instead of showing nothing.
 	TestUnreadable bool `json:"testUnreadable,omitempty"`
+	// Indoor marks the trainer version of a session. OutdoorPlannedSeconds is
+	// the length the "Back to outdoor version" action restores, omitted unless
+	// there is an original to restore and it is time-based.
+	Indoor                bool    `json:"indoor,omitempty"`
+	OutdoorPlannedSeconds float64 `json:"outdoorPlannedSeconds,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -188,6 +196,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		Description: w.Description, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 		Zone: string(w.Zone), Level: w.Level,
 		TestProtocol:   w.TestProtocol,
+		Indoor:         w.Indoor,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
 		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
 	}
@@ -199,6 +208,9 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		dto.TestResultWatts = w.TestResultWatts
 	}
 	dto.TestUnreadable = w.TestResultWatts < 0
+	if w.OutdoorSteps != nil {
+		dto.OutdoorPlannedSeconds = workout.PlannedSeconds(*w.OutdoorSteps)
+	}
 	return dto
 }
 
@@ -896,7 +908,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
 		MaxHR: body.MaxHR, ThresholdHR: body.ThresholdHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
-		AutoPushWorkouts: body.AutoPushWorkouts,
+		AutoPushWorkouts: body.AutoPushWorkouts, SmartTrainer: body.SmartTrainer,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

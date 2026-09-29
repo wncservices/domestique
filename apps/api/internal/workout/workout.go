@@ -338,9 +338,14 @@ type Workout struct {
 	// (internal/indoor): time-based steps, power targets where FTP is known.
 	// Conversion is idempotent on this flag, so a second click shortens
 	// nothing.
-	Indoor    bool
-	CreatedAt string
-	UpdatedAt string
+	Indoor bool
+	// OutdoorSteps is what Steps were before the workout became indoor, so
+	// "Back to outdoor version" can restore them exactly. nil unless Indoor.
+	// A non-nil empty slice is a stored original with no steps, distinct from
+	// nil ("nothing stored").
+	OutdoorSteps *[]WorkoutStep
+	CreatedAt    string
+	UpdatedAt    string
 }
 
 // TestResultUnreadable is what Workout.TestResultWatts holds for a test ride
@@ -404,6 +409,11 @@ type UpdateWorkoutRequest struct {
 	Steps       *[]WorkoutStep
 	Zone        *Zone
 	Level       *float64
+	// Indoor sets the flag. OutdoorSteps sets the stored original steps: a
+	// pointer to a nil slice clears them (NULL), which is how a revert
+	// leaves nothing behind; a pointer to a non-nil slice stores it.
+	Indoor       *bool
+	OutdoorSteps *[]WorkoutStep
 }
 
 // FITSteps converts to the leaf-level type fitworkout.Encode takes. The one

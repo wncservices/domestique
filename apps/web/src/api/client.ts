@@ -74,6 +74,7 @@ import type {
   SessionAnalysis,
   ReadinessResponse,
   EaseTomorrowResult,
+  IndoorPreview,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -746,6 +747,25 @@ export const api = {
     }),
   deleteWorkout: (id: string) =>
     request<{ status: string }>(`/api/training/workouts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** What the indoor version of a session would be, converting nothing. */
+  previewIndoor: (id: string, today?: string) =>
+    request<IndoorPreview>(
+      `/api/training/workouts/${encodeURIComponent(id)}/indoor?preview=1${today ? `&today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'POST' },
+    ),
+  /** Edits the session in place into its indoor version. Idempotent. A 409
+   *  means it is ridden or past, a 422 that it is not a cycling session. */
+  convertToIndoor: (id: string, today?: string) =>
+    request<Workout>(
+      `/api/training/workouts/${encodeURIComponent(id)}/indoor${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'POST' },
+    ),
+  /** Restores the pre-conversion steps ("Back to outdoor version"). Idempotent. */
+  revertIndoor: (id: string, today?: string) =>
+    request<Workout>(
+      `/api/training/workouts/${encodeURIComponent(id)}/indoor${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'DELETE' },
+    ),
   /** The URL a plain link/download button points at — a structured FIT
    *  workout file, the same "copy it onto a device over USB" role
    *  api's route-FIT download plays; see internal/fitworkout's own doc
