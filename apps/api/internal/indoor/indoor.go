@@ -76,10 +76,12 @@ type Result struct {
 	Changed bool
 }
 
-// Convert returns w's indoor version. It is idempotent: an already-indoor
+// Convert returns w's indoor version. Whether ranges collapse to a midpoint
+// comes from the profile's SmartTrainer, so no caller can pass it inconsistently.
+// It is idempotent: an already-indoor
 // workout comes back as it is, so a double click or a retried request cannot
 // shorten a ride twice.
-func Convert(w workout.Workout, p workout.RiderProfile, smartTrainer bool) (Result, error) {
+func Convert(w workout.Workout, p workout.RiderProfile) (Result, error) {
 	if w.Sport != model.SportCycling {
 		return Result{}, ErrNotCycling
 	}
@@ -96,7 +98,7 @@ func Convert(w workout.Workout, p workout.RiderProfile, smartTrainer bool) (Resu
 		}, nil
 	}
 
-	c := converter{w: w, p: p, smart: smartTrainer, band: zoneBand(w)}
+	c := converter{w: w, p: p, smart: p.SmartTrainer, band: zoneBand(w)}
 	steps = c.convert(steps)
 	unscaled := workout.PlannedSeconds(steps)
 
@@ -300,8 +302,14 @@ func note(w workout.Workout, steps []workout.WorkoutStep, unscaled float64, shor
 	if shortened {
 		out += " The rest can be ridden outside on another day."
 	}
-	if p.FTPWatts <= 0 && !erg && hasHeartRateTarget(steps) {
-		out += " No FTP set, so the trainer cannot control resistance. Ride by heart rate."
+	if hasHeartRateTarget(steps) {
+		if p.FTPWatts <= 0 && !erg {
+			out += " No FTP set, so the trainer cannot control resistance. Ride by heart rate."
+		} else if p.FTPWatts > 0 {
+			// FTP is known but the zone is not, so there is nothing to turn the
+			// heart-rate target into: inventing a wattage would be a guess.
+			out += " Heart-rate steps stay as heart rate because the session's zone is not known, so the trainer cannot control them."
+		}
 	}
 	return out
 }

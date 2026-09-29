@@ -17,6 +17,11 @@ const ftp = 200.0
 
 func ftpProfile() workout.RiderProfile { return workout.RiderProfile{FTPWatts: ftp} }
 
+func withSmart(p workout.RiderProfile) workout.RiderProfile {
+	p.SmartTrainer = true
+	return p
+}
+
 func hrProfile() workout.RiderProfile { return workout.RiderProfile{MaxHR: 190} }
 
 func timeStep(name string, in workout.Intensity, secs float64, t workout.TargetType, lo, hi float64) workout.WorkoutStep {
@@ -39,7 +44,8 @@ func road(name string, zone workout.Zone, mainSecs float64, t workout.TargetType
 
 func mustConvert(t *testing.T, w workout.Workout, p workout.RiderProfile, smart bool) Result {
 	t.Helper()
-	r, err := Convert(w, p, smart)
+	p.SmartTrainer = smart
+	r, err := Convert(w, p)
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
@@ -297,7 +303,7 @@ func TestFTPTestWorkoutStepsAreUntouched(t *testing.T) {
 			}
 			w := workout.Workout{Sport: req.Sport, Name: req.Name, Steps: req.Steps, TestProtocol: proto}
 			want := workout.Workout{Steps: req.Steps}
-			r, err := Convert(w, ftpProfile(), true)
+			r, err := Convert(w, withSmart(ftpProfile()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,13 +319,13 @@ func TestFTPTestWorkoutStepsAreUntouched(t *testing.T) {
 
 func TestFTPTestERGFollowsTheProtocolsTrainerMode(t *testing.T) {
 	ramp, _ := fitnesstest.BuildTestWorkout("ramp", ftp)
-	r, _ := Convert(workout.Workout{Sport: ramp.Sport, Steps: ramp.Steps, TestProtocol: "ramp"}, ftpProfile(), true)
+	r, _ := Convert(workout.Workout{Sport: ramp.Sport, Steps: ramp.Steps, TestProtocol: "ramp"}, withSmart(ftpProfile()))
 	if !r.ERG {
 		t.Errorf("the ramp is ERG")
 	}
 	for _, proto := range []string{"twenty_minute", "two_by_eight"} {
 		req, _ := fitnesstest.BuildTestWorkout(proto, ftp)
-		r, _ := Convert(workout.Workout{Sport: req.Sport, Steps: req.Steps, TestProtocol: proto}, ftpProfile(), true)
+		r, _ := Convert(workout.Workout{Sport: req.Sport, Steps: req.Steps, TestProtocol: proto}, withSmart(ftpProfile()))
 		if r.ERG {
 			t.Errorf("%s is resistance mode, ERG must be false", proto)
 		}
@@ -328,7 +334,7 @@ func TestFTPTestERGFollowsTheProtocolsTrainerMode(t *testing.T) {
 
 func TestRunningIsRejected(t *testing.T) {
 	w := workout.Workout{Sport: model.SportRunning, Name: "Easy run", Steps: []workout.WorkoutStep{timeStep("Run", workout.IntensityActive, 1800, workout.TargetOpen, 0, 0)}}
-	if _, err := Convert(w, ftpProfile(), false); !errors.Is(err, ErrNotCycling) {
+	if _, err := Convert(w, ftpProfile()); !errors.Is(err, ErrNotCycling) {
 		t.Errorf("err = %v, want ErrNotCycling", err)
 	}
 }
@@ -368,5 +374,23 @@ func TestConversionDoesNotMutateItsInput(t *testing.T) {
 	_ = mustConvert(t, w, ftpProfile(), true)
 	if !reflect.DeepEqual(w.Steps, before.Steps) {
 		t.Errorf("input mutated")
+	}
+}
+
+func TestFTPKnownButZoneUnknownSaysHeartRateStepsStay(t *testing.T) {
+	w := workout.Workout{Sport: model.SportCycling, Name: "Hand built", Steps: []workout.WorkoutStep{
+		timeStep("Ride", workout.IntensityActive, 1800, workout.TargetHeartRate, 140, 150),
+	}}
+	r := mustConvert(t, w, ftpProfile(), false)
+	if !strings.Contains(r.Note, "Heart-rate steps stay as heart rate because the session's zone is not known") {
+		t.Errorf("note = %q, want the zone-unknown clause", r.Note)
+	}
+	if strings.Contains(r.Note, "No FTP set") {
+		t.Errorf("note = %q, must not claim FTP is missing", r.Note)
+	}
+	// A fully converted session says neither.
+	full := mustConvert(t, road("Endurance ride", workout.ZoneEndurance, 3600, workout.TargetHeartRate, 110, 140), ftpProfile(), false)
+	if strings.Contains(full.Note, "Heart-rate steps stay") {
+		t.Errorf("note = %q", full.Note)
 	}
 }
