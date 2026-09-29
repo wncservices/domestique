@@ -49,6 +49,7 @@ type weatherHarness struct {
 	meteo    *httptest.Server
 	requests atomic.Int32
 	mu       sync.Mutex
+	clockNow time.Time // guarded by mu; the one knob for the server and the client
 	queries  []url.Values
 	status   int
 	body     string
@@ -108,7 +109,7 @@ func newWeatherHarness(t *testing.T, mutate ...func(*api.Server)) *weatherHarnes
 		t.Fatal(err)
 	}
 
-	h := &weatherHarness{t: t, prefs: prefs, training: training, db: db, logs: &syncBuffer{}, status: http.StatusOK, body: rainyForecast()}
+	h := &weatherHarness{t: t, prefs: prefs, training: training, db: db, logs: &syncBuffer{}, status: http.StatusOK, body: rainyForecast(), clockNow: weatherNow}
 	h.meteo = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.requests.Add(1)
 		h.mu.Lock()
@@ -126,9 +127,9 @@ func newWeatherHarness(t *testing.T, mutate ...func(*api.Server)) *weatherHarnes
 		Links:        links,
 		Training:     training,
 		WeatherPrefs: prefs,
-		Weather:      weather.New(h.meteo.URL, weatherAPIKey, func() time.Time { return weatherNow }),
+		Weather:      weather.New(h.meteo.URL, weatherAPIKey, h.now),
 		Config:       &config.Config{Weather: config.WeatherConfig{BaseURL: h.meteo.URL}},
-		Clock:        func() time.Time { return weatherNow },
+		Clock:        h.now,
 		Log:          slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 	for _, m := range mutate {
@@ -173,6 +174,18 @@ func forecastJSON(n int, date string, temp, prob, rain, wind, gust float64, code
 		},
 	})
 	return string(raw)
+}
+
+func (h *weatherHarness) now() time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.clockNow
+}
+
+func (h *weatherHarness) setNow(t time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clockNow = t
 }
 
 func (h *weatherHarness) setForecast(status int, body string) {

@@ -76,6 +76,7 @@ import type {
   EaseTomorrowResult,
   IndoorPreview,
   WeatherPrefs,
+  WeatherResponse,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -767,6 +768,12 @@ export const api = {
       `/api/training/workouts/${encodeURIComponent(id)}/indoor${today ? `?today=${encodeURIComponent(today)}` : ''}`,
       { method: 'DELETE' },
     ),
+  /** The rider's weather opt-in (town name and ride window, never
+   *  coordinates) and, when they have one, four days of forecast and a
+   *  suggestion per planned session. Failure of the forecast comes back as
+   *  `unavailable`, not an error; a 412 means this deployment has weather off. */
+  weather: (today?: string) =>
+    request<WeatherResponse>(`/api/training/weather${today ? `?today=${encodeURIComponent(today)}` : ''}`),
   /** Whether the rider opted in to weather, their town's name and ride window.
    *  Never carries coordinates. A 412 means this deployment has weather off. */
   weatherPrefs: () => request<WeatherPrefs>('/api/training/weather'),
