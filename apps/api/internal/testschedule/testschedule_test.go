@@ -39,8 +39,10 @@ func rec() wk   { return wk{phase: periodization.PhaseBase, recovery: true} }
 func taper() wk { return wk{phase: periodization.PhaseTaper} }
 func peak() wk  { return wk{phase: periodization.PhasePeak} }
 
-// input is a cycling rider who trains Tue/Thu/Sat with a fresh, known FTP, so
-// only the plan can make a test worth suggesting.
+// input is a cycling rider who trains Tue/Thu/Sat with a fresh, known FTP and a
+// test ridden 17 days ago, so only the plan can make a test worth suggesting:
+// that test is old enough not to silence the banner (14 days) and recent enough
+// that plan_start (42 days) and estimated_ftp (never tested) stay out of the way.
 func input(plan *periodization.Plan) Input {
 	return Input{
 		Plan: plan,
@@ -48,8 +50,9 @@ func input(plan *periodization.Plan) Input {
 			Rider: "wilant", FTPWatts: 250, AvailableDays: []string{"tue", "thu", "sat"},
 			FTPVerifiedAt: "2026-03-10",
 		},
-		HasPower: true,
-		Now:      wed,
+		LastTestDate: "2026-03-01",
+		HasPower:     true,
+		Now:          wed,
 	}
 }
 
@@ -409,5 +412,154 @@ func TestARiddenTestSilencesTheBannerTheDayAfter(t *testing.T) {
 	in.Profile.FTPVerifiedAt = "2026-02-01"
 	if s := Suggest(in); s != nil {
 		t.Errorf("last test date alone: %+v, want no banner", s)
+	}
+}
+
+// freshRider is the report that started this: an FTP verified yesterday (the
+// deploy-time backfill), never tested, at the start of a plan.
+func freshRider(plan *periodization.Plan) Input {
+	in := input(plan)
+	in.Profile.FTPVerifiedAt = "2026-03-17"
+	in.LastTestDate = ""
+	return in
+}
+
+func TestPlanStartSuggestsATestInWeekOneAndTwoDespiteAFreshVerifiedDate(t *testing.T) {
+	plan := planFrom(base(), base(), base(), base())
+	in := freshRider(plan)
+	s := mustSuggest(t, in)
+	if s.Reason != ReasonPlanStart || s.Date != "2026-03-19" {
+		t.Fatalf("week 1: got %+v", s)
+	}
+	if want := "Start your plan with an FTP test. Thursday would be ideal"; s.Message != want {
+		t.Errorf("message = %q, want %q", s.Message, want)
+	}
+	in.Now = time.Date(2026, 3, 25, 10, 0, 0, 0, brussels) // week 2
+	if s := mustSuggest(t, in); s.Reason != ReasonPlanStart || s.Date != "2026-03-26" {
+		t.Errorf("week 2: got %+v", s)
+	}
+}
+
+func TestPlanStartDoesNotApplyFromWeekThree(t *testing.T) {
+	in := freshRider(planFrom(base(), base(), base(), base(), base()))
+	in.Now = time.Date(2026, 4, 1, 10, 0, 0, 0, brussels) // week 3; week 4 is next
+	if s := Suggest(in); s != nil {
+		t.Errorf("got %+v, want none from week 3 with nothing else firing", s)
+	}
+}
+
+func TestPlanStartIsNotOfferedWithinFortyTwoDaysOfARiddenTest(t *testing.T) {
+	in := freshRider(planFrom(base(), base(), base()))
+	in.LastTestDate = "2026-02-16" // 30 days ago
+	if s := Suggest(in); s != nil {
+		t.Errorf("test 30 days ago: got %+v", s)
+	}
+	in.LastTestDate = "2026-02-04" // 42 days ago: no longer within the rule
+	if s := mustSuggest(t, in); s.Reason != ReasonPlanStart {
+		t.Errorf("test 42 days ago: got %+v", s)
+	}
+}
+
+func TestARiddenTestFiveDaysAgoIsSilent(t *testing.T) {
+	in := freshRider(planFrom(base(), base()))
+	in.Profile.FTPWatts = 0 // even the strongest reason
+	in.LastTestDate = "2026-03-13"
+	if s := Suggest(in); s != nil {
+		t.Errorf("got %+v", s)
+	}
+}
+
+func TestAVerifiedDateAloneNoLongerSilences(t *testing.T) {
+	in := input(planFrom(base(), base(), base()))
+	in.Profile.FTPVerifiedAt = "2026-03-18" // today, from a backfill or an auto-estimate
+	in.LastTestDate = ""
+	in.Profile.FTPEstimated = true
+	if s := mustSuggest(t, in); s.Reason != ReasonPlanStart {
+		t.Errorf("got %+v", s)
+	}
+}
+
+func TestEstimatedFTPNeverTestedIsSuggestedATest(t *testing.T) {
+	// Week 3 of the plan, so plan_start is out of the picture.
+	in := input(planFrom(base(), base(), base(), base()))
+	in.Now = time.Date(2026, 4, 1, 10, 0, 0, 0, brussels)
+	in.LastTestDate = ""
+	in.Profile.FTPEstimated = true
+	s := mustSuggest(t, in)
+	if s.Reason != ReasonEstimatedFTP || s.Date != "2026-04-02" {
+		t.Fatalf("got %+v", s)
+	}
+	if want := "Your FTP is an estimate from your rides. A test would pin it down"; s.Message != want {
+		t.Errorf("message = %q, want %q", s.Message, want)
+	}
+	// Also without a plan.
+	in.Plan = nil
+	if s := mustSuggest(t, in); s.Reason != ReasonEstimatedFTP {
+		t.Errorf("no plan: got %+v", s)
+	}
+	// A typed FTP is not an estimate.
+	in.Profile.FTPEstimated = false
+	if s := Suggest(in); s != nil {
+		t.Errorf("typed FTP: got %+v", s)
+	}
+	// A test ridden once, even long ago, means it is no longer only an estimate.
+	in.Profile.FTPEstimated = true
+	in.LastTestDate = "2025-01-01"
+	if s := Suggest(in); s != nil {
+		t.Errorf("tested once: got %+v", s)
+	}
+}
+
+func TestPlanStartComesBeforeEstimatedFTPAndAfterNoFTP(t *testing.T) {
+	in := freshRider(planFrom(base(), base()))
+	in.Profile.FTPEstimated = true
+	if s := mustSuggest(t, in); s.Reason != ReasonPlanStart {
+		t.Errorf("got %+v, want plan_start before estimated_ftp", s)
+	}
+	in.Profile.FTPWatts = 0
+	if s := mustSuggest(t, in); s.Reason != ReasonNoFTP {
+		t.Errorf("got %+v, want no_ftp first", s)
+	}
+}
+
+func TestPlanStartComesBeforeAfterRecovery(t *testing.T) {
+	// Week 2 is a recovery week, so week 3 is both "plan week 3" and after
+	// recovery; and a plan starting in recovery week 1 has week 2 as plan_start.
+	in := freshRider(planFrom(rec(), base(), base()))
+	s := mustSuggest(t, in)
+	if s.Reason != ReasonPlanStart {
+		t.Errorf("got %+v", s)
+	}
+}
+
+func TestNewReasonsKeepTheExclusions(t *testing.T) {
+	for name, plan := range map[string]*periodization.Plan{
+		"taper":    planFrom(taper(), taper(), taper()),
+		"peak":     planFrom(peak(), peak(), peak()),
+		"recovery": planFrom(rec(), rec()),
+	} {
+		in := freshRider(plan)
+		in.Profile.FTPEstimated = true
+		if s := Suggest(in); s != nil {
+			t.Errorf("%s: got %+v", name, s)
+		}
+	}
+	// A within 14 days of an A event: plan_start and estimated_ftp are out.
+	in := freshRider(planFrom(base(), base(), base(), base()))
+	in.Profile.FTPEstimated = true
+	in.Goals = []workout.Goal{{ID: "g", Priority: workout.PriorityA, EventDate: "2026-04-01"}}
+	if s := Suggest(in); s != nil {
+		t.Errorf("A event: got %+v", s)
+	}
+	// A scheduled test and a snooze still silence them.
+	in = freshRider(planFrom(base(), base()))
+	in.Upcoming = []workout.Workout{{ID: "t", Date: "2026-03-24", TestProtocol: "ramp"}}
+	if s := Suggest(in); s != nil {
+		t.Errorf("scheduled: got %+v", s)
+	}
+	in.Upcoming = nil
+	in.Profile.FTPTestSnoozedUntil = "2026-04-01"
+	if s := Suggest(in); s != nil {
+		t.Errorf("snoozed: got %+v", s)
 	}
 }

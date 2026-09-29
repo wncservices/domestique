@@ -32,7 +32,7 @@ const powerEvidenceDays = 90
 // Mirrored by hand in apps/web/src/api/types.ts — change them together.
 
 type ftpTestSuggestionDTO struct {
-	// Reason is one of no_ftp, after_recovery, block_start, stale.
+	// Reason is one of no_ftp, plan_start, estimated_ftp, after_recovery, block_start, stale.
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
 	// Date is the suggested day; Recommended the protocol id to pre-select.
