@@ -106,6 +106,10 @@ type LiveGarmin struct {
 	// Log receives the one thing that is worth knowing and not worth failing
 	// over: that the profile lookup did not work. Nil is fine.
 	Log func(msg string, args ...any)
+
+	// APIBase overrides Connect's API host, for tests that point the real
+	// client at an httptest fake. Empty means the real one.
+	APIBase string
 }
 
 // Connect signs in and returns the session to keep in the password's place.
@@ -155,6 +159,9 @@ func (l LiveGarmin) resume(consumer GarminConsumer, session garmin.Session) (*ga
 
 	client := garmin.New()
 	client.SetConsumer(consumer.Key, consumer.Secret)
+	if l.APIBase != "" {
+		client.APIBase = l.APIBase
+	}
 	client.Resume(session)
 	return client, nil
 }

@@ -182,8 +182,8 @@ func TestWellnessOneEndpointFailingLeavesTheOthersFilled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Wellness: %v", err)
 	}
-	if len(w.Partial) != 1 || w.Partial[0] != "hrv" {
-		t.Errorf("Partial = %v, want [hrv]", w.Partial)
+	if len(w.Partial) != 1 || w.Partial[0] != "hrv:500" {
+		t.Errorf("Partial = %v, want [hrv:500]", w.Partial)
 	}
 	if w.HRVLastNight != 0 || w.HRVWeeklyAvg != 0 || w.HRVStatus != "" {
 		t.Errorf("HRV fields = %v/%v/%q, want zero values after the failure", w.HRVLastNight, w.HRVWeeklyAvg, w.HRVStatus)
