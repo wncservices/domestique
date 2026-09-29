@@ -417,7 +417,11 @@ func detectFTP(rides []Ride, p Profile, today time.Time) (Finding, bool) {
 	// and eFTP alone never lowers an FTP a recent test set.
 	if value, raw, testSource, hasTest := latestTestInWindow(rides, today); hasTest {
 		if found && c.value >= value*upFactor {
-			return eftpUpFinding(c, source, p)
+			// A breakthrough only wins when it is itself a finding against
+			// the current FTP; otherwise the test still has its say.
+			if f, ok := eftpUpFinding(c, source, p); ok {
+				return f, true
+			}
 		}
 		return testFinding(value, raw, testSource, p)
 	}
