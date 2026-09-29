@@ -321,9 +321,9 @@ func HRZoneSecondsLTHR(s []Sample, lthr int, sport string) [5]int {
 }
 
 // powerCurveWindows are the durations the Fitness page's power curve
-// tracks: a sprint, a minute, five minutes, twenty minutes (a common FTP
-// proxy) and an hour.
-var powerCurveWindows = [5]int{5, 60, 300, 1200, 3600}
+// tracks: a sprint, a minute (the ramp test), five minutes, eight minutes
+// (the 2 x 8-minute test), twenty minutes (a common FTP proxy) and an hour.
+var powerCurveWindows = [6]int{5, 60, 300, 480, 1200, 3600}
 
 // PowerCurve returns the best average power sustained over each of
 // powerCurveWindows. A window longer than the ride has no meaningful best

@@ -102,7 +102,9 @@ func FTPTestWorkout() workout.CreateWorkoutRequest {
 			"maximum sustainable, even pace as you can — steady, not a fade from going " +
 			"out too hard. Afterward, take your average power for just that 20-minute " +
 			"block and multiply by 0.95: that is your estimated FTP. Enter it in your " +
-			"rider profile once you have it.",
+			"rider profile once you have it. On a smart trainer use resistance (level or " +
+			"slope) mode, not ERG: ERG caps you at its target and the test would " +
+			"measure the target, not you.",
 		Steps: []workout.WorkoutStep{
 			openStep("Warmup", workout.IntensityWarmup, 10*60),
 			{

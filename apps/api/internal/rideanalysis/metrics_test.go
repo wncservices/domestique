@@ -206,7 +206,7 @@ func TestPowerCurveOnTenMinuteRideHasOnlyShorterKeys(t *testing.T) {
 	samples := Resample(act.Records)
 
 	curve := PowerCurve(samples)
-	wantKeys := map[int]bool{5: true, 60: true, 300: true}
+	wantKeys := map[int]bool{5: true, 60: true, 300: true, 480: true}
 	for k := range curve {
 		if !wantKeys[k] {
 			t.Errorf("unexpected key %d in power curve %v", k, curve)
@@ -418,5 +418,16 @@ func TestAnalyzeHRZonesFollowThresholdHRAndSport(t *testing.T) {
 	run := Analyze(Input{Activity: act, Sport: "running", Profile: workout.RiderProfile{ThresholdHR: 180}})
 	if cyc.HRZoneSeconds[1] != 1400 || run.HRZoneSeconds[0] != 1500 {
 		t.Errorf("cycling zones = %v, running zones = %v, want the sport's own edges", cyc.HRZoneSeconds, run.HRZoneSeconds)
+	}
+}
+
+func TestPowerCurveHasAnEightMinuteWindowOnlyForLongEnoughRides(t *testing.T) {
+	long := PowerCurve(Resample(buildActivity(t, constantPower(600, 250), nil).Records))
+	if math.Abs(long[480]-250) > 0.01 {
+		t.Errorf("480 s window = %v on a 10-minute ride, want 250 (curve %v)", long[480], long)
+	}
+	short := PowerCurve(Resample(buildActivity(t, constantPower(420, 250), nil).Records))
+	if _, ok := short[480]; ok {
+		t.Errorf("480 s window present on a 7-minute ride: %v", short)
 	}
 }
