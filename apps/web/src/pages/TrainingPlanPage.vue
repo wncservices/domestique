@@ -28,7 +28,7 @@ import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { usePlanGoals } from '@/composables/usePlanGoals'
-import { localDate, weekdayLong } from '@/utils/planDates'
+import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
 
 const toast = useToast()
 const route = useRoute()
@@ -295,7 +295,12 @@ async function fillWeek() {
   if (!focus) return
   const g = goals.value.find((x) => x.id === focus.goalId)
   if (!g) return
-  await scheduleGoal(g) // already reloads the week (usePlanGoals.scheduleGoal) — a second call here just re-fetched the same week twice.
+  // The week being viewed, not always the current one: the strip offers this
+  // for a future week too, and the server refuses a past one.
+  const viewed = week.value
+  if (!viewed) return
+  const isThisWeek = viewed.start <= viewed.today && viewed.today <= viewed.end
+  await scheduleGoal(g, viewed.start, isThisWeek ? 'this week' : `the week of ${shortDate(viewed.start)}`) // already reloads the week (usePlanGoals.scheduleGoal) — a second call here just re-fetched the same week twice.
 }
 const fillingWeek = computed(() => !!week.value?.focus && schedulingGoal.value === week.value.focus.goalId)
 

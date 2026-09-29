@@ -173,8 +173,14 @@ function onRated(analysis: SessionAnalysis) {
   emit('rated')
 }
 
+// A week that has not ended — this one or a later one the rider paged to; the
+// server refuses a past week, so the button is not offered for one.
 const canFillWeek = computed(
-  () => props.canFill && !!props.week.focus && !props.week.days.some((d) => d.planned.length > 0),
+  () =>
+    props.canFill &&
+    props.week.end >= props.week.today &&
+    !!props.week.focus &&
+    !props.week.days.some((d) => d.planned.length > 0),
 )
 
 // Mobile's horizontally-scrolling strip (the sm:grid breakpoint replaces it

@@ -169,26 +169,33 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 			return
 		}
 
+		thisMonday := periodization.MondayOf(s.now())
 		for _, g := range goals {
-			created, skipped, err := s.scheduleGoal(ctx, g, "")
-			if err != nil {
-				// ErrEventInThePast is not a real problem — a rider's own
-				// goal simply outlived its event and nobody has deleted it
-				// yet, no different from AGENTS.md's "one bad route never
-				// aborts a run": this goal is skipped, every other rider's
-				// goal still gets scheduled. A goal with no date is not an
-				// error either — it gets a rolling general-fitness plan —
-				// but ErrNoEventDate stays excluded from the noisy case
-				// rather than asserted against, since a defensive check that
-				// never fires is cheaper than one that panics if it ever
-				// does.
-				if err != periodization.ErrNoEventDate && err != periodization.ErrEventInThePast {
-					s.logger().Warn("auto-schedule failed for a goal", "goal", g.ID, "rider", g.Rider, "err", err)
+			// This week and next, so a rider paging forward on the Plan page
+			// finds next week planned instead of empty. Next week is a
+			// whole-week, once-only fill (see scheduleGoalWeek), so this stays
+			// idempotent and never undoes a rider's rearranging of it.
+			for _, weekStart := range []time.Time{thisMonday, thisMonday.AddDate(0, 0, 7)} {
+				created, skipped, err := s.scheduleGoalWeek(ctx, g, weekStart, "")
+				if err != nil {
+					// ErrEventInThePast is not a real problem — a rider's own
+					// goal simply outlived its event and nobody has deleted it
+					// yet, no different from AGENTS.md's "one bad route never
+					// aborts a run": this goal is skipped, every other rider's
+					// goal still gets scheduled. A goal with no date is not an
+					// error either — it gets a rolling general-fitness plan —
+					// but ErrNoEventDate stays excluded from the noisy case
+					// rather than asserted against, since a defensive check that
+					// never fires is cheaper than one that panics if it ever
+					// does.
+					if err != periodization.ErrNoEventDate && err != periodization.ErrEventInThePast {
+						s.logger().Warn("auto-schedule failed for a goal", "goal", g.ID, "rider", g.Rider, "week", weekStart.Format(dateLayout), "err", err)
+					}
+					break // the error is about the goal, not the week
 				}
-				continue
-			}
-			if len(created) > 0 {
-				s.logger().Info("auto-scheduled workouts", "goal", g.ID, "rider", g.Rider, "created", len(created), "skipped", skipped)
+				if len(created) > 0 {
+					s.logger().Info("auto-scheduled workouts", "goal", g.ID, "rider", g.Rider, "week", weekStart.Format(dateLayout), "created", len(created), "skipped", skipped)
+				}
 			}
 		}
 

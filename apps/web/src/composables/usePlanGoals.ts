@@ -174,19 +174,21 @@ export function usePlanGoals(deps: {
 
   const schedulingGoal = ref('')
 
-  async function scheduleGoal(g: Goal) {
+  // weekStart is the Monday of the week being filled; omitted means the
+  // current week. `label` is how that week reads in the toast.
+  async function scheduleGoal(g: Goal, weekStart?: string, label = 'this week') {
     schedulingGoal.value = g.id
     try {
-      const result = await api.scheduleGoal(g.id)
+      const result = await api.scheduleGoal(g.id, weekStart)
       if (result.created.length > 0) {
-        toast.add({ title: `Scheduled ${result.created.length} workout${result.created.length === 1 ? '' : 's'} this week`, icon: 'i-lucide-calendar-check' })
+        toast.add({ title: `Scheduled ${result.created.length} workout${result.created.length === 1 ? '' : 's'} ${label}`, icon: 'i-lucide-calendar-check' })
         await loadWorkouts()
       } else {
-        toast.add({ title: 'This week is already scheduled', icon: 'i-lucide-calendar-check' })
+        toast.add({ title: `${label[0]!.toUpperCase()}${label.slice(1)} is already scheduled`, icon: 'i-lucide-calendar-check' })
       }
       await loadWeek()
     } catch (err) {
-      toast.add({ title: 'Could not schedule this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: `Could not schedule ${label}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     } finally {
       schedulingGoal.value = ''
     }

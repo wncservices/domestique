@@ -228,6 +228,19 @@ environment are version-controlled and arrive from Vault, and that stays the
 default. Reach for this only when requiring a file edit would leave a first-run
 deployment with a dead button.
 
+## Auto-schedule plans this week and next
+
+`AutoScheduleTick` calls `scheduleGoalWeek` for this Monday and the next, so
+paging forward on the Plan page never shows an empty week. The current week
+is topped up date by date (Replan relies on that); a **future week is filled
+once, as a whole** — if the goal already has any plan-made workout in it the
+week is left alone, because a rider who dragged or deleted a session there
+would otherwise see the gap refilled on the next tick. Replan and the
+adapter stay scoped to the current week. The plan is built from today, so a
+future week is that plan's later week (its own phase and recovery flag) but
+uses the rider's levels *now*. `POST /api/training/goals/{id}/schedule`
+takes an optional `{"weekStart"}`; a past week is a 400.
+
 ## Garmin sign-in
 
 `internal/garmin` does the four-step handshake (CSRF page → credentials →
