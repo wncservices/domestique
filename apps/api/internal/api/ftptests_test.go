@@ -218,3 +218,43 @@ func TestLastTestIsTheLatestCompletedOneAndSetsTheRecommendation(t *testing.T) {
 		t.Errorf("suggestion = %+v, want like-for-like two_by_eight", out.Suggestion)
 	}
 }
+
+// The rider's report: a goal created 27 weeks out, and no test was suggested.
+// The FTP was an auto-estimate whose verified date was set today, which used to
+// silence every reason; a new plan now opens with a test.
+//
+// The clock is the real one, captured once: the store stamps a goal's
+// created_at from the wall clock, and the plan anchors week 1 on that Monday,
+// so a clock years away would put the goal deep into its own plan.
+func TestANewGoalSuggestsATestInTheFirstTwoWeeks(t *testing.T) {
+	h := newTrainingHarness(t)
+	now := time.Now().UTC()
+	h.srv.Clock = func() time.Time { return now }
+	ctx := context.Background()
+	day := func(offset int) string { return now.AddDate(0, 0, offset).Format("2006-01-02") }
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", FTPWatts: 250, FTPEstimated: true,
+		AvailableDays: []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.MarkFTPVerified(ctx, "wilant", day(0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "p1", Sport: "cycling",
+		Date: day(-3), DurationSeconds: 3600, AvgPowerWatts: 200,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createGoal(t, h, "wilant", "Gran Fondo", day(27*7), "A")
+
+	out := getFTPTests(t, h, "wilant")
+	if out.Suggestion == nil {
+		t.Fatal("want a suggestion for a new 27-week plan")
+	}
+	monday := now.AddDate(0, 0, -((int(now.Weekday()) + 6) % 7))
+	if out.Suggestion.Reason != "plan_start" || out.Suggestion.Date <= day(0) || out.Suggestion.Date > monday.AddDate(0, 0, 13).Format("2006-01-02") {
+		t.Errorf("suggestion = %+v, want plan_start within the first two weeks", out.Suggestion)
+	}
+}

@@ -85,7 +85,10 @@ Computed on read; nothing is stored except a snooze. Pure `testschedule.Suggest(
 over the focus goal's periodization plan, the rider's profile, upcoming workouts and goals,
 and `now`. A suggestion needs: a cycling rider with power evidence (a completed session with
 average power in the last 90 days, or an FTP on file), no test already scheduled today or
-later (scheduling a test ends the nagging), and no active snooze.
+later (scheduling a test ends the nagging), no active snooze, and no test ridden in the last 14
+days. Only a ridden test silences it: `ftp_verified_at` cannot tell a rider's own save from the
+deploy backfill or an auto-estimate, and counting it silenced every rider for two weeks after
+deploy and any brand-new plan for two weeks after an estimate. It still drives `stale`.
 
 A **candidate week** is a Base or Build week that is not a recovery week and not within 14
 days before any A-priority event. Never in taper, never in peak. Reasons, first match wins,
@@ -94,6 +97,8 @@ looking at the current and next week:
 | Reason | When | Message |
 |---|---|---|
 | `no_ftp` | FTP not set | "Set your FTP with a test" |
+| `plan_start` | plan week 1 or 2 (`Week.Number`, anchored on the goal's creation Monday), and no test ridden in the last 42 days | "Start your plan with an FTP test. Tuesday would be ideal" |
+| `estimated_ftp` | FTP is only an estimate from rides (`FTPEstimated`) and no test has ever been ridden | "Your FTP is an estimate from your rides. A test would pin it down" |
 | `after_recovery` | first week after a recovery week | "Time for an FTP test. Tuesday after your recovery week would be ideal" |
 | `block_start` | first week of the Build phase | "A new block starts. Test now so its targets are right" |
 | `stale` | `ftp_verified_at` more than 42 days ago | "It's been N weeks since your FTP was checked" |
@@ -111,7 +116,8 @@ when FTP is known, else `twenty_minute`. The rider can pick another.
 `ftp_verified_at` is the latest of: FTP last changed (any path, set in `SaveProfile` when the
 value differs), a test result, and a ride whose eFTP is within 3 % of the current FTP (recent
 effort confirms it). Monotonic. Existing profiles with an FTP are backfilled to the deploy day
-once, so nobody is nagged the moment this ships.
+once, so nobody is nagged the moment this ships. That backfill (and an auto-estimate) sets the
+date but does not silence anything: `stale` counts from it, nothing else reads it.
 
 **Snooze:** dismissing stores `ftp_test_snoozed_until` = today + 28 days on the profile. The
 banner returns afterwards only if the rules still fire.

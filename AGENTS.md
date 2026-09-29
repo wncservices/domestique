@@ -268,6 +268,28 @@ have a workout, and record the week. The plan is built from today, so a
 future week is that plan's later week (its own phase and recovery flag) but
 uses the rider's levels *now*.
 
+## Only today's session goes to the head unit
+
+`pushWorkoutsForRider` (`internal/api/workoutpush.go`) is the one automatic
+Garmin workout push; the tick (`autoPushWorkouts`), Replan and scheduling an FTP
+test all call it, only for riders with `autoPushWorkouts` on. It sends the
+workouts dated **today in `training.timezone`** (`localToday`, Europe/Brussels by
+default; the rider's own zone is not stored and the pod runs in UTC), and only
+ones that came from a goal or were already pushed. Tomorrow's is sent by the
+first tick of tomorrow. The rest of the plan stays in the app.
+
+`workout_pushes.origin` records who put a copy on the calendar. The automatic
+pass **withdraws only copies it made itself** that are now dated in the future
+(`withdrawFromGarmin`: unschedule, delete the copy, forget the record, and keep
+the record if Garmin refuses, so the next pass retries). A copy the rider sent
+with "Send to Garmin" is `manual`, is never withdrawn, and stays manual even
+when an automatic pass later keeps it in step. Past days' copies are left: they
+are history and cost nothing. The migration that adds the column marks existing
+pushes `auto` only for plan-made workouts of riders with auto-push on, so the
+fortnight the old pass left on a device is cleared down to today; everything
+else is `manual`. There is no Wahoo structured-workout push (Wahoo's Plans API
+is not wired; only routes go to Wahoo).
+
 ## FTP tests
 
 Three protocols in `internal/fitnesstest` (ramp, 20-minute, 2 x 8-minute), one
@@ -289,7 +311,11 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
 - **When to suggest** is `internal/testschedule.Suggest`, pure, computed on read.
   Nothing is stored but the snooze (`ftp_test_snoozed_until`).
   `ftp_verified_at` only moves forward (`MarkFTPVerified`): FTP changed, a test
-  read, or a ride whose eFTP is within 3% of FTP.
+  read, or a ride whose eFTP is within 3% of FTP. It drives `stale` only; it
+  must not silence a suggestion, because the deploy backfill and an auto-estimate
+  write it too. Only a ridden test (`LastTestDate`) silences. `plan_start` (plan
+  weeks 1-2) and `estimated_ftp` exist so a new goal or an estimated FTP is not
+  left with no reason to test.
 - **A scheduled test is goal-linked but not plan-made.** It carries the focus
   goal's id so scheduling treats its day as taken, and a description that is not
   `scheduler.GeneratedDescription` so replan leaves it. `autoScheduleGoalWeek`

@@ -24,6 +24,8 @@ import (
 // Reasons a test is suggested, in the order they are tried.
 const (
 	ReasonNoFTP         = "no_ftp"
+	ReasonPlanStart     = "plan_start"
+	ReasonEstimatedFTP  = "estimated_ftp"
 	ReasonAfterRecovery = "after_recovery"
 	ReasonBlockStart    = "block_start"
 	ReasonStale         = "stale"
@@ -37,9 +39,16 @@ const (
 	// aEventQuietDays is how close to an A event no test is suggested: a test
 	// is a hard, all-out effort and costs a few days.
 	aEventQuietDays = 14
-	// justCheckedDays is how long after FTP was last checked (a test, a
-	// confirming ride, a change) no test is suggested.
+	// justCheckedDays is how long after a ridden test no test is suggested.
 	justCheckedDays = 14
+	// planStartWeeks is how many weeks a new plan counts as "the start":
+	// plan_start applies to plan weeks 1 and 2, so a rider whose first week
+	// has no free day, or who created the goal on a Sunday, still gets it.
+	planStartWeeks = 2
+	// planStartQuietDays is how recent a ridden test must be for plan_start
+	// to stay quiet: a test within the last 6 weeks has already set the numbers
+	// this plan starts from.
+	planStartQuietDays = 42
 	// noPlanHorizonDays is how far ahead a rider with no plan is offered a
 	// day; a two-week look is enough to find one of their available days.
 	noPlanHorizonDays = 14
@@ -97,10 +106,14 @@ func Suggest(in Input) *Suggestion {
 	if p.FTPTestSnoozedUntil != "" && todayStr < p.FTPTestSnoozedUntil {
 		return nil
 	}
-	// A test just ridden, or FTP otherwise just checked, ends the nagging for a
-	// while: otherwise the reasons that hold all week (the week after
-	// recovery, a block start) would bring the banner back the day after.
-	if checked := (&suggester{today: today}); checked.recent(p.FTPVerifiedAt) || checked.recent(in.LastTestDate) {
+	// A test just ridden ends the nagging for a while: otherwise the reasons
+	// that hold all week (the week after recovery, a block start) would bring
+	// the banner back the day after. ftp_verified_at is deliberately not part
+	// of this: it cannot tell a rider's own save from the startup backfill or
+	// an auto-estimate, and counting those silenced every rider for two weeks
+	// after deploy and any new plan for two weeks after an estimate. It still
+	// drives "stale".
+	if checked := (&suggester{today: today}); checked.recent(in.LastTestDate) {
 		return nil
 	}
 	// A test on the calendar ends the nagging: today or later counts.
@@ -225,6 +238,15 @@ func (s *suggester) reasonFor(weeks []periodization.Week, i int) (string, bool) 
 	if p.FTPWatts <= 0 {
 		return ReasonNoFTP, true
 	}
+	// The start of a plan is a natural assessment point, whatever the FTP's
+	// verified date says: it is what TrainerRoad and similar do.
+	if weeks != nil && weeks[i].Number >= 1 && weeks[i].Number <= planStartWeeks && !s.testWithin(planStartQuietDays) {
+		return ReasonPlanStart, true
+	}
+	// An FTP the app guessed from rides and no ridden test has ever confirmed.
+	if p.FTPEstimated && s.in.LastTestDate == "" {
+		return ReasonEstimatedFTP, true
+	}
 	if weeks != nil {
 		if i > 0 && weeks[i-1].Recovery {
 			return ReasonAfterRecovery, true
@@ -326,6 +348,10 @@ func (s *suggester) build(reason, date, replaces string) *Suggestion {
 	switch reason {
 	case ReasonNoFTP:
 		out.Message = "Set your FTP with a test"
+	case ReasonPlanStart:
+		out.Message = fmt.Sprintf("Start your plan with an FTP test. %s would be ideal", weekdayOf(date))
+	case ReasonEstimatedFTP:
+		out.Message = "Your FTP is an estimate from your rides. A test would pin it down"
 	case ReasonAfterRecovery:
 		day := "Tuesday"
 		if d, ok := parseDate(date); ok {
@@ -351,6 +377,20 @@ func (s *suggester) recommended() string {
 		return fitnesstest.ProtocolRamp
 	}
 	return fitnesstest.ProtocolTwentyMinute
+}
+
+// weekdayOf names the weekday of date, "Tuesday" when it cannot be parsed.
+func weekdayOf(date string) string {
+	if d, ok := parseDate(date); ok {
+		return d.Weekday().String()
+	}
+	return "Tuesday"
+}
+
+// testWithin reports whether a test was ridden fewer than days ago.
+func (s *suggester) testWithin(days int) bool {
+	d, ok := parseDate(s.in.LastTestDate)
+	return ok && int(s.today.Sub(d).Hours()/24) < days
 }
 
 // dateOf is the calendar date of t in t's own zone, as a UTC midnight so day

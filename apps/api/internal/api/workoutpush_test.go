@@ -152,9 +152,11 @@ func TestDeletingAWorkoutStillWorksWhenGarminIsUnreachable(t *testing.T) {
 	}
 }
 
-func TestAutoScheduleTickPutsTheWeekOnTheWatchOnlyForRidersWhoOptedIn(t *testing.T) {
+func TestAutoScheduleTickPutsTodayOnTheWatchOnlyForRidersWhoOptedIn(t *testing.T) {
 	h := newPushHarness(t)
 	h.connectGarmin("other")
+	now := utcNoon(2026, time.October, 7)
+	h.srv.Clock = func() time.Time { return now }
 	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -175,23 +177,22 @@ func TestAutoScheduleTickPutsTheWeekOnTheWatchOnlyForRidersWhoOptedIn(t *testing
 
 	h.srv.AutoScheduleTick(ctx)
 
-	today := time.Now().Format("2006-01-02")
-	horizon := time.Now().Add(14 * 24 * time.Hour).Format("2006-01-02") // autoPushWindow
+	today := now.Format("2006-01-02")
 	planned, err := h.training.ListWorkouts(ctx, "wilant")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := 0
 	for _, wk := range planned {
-		if wk.GoalID != "" && wk.Date >= today && wk.Date <= horizon {
+		if wk.GoalID != "" && wk.Date == today {
 			want++
 		}
 	}
-	if want == 0 {
-		t.Fatal("test needs at least one planned workout from today on")
+	if want == 0 || len(planned) <= want {
+		t.Fatal("test needs a planned workout today and others on other days")
 	}
 	if len(h.garmin.remoteWorkouts) != want {
-		t.Errorf("account holds %d workouts, want %d: wilant's plan from today on, nothing of other's, not the hand-built one",
+		t.Errorf("account holds %d workouts, want %d: wilant's session for today, nothing of other's, not the hand-built one",
 			len(h.garmin.remoteWorkouts), want)
 	}
 	if _, have, _ := h.training.GetPush(ctx, manual, "garmin"); have {
@@ -211,11 +212,14 @@ func TestAutoPushKeepsAnEditedWorkoutInStep(t *testing.T) {
 	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
 		t.Fatal(err)
 	}
+	now := utcNoon(2026, time.October, 7)
+	h.srv.Clock = func() time.Time { return now }
 	ctx := context.Background()
 	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", `{"autoPushWorkouts":true}`)
 
-	// Pushed once by hand, so it is in step with what is on the account.
-	id := h.newWorkout(tomorrow())
+	// Today's workout, pushed once by hand, so it is in step with what is on
+	// the account.
+	id := h.newWorkout(now.Format("2006-01-02"))
 	h.push(id)
 
 	h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+id, `{"name":"Renamed"}`)
