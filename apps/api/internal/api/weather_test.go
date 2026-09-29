@@ -305,6 +305,26 @@ func TestWeatherPlaceIsTruncatedToEightyCharacters(t *testing.T) {
 	}
 }
 
+func TestWeatherStoresATownNotAStreetAddress(t *testing.T) {
+	h := newWeatherHarness(t)
+	body := `{"place":"12 Kerkstraat, Gent, Oost-Vlaanderen, België","lat":51.05,"lon":3.72}`
+	if got := h.setLocation("wilant", body).StatusCode; got != http.StatusOK {
+		t.Fatalf("status = %d", got)
+	}
+	out, raw := h.getPrefs("wilant")
+	if out.Place != "Gent, België" {
+		t.Errorf("place = %q, want a town-level label; body %s", out.Place, raw)
+	}
+	stored, _, _ := h.prefs.Get(context.Background(), "wilant")
+	if stored.Place != "Gent, België" || strings.ContainsAny(stored.Place, "0123456789") {
+		t.Errorf("stored %q", stored.Place)
+	}
+	// Nothing town-like left: refused rather than stored.
+	if got := h.setLocation("wilant", `{"place":"12, 9000","lat":51,"lon":3}`).StatusCode; got != http.StatusBadRequest {
+		t.Errorf("digits-only place: status = %d, want 400", got)
+	}
+}
+
 func TestWeatherWindow(t *testing.T) {
 	h := newWeatherHarness(t)
 

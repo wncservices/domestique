@@ -105,6 +105,32 @@ func TestEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("a street address is stored as a town, and a plain town unchanged", func(t *testing.T) {
+				s, src := open(t)
+				if err := s.SetLocation(ctx, "wilant", "12 Kerkstraat, Gent, Oost-Vlaanderen, België", 51.05, 3.72); err != nil {
+					t.Fatal(err)
+				}
+				var stored string
+				if err := src.Conn().QueryRow(`SELECT place FROM weather_locations`).Scan(&stored); err != nil {
+					t.Fatal(err)
+				}
+				if stored != "Gent, België" {
+					t.Errorf("stored %q", stored)
+				}
+				if strings.ContainsAny(stored, "0123456789") || strings.Contains(stored, "Kerkstraat") {
+					t.Errorf("stored value keeps the street: %q", stored)
+				}
+				if err := s.SetLocation(ctx, "wilant", "Gent", 51.05, 3.72); err != nil {
+					t.Fatal(err)
+				}
+				if p, _, _ := s.Get(ctx, "wilant"); p.Place != "Gent" {
+					t.Errorf("plain town became %q", p.Place)
+				}
+				if err := s.SetLocation(ctx, "wilant", "12, 9000", 51.05, 3.72); err == nil {
+					t.Error("a place with nothing town-like was accepted")
+				}
+			})
+
 			t.Run("place is truncated to 80 characters, by characters not bytes", func(t *testing.T) {
 				s, _ := open(t)
 				long := strings.Repeat("é", 120)

@@ -112,16 +112,18 @@ func (s *Store) Get(ctx context.Context, rider string) (Preference, bool, error)
 
 // SetLocation opts a rider in (or moves them). Coordinates are rounded to two
 // decimals before they touch the database, so the precise value the browser
-// sent is never kept; the place is trimmed and cut to MaxPlaceLen characters.
+// sent is never kept; the place is reduced to a town (TownLabel) and cut to MaxPlaceLen characters.
 // An existing window is left alone.
 func (s *Store) SetLocation(ctx context.Context, rider, place string, lat, lon float64) error {
 	rider = normalise(rider)
-	place = strings.TrimSpace(place)
+	// The client's value is untrusted: keep only a town-level label, never a
+	// street address that happened to be searched for.
+	place = TownLabel(place)
 	switch {
 	case rider == "":
 		return fmt.Errorf("%w: no rider", ErrInvalid)
 	case place == "":
-		return fmt.Errorf("%w: place must not be empty", ErrInvalid)
+		return fmt.Errorf("%w: place must name a town", ErrInvalid)
 	case math.IsNaN(lat) || math.IsNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180:
 		return fmt.Errorf("%w: coordinates out of range", ErrInvalid)
 	}
