@@ -731,14 +731,15 @@ func TestSyncInfersTheTrainingPatternFromHistory(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 // newReplica is a second server process on the same database, links and
 // providers — another pod of the same deployment.
 func (h *metricsSyncHarness) newReplica() *api.Server {
 	return &api.Server{
 		Source: h.srv.Source, Auth: h.srv.Auth, Links: h.srv.Links, Training: h.srv.Training,
 		Settings: h.srv.Settings, Garmin: h.srv.Garmin, Wahoo: h.srv.Wahoo, Config: h.srv.Config,
-=======
+	}
+}
+
 // liveGarminFake serves the Connect endpoints RestingHeartRate reads, so the
 // real garmin.Client (behind LiveGarmin) runs end to end through a sync.
 func liveGarminFake(t *testing.T, summary, stats, sleep string) *api.LiveGarmin {
@@ -827,6 +828,5 @@ func TestSyncDoesNotWarnWhenRestingHeartRateWasFound(t *testing.T) {
 	live := liveGarminFake(t, `{"restingHeartRate":48}`, `{}`, `{}`)
 	if logs := syncLogs(t, live); strings.Contains(logs, "no reading from any source") {
 		t.Errorf("unexpected diagnostic warn:\n%s", logs)
->>>>>>> origin/main
 	}
 }
