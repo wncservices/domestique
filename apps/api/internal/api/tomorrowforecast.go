@@ -61,7 +61,7 @@ func forecastTomorrow(today time.Time, workouts []workout.Workout, sessions []wo
 
 	in := readiness.TomorrowInput{
 		TodayVerdict:        todayAssessment.Verdict,
-		ConsecutiveHardDays: consecutiveHardDays(workouts, today),
+		ConsecutiveHardDays: consecutiveHardDays(workouts, sessions, today),
 	}
 
 	dayLoads := map[string]float64{}
@@ -81,11 +81,15 @@ func forecastTomorrow(today time.Time, workouts []workout.Workout, sessions []wo
 
 	forecast := readiness.ForecastTomorrow(in)
 
-	// A caution is applied as a step-down, which needs a rung on the zone's
-	// own ladder; a legacy zone-less hard workout has none, and offering to
-	// ease something the click could only refuse would be a dead button.
-	if forecast.Verdict == readiness.Caution && !workout.IsStructuredZone(target.Zone) {
-		return readiness.Assessment{}, workout.Workout{}, false
+	// A caution is applied as a step-down, which needs a ladder for the
+	// workout's sport and zone and a rung below its level; a legacy
+	// zone-less workout, or a zone with no ladder for its sport, has none,
+	// and offering to ease something the click could only fail on would be
+	// a banner that turns into a 500.
+	if forecast.Verdict == readiness.Caution {
+		if _, _, err := stepDownRung(target); err != nil {
+			return readiness.Assessment{}, workout.Workout{}, false
+		}
 	}
 	return forecast, target, true
 }
@@ -174,18 +178,25 @@ func acwrThroughToday(loads []readiness.Load, todayLoad float64, today time.Time
 
 // consecutiveHardDays counts the unbroken run of calendar days, ending at
 // and including today, that have a plan-made hard workout on them — a day
-// with none (an easy day, or nothing planned at all) breaks the run. A
-// workout an adjustment has already eased still counts if it is still hard
-// by zone (a step-down stays in its zone), which is why this does not
-// require scheduler.IsGenerated the way eligibility does.
-func consecutiveHardDays(workouts []workout.Workout, today time.Time) int {
+// with none (an easy day, or nothing planned at all) breaks the run. Days
+// strictly before today count only if the session was actually done
+// (adapter.WorkoutDone): a skipped hard session tires nobody. Today counts
+// as planned, since the forecast assumes today gets ridden. A workout an
+// adjustment has already eased still counts if it is still hard by zone (a
+// step-down stays in its zone), which is why this does not require
+// scheduler.IsGenerated the way eligibility does.
+func consecutiveHardDays(workouts []workout.Workout, sessions []workout.CompletedSession, today time.Time) int {
+	today = calendarDay(today)
+	todayStr := today.Format(dateFormat)
 	hard := map[string]bool{}
 	for _, w := range workouts {
-		if w.GoalID != "" && scheduler.IsHardSession(w) {
+		if w.GoalID == "" || !scheduler.IsHardSession(w) {
+			continue
+		}
+		if w.Date == todayStr || (w.Date < todayStr && adapter.WorkoutDone(w, sessions)) {
 			hard[w.Date] = true
 		}
 	}
-	today = calendarDay(today)
 	n := 0
 	for d := today; n < maxConsecutiveHardDays && hard[d.Format(dateFormat)]; d = d.AddDate(0, 0, -1) {
 		n++
@@ -203,13 +214,17 @@ func consecutiveHardDays(workouts []workout.Workout, today time.Time) int {
 // ask, and being a few hours off around local midnight costs nothing on an
 // observational line. Workouts are re-read because this runs after the
 // pass's own changes, which may have just eased today's session.
-func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, todayAssessment readiness.Assessment, profile workout.RiderProfile) {
+func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, profile workout.RiderProfile) {
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
 		s.logger().Warn("adapt: listing workouts for the tomorrow forecast failed", "rider", rider, "err", err)
 		return
 	}
-	forecast, _, ok := forecastTomorrow(s.now().UTC(), workouts, sessions, latest, todayAssessment, profile)
+	// One UTC-anchored "now" for both today's verdict and the forecast, so
+	// they describe the same day whatever zone the process runs in.
+	today := calendarDay(s.now().UTC())
+	todayAssessment := s.assessReadinessAt(ctx, rider, sessions, latest, today)
+	forecast, _, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
 	if ok && forecast.Verdict != readiness.Ready {
 		s.logger().Info("tomorrow's session may need easing", "rider", rider, "risk", string(forecast.Verdict))
 	}

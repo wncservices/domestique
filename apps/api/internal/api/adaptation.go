@@ -127,7 +127,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "reason", c.Reason)
 	}
 
-	s.logTomorrowAdvisory(ctx, rider, sessions, latest, assessment, profile)
+	s.logTomorrowAdvisory(ctx, rider, sessions, latest, profile)
 }
 
 // applyChange writes one adapter.Change to the store and returns what kind
@@ -186,6 +186,27 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 	return what, nil
 }
 
+// stepDownRung finds the rung one level below wk's own on its zone's ladder.
+// Shared by applyStepDown and the tomorrow forecast's eligibility check, so
+// a banner is only ever offered for a workout the click can actually step
+// down.
+func stepDownRung(wk workout.Workout) (workoutlib.Ladder, workoutlib.Rung, error) {
+	ladder, ok := workoutlib.LadderFor(wk.Sport, string(wk.Zone))
+	if !ok {
+		return workoutlib.Ladder{}, workoutlib.Rung{}, fmt.Errorf("no workout ladder for %s/%s", wk.Sport, wk.Zone)
+	}
+	targetLevel := int(wk.Level) - 1
+	if targetLevel < 1 {
+		targetLevel = 1
+	}
+	for _, r := range ladder.Rungs {
+		if r.Level == targetLevel {
+			return ladder, r, nil
+		}
+	}
+	return workoutlib.Ladder{}, workoutlib.Rung{}, fmt.Errorf("no rung at level %d for %s/%s", targetLevel, wk.Sport, wk.Zone)
+}
+
 // applyStepDown replaces wk with the rung one level below its own on the
 // same zone's ladder — same date, same goal — the spec's response to a
 // struggled key session in that zone (adapter.AdaptSessions' own
@@ -193,25 +214,9 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 // actually builds the lower rung, via workoutlib, the same library
 // scheduleGoal uses to build a workout in the first place).
 func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile workout.RiderProfile, c adapter.Change) error {
-	ladder, ok := workoutlib.LadderFor(wk.Sport, string(wk.Zone))
-	if !ok {
-		return fmt.Errorf("no workout ladder for %s/%s", wk.Sport, wk.Zone)
-	}
-
-	targetLevel := int(wk.Level) - 1
-	if targetLevel < 1 {
-		targetLevel = 1
-	}
-	var rung workoutlib.Rung
-	found := false
-	for _, r := range ladder.Rungs {
-		if r.Level == targetLevel {
-			rung, found = r, true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("no rung at level %d for %s/%s", targetLevel, wk.Sport, wk.Zone)
+	ladder, rung, err := stepDownRung(wk)
+	if err != nil {
+		return err
 	}
 
 	req := workoutlib.Instantiate(ladder, rung, profile)
@@ -224,7 +229,7 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 	// hasStepDownSource can still find it — it just searches the whole
 	// description, position included.
 	description := wk.Description + " " + adapter.StepDownSourceNote(c.StepDownSourceID) + " " + adapter.Note(c)
-	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
+	_, err = s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
 		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
 	})
 	return err

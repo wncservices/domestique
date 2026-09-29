@@ -144,7 +144,7 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 // the same precedent handleUpcomingRides sets for ?from=, for the same
 // reason: the browser always knows its local day and the server's process
 // zone is no guarantee. Omitted, it falls back to the server's UTC today. A
-// malformed value is a 400 and ok is false.
+// malformed or out-of-window value is a 400 and ok is false.
 func parseTodayParam(w http.ResponseWriter, r *http.Request, fallback time.Time) (time.Time, bool) {
 	raw := r.URL.Query().Get("today")
 	if raw == "" {
@@ -153,6 +153,15 @@ func parseTodayParam(w http.ResponseWriter, r *http.Request, fallback time.Time)
 	t, err := time.Parse(dateFormat, raw)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "today must be a date in YYYY-MM-DD form"})
+		return time.Time{}, false
+	}
+	// Bounded to a day either side of the server's UTC today, which covers
+	// every real zone (from twelve hours behind UTC to fourteen ahead).
+	// Unbounded, a rider could aim the ease at an arbitrary future day, and
+	// a browser clock a day behind would make "tomorrow" the server's today.
+	server := calendarDay(fallback.UTC())
+	if t.Before(server.AddDate(0, 0, -1)) || t.After(server.AddDate(0, 0, 1)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "today is more than a day away from the server's date"})
 		return time.Time{}, false
 	}
 	return t, true

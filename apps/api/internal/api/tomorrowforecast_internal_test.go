@@ -175,37 +175,56 @@ func TestACWRThroughTodayNeedsTwentyOneDaysOfCoverage(t *testing.T) {
 	}
 }
 
+// fcRide is a completed hour of cycling on the given day offset.
+func fcRide(offset int) workout.CompletedSession {
+	return workout.CompletedSession{Date: fcDay(offset), Sport: "cycling", DurationSeconds: 3600}
+}
+
 func TestConsecutiveHardDays(t *testing.T) {
 	gen := func(id string, offset int) workout.Workout { return fcHard(id, fcDay(offset), 200) }
 	cases := []struct {
-		name string
-		ws   []workout.Workout
-		want int
+		name   string
+		ws     []workout.Workout
+		missed []string // ids of past hard sessions nobody rode
+		want   int
 	}{
-		{"nothing planned", nil, 0},
-		{"only today", []workout.Workout{gen("a", 0)}, 1},
-		{"today and yesterday", []workout.Workout{gen("a", 0), gen("b", -1)}, 2},
-		{"a run of three", []workout.Workout{gen("a", 0), gen("b", -1), gen("c", -2)}, 3},
-		{"an easy day breaks the run", []workout.Workout{gen("a", 0), fcEasy("e", fcDay(-1)), gen("c", -2)}, 1},
-		{"a day with no workout at all breaks the run", []workout.Workout{gen("a", 0), gen("c", -2)}, 1},
-		{"today easy is zero however hard yesterday was", []workout.Workout{fcEasy("e", fcDay(0)), gen("b", -1)}, 0},
-		{"tomorrow is not counted", []workout.Workout{gen("t", 1), gen("a", 0)}, 1},
+		{"nothing planned", nil, nil, 0},
+		{"only today", []workout.Workout{gen("a", 0)}, nil, 1},
+		{"today and yesterday", []workout.Workout{gen("a", 0), gen("b", -1)}, nil, 2},
+		{"a run of three", []workout.Workout{gen("a", 0), gen("b", -1), gen("c", -2)}, nil, 3},
+		{"a skipped yesterday breaks the run", []workout.Workout{gen("a", 0), gen("b", -1), gen("c", -2)}, []string{"b"}, 1},
+		{"a skipped day further back ends the run there", []workout.Workout{gen("a", 0), gen("b", -1), gen("c", -2)}, []string{"c"}, 2},
+		{"today counts as planned even though it is not ridden yet", []workout.Workout{gen("a", 0)}, []string{"a"}, 1},
+		{"an easy day breaks the run", []workout.Workout{gen("a", 0), fcEasy("e", fcDay(-1)), gen("c", -2)}, nil, 1},
+		{"a day with no workout at all breaks the run", []workout.Workout{gen("a", 0), gen("c", -2)}, nil, 1},
+		{"today easy is zero however hard yesterday was", []workout.Workout{fcEasy("e", fcDay(0)), gen("b", -1)}, nil, 0},
+		{"tomorrow is not counted", []workout.Workout{gen("t", 1), gen("a", 0)}, nil, 1},
 		{"capped at seven", func() []workout.Workout {
 			var ws []workout.Workout
 			for d := 0; d >= -9; d-- {
 				ws = append(ws, gen("x"+fcDay(d), d))
 			}
 			return ws
-		}(), 7},
+		}(), nil, 7},
 		{"a rider's own hard session is not a generated one", func() []workout.Workout {
 			own := gen("own", -1)
 			own.GoalID = ""
 			return []workout.Workout{gen("a", 0), own}
-		}(), 1},
+		}(), nil, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := consecutiveHardDays(c.ws, fcToday); got != c.want {
+			missed := map[string]bool{}
+			for _, id := range c.missed {
+				missed[id] = true
+			}
+			var sessions []workout.CompletedSession
+			for _, w := range c.ws {
+				if w.Date < fcDay(0) && !missed[w.ID] {
+					sessions = append(sessions, workout.CompletedSession{Date: w.Date, Sport: "cycling", DurationSeconds: 3600})
+				}
+			}
+			if got := consecutiveHardDays(c.ws, sessions, fcToday); got != c.want {
 				t.Errorf("got %d, want %d", got, c.want)
 			}
 		})
@@ -241,7 +260,7 @@ func TestForecastTomorrowEligibility(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			ws := append(append([]workout.Workout{}, twoDays...), c.tomorrow...)
-			_, _, ok := forecastTomorrow(fcToday, ws, c.sessions, nil, readiness.Assessment{Verdict: readiness.Ready}, workout.RiderProfile{FTPWatts: 200})
+			_, _, ok := forecastTomorrow(fcToday, ws, append([]workout.CompletedSession{fcRide(-1)}, c.sessions...), nil, readiness.Assessment{Verdict: readiness.Ready}, workout.RiderProfile{FTPWatts: 200})
 			if ok {
 				t.Error("ok = true, want no forecast without an eligible tomorrow workout")
 			}
@@ -291,7 +310,7 @@ func TestForecastTomorrowVerdicts(t *testing.T) {
 
 	t.Run("no FTP with a hard session planned today gives no TSB reason, and leaves other reasons alone", func(t *testing.T) {
 		ws := []workout.Workout{tomorrow, fcHard("today", fcDay(0), 200), fcHard("yday", fcDay(-1), 200)}
-		got, _, _ := forecastTomorrow(fcToday, ws, nil, fcSnap(fcDay(0), 0, 200), ready, workout.RiderProfile{})
+		got, _, _ := forecastTomorrow(fcToday, ws, []workout.CompletedSession{fcRide(-1)}, fcSnap(fcDay(0), 0, 200), ready, workout.RiderProfile{})
 		if got.Verdict != readiness.Caution || len(got.Reasons) != 1 || !strings.Contains(got.Reasons[0], "third hard day") {
 			t.Errorf("got %+v, want caution from consecutive days alone", got)
 		}
@@ -309,4 +328,39 @@ func TestForecastTomorrowVerdicts(t *testing.T) {
 			t.Errorf("rest on a legacy workout: got %+v %v, want rest (a swap needs no ladder)", got, ok)
 		}
 	})
+}
+
+func TestForecastTomorrowIgnoresSkippedHardDays(t *testing.T) {
+	ws := []workout.Workout{fcHard("t", fcDay(1), 200), fcHard("a", fcDay(0), 200), fcHard("b", fcDay(-1), 200)}
+	got, _, ok := forecastTomorrow(fcToday, ws, nil, nil, readiness.Assessment{Verdict: readiness.Ready}, workout.RiderProfile{FTPWatts: 200})
+	if !ok || got.Verdict != readiness.Ready {
+		t.Errorf("got %+v %v, want ready: yesterday's hard session was never ridden, so tomorrow is not a third hard day", got, ok)
+	}
+	got, _, _ = forecastTomorrow(fcToday, ws, []workout.CompletedSession{fcRide(-1)}, nil, readiness.Assessment{Verdict: readiness.Ready}, workout.RiderProfile{FTPWatts: 200})
+	if got.Verdict != readiness.Caution {
+		t.Errorf("with yesterday ridden: got %+v, want caution", got)
+	}
+}
+
+func TestForecastTomorrowCautionNeedsALadderToStepDown(t *testing.T) {
+	// "intervals" is a structured zone, but cycling has no ladder for it.
+	noLadder := fcHard("t", fcDay(1), 200)
+	noLadder.Zone, noLadder.Level = "intervals", 3
+	profile := workout.RiderProfile{FTPWatts: 200}
+
+	if _, _, ok := forecastTomorrow(fcToday, []workout.Workout{noLadder}, nil, nil, readiness.Assessment{Verdict: readiness.Rest}, profile); ok {
+		t.Error("caution offered for a workout with no ladder: the click would 500")
+	}
+	// A rest forecast is a swap and needs no ladder.
+	atl := 40 / math.Exp(-1.0/7)
+	got, _, ok := forecastTomorrow(fcToday, []workout.Workout{noLadder}, nil, fcSnap(fcDay(0), 0, atl), readiness.Assessment{Verdict: readiness.Ready}, profile)
+	if !ok || got.Verdict != readiness.Rest {
+		t.Errorf("rest: got %+v %v, want offered", got, ok)
+	}
+	// A level with no rung below it fails the same way.
+	noRung := fcHard("t", fcDay(1), 200)
+	noRung.Level = 99
+	if _, _, ok := forecastTomorrow(fcToday, []workout.Workout{noRung}, nil, nil, readiness.Assessment{Verdict: readiness.Rest}, profile); ok {
+		t.Error("caution offered where the rung below does not exist")
+	}
 }

@@ -76,6 +76,18 @@ func (h *tomorrowHarness) snapshot(ctl, atl float64) {
 	}
 }
 
+// rode records a completed hour of cycling on date — the hard days a
+// consecutive-days run counts must have actually been ridden.
+func (h *tomorrowHarness) rode(date string) {
+	h.t.Helper()
+	if _, err := h.store.UpsertSession(context.Background(), workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "ride-" + date, Sport: "cycling",
+		Date: date, DurationSeconds: 3600,
+	}); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 func (h *tomorrowHarness) get(user, groups, query string) (int, tomorrowBody, map[string]json.RawMessage) {
 	h.t.Helper()
 	resp := h.as(user, groups, http.MethodGet, "/api/training/readiness"+query, "")
@@ -238,6 +250,7 @@ func TestEaseTomorrowStepsDownOneRungOnACautionForecast(t *testing.T) {
 	h := newTomorrowHarness(t)
 	h.hard(tmToday)
 	h.hard("2026-03-18")
+	h.rode("2026-03-18")
 	tomorrow := h.hard(tmTomorrow)
 
 	_, body, _ := h.get("wilant", "cyclists", "?today="+tmToday)
@@ -271,6 +284,7 @@ func TestEaseTomorrowRecomputesRatherThanTrustingTheBanner(t *testing.T) {
 	h := newTomorrowHarness(t)
 	h.hard(tmToday)
 	h.hard("2026-03-18")
+	h.rode("2026-03-18")
 	tomorrow := h.hard(tmTomorrow)
 	// Today's hard session needs an FTP to be sized for the projection.
 	if _, err := h.store.SaveProfile(context.Background(), workout.RiderProfile{Rider: "wilant", FTPWatts: 200}); err != nil {
@@ -481,5 +495,81 @@ func TestSyncTickLogsNothingWhenTomorrowIsReady(t *testing.T) {
 		if strings.Contains(r.msg, "tomorrow") {
 			t.Errorf("unexpected advisory %+v for a ready forecast", r)
 		}
+	}
+}
+
+// ?today= is the caller's own day, but only within a day either side of the
+// server's UTC today (which covers every real zone, UTC-12 to UTC+14): past
+// that a rider could point the ease at an arbitrary future day, and a badly
+// wrong browser clock would make "tomorrow" the server's today.
+func TestTodayParameterIsBoundedToOneDayEitherSideOfUTCNow(t *testing.T) {
+	cases := []struct {
+		name  string
+		today string
+		want  int
+	}{
+		{"malformed", "tomorrow", http.StatusBadRequest},
+		{"not a real date", "2026-02-30", http.StatusBadRequest},
+		{"two days ahead", "2026-03-21", http.StatusBadRequest},
+		{"far ahead", "2027-01-01", http.StatusBadRequest},
+		{"two days behind", "2026-03-17", http.StatusBadRequest},
+		{"a day behind, the far-west edge", "2026-03-18", http.StatusOK},
+		{"the server's own day", tmToday, http.StatusOK},
+		{"a day ahead, the far-east edge", tmTomorrow, http.StatusOK},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newTomorrowHarness(t)
+			h.hard("2026-03-21")
+			h.snapshot(40, 100)
+			before := h.workouts()
+
+			if status, _, _ := h.get("wilant", "cyclists", "?today="+c.today); status != c.want {
+				t.Errorf("GET status = %d, want %d", status, c.want)
+			}
+			status, _ := h.ease("wilant", "cyclists", "?today="+c.today)
+			if c.want == http.StatusBadRequest && status != http.StatusBadRequest {
+				t.Errorf("ease status = %d, want 400", status)
+			}
+			if c.want == http.StatusBadRequest && !reflect.DeepEqual(before, h.workouts()) {
+				t.Error("a rejected ease changed a workout")
+			}
+		})
+	}
+}
+
+// Two skipped hard days are not a run: tomorrow is not "the third hard day".
+func TestSkippedHardDaysDoNotMakeTomorrowAThirdHardDay(t *testing.T) {
+	h := newTomorrowHarness(t)
+	h.hard(tmToday)
+	h.hard("2026-03-18") // never ridden
+	h.hard(tmTomorrow)
+
+	_, body, raw := h.get("wilant", "cyclists", "?today="+tmToday)
+	if body.Tomorrow != nil {
+		t.Errorf("tomorrow = %+v, want none (raw %s)", body.Tomorrow, raw["tomorrow"])
+	}
+}
+
+// A caution the click could only answer with a 500 must never be offered.
+func TestNoCautionBannerForAWorkoutWithNoLadderToStepDown(t *testing.T) {
+	h := newTomorrowHarness(t)
+	if _, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		Rider: "wilant", GoalID: h.goalID, Sport: model.SportCycling, Name: "Intervals", Date: tmTomorrow,
+		Description: scheduler.GeneratedDescription, Zone: "intervals", Level: 3,
+		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.hard(tmToday)
+	h.hard("2026-03-18")
+	h.rode("2026-03-18")
+
+	_, body, _ := h.get("wilant", "cyclists", "?today="+tmToday)
+	if body.Tomorrow != nil {
+		t.Errorf("tomorrow = %+v, want none: nothing to step down to", body.Tomorrow)
+	}
+	if status, _ := h.ease("wilant", "cyclists", "?today="+tmToday); status != http.StatusConflict {
+		t.Errorf("ease status = %d, want 409, not a 500", status)
 	}
 }
