@@ -22,6 +22,7 @@ import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
+import TomorrowForecastBanner from '@/components/plan/TomorrowForecastBanner.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
@@ -29,6 +30,7 @@ import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, weekdayLong } from '@/utils/planDates'
+import { todayISO } from '@/utils/rideDates'
 
 const toast = useToast()
 const route = useRoute()
@@ -222,12 +224,56 @@ const weekStart = ref<string | undefined>(undefined)
 
 const readiness = ref<ReadinessResponse | null>(null)
 
+// Ticketed like loadWeek: an ease click refetches while an earlier load may
+// still be in flight, and a slower stale response must not put a banner back
+// that the newer one just removed.
+let readinessRequest = 0
+
 async function loadReadiness() {
+  const requestId = ++readinessRequest
   try {
-    readiness.value = await api.readiness()
+    // The browser's own local day, so "tomorrow" is the rider's tomorrow
+    // even near local midnight — see utils/rideDates.ts's todayISO.
+    const result = await api.readiness(todayISO())
+    if (requestId === readinessRequest) readiness.value = result
   } catch {
-    readiness.value = null
+    if (requestId === readinessRequest) readiness.value = null
   }
+}
+
+// --- tomorrow's forecast: a banner with an "Ease tomorrow" button. The
+// server recomputes on click, so a 409 just means the forecast moved on. ---
+
+const easingTomorrow = ref(false)
+
+// The forecast carries the workout's id and name only; the zone for the
+// banner's wording comes from the workouts already loaded here.
+const tomorrowZone = computed(() => {
+  const id = readiness.value?.tomorrow?.workoutId
+  return id ? workouts.value.find((w) => w.id === id)?.zone : undefined
+})
+
+async function easeTomorrow() {
+  easingTomorrow.value = true
+  try {
+    const result = await api.easeTomorrow(todayISO())
+    toast.add({ title: "Eased tomorrow's session", description: result.reason, icon: 'i-lucide-feather', color: 'success' })
+  } catch (err) {
+    // 409: the fresh forecast no longer calls for easing, or the session
+    // has already been changed — nothing was changed. Same handling as the
+    // replan 409: a warning showing the server's own message.
+    if (err instanceof ApiError && err.status === 409) {
+      toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
+    } else {
+      toast.add({ title: "Could not ease tomorrow's session", description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    }
+  } finally {
+    easingTomorrow.value = false
+  }
+  // Refetch either way: on success the eased workout carries its
+  // "Adjusted automatically" note and the banner disappears on its own once
+  // `tomorrow` comes back absent; after a 409 the banner may no longer apply.
+  await Promise.all([loadReadiness(), loadWorkouts(), loadWeek()])
 }
 
 // Same reasoning as seasonRequest below: prevWeek/nextWeek/thisWeek/
@@ -519,6 +565,14 @@ onMounted(() => {
           @back-to-today="backToToday"
         />
       </div>
+
+      <TomorrowForecastBanner
+        v-if="readiness?.tomorrow && isCurrentWeek"
+        :forecast="readiness.tomorrow"
+        :zone="tomorrowZone"
+        :easing="easingTomorrow"
+        @ease="easeTomorrow"
+      />
 
       <WeekStrip
         v-if="week"
