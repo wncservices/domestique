@@ -400,6 +400,12 @@ type ftpTestResultDTO struct {
 	Protocol  string `json:"protocol"`
 	// FTPWatts is the FTP the test measured; 0 when the ride was unreadable.
 	FTPWatts float64 `json:"ftpWatts"`
+	// Source is "test" when the finding came from this test, or "rides" when
+	// a real breakthrough in the rider's ordinary rides outranked it: then
+	// FTPWatts is the rides' value (the one applied or suggested) and
+	// TestWatts what the test itself measured.
+	Source    string  `json:"source"`
+	TestWatts float64 `json:"testWatts,omitempty"`
 	// Date is the day the test was ridden.
 	Date string `json:"date"`
 	// Outcome is applied, suggested, confirmed (within 1% of the FTP on
@@ -476,6 +482,15 @@ func (s *Server) readFTPTestRides(ctx context.Context, rider string, sessions []
 			continue
 		}
 		delete(open, wk.ID) // one ride per test
+		if readable {
+			// Verified as soon as the result is stored, not after detection: if
+			// detection fails the sync errors, the result is never reported, and
+			// FTP was still checked. The finding itself is stateless and comes
+			// back on the next sync.
+			if err := s.Training.MarkFTPVerified(ctx, rider, sess.Date); err != nil {
+				s.logger().Warn("marking FTP verified from a test failed", "rider", rider, "err", err)
+			}
+		}
 		out = append(out, ftpTestRide{
 			workoutID: wk.ID, protocol: wk.TestProtocol, sessionID: sess.ID, date: sess.Date,
 			ftp: value, readable: readable,
@@ -496,26 +511,24 @@ func freshTestSessions(rides []ftpTestRide) map[string]bool {
 }
 
 // ftpTestResults turns the rides read this sync, and what detection did with
-// them, into the sync result's "ftpTests". profileFTP is the FTP on file
-// before detection, which decides "confirmed". Marking FTP verified is here
-// too: a test dates the FTP whether or not it moved it.
-func (s *Server) ftpTestResults(ctx context.Context, rider string, rides []ftpTestRide, tdr thresholdDetectionResult, profileFTP float64) []ftpTestResultDTO {
+// them, into the sync result's "ftpTests". "Confirmed" is the absence of any
+// finding.
+func (s *Server) ftpTestResults(rider string, rides []ftpTestRide, tdr thresholdDetectionResult) []ftpTestResultDTO {
 	var out []ftpTestResultDTO
 	for _, r := range rides {
-		dto := ftpTestResultDTO{WorkoutID: r.workoutID, Protocol: r.protocol, FTPWatts: r.ftp, Date: r.date, Outcome: "unreadable"}
+		dto := ftpTestResultDTO{WorkoutID: r.workoutID, Protocol: r.protocol, FTPWatts: r.ftp, Source: "test", Date: r.date, Outcome: "unreadable"}
 		if r.readable {
 			dto.Outcome = tdr.TestOutcomes[r.sessionID]
 			if dto.Outcome == "" {
 				dto.Outcome = "confirmed"
-				// No finding from the test itself but FTP still moved: an eFTP
-				// breakthrough outranked it, and that finding's fate is the
-				// honest one to report.
-				if profileFTP > 0 && math.Abs(r.ftp-profileFTP) >= profileFTP*0.01 && tdr.FTPOutcome != "" {
-					dto.Outcome = tdr.FTPOutcome
+				// No finding from this test but FTP still had one, and it came
+				// from the rider's ordinary rides: a breakthrough outranked the
+				// test. Report that finding's own number and fate, not the
+				// test's, which would toast a value nothing was done with.
+				if tdr.FTPOutcome != "" && !tdr.FTPFromTest {
+					dto.Outcome, dto.Source = tdr.FTPOutcome, "rides"
+					dto.TestWatts, dto.FTPWatts = r.ftp, tdr.FTPValue
 				}
-			}
-			if err := s.Training.MarkFTPVerified(ctx, rider, r.date); err != nil {
-				s.logger().Warn("marking FTP verified from a test failed", "rider", rider, "err", err)
 			}
 		}
 		// Rider and protocol and outcome only: no watts next to a name.

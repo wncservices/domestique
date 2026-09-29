@@ -76,6 +76,10 @@ type thresholdDetectionResult struct {
 	// or not, "" when there was none. It is only read when a test's own
 	// finding was overridden by an eFTP breakthrough.
 	FTPOutcome string
+	// FTPValue is that finding's own value, and FTPFromTest whether it came
+	// from an FTP test rather than from the rider's ordinary rides.
+	FTPValue    float64
+	FTPFromTest bool
 }
 
 // detectThresholds runs internal/thresholds.Detect against a rider's last
@@ -249,7 +253,7 @@ func (r *thresholdDetectionResult) recordFTPOutcome(f thresholds.Finding, outcom
 	if f.Field != "ftp" {
 		return
 	}
-	r.FTPOutcome = outcome
+	r.FTPOutcome, r.FTPValue, r.FTPFromTest = outcome, f.Value, f.FromTest
 	if f.FromTest {
 		r.TestOutcomes[f.SourceSessionID] = outcome
 	}

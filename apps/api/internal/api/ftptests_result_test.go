@@ -21,6 +21,8 @@ type syncFTPTestsOut struct {
 		FTPWatts  float64 `json:"ftpWatts"`
 		Date      string  `json:"date"`
 		Outcome   string  `json:"outcome"`
+		Source    string  `json:"source"`
+		TestWatts float64 `json:"testWatts"`
 	} `json:"ftpTests"`
 	Detected []struct {
 		Field string  `json:"field"`
@@ -275,5 +277,36 @@ func TestADecodedRideTooShortForTheWindowIsUnreadable(t *testing.T) {
 	stored, _ := h.srv.Training.GetWorkout(context.Background(), h.testID)
 	if stored.TestResultWatts != workout.TestResultUnreadable {
 		t.Errorf("marker = %v, want the unreadable marker", stored.TestResultWatts)
+	}
+}
+
+// When a real breakthrough in the rider's ordinary rides outranks the test, the
+// report says so and carries the number that actually moved (or was offered),
+// not the test's.
+func TestSyncReportsTheRidesFindingWhenAnEFTPBreakthroughOutranksTheTest(t *testing.T) {
+	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250}) // test reads 300
+	other := time.Now().AddDate(0, 0, -3)
+	h.fake.activities = append(h.fake.activities, garmin.Activity{
+		ID: "9200", Sport: "cycling", StartTime: other, DurationSeconds: 1200, AvgPowerWatts: 360,
+	})
+	h.fake.fitByID["9200"] = buildRideFIT(t, other, 1200, 360) // 0.95 x 360 = 342: over 300 x 1.03
+
+	out := h.sync()
+	if len(out.FTPTests) != 1 {
+		t.Fatalf("ftpTests = %+v, want one", out.FTPTests)
+	}
+	got := out.FTPTests[0]
+	if got.Outcome != "suggested" || got.Source != "rides" || got.FTPWatts != 342 || got.TestWatts != 300 {
+		t.Errorf("ftpTest = %+v, want a suggested 342 W from the rides, test 300 W", got)
+	}
+	if pending := h.pending(); len(pending) != 1 || pending[0].Value != 342 {
+		t.Errorf("pending = %+v, want the rides' 342", pending)
+	}
+}
+
+func TestSyncReportsATestFindingAsFromTheTest(t *testing.T) {
+	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250})
+	if got := h.sync().FTPTests[0]; got.Source != "test" || got.TestWatts != 0 {
+		t.Errorf("ftpTest = %+v, want source test and no separate test watts", got)
 	}
 }

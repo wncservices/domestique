@@ -377,12 +377,11 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
-	profileFTPBefore := profile.FTPWatts
 	tdr, err := s.detectThresholdsFresh(ctx, rider, profile, sessions, time.Now(), freshTestSessions(testRides))
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
-	ftpTests := s.ftpTestResults(ctx, rider, testRides, tdr, profileFTPBefore)
+	ftpTests := s.ftpTestResults(rider, testRides, tdr)
 	profile = tdr.Profile
 	autoFilled = append(autoFilled, tdr.AutoFields...)
 
