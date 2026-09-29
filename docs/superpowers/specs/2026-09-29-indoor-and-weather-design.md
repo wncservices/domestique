@@ -48,9 +48,26 @@ the Garmin copy; the push path already updates a changed workout under its remot
 
 Conversion is **rider-initiated or rider-approved, never silent**: the manual "Indoor version"
 action, or the weather banner's button. It is idempotent: an already-indoor workout returns
-unchanged, so a double click or a retried request cannot shorten a ride twice. The original
-steps are not kept; there is no "back to outdoor" in this version (see Out of scope). The note
-keeps the original name and duration so the change is legible.
+unchanged, so a double click or a retried request cannot shorten a ride twice. The note keeps
+the original name and duration so the change is legible.
+
+**Conversion is reversible.** Converting stores the workout's pre-conversion steps in
+`workouts.outdoor_steps` (nullable JSON, the same encoding as `steps`). Only the steps change on
+conversion (the name, date, zone and level do not), so steps are all that needs keeping.
+**Converting twice keeps the first original**, because an already-indoor workout is a no-op and
+never overwrites `outdoor_steps`. "Back to outdoor version" restores `outdoor_steps` into
+`steps`, sets `indoor = false`, clears `outdoor_steps` (NULL) and appends a note ("Back to the
+outdoor version"). Revert is idempotent too: a workout that is not indoor, or has no
+`outdoor_steps`, returns unchanged with 200. Like conversion it is rider-initiated, adds no
+marker, and is refused (409) for a ridden or past-date workout.
+
+**Adaptation and `outdoor_steps`.** When adaptation replaces an indoor workout's content, the
+replacement is first built as the usual *outdoor* session (the easy variant or the lower
+rung) and then converted. **That outdoor replacement becomes the new `outdoor_steps`**, so
+"Back to outdoor" after an automatic easing gives the eased outdoor session, not the
+pre-easing one (the easing was decided on today's recovery and still applies outdoors). This is
+simpler than disabling revert after an automatic change, needs no extra state, and `keepIndoor`
+already has the outdoor replacement in hand before it converts it.
 
 **Changed-once markers.** Conversion does **not** add `scheduler.AdjustedMarker`, which stays
 the guard for *automatic* adaptation. So an indoor session is still eligible for readiness
@@ -135,6 +152,11 @@ not built: available days already exist and the weather does the deciding.
   cycling) with a confirm showing the result: new duration, "Trainer control (ERG)" or "Ride by
   feel", the shortening note. The result comes from `POST .../indoor?preview=1`, which converts
   nothing.
+- The Indoor badge is also the way back: on the day card an indoor workout shows "Back to
+  outdoor version" (hidden when ridden or past), with a confirm showing the restored duration.
+  It calls `DELETE /api/training/workouts/{id}/indoor` (200 with the workout, idempotent, 409
+  ridden or past, 404 another rider's). The weather banner does not reappear for the restored
+  workout until the forecast is bad again and the rider has not dismissed it.
 
 ## Weather
 
@@ -268,7 +290,8 @@ nagged.
 
 Idempotent in `UseDB`, through `dbx`:
 
-- `workouts`: `indoor <boolean> NOT NULL DEFAULT FALSE`.
+- `workouts`: `indoor <boolean> NOT NULL DEFAULT FALSE`, and `outdoor_steps TEXT` (nullable
+  JSON, the original steps; NULL unless the workout is indoor).
 - `rider_profiles`: `smart_trainer <boolean> NOT NULL DEFAULT FALSE`.
 - New `weather_locations` as above.
 
@@ -308,7 +331,7 @@ the workout id only. No new metric: per-request spans already cover outbound cal
 
 ## Out of scope
 
-Zwift export (only the seam above), a treadmill or run indoor version, "back to outdoor" and
-reverting when the forecast clears, "indoor days" scheduling, automatic conversion, notifications
+Zwift export (only the seam above), a treadmill or run indoor version, "indoor days" scheduling, reverting automatically when the forecast clears (revert is a rider
+click), automatic conversion, notifications
 or push alerts, hourly charts, alternative providers, using Garmin's or Wahoo's own weather,
 recording where a ride was done, and moving a session to a drier day automatically.
