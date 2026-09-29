@@ -228,6 +228,27 @@ environment are version-controlled and arrive from Vault, and that stays the
 default. Reach for this only when requiring a file edit would leave a first-run
 deployment with a dead button.
 
+## Auto-schedule plans this week and next
+
+`AutoScheduleTick` calls `autoScheduleGoalWeek` for this Monday and the next,
+so paging forward on the Plan page never shows an empty week. **A week is
+filled once per goal.** The `scheduled_weeks` table (goal, Monday) records it,
+and the tick fills a week only if it is unrecorded *and* the goal has no
+workout in it — so a deployment that predates the table needs no backfill. The
+tick never tops up a week it filled before: a session the rider deleted, moved
+or rewrote stays that way, including on the Monday the week becomes current.
+Deleting a goal deletes its rows.
+
+The explicit paths do top up gaps, because the rider asked: the Plan page's
+Fill button (`POST /api/training/goals/{id}/schedule`, optional
+`{"weekStart"}`, this week or later, a past week is a 400) and Replan (this
+week from today). Both go through `scheduleGoalWeek`, skip dates that already
+have a workout, and record the week. The plan is built from today, so a
+future week is that plan's later week (its own phase and recovery flag) but
+uses the rider's levels *now*. Next week's workouts are inside the 14-day
+auto-push window, so for riders who opted in they reach the watch a week
+earlier than before.
+
 ## Fixed-time metrics sync
 
 `RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and

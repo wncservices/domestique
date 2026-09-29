@@ -688,11 +688,16 @@ export const api = {
    *  own event date, sized to the rider's own saved profile. */
   goalPeriodization: (id: string) =>
     request<PeriodizationPlan>(`/api/training/goals/${encodeURIComponent(id)}/periodization`),
-  /** Turns the periodization plan's current week into concrete, dated
-   *  workouts and persists them — safe to call more than once, a date
-   *  already covered for this goal is skipped rather than duplicated. */
-  scheduleGoal: (id: string) =>
-    request<ScheduledWorkouts>(`/api/training/goals/${encodeURIComponent(id)}/schedule`, { method: 'POST' }),
+  /** Turns a periodization plan week into concrete, dated workouts and
+   *  persists them — safe to call more than once, a date already covered for
+   *  this goal is skipped rather than duplicated. `weekStart` (any date in
+   *  the week) picks the week; omitted means the current one. A week that
+   *  has already passed is refused with a 400. */
+  scheduleGoal: (id: string, weekStart?: string) =>
+    request<ScheduledWorkouts>(`/api/training/goals/${encodeURIComponent(id)}/schedule`, {
+      method: 'POST',
+      ...(weekStart ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekStart }) } : {}),
+    }),
   /** Asks internal/narration for a few plain-language sentences about this
    *  same reconciled plan — 412 when the deployment has no
    *  ANTHROPIC_API_KEY configured, 502 when the model call itself fails. */

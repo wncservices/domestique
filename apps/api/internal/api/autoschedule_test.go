@@ -150,8 +150,8 @@ func TestAutoScheduleTickSchedulesEveryRidersCurrentWeek(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(workouts) != 4 {
-			t.Errorf("%s: workouts = %d, want 4 (one per available day)", rider, len(workouts))
+		if len(workouts) != 8 {
+			t.Errorf("%s: workouts = %d, want 8 (one per available day, this week and next)", rider, len(workouts))
 		}
 	}
 
@@ -161,8 +161,8 @@ func TestAutoScheduleTickSchedulesEveryRidersCurrentWeek(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 4 {
-		t.Errorf("after a second tick: workouts = %d, want still 4 (no duplicates)", len(workouts))
+	if len(workouts) != 8 {
+		t.Errorf("after a second tick: workouts = %d, want still 8 (no duplicates)", len(workouts))
 	}
 }
 
@@ -198,8 +198,8 @@ func TestAutoScheduleTickSkipsAPastGoalWithoutBlockingOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 4 {
-		t.Errorf("wilant's workouts = %d, want 4 — a different rider's stale goal must not block this", len(workouts))
+	if len(workouts) != 8 {
+		t.Errorf("wilant's workouts = %d, want 8 (this week and next) — a different rider's stale goal must not block this", len(workouts))
 	}
 }
 
@@ -254,8 +254,8 @@ func TestAutoScheduleTickSchedulesAGoalWithNoEventDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 3 {
-		t.Errorf("workouts = %d, want 3 — one per available day from the rolling plan", len(workouts))
+	if len(workouts) != 6 {
+		t.Errorf("workouts = %d, want 6 (this week and next) — one per available day from the rolling plan", len(workouts))
 	}
 }
 
@@ -291,8 +291,8 @@ func TestAutoScheduleTickNeverDoubleBooksTwoGoals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workouts) != 4 {
-		t.Fatalf("workouts = %d, want 4 — two goals must share one week, not double it", len(workouts))
+	if len(workouts) != 8 {
+		t.Fatalf("workouts = %d, want 8 (this week and next) — two goals must share one week, not double it", len(workouts))
 	}
 	for _, wk := range workouts {
 		if wk.GoalID != dated.ID {

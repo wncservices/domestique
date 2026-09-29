@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -444,7 +445,35 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, skipped, err := s.scheduleGoal(r.Context(), g, "")
+	// The body is optional: none (or no weekStart) means the current week, as
+	// this endpoint always did. A weekStart names the week the rider is
+	// looking at on the Plan page; it may be this week or a later one.
+	var body struct {
+		WeekStart string `json:"weekStart"`
+	}
+	// io.EOF is an empty body (chunked, so ContentLength says nothing): the
+	// current week, not an error.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	thisMonday := periodization.MondayOf(s.now())
+	weekStart := thisMonday
+	if body.WeekStart != "" {
+		parsed, err := time.Parse(dateLayout, body.WeekStart)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "weekStart must be a date, YYYY-MM-DD"})
+			return
+		}
+		// Normalised to that week's Monday, so any day of the week works.
+		weekStart = periodization.MondayOf(parsed)
+		if weekStart.Format(dateLayout) < thisMonday.Format(dateLayout) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a week that has already passed cannot be scheduled"})
+			return
+		}
+	}
+
+	created, skipped, err := s.scheduleGoalWeek(r.Context(), g, weekStart, "")
 	if err != nil {
 		if err == periodization.ErrNoEventDate || err == periodization.ErrEventInThePast {
 			// ErrNoEventDate/ErrEventInThePast — see handleGoalPeriodization's
@@ -528,9 +557,37 @@ func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.Ri
 // AutoScheduleTick both pass "", keeping their own behaviour exactly what
 // it was before this parameter existed.
 func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate string) ([]workout.Workout, int, error) {
+	return s.scheduleGoalWeek(ctx, g, periodization.MondayOf(s.now()), fromDate)
+}
+
+// scheduleGoalWeek is scheduleGoal for the plan week starting on weekStart (a
+// Monday) — this week, or a later one. It is the explicit path: the Plan
+// page's Fill button and Replan. It tops up any date that has no workout yet,
+// so a rider who asks for it gets a gap filled, and it records the week as
+// filled. A weekStart the plan has no week for (before this week, or past the
+// event) creates nothing and is not an error.
+//
+// The week comes from the plan built from *today*, so a later week carries
+// its own phase, recovery flag and target hours (and the compliance
+// adjustment Reconcile applies to every week after the first) — never a copy
+// of this week's. Levels are the rider's levels now; a week built ahead can
+// therefore be one progression step behind the one built on its own Monday.
+func (s *Server) scheduleGoalWeek(ctx context.Context, g workout.Goal, weekStart time.Time, fromDate string) ([]workout.Workout, int, error) {
 	plan, profile, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider)
 	if err != nil {
 		return nil, 0, err
+	}
+	startStr := weekStart.Format(dateLayout)
+	var week periodization.Week
+	found := false
+	for _, w := range plan.Weeks {
+		if w.StartDate == startStr {
+			week, found = w, true
+			break
+		}
+	}
+	if !found {
+		return nil, 0, nil
 	}
 
 	levels, err := s.levelsFor(ctx, g.Rider, profile, g.Sport)
@@ -538,7 +595,7 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate stri
 		return nil, 0, err
 	}
 
-	requests, err := scheduler.NextWorkouts(plan, profile, levels, g.Rider, g.ID, g.Sport, s.now())
+	requests, err := scheduler.WeekWorkouts(week, profile, levels, g.Rider, g.ID, g.Sport)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -547,6 +604,7 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate stri
 	if err != nil {
 		return nil, 0, err
 	}
+
 	// A date is taken if *any* goal has already put a workout on it, not
 	// just this one: a rider with a race on the calendar and a general
 	// fitness goal must not get two sessions on the same Tuesday. Whichever
@@ -583,7 +641,40 @@ func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate stri
 		}
 		created = append(created, wk)
 	}
+	if err := s.Training.MarkWeekScheduled(ctx, g.ID, startStr); err != nil {
+		return created, skipped, err
+	}
 	return created, skipped, nil
+}
+
+// autoScheduleGoalWeek is what the unattended tick calls: it fills a goal's
+// week only if it has never been filled — no scheduled_weeks row and no
+// workout of this goal already in it — and then records it. The tick never
+// tops up a week it filled before, so a session the rider deleted, moved or
+// rewrote stays that way, including on the Monday the week becomes current.
+// A workout already in the week counts as filled (and is recorded), which is
+// how a deployment that predates scheduled_weeks needs no backfill.
+func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekStart time.Time) ([]workout.Workout, int, error) {
+	startStr := weekStart.Format(dateLayout)
+	done, err := s.Training.WeekScheduled(ctx, g.ID, startStr)
+	if err != nil {
+		return nil, 0, err
+	}
+	if done {
+		return nil, 0, nil
+	}
+
+	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
+	if err != nil {
+		return nil, 0, err
+	}
+	endStr := weekStart.AddDate(0, 0, 6).Format(dateLayout)
+	for _, wk := range existing {
+		if wk.GoalID == g.ID && wk.Date >= startStr && wk.Date <= endStr {
+			return nil, 0, s.Training.MarkWeekScheduled(ctx, g.ID, startStr)
+		}
+	}
+	return s.scheduleGoalWeek(ctx, g, weekStart, "")
 }
 
 // handleExplainPlan asks internal/narration for a plain-language summary
