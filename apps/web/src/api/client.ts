@@ -75,6 +75,7 @@ import type {
   ReadinessResponse,
   EaseTomorrowResult,
   IndoorPreview,
+  WeatherPrefs,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -766,6 +767,27 @@ export const api = {
       `/api/training/workouts/${encodeURIComponent(id)}/indoor${today ? `?today=${encodeURIComponent(today)}` : ''}`,
       { method: 'DELETE' },
     ),
+  /** Whether the rider opted in to weather, their town's name and ride window.
+   *  Never carries coordinates. A 412 means this deployment has weather off. */
+  weatherPrefs: () => request<WeatherPrefs>('/api/training/weather'),
+  /** Opts in with a town from the geocoder search. The server rounds the
+   *  coordinates to about 1 km and never sends them back. */
+  setWeatherLocation: (place: string, lat: number, lon: number) =>
+    request<WeatherPrefs>('/api/training/weather/location', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place, lat, lon }),
+    }),
+  /** The hours the rider usually rides, local, 0-23 with start before end. */
+  setWeatherWindow: (start: number, end: number) =>
+    request<WeatherPrefs>('/api/training/weather/window', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start, end }),
+    }),
+  /** "Stop using weather": removes the stored town. */
+  removeWeatherLocation: () =>
+    request<WeatherPrefs>('/api/training/weather/location', { method: 'DELETE' }),
   /** The URL a plain link/download button points at — a structured FIT
    *  workout file, the same "copy it onto a device over USB" role
    *  api's route-FIT download plays; see internal/fitworkout's own doc

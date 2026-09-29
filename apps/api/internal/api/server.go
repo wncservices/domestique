@@ -51,6 +51,7 @@ import (
 	syncer "github.com/wncservices/domestique/apps/api/internal/sync"
 	"github.com/wncservices/domestique/apps/api/internal/targets"
 	"github.com/wncservices/domestique/apps/api/internal/wahoo"
+	"github.com/wncservices/domestique/apps/api/internal/weather"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -241,6 +242,13 @@ type Server struct {
 	// only the database every deployment already has, wired unconditionally
 	// in runServe.
 	Training *workout.DB
+
+	// Weather is the Open-Meteo forecast client and WeatherPrefs the riders'
+	// opted-in towns — see internal/weather and docs/weather.md. Nil Weather
+	// (or weather.enabled: false) means the whole feature answers 412, and a
+	// rider with no row in WeatherPrefs never causes a request.
+	Weather      *weather.Client
+	WeatherPrefs *weather.Store
 
 	// Narration is Phase E of docs/training-plan.md — an LLM layer that
 	// explains a plan and proposes profile edits from free text, strictly
@@ -508,6 +516,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)
 	mux.HandleFunc("POST /api/training/readiness/tomorrow/ease", s.handleEaseTomorrow)
 	mux.HandleFunc("PUT /api/training/sessions/{id}/feel", s.handleSetSessionFeel)
+	mux.HandleFunc("GET /api/training/weather", s.handleGetWeather)
+	mux.HandleFunc("PUT /api/training/weather/location", s.handleSetWeatherLocation)
+	mux.HandleFunc("PUT /api/training/weather/window", s.handleSetWeatherWindow)
+	mux.HandleFunc("DELETE /api/training/weather/location", s.handleDeleteWeatherLocation)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
 	mux.HandleFunc("GET /api/training/tests", s.handleGetFTPTests)
