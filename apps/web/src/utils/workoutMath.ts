@@ -214,7 +214,7 @@ const ADJUSTED_MARKER = 'Adjusted automatically:'
 // FTP-test variant that ends "steps are unchanged.". Read back for the Indoor
 // badge's tooltip; '' when the description has no such note.
 const INDOOR_NOTE =
-  /Indoor version of .*?(?:on the trainer|are unchanged)\.(?: The rest can be ridden outside on another day\.)?(?: No FTP set, so the trainer cannot control resistance\. Ride by heart rate\.)?/
+  /Indoor version of .*?(?:on the trainer|are unchanged)\.(?: The rest can be ridden outside on another day\.)?(?: No FTP set, so the trainer cannot control resistance\. Ride by heart rate\.)?(?: Heart-rate steps stay as heart rate because the session's zone is not known, so the trainer cannot control them\.)?/
 
 export function indoorNote(description?: string): string {
   return INDOOR_NOTE.exec(description ?? '')?.[0].trim() ?? ''

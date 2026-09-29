@@ -280,7 +280,7 @@ watch(
           role="button"
           tabindex="0"
           :aria-pressed="w.id === selectedWorkoutId"
-          :aria-label="`Show ${w.name} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
+          :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
           :draggable="canDrag(day.date)"
           @dragstart="onDragStart($event, w)"
           @click="emit('select', w, day.date)"

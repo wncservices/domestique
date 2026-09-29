@@ -860,6 +860,9 @@ export interface Workout {
   /** What "Back to outdoor version" restores the length to, in seconds;
    *  absent unless there is a stored original and it is time-based. */
   outdoorPlannedSeconds?: number
+  /** "Back to outdoor version" would do something: indoor, with its outdoor
+   *  steps still stored. Editing the steps or the sport retires them. */
+  canRevertIndoor?: boolean
   /** How long the step list is meant to take, in seconds — time steps
    *  only; 0 means unknown (open/distance-only steps have no honest
    *  duration). See workout.PlannedSeconds. */

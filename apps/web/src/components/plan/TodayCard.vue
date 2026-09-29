@@ -125,7 +125,7 @@ const canChangeIndoor = computed(() => {
   return day.completed.length === 0 && day.date >= todayISO()
 })
 const canConvertIndoor = computed(() => canChangeIndoor.value && !firstWorkout.value?.indoor)
-const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.value?.indoor)
+const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.value?.canRevertIndoor)
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 

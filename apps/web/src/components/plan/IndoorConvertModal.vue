@@ -71,8 +71,8 @@ const canConfirm = computed(() => !props.busy && !props.error && (isConvert.valu
               </div>
             </dl>
             <p class="text-sm text-toned">{{ preview.note }}</p>
+            <p class="text-xs text-muted">You can go back to the outdoor version until you edit or ride it.</p>
           </template>
-          <p class="text-xs text-muted">Nothing is lost: you can go back to the outdoor version until you ride it.</p>
         </template>
 
         <template v-else>
