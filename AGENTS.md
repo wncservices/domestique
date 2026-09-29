@@ -270,7 +270,11 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
 - **When to suggest** is `internal/testschedule.Suggest`, pure, computed on read.
   Nothing is stored but the snooze (`ftp_test_snoozed_until`).
   `ftp_verified_at` only moves forward (`MarkFTPVerified`): FTP changed, a test
-  read, or a ride whose eFTP is within 3% of FTP.
+  read, or a ride whose eFTP is within 3% of FTP. It drives `stale` only; it
+  must not silence a suggestion, because the deploy backfill and an auto-estimate
+  write it too. Only a ridden test (`LastTestDate`) silences. `plan_start` (plan
+  weeks 1-2) and `estimated_ftp` exist so a new goal or an estimated FTP is not
+  left with no reason to test.
 - **A scheduled test is goal-linked but not plan-made.** It carries the focus
   goal's id so scheduling treats its day as taken, and a description that is not
   `scheduler.GeneratedDescription` so replan leaves it. `autoScheduleGoalWeek`

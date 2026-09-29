@@ -1040,7 +1040,7 @@ export interface FtpTestProtocol {
 
 /** The test worth offering right now. Mirrors ftpTestSuggestionDTO. */
 export interface FtpTestSuggestion {
-  reason: 'no_ftp' | 'after_recovery' | 'block_start' | 'stale'
+  reason: 'no_ftp' | 'plan_start' | 'estimated_ftp' | 'after_recovery' | 'block_start' | 'stale'
   message: string
   /** The suggested day, YYYY-MM-DD. */
   date: string
