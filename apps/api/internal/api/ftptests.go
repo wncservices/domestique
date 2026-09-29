@@ -11,9 +11,11 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/testschedule"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -521,4 +523,48 @@ func (s *Server) ftpTestResults(ctx context.Context, rider string, rides []ftpTe
 		out = append(out, dto)
 	}
 	return out
+}
+
+// ---------- Test-day preparation ----------
+
+// easeBeforeFTPTests swaps a generated, unadjusted hard session dated the day
+// before a scheduled FTP test for an easy one. It runs inside adaptRider, so
+// it follows every schedule and replan: a replan rebuilds the day from scratch
+// and this puts the easing straight back, which is why the easing is a rule
+// applied each pass and not something remembered.
+//
+// workouts is adaptRider's own snapshot, and alreadyChanged the ids that pass
+// has already changed, so a workout is never adjusted twice in one pass.
+func (s *Server) easeBeforeFTPTests(ctx context.Context, rider string, workouts []workout.Workout, profile workout.RiderProfile, alreadyChanged map[string]bool) {
+	today := s.now().Format(dateLayout)
+	var ridden map[string]bool
+	for _, wk := range workouts {
+		if alreadyChanged[wk.ID] || wk.Date < today || !scheduler.NeedsEasingBeforeTest(wk, workouts) {
+			continue
+		}
+		// A session the rider has already ridden today cannot be eased.
+		if wk.Date == today {
+			if ridden == nil {
+				var err error
+				if ridden, err = s.riddenToday(ctx, rider, today, workouts); err != nil {
+					s.logger().Warn("adapt: could not tell whether today's session was ridden", "rider", rider, "err", err)
+					return
+				}
+			}
+			if ridden[wk.ID] {
+				continue
+			}
+		}
+
+		easy := scheduler.EasyVariant(wk, profile)
+		note := adapter.Note(adapter.Change{Reason: scheduler.EasedBeforeTestReason})
+		description := wk.Description + " " + note + " Replaces: " + wk.Name + "."
+		if _, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{
+			Name: &easy.Name, Steps: &easy.Steps, Zone: &easy.Zone, Level: &easy.Level, Description: &description,
+		}); err != nil {
+			s.logger().Warn("adapt: could not ease the day before an FTP test", "workout", wk.ID, "rider", rider, "err", err)
+			continue
+		}
+		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "eased before an FTP test")
+	}
 }
