@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
-	"github.com/wncservices/domestique/apps/api/internal/periodization"
 )
 
 // FlagAutoSchedule is settings.Store's flag name for automated training: pull
@@ -169,34 +168,23 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 			return
 		}
 
-		thisMonday := periodization.MondayOf(s.now())
 		for _, g := range goals {
-			// This week and next, so a rider paging forward on the Plan page
-			// finds next week planned instead of empty. Each week is filled
-			// once (see autoScheduleGoalWeek), so this stays idempotent and
-			// never undoes a rider's deleting, moving or rewriting of it.
-			for _, weekStart := range []time.Time{thisMonday, thisMonday.AddDate(0, 0, 7)} {
-				created, skipped, err := s.autoScheduleGoalWeek(ctx, g, weekStart)
-				if err != nil {
-					// ErrEventInThePast is not a real problem — a rider's own
-					// goal simply outlived its event and nobody has deleted it
-					// yet, no different from AGENTS.md's "one bad route never
-					// aborts a run": this goal is skipped, every other rider's
-					// goal still gets scheduled. A goal with no date is not an
-					// error either — it gets a rolling general-fitness plan —
-					// but ErrNoEventDate stays excluded from the noisy case
-					// rather than asserted against, since a defensive check that
-					// never fires is cheaper than one that panics if it ever
-					// does.
-					if err != periodization.ErrNoEventDate && err != periodization.ErrEventInThePast {
-						s.logger().Warn("auto-schedule failed for a goal", "goal", g.ID, "rider", g.Rider, "week", weekStart.Format(dateLayout), "err", err)
-					}
-					break // the error is about the goal, not the week
-				}
-				if len(created) > 0 {
-					s.logger().Info("auto-scheduled workouts", "goal", g.ID, "rider", g.Rider, "week", weekStart.Format(dateLayout), "created", len(created), "skipped", skipped)
-				}
+			// Every week from this one to the event (twelve rolling weeks for
+			// a goal with no date), so a rider paging forward on the Plan page
+			// finds the whole season planned. Each week is filled once (see
+			// planSeason), so this stays idempotent and never undoes a
+			// rider's deleting, moving or rewriting of it, and a week that has
+			// just become next week gets its untouched sessions refreshed.
+			//
+			// One goal failing (a bad row, an event that has passed) is
+			// skipped, no different from AGENTS.md's "one bad route never
+			// aborts a run": every other rider's goal still gets planned.
+			res, err := s.planSeason(ctx, g)
+			if err != nil {
+				s.seasonPlanErr(g, err)
+				continue
 			}
+			s.logSeasonPass(g, res)
 		}
 
 		// After scheduling, so this week exists to be adapted, and before

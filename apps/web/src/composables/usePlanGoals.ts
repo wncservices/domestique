@@ -159,7 +159,13 @@ export function usePlanGoals(deps: {
       } else {
         await api.createGoal(req)
       }
-      toast.add({ title: `Saved ${goalForm.value.name.trim()}`, icon: 'i-lucide-flag', color: 'success' })
+      toast.add({
+        title: `Saved ${goalForm.value.name.trim()}`,
+        // The server fills this week before it answers and the rest of the
+        // season in the background, so later weeks may take a moment to appear.
+        description: 'Planning the rest of your season…',
+        icon: 'i-lucide-flag', color: 'success',
+      })
       goalModalOpen.value = false
       await loadGoals()
       await loadWeek()

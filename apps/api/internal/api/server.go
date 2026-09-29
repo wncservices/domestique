@@ -79,6 +79,28 @@ type Server struct {
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time
 
+	// Lifecycle is the server's own context, cancelled on shutdown. Work that
+	// must outlive the request that started it (planning a season after a
+	// goal is saved) runs on a context derived from it, never from the
+	// request's, which ends the moment the response is written. Nil means
+	// context.Background — tests, and a server that is never shut down.
+	Lifecycle context.Context
+
+	// BeforeSeasonFill, when set, runs at the start of every background
+	// season pass. Tests only: it lets one hold the pass back to observe what
+	// the request had done by the time it answered.
+	BeforeSeasonFill func()
+	// SeasonFillRetry is how long a background season pass waits before
+	// trying again when the scheduling lock is held elsewhere. Zero means
+	// the default.
+	SeasonFillRetry time.Duration
+
+	// seasonMu serialises season passes inside this process (the advisory
+	// lock does nothing on SQLite), and background counts the ones in
+	// flight, for WaitForBackground.
+	seasonMu   sync.Mutex
+	background sync.WaitGroup
+
 	Source   source.Library
 	Config   *config.Config
 	Store    state.Store

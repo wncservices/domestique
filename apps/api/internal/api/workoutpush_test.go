@@ -176,13 +176,14 @@ func TestAutoScheduleTickPutsTheWeekOnTheWatchOnlyForRidersWhoOptedIn(t *testing
 	h.srv.AutoScheduleTick(ctx)
 
 	today := time.Now().Format("2006-01-02")
+	horizon := time.Now().Add(14 * 24 * time.Hour).Format("2006-01-02") // autoPushWindow
 	planned, err := h.training.ListWorkouts(ctx, "wilant")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := 0
 	for _, wk := range planned {
-		if wk.GoalID != "" && wk.Date >= today {
+		if wk.GoalID != "" && wk.Date >= today && wk.Date <= horizon {
 			want++
 		}
 	}

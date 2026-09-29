@@ -228,16 +228,35 @@ environment are version-controlled and arrive from Vault, and that stays the
 default. Reach for this only when requiring a file edit would leave a first-run
 deployment with a dead button.
 
-## Auto-schedule plans this week and next
+## The whole season is planned
 
-`AutoScheduleTick` calls `autoScheduleGoalWeek` for this Monday and the next,
-so paging forward on the Plan page never shows an empty week. **A week is
-filled once per goal.** The `scheduled_weeks` table (goal, Monday) records it,
-and the tick fills a week only if it is unrecorded *and* the goal has no
-workout in it — so a deployment that predates the table needs no backfill. The
-tick never tops up a week it filled before: a session the rider deleted, moved
-or rewrote stays that way, including on the Monday the week becomes current.
-Deleting a goal deletes its rows.
+`planSeason` (`internal/api/seasonplan.go`) fills every plan week of a goal: this
+week to the event week, or the 12 rolling weeks of an undated goal. Two callers.
+`AutoScheduleTick` runs it for every goal when auto-schedule is on. Saving a goal
+(create or edit) fills this week before the response, then plans the rest on a
+goroutine whose context comes from `Server.Lifecycle`, never the request's,
+under the same advisory lock as the tick and retrying if it is held. That path
+ignores the flag: the rider asked for the goal, the flag governs what the app
+does unprompted.
+
+**A week is filled once per goal.** The `scheduled_weeks` table (goal, Monday)
+records it, and a pass fills a week only if it is unrecorded *and* the goal has
+no plan-made workout in it. It never tops up a week it filled before: a session
+the rider deleted, moved or rewrote stays that way, including on the Monday the
+week becomes current. **A week that yields no sessions (no profile days yet) is
+not recorded**, or the empty season would be permanent. Deleting a goal deletes
+its rows. Deleting an event-dated goal's future weeks, or shortening its date,
+does not remove sessions beyond the new end.
+
+**A week built months ahead uses that day's levels and FTP, so it is refreshed
+once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).
+Only untouched sessions are rebuilt in place (same id, so a Garmin copy updates):
+generated, description exactly the generated one, not an FTP test, dated after
+today, and `updated_at == created_at` (a rider's edit of the name or steps
+leaves the description alone, so the timestamp is the only tell). It never
+creates a session. Weeks filled while already this week or next are recorded as
+refreshed at once. The refresh runs from the tick and from a goal-save pass, so
+with auto-schedule off a pre-filled week stays as built until the goal is edited.
 
 The explicit paths do top up gaps, because the rider asked: the Plan page's
 Fill button (`POST /api/training/goals/{id}/schedule`, optional
@@ -245,9 +264,7 @@ Fill button (`POST /api/training/goals/{id}/schedule`, optional
 week from today). Both go through `scheduleGoalWeek`, skip dates that already
 have a workout, and record the week. The plan is built from today, so a
 future week is that plan's later week (its own phase and recovery flag) but
-uses the rider's levels *now*. Next week's workouts are inside the 14-day
-auto-push window, so for riders who opted in they reach the watch a week
-earlier than before.
+uses the rider's levels *now*.
 
 ## FTP tests
 
