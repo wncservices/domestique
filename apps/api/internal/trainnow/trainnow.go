@@ -14,7 +14,6 @@ import (
 	"math"
 	"strings"
 
-	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/alternates"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
@@ -55,7 +54,6 @@ const (
 	HardDayWarning = "A third hard day in 7"
 
 	roundSeconds = 5 * 60
-	minSeconds   = MinMinutes * 60
 )
 
 // Input is everything Suggest needs; the caller reads it all.
@@ -229,24 +227,26 @@ func structured(in Input, zone string, caution bool) (s Suggestion, fits, ok boo
 	return Suggestion{
 		Sport: in.Sport,
 		Name:  req.Name, Zone: req.Zone, Level: req.Level, Seconds: workoutlib.TotalSeconds(rung),
-		TSS:        tss(req.Steps, in.Profile),
+		TSS:        tss(in.Sport, req.Steps, in.Profile),
 		Difficulty: alternates.Difficulty(req.Level, l),
 		Steps:      req.Steps,
 	}, true, true
 }
 
 // endurance is a ride shaped like stand-in, N minutes long but never more than
-// 1.25 x standInSeconds, and never below the fixed warmup and a ten-minute main
-// step (nor over N, which is what it has to fit).
+// 1.25 x standInSeconds. The cap wins over the 30-minute floor an endurance ride
+// otherwise has (a 20-minute stand-in gives 25 minutes, not 30); the one hard
+// floor is the fixed warmup and cooldown, and N bounds everything because the
+// ride has to fit.
 func endurance(in Input, stand *workout.Workout, standInSeconds float64) Suggestion {
 	seconds := float64(in.Minutes) * 60
 	if standInSeconds > 0 {
 		limit := math.Floor(enduranceCap*standInSeconds/roundSeconds) * roundSeconds
 		seconds = math.Min(seconds, limit)
 	}
-	seconds = math.Max(seconds, math.Min(minSeconds, float64(in.Minutes)*60))
+	seconds = math.Max(seconds, math.Min(workoutlib.WarmupCooldownSeconds, float64(in.Minutes)*60))
 	req := alternates.EnduranceRide(*stand, seconds, in.Profile)
-	s := enduranceSuggestion(req, seconds, alternates.LabelAchievable, in.Profile)
+	s := enduranceSuggestion(req, stand.Sport, seconds, alternates.LabelAchievable, in.Profile)
 	s.Sport = stand.Sport
 	return s
 }
@@ -255,16 +255,16 @@ func endurance(in Input, stand *workout.Workout, standInSeconds float64) Suggest
 func easy(in Input, minutes float64) Suggestion {
 	seconds := minutes * 60
 	req := scheduler.BuildEnduranceSession(minutes/60, false, in.Sport, in.Profile)
-	s := enduranceSuggestion(req, seconds, alternates.LabelRecovery, in.Profile)
+	s := enduranceSuggestion(req, in.Sport, seconds, alternates.LabelRecovery, in.Profile)
 	s.Kind, s.Sport = Easy, in.Sport
 	s.Why = "An easy ride in the time you have."
 	return s
 }
 
-func enduranceSuggestion(req workout.CreateWorkoutRequest, seconds float64, difficulty string, profile workout.RiderProfile) Suggestion {
+func enduranceSuggestion(req workout.CreateWorkoutRequest, sport model.Sport, seconds float64, difficulty string, profile workout.RiderProfile) Suggestion {
 	return Suggestion{
 		Name: req.Name, Zone: req.Zone, Seconds: seconds,
-		TSS: tss(req.Steps, profile), Difficulty: difficulty, Steps: req.Steps,
+		TSS: tss(sport, req.Steps, profile), Difficulty: difficulty, Steps: req.Steps,
 	}
 }
 
@@ -275,8 +275,8 @@ func restWhy(reasons []string) string {
 	return "Readiness says rest today: " + strings.Join(reasons, "; ") + "."
 }
 
-func tss(steps []workout.WorkoutStep, profile workout.RiderProfile) float64 {
-	return adapter.EstimatePlannedTSS(workout.Workout{Steps: steps}, profile.FTPWatts)
+func tss(sport model.Sport, steps []workout.WorkoutStep, profile workout.RiderProfile) float64 {
+	return alternates.TSS(sport, steps, profile.FTPWatts)
 }
 
 func zoneLabel(zone string) string { return strings.ReplaceAll(zone, "_", " ") }

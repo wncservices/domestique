@@ -135,7 +135,9 @@ N x 60)`, which takes the rung closest to the target level among those that fit.
 does not fit, it is demoted to an endurance ride of N minutes, never trimmed below the fixed
 warmup. Endurance suggestions use N exactly, except **never more than 1.25 x the session they
 stand in for** (so "180 minutes" does not turn a planned 60-minute easy ride into three hours;
-the easy option below is the one that takes all of N).
+the easy option below is the one that takes all of N). That cap wins over the 30-minute floor
+an endurance ride otherwise has (a 20-minute stand-in gives 25 minutes, not 30); the only hard
+floor is the fixed 20-minute warmup and cooldown, and N bounds everything.
 
 The three, in order, each dropped when it does not apply and deduplicated when two land on the
 same zone, level and minutes:

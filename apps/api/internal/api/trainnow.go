@@ -345,6 +345,16 @@ func (s *Server) replaceWithSuggestion(ctx context.Context, wk workout.Workout, 
 		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description,
 		PlannedSnapshot: plannedSnapshotOf(wk),
 	}
-	s.keepIndoor(&req, wk, profile, sg.Zone)
+	// A suggestion is built for its own sport; the snapshot keeps the session's,
+	// so "Back to planned version" restores it.
+	if sg.Sport != "" && sg.Sport != wk.Sport {
+		// Only cycling has an indoor version, so a run leaves it behind.
+		req.Sport = &sg.Sport
+		no := false
+		var none []workout.WorkoutStep
+		req.Indoor, req.OutdoorSteps = &no, &none
+	} else {
+		s.keepIndoor(&req, wk, profile, sg.Zone)
+	}
 	return s.Training.UpdateWorkout(ctx, wk.ID, req)
 }
