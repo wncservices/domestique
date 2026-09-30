@@ -389,10 +389,27 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addPushOriginColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.rescoreFTPTestAnalyses(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.backfillFTPVerified(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
+}
+
+// rescoreFTPTestAnalyses brings rides analysed against an FTP test before the
+// analysis learned what a test is into line with it: outcome completed, no
+// step results. A ramp is ridden to failure, so scored like a session it read
+// "struggled" with "0 of 1 efforts on target", and the adapter took that as
+// fatigue. Idempotent: it only touches rows still in the old shape.
+func (d *DB) rescoreFTPTestAnalyses() error {
+	_, err := d.db.Exec(d.query(`
+UPDATE session_analyses SET outcome = ?, steps = ''
+WHERE workout_id IN (SELECT id FROM workouts WHERE test_protocol <> '')
+  AND (outcome IN (?, ?) OR steps NOT IN ('', 'null', '[]'))`),
+		"completed", "struggled", "incomplete")
+	return err
 }
 
 // backfillFTPVerified dates every FTP already on file to today, only where

@@ -642,4 +642,7 @@ func TestAnalyzeFTPTestRiddenShortIsCompleted(t *testing.T) {
 	if a.Outcome != OutcomeCompleted {
 		t.Errorf("Outcome = %q, want completed", a.Outcome)
 	}
+	if len(a.Steps) != 0 {
+		t.Errorf("Steps = %+v, want none scored for a test", a.Steps)
+	}
 }
