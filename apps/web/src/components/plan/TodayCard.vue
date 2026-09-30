@@ -340,6 +340,8 @@ function onRated(analysis: SessionAnalysis) {
             class="mt-2"
             :session-id="analysedSession.id"
             :feel="analysedSession.analysis.feel"
+            :legs="analysedSession.analysis.legs"
+            :stress="analysedSession.analysis.stress"
             @rated="onRated"
           />
         </div>
@@ -445,6 +447,8 @@ function onRated(analysis: SessionAnalysis) {
       :steps="analysedSession?.analysis?.steps ?? []"
       :session-id="analysedSession?.id"
       :feel="analysedSession?.analysis?.feel"
+      :legs="analysedSession?.analysis?.legs"
+      :stress="analysedSession?.analysis?.stress"
       @rated="onRated"
     />
   </div>

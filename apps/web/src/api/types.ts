@@ -957,6 +957,10 @@ export interface SessionAnalysis {
   /** The rider's own optional 1-5 "how did it feel" rating — absent when
    *  never rated. Set (or replaced) via PUT /api/training/sessions/{id}/feel. */
   feel?: number
+  /** The survey's optional answers next to `feel`: "fresh" | "normal" |
+   *  "heavy" and "low" | "normal" | "high"; absent when unanswered. */
+  legs?: string
+  stress?: string
 }
 
 /** One rider's current level in one sport/zone — mirrors
