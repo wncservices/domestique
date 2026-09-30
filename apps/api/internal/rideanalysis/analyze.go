@@ -627,6 +627,14 @@ func Analyze(in Input) Analysis {
 
 	frac, scorable := hitFraction(a.Steps, mainIdx)
 	a.Outcome = outcomeFrom(a.DurationRatio, frac, scorable)
+	// An FTP test is ridden to failure: steps it never reached are the point,
+	// not misses, and ending early is how it ends. Its result is the FTP it
+	// measures, so the ride itself is simply completed; scored like a
+	// session it read as struggled or incomplete, and the adapter took it as
+	// missed or as a sign of fatigue.
+	if in.Planned != nil && in.Planned.TestProtocol != "" && rideSeconds > 0 {
+		a.Outcome = OutcomeCompleted
+	}
 	return a
 }
 

@@ -79,6 +79,21 @@ const emit = defineEmits<{
 
 const showingToday = computed(() => props.isToday !== false)
 
+// A day with the session ridden, fully or in part, shows what was ridden, not
+// the session still waiting to be done with its Send and Move buttons. A
+// partial day used to fall through to that planned view, so a ride cut short
+// looked like nothing had happened.
+const ridden = computed(() => {
+  switch (props.day?.status) {
+    case 'done':
+      return { label: 'Done', icon: 'i-lucide-circle-check', color: 'text-success' }
+    case 'partial':
+      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-warning' }
+    default:
+      return undefined
+  }
+})
+
 const eyebrow = computed(() => {
   if (!showingToday.value) return props.day ? weekdayDateShort(props.day.date) : ''
   return props.day ? `Today · ${weekdayDateShort(props.day.date)}` : 'Today'
@@ -170,7 +185,7 @@ const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 // still change: a done day has nothing left to move or switch.
 const weatherBanner = computed(() => {
   const w = firstWorkout.value
-  if (!w || props.day?.status === 'done') return undefined
+  if (!w || ridden.value) return undefined
   const suggestion = props.weatherSuggestions?.find((s) => s.workoutId === w.id)
   return suggestion ? { workout: w, suggestion } : undefined
 })
@@ -275,11 +290,11 @@ function onRated(analysis: SessionAnalysis) {
       </div>
 
       <template v-if="day">
-        <!-- Done -->
-        <div v-if="day.status === 'done'" class="mt-2 flex flex-col gap-1">
+        <!-- Ridden: done, or partly done -->
+        <div v-if="ridden" class="mt-2 flex flex-col gap-1">
           <div class="flex flex-wrap items-center gap-2">
-            <UIcon name="i-lucide-circle-check" class="size-5 text-success" />
-            <span class="font-medium text-highlighted">Done</span>
+            <UIcon :name="ridden.icon" class="size-5" :class="ridden.color" />
+            <span class="font-medium text-highlighted">{{ ridden.label }}</span>
             <span class="font-mono tabular-nums text-sm text-muted">
               {{ formatDuration(completedSecondsOf(day)) }} of {{ formatDuration(plannedSecondsOf(day)) }} planned
             </span>
