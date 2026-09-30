@@ -165,9 +165,14 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 // than by the rider's own hand — GoalID set and a description starting
 // with scheduler.GeneratedDescription, which also matches one carrying
 // scheduler.AdjustedMarker (adaptRider appends to the description, it never
-// replaces its own prefix).
+// replaces its own prefix). A session the rider swapped for an alternate
+// (scheduler.SwappedMarker) is not plan-made any more: the rider chose it, so
+// "Re-plan this week" must not delete it. It still counts for scheduling,
+// because its GoalID is kept.
 func isPlanMade(wk workout.Workout) bool {
-	return wk.GoalID != "" && strings.HasPrefix(wk.Description, scheduler.GeneratedDescription)
+	return wk.GoalID != "" &&
+		strings.HasPrefix(wk.Description, scheduler.GeneratedDescription) &&
+		!strings.Contains(wk.Description, scheduler.SwappedMarker)
 }
 
 // removePlanMadeWorkouts deletes every plan-made workout dated today

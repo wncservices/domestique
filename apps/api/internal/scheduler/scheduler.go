@@ -242,7 +242,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 			if hours <= 0 {
 				continue
 			}
-			req = buildEnduranceSession(hours, kinds[i] == slotLong, sport, profile)
+			req = BuildEnduranceSession(hours, kinds[i] == slotLong, sport, profile)
 		}
 		date := weekStart.AddDate(0, 0, weekdayOffset(day)).Format("2006-01-02")
 		req.Rider = rider
@@ -458,7 +458,9 @@ func enduranceName(long bool, sport model.Sport) string {
 	}
 }
 
-// buildEnduranceSession builds an endurance or long session: zone
+// BuildEnduranceSession builds an endurance or long session, exported so
+// internal/alternates and internal/trainnow rescale one exactly the way a
+// generated one is shaped: zone
 // ZoneEndurance, no level (out of scope for volume sessions — see
 // workout.Zone's own doc comment), the same target range this package has
 // always used for Easy/Long, now bookended by the library's 10-minute
@@ -467,7 +469,7 @@ func enduranceName(long bool, sport model.Sport) string {
 // and cools down exactly the way a structured one does. The main step's own
 // length is hours minus that fixed 20 minutes, so the day's total still
 // lands on hours rather than running over it.
-func buildEnduranceSession(hours float64, long bool, sport model.Sport, profile workout.RiderProfile) workout.CreateWorkoutRequest {
+func BuildEnduranceSession(hours float64, long bool, sport model.Sport, profile workout.RiderProfile) workout.CreateWorkoutRequest {
 	name := enduranceName(long, sport)
 	// Rounded to a whole second: hours*3600 otherwise carries binary
 	// floating-point noise into both the API response and, eventually,

@@ -20,12 +20,21 @@ const GeneratedDescription = "Generated from the periodization plan."
 // what stops the same workout being adjusted twice.
 const AdjustedMarker = "Adjusted automatically:"
 
+// SwappedMarker prefixes the note appended when the rider swapped a plan-made
+// session for an alternate ("I have N minutes" fits count too). Like
+// AdjustedMarker it makes the session rider-touched: adaptation, the
+// whole-season refresh and replan all leave it alone, because the rider
+// chose it on purpose. Unlike AdjustedMarker it does not stop a further
+// swap: each one is the rider acting.
+const SwappedMarker = "Swapped by you:"
+
 // IsGenerated reports whether w was made by the scheduler and has not
-// already been adjusted — the only workouts adaptation may change.
+// already been adjusted or swapped, the only workouts adaptation may change.
 func IsGenerated(w workout.Workout) bool {
 	return w.GoalID != "" &&
 		strings.HasPrefix(w.Description, GeneratedDescription) &&
-		!strings.Contains(w.Description, AdjustedMarker)
+		!strings.Contains(w.Description, AdjustedMarker) &&
+		!strings.Contains(w.Description, SwappedMarker)
 }
 
 // keyNames are the legacy session names IsKeySession/IsHardSession fall back
@@ -86,7 +95,7 @@ func EasyVariant(w workout.Workout, profile workout.RiderProfile) workout.Create
 	if hours <= 0 {
 		hours = 1
 	}
-	return buildEnduranceSession(hours, false, w.Sport, profile)
+	return BuildEnduranceSession(hours, false, w.Sport, profile)
 }
 
 // EasedBeforeTestReason is the note on a hard session eased because an FTP test
