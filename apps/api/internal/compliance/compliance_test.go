@@ -21,6 +21,10 @@ func TestDay(t *testing.T) {
 	const today = "2026-09-29"
 	openOnly := workout.Workout{Date: "2026-09-28", Sport: "cycling", Steps: []workout.WorkoutStep{{Duration: workout.DurationOpen, Target: workout.TargetOpen}}}
 
+	// Planned for 31 minutes, ridden to failure at 24: always short by design.
+	rampTest := planned("2026-09-28", 1860)
+	rampTest.TestProtocol = "ramp"
+
 	cases := []struct {
 		name      string
 		date      string
@@ -37,6 +41,8 @@ func TestDay(t *testing.T) {
 		{"past day with nothing is missed", "2026-09-28", []workout.Workout{planned("2026-09-28", 3600)}, nil, compliance.StatusMissed},
 		{"today with nothing yet is upcoming", today, []workout.Workout{planned(today, 3600)}, nil, compliance.StatusUpcoming},
 		{"future day is upcoming", "2026-10-01", []workout.Workout{planned("2026-10-01", 3600)}, nil, compliance.StatusUpcoming},
+		{"an FTP test ridden short is done", "2026-09-28", []workout.Workout{rampTest}, []workout.CompletedSession{done("2026-09-28", "cycling", 1440)}, compliance.StatusDone},
+		{"an FTP test not ridden is missed", "2026-09-28", []workout.Workout{rampTest}, nil, compliance.StatusMissed},
 		{"other sport does not count", "2026-09-28", []workout.Workout{planned("2026-09-28", 3600)}, []workout.CompletedSession{done("2026-09-28", "running", 3600)}, compliance.StatusMissed},
 		{"sessions add up", "2026-09-28", []workout.Workout{planned("2026-09-28", 3600)}, []workout.CompletedSession{done("2026-09-28", "cycling", 1800), done("2026-09-28", "cycling", 1200)}, compliance.StatusDone},
 		{"open-ended plan with any matching ride is done", "2026-09-28", []workout.Workout{openOnly}, []workout.CompletedSession{done("2026-09-28", "cycling", 60)}, compliance.StatusDone},

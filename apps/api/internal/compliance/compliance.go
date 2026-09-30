@@ -39,9 +39,11 @@ func Day(date, today string, planned []workout.Workout, completed []workout.Comp
 
 	sports := make(map[string]bool, len(planned))
 	var plannedSeconds float64
+	var test bool
 	for _, w := range planned {
 		sports[string(w.Sport)] = true
 		plannedSeconds += workout.PlannedSeconds(w.Steps)
+		test = test || w.TestProtocol != ""
 	}
 	var matched float64
 	var anyMatch bool
@@ -54,7 +56,9 @@ func Day(date, today string, planned []workout.Workout, completed []workout.Comp
 
 	// Open or distance-only steps have no honest duration (see
 	// workout.PlannedSeconds); any matching ride is the best evidence there is.
-	if plannedSeconds == 0 {
+	// Nor does an FTP test: the ramp is ridden to failure, so it always ends
+	// short of its planned steps, and a test ridden is a test done.
+	if plannedSeconds == 0 || test {
 		if anyMatch {
 			return StatusDone
 		}

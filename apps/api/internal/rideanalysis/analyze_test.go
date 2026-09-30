@@ -8,6 +8,7 @@ import (
 	"github.com/muktihari/fit/decoder"
 	"github.com/muktihari/fit/profile/filedef"
 
+	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -629,5 +630,16 @@ func TestAnalyzeReportsBestHR1200(t *testing.T) {
 	}
 	if none := Analyze(Input{Profile: workout.RiderProfile{MaxHR: 190}}); none.BestHR1200 != 0 {
 		t.Errorf("BestHR1200 = %d, want 0 without a decoded activity", none.BestHR1200)
+	}
+}
+
+// A ramp is ridden to failure: it always ends short of its planned steps and
+// misses the last ones. That is the test working, not a struggled session.
+func TestAnalyzeFTPTestRiddenShortIsCompleted(t *testing.T) {
+	ramp := fitnesstest.RampWorkout(250)
+	planned := &workout.Workout{Sport: "cycling", Steps: ramp.Steps, TestProtocol: fitnesstest.ProtocolRamp}
+	a := Analyze(Input{Summary: Summary{DurationSeconds: 0.4 * workout.PlannedSeconds(ramp.Steps), AvgPower: 200}, Planned: planned, Profile: fullProfile()})
+	if a.Outcome != OutcomeCompleted {
+		t.Errorf("Outcome = %q, want completed", a.Outcome)
 	}
 }
