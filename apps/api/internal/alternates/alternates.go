@@ -244,7 +244,6 @@ func enduranceOptions(w workout.Workout, profile workout.RiderProfile) []Option 
 	if main < 0 {
 		main = 0
 	}
-
 	var out []Option
 	for _, c := range []struct {
 		kind   Kind
