@@ -863,6 +863,11 @@ export interface Workout {
   /** "Back to outdoor version" would do something: indoor, with its outdoor
    *  steps still stored. Editing the steps or the sport retires them. */
   canRevertIndoor?: boolean
+  /** The rider swapped this session for an alternate (and it stays
+   *  rider-touched even after "Back to planned version"). */
+  swapped?: boolean
+  /** "Back to planned version" would do something. */
+  hasPlannedSnapshot?: boolean
   /** How long the step list is meant to take, in seconds — time steps
    *  only; 0 means unknown (open/distance-only steps have no honest
    *  duration). See workout.PlannedSeconds. */
@@ -1336,4 +1341,32 @@ export interface WeatherResponse extends WeatherPrefs {
   unavailable?: boolean
   days: WeatherDay[]
   suggestions: WeatherSuggestion[]
+}
+
+export type AlternateKind = 'easier' | 'harder' | 'shorter' | 'longer'
+
+/** Predicted difficulty of an option: the distance between its rung and the
+ *  rider's level, in TrainerRoad's vocabulary (see internal/alternates). */
+export type Difficulty = 'Recovery' | 'Achievable' | 'Productive' | 'Stretch' | 'Breakthrough'
+
+/** One easier / harder / shorter / longer version of a plan-made session.
+ *  `tss` is 0 without an FTP (shown as "-"); `level` is absent for an
+ *  endurance or long ride. */
+export interface AlternateOption {
+  kind: AlternateKind
+  name: string
+  zone: string
+  level?: number
+  minutes: number
+  tss: number
+  difficulty: Difficulty
+  /** A muted line, e.g. "Readiness is low today" on a harder option. */
+  warning?: string
+}
+
+/** GET .../alternates: the options on offer (empty for a ridden, past, test
+ *  or rider-built day) and whether "Back to planned version" applies. */
+export interface WorkoutAlternates {
+  options: AlternateOption[]
+  hasSnapshot: boolean
 }

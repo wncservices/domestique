@@ -75,7 +75,7 @@ func TestOnlyUnadjustedGeneratedWorkoutsMayBeAdapted(t *testing.T) {
 }
 
 func TestBuiltSessionsCarryTheGeneratedDescription(t *testing.T) {
-	req := buildEnduranceSession(1, false, model.SportCycling, workout.RiderProfile{})
+	req := BuildEnduranceSession(1, false, model.SportCycling, workout.RiderProfile{})
 	if req.Description != GeneratedDescription {
 		t.Errorf("description = %q — IsGenerated would stop recognising the scheduler's own output", req.Description)
 	}
@@ -101,5 +101,16 @@ func TestMovedFromReadsTheOriginalDate(t *testing.T) {
 	}
 	if _, ok := MovedFrom(GeneratedDescription); ok {
 		t.Error("an unmoved workout has no original date")
+	}
+}
+
+func TestASwappedSessionIsRiderTouchedAndNotGenerated(t *testing.T) {
+	gen := workout.Workout{GoalID: "g", Description: GeneratedDescription}
+	if !IsGenerated(gen) {
+		t.Fatal("setup: a scheduler-made workout should be generated")
+	}
+	gen.Description += " " + SwappedMarker + " harder, was Threshold 4 (1h10)."
+	if IsGenerated(gen) {
+		t.Error("a swapped session is the rider's choice; adaptation must not rewrite it")
 	}
 }

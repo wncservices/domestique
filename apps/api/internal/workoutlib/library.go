@@ -194,13 +194,13 @@ func workIntensity(zone string) workout.Intensity {
 // WarmupCooldownSeconds is the library's fixed 10-minute warmup plus
 // 10-minute cooldown, in seconds — every structured rung carries it (via
 // Instantiate) and so does an endurance/long session built directly from
-// the library (scheduler.buildEnduranceSession), so the two warm up and cool
+// the library (scheduler.BuildEnduranceSession), so the two warm up and cool
 // down exactly the same way.
 const WarmupCooldownSeconds = warmupSeconds + cooldownSeconds
 
 // Warmup builds the library's 10-minute warmup: two 5-minute steps ramping
 // 50->65% of FTP/threshold pace (or the equivalent heart-rate fraction),
-// shared by Instantiate and by scheduler.buildEnduranceSession — exported
+// shared by Instantiate and by scheduler.BuildEnduranceSession — exported
 // rather than duplicated so an endurance day warms up exactly the way a
 // structured one does.
 func Warmup(sport model.Sport, profile workout.RiderProfile) []workout.WorkoutStep {

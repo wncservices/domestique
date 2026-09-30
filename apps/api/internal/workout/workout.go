@@ -344,8 +344,33 @@ type Workout struct {
 	// A non-nil empty slice is a stored original with no steps, distinct from
 	// nil ("nothing stored").
 	OutdoorSteps *[]WorkoutStep
-	CreatedAt    string
-	UpdatedAt    string
+	// PlannedSnapshot is the session as the plan made it, written by the first
+	// swap for an alternate and kept by every later one, so "Back to planned
+	// version" always returns to what the plan made and not to the previous
+	// swap. nil until a session has been swapped.
+	PlannedSnapshot *PlannedSnapshot
+	CreatedAt       string
+	UpdatedAt       string
+}
+
+// PlannedSnapshot is what a swap overwrites: name, zone, level, description
+// and steps, plus the indoor state, which is its own axis (a swapped session
+// can go indoor and an indoor one can be swapped) and so has to be recorded
+// for a revert to be exact. It is deliberately not the indoor feature's
+// outdoor_steps column: that one undoes only the steps and is cleared by an
+// unrelated revert.
+type PlannedSnapshot struct {
+	// Sport is empty in a snapshot written before it was recorded; a revert
+	// then leaves the sport as it is.
+	Sport       model.Sport   `json:"sport,omitempty"`
+	Name        string        `json:"name"`
+	Zone        Zone          `json:"zone"`
+	Level       float64       `json:"level"`
+	Description string        `json:"description"`
+	Steps       []WorkoutStep `json:"steps"`
+	Indoor      bool          `json:"indoor"`
+	// OutdoorSteps is nil when the session was not indoor.
+	OutdoorSteps *[]WorkoutStep `json:"outdoorSteps,omitempty"`
 }
 
 // TestResultUnreadable is what Workout.TestResultWatts holds for a test ride
@@ -414,6 +439,11 @@ type UpdateWorkoutRequest struct {
 	// leaves nothing behind; a pointer to a non-nil slice stores it.
 	Indoor       *bool
 	OutdoorSteps *[]WorkoutStep
+	// PlannedSnapshot is stored only when the workout has none yet: the first
+	// swap's snapshot is the plan's version, and a later swap passing its own
+	// must not replace it. ClearPlannedSnapshot removes it (a revert).
+	PlannedSnapshot      *PlannedSnapshot
+	ClearPlannedSnapshot bool
 }
 
 // FITSteps converts to the leaf-level type fitworkout.Encode takes. The one

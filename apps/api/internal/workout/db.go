@@ -443,6 +443,9 @@ func (d *DB) addZoneLevelColumns() error {
 		fmt.Sprintf(`ALTER TABLE workouts ADD COLUMN indoor %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
 		// The steps before the workout became indoor; NULL unless it is.
 		`ALTER TABLE workouts ADD COLUMN outdoor_steps TEXT`,
+		// The session as the plan made it, JSON, before the first swap for an
+		// alternate; NULL until then.
+		`ALTER TABLE workouts ADD COLUMN planned_snapshot TEXT`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -864,7 +867,7 @@ func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64)
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, planned_snapshot, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -884,7 +887,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, planned_snapshot, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -906,9 +909,10 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		steps   []byte
 		zone    string
 		outdoor sql.NullString
+		planned sql.NullString
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.Indoor, &outdoor, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.Indoor, &outdoor, &planned, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
@@ -927,6 +931,13 @@ func scanWorkout(row rowScanner) (Workout, error) {
 			original = []WorkoutStep{}
 		}
 		w.OutdoorSteps = &original
+	}
+	if planned.Valid {
+		var snap PlannedSnapshot
+		if err := json.Unmarshal([]byte(planned.String), &snap); err != nil {
+			return Workout{}, fmt.Errorf("workout: decode planned snapshot for %s: %w", w.ID, err)
+		}
+		w.PlannedSnapshot = &snap
 	}
 	return w, nil
 }
@@ -1018,6 +1029,14 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 		}
 	}
 
+	switch {
+	case req.ClearPlannedSnapshot:
+		current.PlannedSnapshot = nil
+	case req.PlannedSnapshot != nil && current.PlannedSnapshot == nil:
+		snap := *req.PlannedSnapshot
+		current.PlannedSnapshot = &snap
+	}
+
 	steps, err := json.Marshal(current.Steps)
 	if err != nil {
 		return Workout{}, fmt.Errorf("workout: encode steps: %w", err)
@@ -1032,13 +1051,21 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 		}
 		outdoor = string(encoded)
 	}
+	var planned any
+	if current.PlannedSnapshot != nil {
+		encoded, err := json.Marshal(current.PlannedSnapshot)
+		if err != nil {
+			return Workout{}, fmt.Errorf("workout: encode planned snapshot: %w", err)
+		}
+		planned = string(encoded)
+	}
 
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?,
-               indoor=?, outdoor_steps=?, updated_at=?
+               indoor=?, outdoor_steps=?, planned_snapshot=?, updated_at=?
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
-		steps, string(current.Zone), current.Level, current.Indoor, outdoor, timestamp(), id)
+		steps, string(current.Zone), current.Level, current.Indoor, outdoor, planned, timestamp(), id)
 	if err != nil {
 		return Workout{}, err
 	}

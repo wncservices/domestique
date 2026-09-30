@@ -188,6 +188,11 @@ type workoutDTO struct {
 	// an indoor workout that still has its outdoor steps. A manual edit of the
 	// steps or the sport retires them (see handleUpdateWorkout).
 	CanRevertIndoor bool `json:"canRevertIndoor,omitempty"`
+	// Swapped is true once the rider swapped this session for an alternate
+	// (scheduler.SwappedMarker in the description); HasPlannedSnapshot is
+	// whether "Back to planned version" would do anything.
+	Swapped            bool `json:"swapped,omitempty"`
+	HasPlannedSnapshot bool `json:"hasPlannedSnapshot,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -216,6 +221,8 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		dto.OutdoorPlannedSeconds = workout.PlannedSeconds(*w.OutdoorSteps)
 	}
 	dto.CanRevertIndoor = w.Indoor && w.OutdoorSteps != nil
+	dto.Swapped = strings.Contains(w.Description, scheduler.SwappedMarker)
+	dto.HasPlannedSnapshot = w.PlannedSnapshot != nil
 	return dto
 }
 
@@ -700,10 +707,23 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		}
 	}
 
+	// Never a session on a day that has already gone by. The adapter reads a
+	// dated session nobody rode as missed and "makes it up" by replacing a
+	// later easy day, so filling Monday and Tuesday on a Wednesday would
+	// hand the rider a phantom miss and a reshuffled week. Every caller
+	// funnels through here, so the floor lives here rather than in each of
+	// them; a later week is entirely after today and is unaffected. The
+	// skipped days' share of the week's hours is not moved onto the days
+	// left: WeekWorkouts sizes each session from the whole week, so a
+	// mid-week fill is a lighter week, which is what it is.
+	if today := s.now().Format(dateLayout); fromDate < today {
+		fromDate = today
+	}
+
 	created := make([]workout.Workout, 0, len(requests))
 	skipped := 0
 	for _, req := range requests {
-		if fromDate != "" && req.Date < fromDate {
+		if req.Date < fromDate {
 			continue
 		}
 		if alreadyScheduled[req.Date] {

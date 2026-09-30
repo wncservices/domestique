@@ -824,8 +824,12 @@ func decodeSchedule(t *testing.T, resp *http.Response) scheduledWorkoutsOut {
 // right calendar dates, each with real steps a device could ride.
 func TestGoalSchedule(t *testing.T) {
 	h := newTrainingHarness(t)
+	// A fixed Monday: filling a week mid-week creates only the days still to
+	// come, so on the real date these counts changed with the weekday.
+	now := utcNoon(2026, time.October, 5)
+	h.srv.Clock = func() time.Time { return now }
 
-	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	eventDate := now.AddDate(0, 0, 70).Format("2006-01-02")
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
 		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
 	g := decodeGoal(t, resp)
@@ -876,8 +880,12 @@ func TestGoalSchedule(t *testing.T) {
 // scheduler.NextWorkouts function.
 func TestGoalScheduleIsIdempotentPerDate(t *testing.T) {
 	h := newTrainingHarness(t)
+	// A fixed Monday: filling a week mid-week creates only the days still to
+	// come, so on the real date these counts changed with the weekday.
+	now := utcNoon(2026, time.October, 5)
+	h.srv.Clock = func() time.Time { return now }
 
-	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	eventDate := now.AddDate(0, 0, 70).Format("2006-01-02")
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
 		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
 	g := decodeGoal(t, resp)
@@ -915,8 +923,12 @@ func TestGoalScheduleIsIdempotentPerDate(t *testing.T) {
 // automatic move records it (scheduler.MovedFrom).
 func TestMovingAPlanWorkoutDoesNotGetItScheduledAgain(t *testing.T) {
 	h := newTrainingHarness(t)
+	// A fixed Monday: filling a week mid-week creates only the days still to
+	// come, so on the real date these counts changed with the weekday.
+	now := utcNoon(2026, time.October, 5)
+	h.srv.Clock = func() time.Time { return now }
 
-	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	eventDate := now.AddDate(0, 0, 70).Format("2006-01-02")
 	g := decodeGoal(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
 		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate)))
 	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
