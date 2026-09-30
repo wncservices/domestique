@@ -209,6 +209,18 @@ CREATE TABLE IF NOT EXISTS daily_wellness (
 -- scheduled_weeks remembers that a goal's plan week has been filled once, so
 -- a session the rider then deleted, moved or rewrote is not read as a gap and
 -- refilled by the next auto-schedule tick. week_start is that week's Monday.
+-- session_links records a rider's own answer to "which planned session was
+-- this ride?", for when the automatic match (same date, same sport, closest
+-- duration) got it wrong or found nothing. workout_id '' means "this ride was
+-- not a planned session". No row means the automatic match decides.
+CREATE TABLE IF NOT EXISTS session_links (
+    session_id TEXT PRIMARY KEY,
+    rider      TEXT NOT NULL,
+    workout_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_links_rider_idx ON session_links (rider);
+
 CREATE TABLE IF NOT EXISTS scheduled_weeks (
     goal_id    TEXT NOT NULL,
     week_start TEXT NOT NULL,
@@ -1085,6 +1097,12 @@ func (d *DB) DeleteWorkout(ctx context.Context, id string) error {
 	// copy is the API layer's job, which has the session to do it with — by
 	// this point it has already read what it needs.)
 	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM workout_pushes WHERE workout_id = ?`), id)
+	if err != nil {
+		return err
+	}
+	// A ride linked by hand to this workout goes back to the automatic match,
+	// rather than pointing at nothing forever.
+	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM session_links WHERE workout_id = ?`), id)
 	return err
 }
 

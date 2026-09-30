@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -84,16 +85,16 @@ func (s *Server) analyseNewSessions(
 	garminConnected bool,
 	wahooToken string,
 	wahooConnected bool,
-) error {
+) ([]string, error) {
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	sinceDate := time.Now().Add(-rideAnalysisWindow).Format("2006-01-02")
 	analyzed, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	analyzedIDs := make(map[string]bool, len(analyzed))
 	for _, a := range analyzed {
@@ -102,8 +103,13 @@ func (s *Server) analyseNewSessions(
 
 	planned, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	links, err := s.Training.SessionLinks(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
+	var notes []string
 
 	// sessions is already "most recent first" (ListSessions' own ordering),
 	// so capping the first N seen per provider is exactly "newest 20".
@@ -164,7 +170,7 @@ func (s *Server) analyseNewSessions(
 			}
 		}
 
-		matched := rideanalysis.MatchPlanned(sess.Date, sess.Sport, summary.DurationSeconds, planned)
+		matched := plannedFor(sess, summary.DurationSeconds, planned, links)
 		// An FTP test's whole result comes from the ride's own power curve. A
 		// FIT that could not be fetched or decoded says nothing about the ride,
 		// and saving a curve-less analysis now would stop the ride ever being
@@ -172,6 +178,9 @@ func (s *Server) analyseNewSessions(
 		// it unanalysed; the next sync tries the file again.
 		if act == nil && matched != nil && matched.TestProtocol != "" {
 			s.logger().Warn("ride analysis: an FTP test ride has no readable FIT yet, will retry", "rider", rider, "provider", sess.Provider, "session", sess.ID)
+			// Said out loud as well: otherwise the test just looks unmatched,
+			// with nothing to tell the rider it is waiting on the file.
+			notes = append(notes, fmt.Sprintf("%s: the activity file for your FTP test on %s could not be read yet; it is tried again on the next sync.", sess.Provider, sess.Date))
 			continue
 		}
 		analysis := rideanalysis.Analyze(rideanalysis.Input{
@@ -238,7 +247,7 @@ func (s *Server) analyseNewSessions(
 
 	if loadChanged {
 		if err := s.Training.RecomputeFitnessSnapshots(ctx, rider); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -246,7 +255,43 @@ func (s *Server) analyseNewSessions(
 		s.logger().Info("ride analysis: sync complete", "rider", rider, "analyzed", analyzedCount, "downloadFailures", downloadFailed)
 	}
 
-	return nil
+	return notes, nil
+}
+
+// plannedFor picks the planned workout a ride is scored against. A link the
+// rider made by hand wins outright, "" included ("not a planned session").
+// Otherwise it is rideanalysis.MatchPlanned over the workouts no other ride
+// has been linked to by hand, so one hand-made link cannot leave a second
+// ride auto-matched to the same session.
+func plannedFor(sess workout.CompletedSession, rideSeconds float64, planned []workout.Workout, links map[string]string) *workout.Workout {
+	if id, ok := links[sess.ID]; ok {
+		if id == "" {
+			return nil
+		}
+		for i := range planned {
+			if planned[i].ID == id {
+				return &planned[i]
+			}
+		}
+		// The workout is gone (DeleteWorkout clears its links, so this is a
+		// race at most): fall back to the automatic match.
+	}
+	claimed := map[string]bool{}
+	for sessionID, id := range links {
+		if sessionID != sess.ID && id != "" {
+			claimed[id] = true
+		}
+	}
+	candidates := planned
+	if len(claimed) > 0 {
+		candidates = make([]workout.Workout, 0, len(planned))
+		for _, w := range planned {
+			if !claimed[w.ID] {
+				candidates = append(candidates, w)
+			}
+		}
+	}
+	return rideanalysis.MatchPlanned(sess.Date, sess.Sport, rideSeconds, candidates)
 }
 
 // fetchSessionFIT downloads one session's FIT file, choosing the provider id

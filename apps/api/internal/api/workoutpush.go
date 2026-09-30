@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -200,6 +201,17 @@ func (s *Server) localToday() string {
 		}
 	}
 	return now.Format(dateLayout)
+}
+
+// localDate is the calendar date of t in training.timezone: what a UTC
+// timestamp from a provider means as "the day it was ridden".
+func (s *Server) localDate(t time.Time) string {
+	if sched, err := s.syncSchedule(); err == nil {
+		if loc := sched.Location(); loc != nil {
+			t = t.In(loc)
+		}
+	}
+	return t.Format(dateLayout)
 }
 
 // autoPushWorkouts keeps every opted-in rider's head unit showing today: the

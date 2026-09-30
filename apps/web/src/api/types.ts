@@ -1016,6 +1016,17 @@ export interface CompletedSession {
    *  session not yet synced with a FIT source, or older than the analysis
    *  window. */
   analysis?: SessionAnalysis
+  /** True when the rider said which planned session this ride was (PUT
+   *  /api/training/sessions/{id}/workout), so the automatic match no longer
+   *  decides. Only the week view fills it in. */
+  linkedByHand?: boolean
+}
+
+/** PUT /api/training/sessions/{id}/workout. `workoutId: ''` says the ride was
+ *  not a planned session; `auto` hands it back to the automatic match. */
+export interface LinkSessionRequest {
+  workoutId?: string
+  auto?: boolean
 }
 
 export interface FitnessSnapshot {

@@ -330,6 +330,14 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
   measure the target, not the rider; only the ramp's steps are power targets.
   Anything that converts workouts for an indoor trainer must skip a workout with
   `test_protocol` set (the indoor spec already says so).
+- **A ride can be linked by hand** when the automatic match (same date, same
+  sport, closest planned duration) misses: a test ridden a day early is the case
+  that prompted it. `PUT /api/training/sessions/{id}/workout` stores the link in
+  `session_links` (`workout_id ''` = "not a planned session"; no row = automatic),
+  moves the workout to the ride's day, undoes the old analysis's level move,
+  forgets the analysis and runs a sync so the ride is scored again. The link
+  outranks `MatchPlanned` on every later pass (`plannedFor`). A ride that already
+  gave a test its result cannot be relinked: one result per test, ever.
 - The day before a scheduled test, a generated, unadjusted hard session is eased
   by `easeBeforeFTPTests`, inside `adaptRider`, so it follows every replan.
 - No watts (FTP, test result) in log lines next to a rider name.

@@ -33,6 +33,7 @@ import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import GoalsSection from '@/components/plan/GoalsSection.vue'
 import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
+import LinkRideModal from '@/components/plan/LinkRideModal.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
@@ -45,6 +46,7 @@ import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { useIndoor } from '@/composables/useIndoor'
+import { useRideLink } from '@/composables/useRideLink'
 import { useWeather } from '@/composables/useWeather'
 import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
@@ -223,6 +225,17 @@ const indoor = useIndoor({
     await loadWorkouts()
     // A converted session is no longer a candidate for a weather suggestion.
     await loadWeather()
+  },
+})
+
+const rideLink = useRideLink({
+  toast,
+  errorMessage,
+  workouts,
+  reload: async () => {
+    // A linked session may have moved to the ride's day, and a test read
+    // through the link no longer needs suggesting.
+    await Promise.all([loadWeek(), loadWorkouts(), loadFtpTests()])
   },
 })
 
@@ -748,6 +761,7 @@ onMounted(() => {
         @replan="openReplanConfirm"
         @ftp-test="ftpModalOpen = true"
         @train-now="trainNowOpen = true"
+        @link-ride="rideLink.openFor"
       />
 
       <SeasonTimeline
@@ -812,6 +826,14 @@ onMounted(() => {
       :busy="indoor.busy.value"
       :error="indoor.error.value"
       @confirm="indoor.confirm"
+    />
+
+    <LinkRideModal
+      v-model:open="rideLink.open.value"
+      :ride="rideLink.ride.value"
+      :candidates="rideLink.candidates.value"
+      :busy="rideLink.busy.value"
+      @link="rideLink.link"
     />
 
     <TrainNowSlideover v-model:open="trainNowOpen" :today="today" @applied="reloadAfterSwap" />
