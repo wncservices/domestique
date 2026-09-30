@@ -1374,6 +1374,10 @@ type completedSessionDTO struct {
 	// are sized for a full ride's worth of raw samples, not worth shipping
 	// on every fitness/week response.
 	Analysis *sessionAnalysisDTO `json:"analysis,omitempty"`
+	// LinkedByHand is set when the rider said which planned session this
+	// ride was (PUT /api/training/sessions/{id}/workout), so the automatic
+	// match no longer decides. Filled in by the week view only.
+	LinkedByHand bool `json:"linkedByHand,omitempty"`
 }
 
 // sessionAnalysisDTO mirrors workout.SessionAnalysis's summary fields —

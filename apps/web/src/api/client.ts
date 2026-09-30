@@ -66,6 +66,7 @@ import type {
   RiderProfile,
   FitnessResponse,
   GoalProposal,
+  LinkSessionRequest,
   SyncMetricsResult,
   ThresholdSuggestion,
   ThresholdSuggestionsResponse,
@@ -938,5 +939,15 @@ export const api = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ feel }),
+    }),
+  /** Says which planned session a ride was, when the automatic match (same
+   *  day, same sport) got it wrong or found nothing. The server re-scores the
+   *  ride with a sync, so the answer is that sync's result: an FTP test read
+   *  this way shows up in its ftpTests. See handleLinkSession. */
+  linkSession: (id: string, body: LinkSessionRequest) =>
+    request<SyncMetricsResult>(`/api/training/sessions/${encodeURIComponent(id)}/workout`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     }),
 }

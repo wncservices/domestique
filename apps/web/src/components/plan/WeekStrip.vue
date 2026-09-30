@@ -4,7 +4,7 @@
 // it in the day card above. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
-import type { AnalysisStep, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
+import type { AnalysisStep, CompletedSession, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import IndoorBadge from './IndoorBadge.vue'
@@ -47,6 +47,8 @@ const emit = defineEmits<{
   ftpTest: []
   // Opens the "I have N minutes today" sheet.
   trainNow: []
+  // Opens the "which planned session was this ride?" modal.
+  linkRide: [session: CompletedSession]
 }>()
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
@@ -185,6 +187,15 @@ const resultsFeel = computed(() => (resultsDay.value ? analysedSession(resultsDa
 function onRated(analysis: SessionAnalysis) {
   void analysis
   emit('rated')
+}
+
+// What a ride's link button says: the session it counts as, or that it
+// counts as none, so an unmatched test is visible at a glance.
+function rideLinkNote(c: CompletedSession): string {
+  const id = c.analysis?.workoutId
+  if (!id) return c.analysis ? 'Not linked to a planned session. Click to link it.' : 'Not scored yet. Click to link it to a planned session.'
+  const name = props.week.days.flatMap((d) => d.planned).find((w) => w.id === id)?.name
+  return `${c.linkedByHand ? 'Linked by you' : 'Matched'} to ${name ?? 'a planned session'}. Click to change.`
 }
 
 // A week that has not ended — this one or a later one the rider paged to; the
@@ -338,10 +349,21 @@ watch(
           </UTooltip>
         </div>
 
-        <p v-for="c in day.completed" :key="c.id" class="flex items-center gap-1 text-[0.7rem] text-muted">
+        <div v-for="c in day.completed" :key="c.id" class="flex items-center gap-1 text-[0.7rem] text-muted">
           <UIcon name="i-lucide-activity" class="size-3" />
-          {{ formatDuration(c.durationSeconds) }}
-        </p>
+          <span class="font-mono tabular-nums">{{ formatDuration(c.durationSeconds) }}</span>
+          <UTooltip :text="rideLinkNote(c)">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              :icon="c.analysis?.workoutId ? 'i-lucide-link' : 'i-lucide-link-2-off'"
+              :aria-label="`Link the ride on ${weekdayShort(day.date)} ${dayNumber(day.date)} to a planned session`"
+              :ui="{ base: 'p-0.5' }"
+              @click.stop="emit('linkRide', c)"
+            />
+          </UTooltip>
+        </div>
 
         <button
           v-if="analysedSession(day)"

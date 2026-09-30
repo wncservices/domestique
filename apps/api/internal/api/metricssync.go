@@ -273,6 +273,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 				synced++
 				sessionFITSources[session.ID] = sessionFITSource{
 					garminActivityID: a.ID,
+					bestPower:        a.BestPower,
 					summary: rideanalysis.Summary{
 						DurationSeconds: a.DurationSeconds,
 						AvgPower:        a.AvgPowerWatts,
@@ -316,8 +317,12 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 						// doc comment) — cycling, the same "this is a
 						// cycling library" default AGENTS.md already states
 						// for Wahoo route push.
+						// Starts is UTC; the day is the rider's local one, or
+						// a ride just after midnight lands on the day before
+						// and never meets the session planned for it.
+						// Garmin's list already gives local time.
 						Rider: rider, Provider: "wahoo", ExternalID: wk.ID, Sport: "cycling",
-						Date: wk.Starts.Format("2006-01-02"), DurationSeconds: wk.DurationSeconds,
+						Date: s.localDate(wk.Starts), DurationSeconds: wk.DurationSeconds,
 						DistanceM: wk.DistanceM, AvgHR: wk.AvgHR, AvgPowerWatts: wk.AvgPowerWatts, TrainingLoad: load,
 					})
 					if err != nil {
@@ -353,9 +358,11 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// window, the per-provider cap, and why a download/decode/save failure
 	// here is a Warn rather than a sync failure.
 	consumer, _ := s.garminConsumer()
-	if err := s.analyseNewSessions(ctx, rider, profile, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected); err != nil {
+	analysisNotes, err := s.analyseNewSessions(ctx, rider, profile, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected)
+	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
+	warnings = append(warnings, analysisNotes...)
 
 	// What the history itself can say, now that it is on file: an FTP
 	// estimate (only where Garmin gave none — its own detected FTP is a
