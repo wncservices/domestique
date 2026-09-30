@@ -632,8 +632,11 @@ func Analyze(in Input) Analysis {
 	// measures, so the ride itself is simply completed; scored like a
 	// session it read as struggled or incomplete, and the adapter took it as
 	// missed or as a sign of fatigue.
+	// Its steps are not scored either: "0 of 1 efforts on target" says
+	// nothing about a test, whose one number is the FTP it reads.
 	if in.Planned != nil && in.Planned.TestProtocol != "" && rideSeconds > 0 {
 		a.Outcome = OutcomeCompleted
+		a.Steps = nil
 	}
 	return a
 }
