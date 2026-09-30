@@ -197,6 +197,11 @@ type workoutDTO struct {
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
 	UpdatedAt      string  `json:"updatedAt"`
+	// Why is the structured reason behind the workout's latest automatic
+	// change, when one was recorded. Filled by attachWhy, one batched read
+	// per response; a workout adjusted before reasons were recorded has none
+	// and the client falls back to the note in Description.
+	Why *whyDTO `json:"why,omitempty"`
 }
 
 func workoutDTOFrom(w workout.Workout) workoutDTO {
@@ -1083,6 +1088,7 @@ func (s *Server) handleListWorkouts(w http.ResponseWriter, r *http.Request) {
 	for _, wk := range workouts {
 		out = append(out, workoutDTOFrom(wk))
 	}
+	s.attachWhy(r.Context(), rider, out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1099,7 +1105,9 @@ func (s *Server) handleGetWorkout(w http.ResponseWriter, r *http.Request) {
 		s.forbidTraining(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, workoutDTOFrom(wk))
+	one := []workoutDTO{workoutDTOFrom(wk)}
+	s.attachWhy(r.Context(), wk.Rider, one)
+	writeJSON(w, http.StatusOK, one[0])
 }
 
 type workoutRequestBody struct {
@@ -1205,7 +1213,9 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("workout updated", "id", id, "by", identity.User)
-	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+	one := []workoutDTO{workoutDTOFrom(updated)}
+	s.attachWhy(r.Context(), updated.Rider, one)
+	writeJSON(w, http.StatusOK, one[0])
 }
 
 // recordManualMove returns the description to save when an update moves a
