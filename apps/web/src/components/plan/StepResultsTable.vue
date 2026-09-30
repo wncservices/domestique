@@ -4,7 +4,8 @@
 // table rather than UTable: the actual column needs a second, muted line
 // for a fallback-scored step's in-range percentage (see AnalysisStep's own
 // doc comment), which UTable's single-string cell doesn't fit cleanly.
-import type { AnalysisStep, SessionAnalysis, StepResult } from '@/api/types'
+import type { AnalysisStep, SessionAnalysis } from '@/api/types'
+import { effortLine, GRADE_LABEL, type EffortGrade } from '@/utils/effortSummary'
 import { formatPace } from '@/utils/fitnessMath'
 import FeelRating from './FeelRating.vue'
 
@@ -20,10 +21,18 @@ defineProps<{
 }>()
 const emit = defineEmits<{ 'update:open': [boolean]; rated: [analysis: SessionAnalysis] }>()
 
-const RESULT_META: Record<StepResult, { label: string; icon: string; color: 'success' | 'warning' }> = {
-  hit: { label: 'Hit', icon: 'i-lucide-check', color: 'success' },
-  under: { label: 'Under', icon: 'i-lucide-arrow-down', color: 'warning' },
-  over: { label: 'Over', icon: 'i-lucide-arrow-up', color: 'warning' },
+// The same five grades as the day card's effort summary (effortSummary.ts),
+// so "Just under" means the same thing in both places.
+const GRADE_META: Record<EffortGrade, { icon: string; color: 'success' | 'warning' | 'error' }> = {
+  on: { icon: 'i-lucide-check', color: 'success' },
+  justUnder: { icon: 'i-lucide-arrow-down-right', color: 'warning' },
+  justOver: { icon: 'i-lucide-arrow-up-right', color: 'warning' },
+  under: { icon: 'i-lucide-arrow-down', color: 'error' },
+  over: { icon: 'i-lucide-arrow-up', color: 'warning' },
+}
+
+function gradeOf(step: AnalysisStep): EffortGrade {
+  return effortLine(step).grade
 }
 
 function unitFor(target: string): string {
@@ -74,8 +83,8 @@ function formatActual(step: AnalysisStep): string {
                 <div v-if="step.inTargetPct" class="text-xs text-dimmed">{{ Math.round(step.inTargetPct) }}% in range</div>
               </td>
               <td class="py-2">
-                <UBadge :color="RESULT_META[step.result].color" variant="subtle" :icon="RESULT_META[step.result].icon" size="xs">
-                  {{ RESULT_META[step.result].label }}
+                <UBadge :color="GRADE_META[gradeOf(step)].color" variant="subtle" :icon="GRADE_META[gradeOf(step)].icon" size="xs">
+                  {{ GRADE_LABEL[gradeOf(step)] }}
                 </UBadge>
               </td>
             </tr>
