@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -301,8 +302,11 @@ func TestOpenMeteoDownDegradesToAnEmptyButSuccessfulAnswer(t *testing.T) {
 	if !strings.Contains(logs, "level=WARN") || !strings.Contains(logs, "forecast unavailable") {
 		t.Errorf("want a Warn about the failed fetch; logs:\n%s", logs)
 	}
+	// The timestamp is left out of the search: at hh:m3:03.72x it holds "3.72"
+	// itself, which failed this test about once a minute's worth of runs.
+	untimed := regexp.MustCompile(`time=\S+`).ReplaceAllString(logs, "")
 	for _, leak := range []string{"Ghent", "51.05", "3.72", "latitude", weatherAPIKey} {
-		if strings.Contains(logs, leak) {
+		if strings.Contains(untimed, leak) {
 			t.Errorf("logs leak %q:\n%s", leak, logs)
 		}
 	}
