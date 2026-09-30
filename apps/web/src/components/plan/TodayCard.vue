@@ -20,7 +20,8 @@ import type {
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
 import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
-import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import { adjustmentNote, describeTarget, formatDuration, isPlanMadeSession, pickAnalysedSession, swapNote } from '@/utils/workoutMath'
+import AlternatesMenu from './AlternatesMenu.vue'
 import FeelRating from './FeelRating.vue'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
@@ -65,6 +66,9 @@ const emit = defineEmits<{
   outdoor: [w: Workout]
   // "Keep outdoors" on the weather banner: the page remembers it.
   weatherKeep: [s: WeatherSuggestion]
+  // An alternate was taken or undone: the session changed in place, so the page
+  // reloads the week and the list.
+  swapped: []
   // A feel rating can change the ride's own progression-level change (see
   // api.setSessionFeel's own doc comment) — the level and week state live on
   // the page, not here, so this just asks it to reload both rather than
@@ -146,6 +150,19 @@ const canChangeIndoor = computed(() => {
 })
 const canConvertIndoor = computed(() => canChangeIndoor.value && !firstWorkout.value?.indoor)
 const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.value?.canRevertIndoor)
+
+// Alternates are offered for a plan-made session that is neither ridden nor
+// past nor an FTP test; the API is the judge (it answers with no options for
+// anything else and the menu then hides itself), this only spares it the
+// obvious asks.
+// The menu belongs to the day's first plan-made session, which is not always the
+// one shown (a session the rider added sorts first, or the selected one is a test).
+const alternatesWorkout = computed(() => props.day?.planned.find(isPlanMadeSession))
+const canOfferAlternates = computed(() => {
+  const day = props.day
+  if (!alternatesWorkout.value || !day) return false
+  return day.completed.length === 0 && day.date >= todayISO()
+})
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 
@@ -301,6 +318,7 @@ function onRated(analysis: SessionAnalysis) {
               <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
               <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
               <IndoorBadge v-if="firstWorkout.indoor" :description="firstWorkout.description" />
+              <UBadge v-if="firstWorkout.swapped" color="neutral" variant="subtle" icon="i-lucide-shuffle">Customised</UBadge>
               <UBadge v-if="firstWorkout.testProtocol" color="primary" variant="subtle" icon="i-lucide-gauge">
                 {{ ftpTestLabel(firstWorkout.testProtocol) }}
               </UBadge>
@@ -314,6 +332,10 @@ function onRated(analysis: SessionAnalysis) {
           <p v-if="adjustmentNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-info">
             <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
             <span>{{ adjustmentNote(firstWorkout.description) }}</span>
+          </p>
+          <p v-if="swapNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-muted">
+            <UIcon name="i-lucide-shuffle" class="mt-0.5 shrink-0" />
+            <span>{{ swapNote(firstWorkout.description) }}</span>
           </p>
           <p v-if="firstWorkout.testProtocol" class="flex items-start gap-1 text-xs text-muted">
             <UIcon name="i-lucide-bike" class="mt-0.5 shrink-0" />
@@ -341,6 +363,13 @@ function onRated(analysis: SessionAnalysis) {
             <UDropdownMenu :items="moveMenuItems(firstWorkout, day.date)">
               <UButton color="neutral" variant="outline" icon="i-lucide-calendar-clock">Move</UButton>
             </UDropdownMenu>
+            <AlternatesMenu
+              v-if="canOfferAlternates"
+              :key="alternatesWorkout!.id"
+              :workout="alternatesWorkout!"
+              :can-offer="canOfferAlternates"
+              @changed="emit('swapped')"
+            />
             <UButton v-if="canConvertIndoor" color="neutral" variant="outline" icon="i-lucide-house" @click="emit('indoor', firstWorkout)">
               Indoor version
             </UButton>

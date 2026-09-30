@@ -3,7 +3,7 @@
 // (Task 6), and the plan/library workout cards (Task 4/5) all need the same
 // duration formatting and target/threshold arithmetic, so it lives once
 // here rather than being re-derived per component.
-import type { CompletedSession, RiderProfile, StepIntensity, StepTarget, WorkoutStep } from '@/api/types'
+import type { CompletedSession, RiderProfile, StepIntensity, StepTarget, Workout, WorkoutStep } from '@/api/types'
 
 /** One timed step, after repeat blocks are expanded — what the profile
  *  chart actually draws one rect per. `level` is 0..1.5, a relative-effort
@@ -218,6 +218,43 @@ const INDOOR_NOTE =
 
 export function indoorNote(description?: string): string {
   return INDOOR_NOTE.exec(description ?? '')?.[0].trim() ?? ''
+}
+
+// The scheduler's own description on a plan-made session, and the marker a swap
+// for an alternate adds (see internal/scheduler.GeneratedDescription and
+// SwappedMarker). Only read here to word the "I have N minutes" sheet's
+// replace-or-add note and to show the swap note on the day card; the server
+// decides what a suggestion actually replaces.
+const GENERATED_DESCRIPTION = 'Generated from the periodization plan.'
+const SWAPPED_MARKER = 'Swapped by you:'
+
+// The latest swap note in a description: "Swapped by you: harder, was
+// Threshold 5x8 (1h10)." or "Swapped by you: Back to the planned version.",
+// '' when the rider never swapped it.
+const SWAP_NOTE = /Swapped by you: (?:[^()]*\([^)]*\)\.|Back to the planned version\.)/g
+
+export function swapNote(description?: string): string {
+  const all = (description ?? '').match(SWAP_NOTE)
+  return all ? all[all.length - 1]! : ''
+}
+
+/** A session the plan made, however it has since been adjusted, moved or
+ *  swapped: what the Alternates menu is offered for. */
+export function isPlanMadeSession(w: Workout): boolean {
+  return !!w.goalId && !w.testProtocol && (w.description ?? '').startsWith(GENERATED_DESCRIPTION)
+}
+
+/** A plan-made session nobody has touched: what "Use this" replaces in place.
+ *  (Ridden days are the caller's to rule out; a workout alone cannot say.) */
+export function isUntouchedPlanSession(w: Workout): boolean {
+  const d = w.description ?? ''
+  return (
+    !!w.goalId &&
+    !w.testProtocol &&
+    d.startsWith(GENERATED_DESCRIPTION) &&
+    !d.includes(ADJUSTED_MARKER) &&
+    !d.includes(SWAPPED_MARKER)
+  )
 }
 
 export function adjustmentNote(description?: string): string {
