@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
@@ -195,6 +196,11 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		// a session touched (the note changes its description), but that must
 		// not be the only thing keeping the refresh off it.
 		!wk.Indoor &&
+		// A swap for an alternate is the rider's choice. It already fails the
+		// description and timestamp tests, but the guarantee is stated here
+		// rather than left to those.
+		!strings.Contains(wk.Description, scheduler.SwappedMarker) &&
+		wk.PlannedSnapshot == nil &&
 		wk.UpdatedAt == wk.CreatedAt
 }
 

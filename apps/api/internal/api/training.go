@@ -188,6 +188,11 @@ type workoutDTO struct {
 	// an indoor workout that still has its outdoor steps. A manual edit of the
 	// steps or the sport retires them (see handleUpdateWorkout).
 	CanRevertIndoor bool `json:"canRevertIndoor,omitempty"`
+	// Swapped is true once the rider swapped this session for an alternate
+	// (scheduler.SwappedMarker in the description); HasPlannedSnapshot is
+	// whether "Back to planned version" would do anything.
+	Swapped            bool `json:"swapped,omitempty"`
+	HasPlannedSnapshot bool `json:"hasPlannedSnapshot,omitempty"`
 	// So the UI can show "1h 15m" without re-implementing repeat-block arithmetic.
 	PlannedSeconds float64 `json:"plannedSeconds"`
 	CreatedAt      string  `json:"createdAt"`
@@ -216,6 +221,8 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		dto.OutdoorPlannedSeconds = workout.PlannedSeconds(*w.OutdoorSteps)
 	}
 	dto.CanRevertIndoor = w.Indoor && w.OutdoorSteps != nil
+	dto.Swapped = strings.Contains(w.Description, scheduler.SwappedMarker)
+	dto.HasPlannedSnapshot = w.PlannedSnapshot != nil
 	return dto
 }
 
