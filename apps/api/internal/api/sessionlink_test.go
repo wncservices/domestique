@@ -3,7 +3,9 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,5 +177,42 @@ func TestLinkingIsOwnerOnly(t *testing.T) {
 	}
 	if resp, _ := h.link(`{"workoutId":"` + theirs.ID + `"}`); resp.StatusCode != http.StatusNotFound {
 		t.Errorf("another rider's workout: status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// An unreadable FIT no longer leaves a ramp test hanging when Garmin's own
+// best 1-minute power is there: that is the only number the ramp reads.
+func TestARampTestIsReadFromGarminsBestPowerWhenTheFITFails(t *testing.T) {
+	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250})
+	h.fake.fitErr = errors.New("garmin: activity FIT download returned 404")
+	h.fake.activities[0].BestPower = map[int]float64{60: 400, 300: 330}
+
+	out := h.sync()
+	if len(out.FTPTests) != 1 || out.FTPTests[0].FTPWatts != 300 {
+		t.Fatalf("ftpTests = %+v, want the ramp read at 300 W from Garmin's best minute", out.FTPTests)
+	}
+	if got := h.analysedAgainst(); got != h.testID {
+		t.Errorf("analysed against %q, want the test", got)
+	}
+}
+
+// Without that fallback the ride waits for its file, and the sync says so
+// with the reason, rather than the test just looking unmatched.
+func TestAnUnreadableTestRideIsNamedInTheSyncWarnings(t *testing.T) {
+	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250})
+	h.fake.fitErr = errors.New("activity FIT download returned 404")
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	var out struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "FTP test") || !strings.Contains(out.Warnings[0], "404") {
+		t.Errorf("warnings = %q, want one naming the FTP test and the reason", out.Warnings)
+	}
+	if got := h.analysedAgainst(); got != "<none>" {
+		t.Errorf("analysed against %q, want the ride left for the next sync", got)
 	}
 }

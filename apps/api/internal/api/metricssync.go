@@ -273,6 +273,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 				synced++
 				sessionFITSources[session.ID] = sessionFITSource{
 					garminActivityID: a.ID,
+					bestPower:        a.BestPower,
 					summary: rideanalysis.Summary{
 						DurationSeconds: a.DurationSeconds,
 						AvgPower:        a.AvgPowerWatts,
