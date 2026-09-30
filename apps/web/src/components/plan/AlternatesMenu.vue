@@ -168,7 +168,10 @@ const items = computed(() => {
 
     <template #option-description="{ item }">
       <span class="font-mono tabular-nums">{{ item.description }}</span>
-      <span v-if="item.option?.warning" class="mt-0.5 block text-dimmed">{{ item.option.warning }}</span>
+      <span v-if="item.option?.warning" class="mt-0.5 flex items-center gap-1 text-warning">
+        <UIcon name="i-lucide-triangle-alert" class="size-3 shrink-0" />
+        {{ item.option.warning }}
+      </span>
     </template>
     <template #option-trailing="{ item }">
       <DifficultyChip v-if="item.option" :difficulty="item.option.difficulty" size="xs" />

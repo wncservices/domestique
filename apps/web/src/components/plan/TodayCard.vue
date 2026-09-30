@@ -20,7 +20,7 @@ import type {
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
 import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
-import { adjustmentNote, describeTarget, formatDuration, pickAnalysedSession, swapNote } from '@/utils/workoutMath'
+import { adjustmentNote, describeTarget, formatDuration, isPlanMadeSession, pickAnalysedSession, swapNote } from '@/utils/workoutMath'
 import AlternatesMenu from './AlternatesMenu.vue'
 import FeelRating from './FeelRating.vue'
 import IndoorBadge from './IndoorBadge.vue'
@@ -155,10 +155,12 @@ const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.v
 // past nor an FTP test; the API is the judge (it answers with no options for
 // anything else and the menu then hides itself), this only spares it the
 // obvious asks.
+// The menu belongs to the day's first plan-made session, which is not always the
+// one shown (a session the rider added sorts first, or the selected one is a test).
+const alternatesWorkout = computed(() => props.day?.planned.find(isPlanMadeSession))
 const canOfferAlternates = computed(() => {
-  const w = firstWorkout.value
   const day = props.day
-  if (!w || !day || w.testProtocol || !w.goalId) return false
+  if (!alternatesWorkout.value || !day) return false
   return day.completed.length === 0 && day.date >= todayISO()
 })
 
@@ -316,7 +318,7 @@ function onRated(analysis: SessionAnalysis) {
               <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
               <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
               <IndoorBadge v-if="firstWorkout.indoor" :description="firstWorkout.description" />
-              <UBadge v-if="firstWorkout.swapped" color="neutral" variant="subtle" icon="i-lucide-shuffle">Swapped</UBadge>
+              <UBadge v-if="firstWorkout.swapped" color="neutral" variant="subtle" icon="i-lucide-shuffle">Customised</UBadge>
               <UBadge v-if="firstWorkout.testProtocol" color="primary" variant="subtle" icon="i-lucide-gauge">
                 {{ ftpTestLabel(firstWorkout.testProtocol) }}
               </UBadge>
@@ -363,8 +365,8 @@ function onRated(analysis: SessionAnalysis) {
             </UDropdownMenu>
             <AlternatesMenu
               v-if="canOfferAlternates"
-              :key="firstWorkout.id"
-              :workout="firstWorkout"
+              :key="alternatesWorkout!.id"
+              :workout="alternatesWorkout!"
               :can-offer="canOfferAlternates"
               @changed="emit('swapped')"
             />

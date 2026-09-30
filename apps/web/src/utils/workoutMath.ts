@@ -238,6 +238,12 @@ export function swapNote(description?: string): string {
   return all ? all[all.length - 1]! : ''
 }
 
+/** A session the plan made, however it has since been adjusted, moved or
+ *  swapped: what the Alternates menu is offered for. */
+export function isPlanMadeSession(w: Workout): boolean {
+  return !!w.goalId && !w.testProtocol && (w.description ?? '').startsWith(GENERATED_DESCRIPTION)
+}
+
 /** A plan-made session nobody has touched: what "Use this" replaces in place.
  *  (Ridden days are the caller's to rule out; a workout alone cannot say.) */
 export function isUntouchedPlanSession(w: Workout): boolean {
