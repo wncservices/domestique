@@ -123,6 +123,26 @@ func outdoorSteps(w workout.Workout) []workout.WorkoutStep {
 	return w.Steps
 }
 
+// OutdoorSeconds is how long w takes in its outdoor form, what its alternates
+// (and internal/trainnow's stand-in for it) are sized from.
+func OutdoorSeconds(w workout.Workout) float64 {
+	return workout.PlannedSeconds(outdoorSteps(w))
+}
+
+// EnduranceRide builds an endurance or long ride of totalSeconds in the shape
+// of w (a long ride stays a long ride, a run stays a run), through the
+// scheduler's own builder.
+func EnduranceRide(w workout.Workout, totalSeconds float64, profile workout.RiderProfile) workout.CreateWorkoutRequest {
+	return scheduler.BuildEnduranceSession(totalSeconds/3600, isLong(w, totalSeconds, profile), w.Sport, profile)
+}
+
+// isLong reports whether w is the week's long day, which the builder names
+// differently ("Long ride" against "Endurance ride"): asking it for a long
+// session of any length and comparing names avoids a second copy of the names.
+func isLong(w workout.Workout, totalSeconds float64, profile workout.RiderProfile) bool {
+	return scheduler.BuildEnduranceSession(totalSeconds/3600, true, w.Sport, profile).Name == w.Name
+}
+
 // Options returns the alternates on offer for w, in the order easier, harder,
 // shorter, longer, omitting any that has no rung behind it. reducedWeek is a
 // recovery or taper week: the plan is shedding load there, so no harder and no
@@ -224,8 +244,6 @@ func enduranceOptions(w workout.Workout, profile workout.RiderProfile) []Option 
 	if main < 0 {
 		main = 0
 	}
-	long := scheduler.BuildEnduranceSession(total/3600, true, w.Sport, profile).Name == w.Name
-
 	var out []Option
 	for _, c := range []struct {
 		kind   Kind
@@ -235,7 +253,7 @@ func enduranceOptions(w workout.Workout, profile workout.RiderProfile) []Option 
 		if seconds == math.Round(total) {
 			continue // clamped back to what it already is
 		}
-		req := scheduler.BuildEnduranceSession(seconds/3600, long, w.Sport, profile)
+		req := EnduranceRide(w, seconds, profile)
 		out = append(out, Option{
 			Kind: c.kind, Name: req.Name, Zone: req.Zone,
 			Seconds:    seconds,

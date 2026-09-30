@@ -1370,3 +1370,28 @@ export interface WorkoutAlternates {
   options: AlternateOption[]
   hasSnapshot: boolean
 }
+
+export type TrainNowKind = 'planned' | 'wanted' | 'easy'
+
+/** One session that fits the minutes a rider has today. `level` is absent for
+ *  an endurance ride; `tss` is 0 without an FTP. */
+export interface TrainNowSuggestion {
+  kind: TrainNowKind
+  name: string
+  zone: string
+  level?: number
+  minutes: number
+  tss: number
+  difficulty: Difficulty
+  /** The one-line reason this was suggested. */
+  why: string
+  warning?: string
+}
+
+/** GET /api/training/trainnow: up to three suggestions and the readiness
+ *  verdict that shaped them. Nothing is stored or applied. */
+export interface TrainNowResponse {
+  minutes: number
+  verdict: 'ready' | 'caution' | 'rest'
+  suggestions: TrainNowSuggestion[]
+}

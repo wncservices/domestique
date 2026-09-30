@@ -79,6 +79,8 @@ import type {
   WeatherResponse,
   AlternateKind,
   WorkoutAlternates,
+  TrainNowResponse,
+  TrainNowSuggestion,
 } from './types'
 import type { BasemapLayers } from '@/utils/staticBasemap'
 
@@ -821,6 +823,20 @@ export const api = {
       `/api/training/workouts/${encodeURIComponent(id)}/alternates/revert${today ? `?today=${encodeURIComponent(today)}` : ''}`,
       { method: 'POST' },
     ),
+  /** Up to three sessions that fit `minutes` (30 to 180) today. Writes nothing. */
+  trainNow: (minutes: number, today?: string) =>
+    request<TrainNowResponse>(
+      `/api/training/trainnow?minutes=${encodeURIComponent(String(minutes))}${today ? `&today=${encodeURIComponent(today)}` : ''}`,
+    ),
+  /** "Use this": puts one suggestion on today. It replaces today's untouched
+   *  plan session in place, otherwise adds a new one. A 409 means the day moved
+   *  on since the sheet opened: refetch the suggestions. */
+  applyTrainNow: (minutes: number, s: Pick<TrainNowSuggestion, 'kind' | 'zone' | 'level'>, today?: string) =>
+    request<Workout>(`/api/training/trainnow/apply${today ? `?today=${encodeURIComponent(today)}` : ''}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minutes, kind: s.kind, zone: s.zone, level: s.level ?? 0 }),
+    }),
   /** The URL a plain link/download button points at — a structured FIT
    *  workout file, the same "copy it onto a device over USB" role
    *  api's route-FIT download plays; see internal/fitworkout's own doc
