@@ -126,11 +126,12 @@ func TestCreatingAGoalPlansTheWholeSeasonInTheBackground(t *testing.T) {
 
 	g := h.createGoal(t, `{"name":"Gran Fondo","eventDate":"2027-04-14"}`)
 
-	if n := len(h.week(t, thisMon)); n != 4 {
-		t.Errorf("this week has %d sessions when the response returned, want 4", n)
+	// The clock is a Wednesday: Tuesday has gone by, so this week is Thu, Sat, Sun.
+	if n := len(h.week(t, thisMon)); n != 3 {
+		t.Errorf("this week has %d sessions when the response returned, want 3", n)
 	}
-	if n := len(h.workouts(t)); n != 4 {
-		t.Errorf("%d workouts exist when the response returned, want only this week's 4 — the rest is for the background", n)
+	if n := len(h.workouts(t)); n != 3 {
+		t.Errorf("%d workouts exist when the response returned, want only this week's 3 — the rest is for the background", n)
 	}
 
 	close(gate)
@@ -142,12 +143,16 @@ func TestCreatingAGoalPlansTheWholeSeasonInTheBackground(t *testing.T) {
 	}
 	for _, wk := range weeks {
 		start, _ := time.Parse("2006-01-02", wk.StartDate)
-		if n := len(h.week(t, start)); n != 4 {
-			t.Errorf("week %s has %d sessions, want 4", wk.StartDate, n)
+		want := 4
+		if wk.StartDate == thisMon.Format("2006-01-02") {
+			want = 3 // Tuesday has gone by
+		}
+		if n := len(h.week(t, start)); n != want {
+			t.Errorf("week %s has %d sessions, want %d", wk.StartDate, n, want)
 		}
 	}
-	if got, want := len(h.workouts(t)), 4*len(weeks); got != want {
-		t.Errorf("%d workouts in all, want %d (four a week, nothing past the event)", got, want)
+	if got, want := len(h.workouts(t)), 4*len(weeks)-1; got != want {
+		t.Errorf("%d workouts in all, want %d (four a week, minus this week's past Tuesday, nothing past the event)", got, want)
 	}
 }
 
@@ -187,8 +192,12 @@ func TestAnUndatedGoalPlansTwelveWeeks(t *testing.T) {
 	h.srv.WaitForBackground()
 
 	for i := 0; i < 12; i++ {
-		if n := len(h.week(t, thisMon.AddDate(0, 0, 7*i))); n != 4 {
-			t.Errorf("week +%d has %d sessions, want 4", i, n)
+		want := 4
+		if i == 0 {
+			want = 3 // the clock is a Wednesday: Tuesday has gone by
+		}
+		if n := len(h.week(t, thisMon.AddDate(0, 0, 7*i))); n != want {
+			t.Errorf("week +%d has %d sessions, want %d", i, n, want)
 		}
 	}
 	if n := len(h.week(t, thisMon.AddDate(0, 0, 7*12))); n != 0 {
@@ -491,8 +500,12 @@ func TestMovingTheEventEarlierClearsUntouchedSessionsBeyondTheNewEnd(t *testing.
 	}
 	// Weeks up to the new end are intact.
 	for n := 1; n <= 20; n++ {
-		if got := len(h.week(t, weekN(n))); got != 4 {
-			t.Errorf("week %d has %d sessions, want 4", n, got)
+		want := 4
+		if n == 1 {
+			want = 3 // the clock is a Wednesday: Tuesday has gone by
+		}
+		if got := len(h.week(t, weekN(n))); got != want {
+			t.Errorf("week %d has %d sessions, want %d", n, got, want)
 		}
 	}
 	// The dropped weeks are forgotten, the kept ones are not.
