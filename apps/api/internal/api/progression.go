@@ -158,9 +158,21 @@ func (s *Server) seedLevelsForRidersGoals(ctx context.Context, rider string) err
 	return nil
 }
 
+// feelRequestDTO is the whole post-ride survey. It is a full replace: an
+// omitted or empty Legs/Stress clears what was there, so the rider's last tap
+// is the whole truth. Feel stays required, the survey starts with it.
 type feelRequestDTO struct {
-	Feel int `json:"feel"`
+	Feel   int    `json:"feel"`
+	Legs   string `json:"legs"`
+	Stress string `json:"stress"`
 }
+
+// validSurveyLegs and validSurveyStress are the only answers the survey
+// takes; "" (unanswered) is allowed for both.
+var (
+	validSurveyLegs   = map[string]bool{"": true, "fresh": true, "normal": true, "heavy": true}
+	validSurveyStress = map[string]bool{"": true, "low": true, "normal": true, "high": true}
+)
 
 // handleSetSessionFeel records a rider's own "how did it feel" 1-5 rating
 // for one analysed session, and re-applies the level change that ride
@@ -186,6 +198,14 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "feel must be between 1 and 5"})
 		return
 	}
+	if !validSurveyLegs[body.Legs] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "legs must be fresh, normal or heavy"})
+		return
+	}
+	if !validSurveyStress[body.Stress] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "stress must be low, normal or high"})
+		return
+	}
 
 	id := r.PathValue("id")
 	identity := auth.FromContext(r.Context())
@@ -199,6 +219,13 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such session"})
 		return
 	}
+
+	// The outcome progression reacts to is the one this rating would give the
+	// ride, not the one stored under the previous rating: all-out on a nailed
+	// ride is a struggle, and a re-rate to anything else takes that back.
+	rated := analysis
+	rated.Feel = body.Feel
+	effective := rated.EffectiveOutcome()
 
 	newDelta := 0.0
 	if analysis.WorkoutID != "" {
@@ -223,9 +250,9 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 			// one — a re-rate replaces the delta, it never stacks a second
 			// adjustment on top of the first.
 			curWithout := levels[string(wk.Zone)] - analysis.LevelDelta
-			rawDelta := progression.Delta(curWithout, wk.Level, progression.Outcome(analysis.Outcome), body.Feel)
+			rawDelta := progression.Delta(curWithout, wk.Level, progression.Outcome(effective), body.Feel)
 			newLevel := progression.Apply(curWithout, rawDelta)
-			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, progression.Outcome(analysis.Outcome))
+			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, progression.Outcome(effective))
 
 			// Store what Apply actually did (newLevel - curWithout, rounded),
 			// not Delta's raw, unclamped result — see
@@ -246,14 +273,14 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		// is recorded below.
 	}
 
-	if err := s.Training.SetAnalysisFeel(r.Context(), id, body.Feel, newDelta); err != nil {
+	if err := s.Training.SetAnalysisSurvey(r.Context(), id, body.Feel, body.Legs, body.Stress, newDelta); err != nil {
 		s.fail(w, err)
 		return
 	}
 
 	s.logger().Info("session feel recorded", "session", id, "rider", identity.User)
 
-	analysis.Feel = body.Feel
+	analysis.Feel, analysis.Legs, analysis.Stress = body.Feel, body.Legs, body.Stress
 	analysis.LevelDelta = newDelta
 	writeJSON(w, http.StatusOK, sessionAnalysisDTOFrom(analysis))
 }

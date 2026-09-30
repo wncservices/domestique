@@ -1408,13 +1408,17 @@ type sessionAnalysisDTO struct {
 	// when never rated — see workout.SessionAnalysis.Feel and
 	// handleSetSessionFeel (progression.go).
 	Feel int `json:"feel,omitempty"`
+	// Legs and Stress are the survey's optional answers next to Feel,
+	// omitted when unanswered.
+	Legs   string `json:"legs,omitempty"`
+	Stress string `json:"stress,omitempty"`
 }
 
 func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
 	return sessionAnalysisDTO{
 		Outcome: a.Outcome, LoadSource: a.LoadSource,
 		NP: a.NormalizedPower, IF: a.IntensityFactor, TSS: a.TSS, DurationRatio: a.DurationRatio,
-		Steps: a.Steps, WorkoutID: a.WorkoutID, Feel: a.Feel,
+		Steps: a.Steps, WorkoutID: a.WorkoutID, Feel: a.Feel, Legs: a.Legs, Stress: a.Stress,
 	}
 }
 

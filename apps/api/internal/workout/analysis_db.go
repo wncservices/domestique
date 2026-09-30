@@ -49,7 +49,28 @@ type SessionAnalysis struct {
 	Feel       int
 	LevelDelta float64
 
+	// Legs ("fresh", "normal", "heavy") and Stress ("low", "normal", "high")
+	// are the survey's optional answers next to Feel; "" is unanswered. They
+	// are set only by SetAnalysisSurvey and, like Feel, are not touched by a
+	// re-analysis.
+	Legs   string
+	Stress string
+
 	AnalysedAt string
+}
+
+// EffectiveOutcome is the outcome the plan should react to: the stored one,
+// except that an all-out effort (5 of 5) on a ride that matched a planned
+// workout and was scored nailed or completed counts as struggled. A rider's
+// own word that it was too much outweighs a power file that says it went to
+// plan. An unplanned ride, an incomplete one and an already-struggled one are
+// untouched, and effort 1-4 never changes anything. This is the only place
+// that rule lives; everything that reads how a ride went asks here.
+func (a SessionAnalysis) EffectiveOutcome() string {
+	if a.Feel == 5 && a.WorkoutID != "" && (a.Outcome == "nailed" || a.Outcome == "completed") {
+		return "struggled"
+	}
+	return a.Outcome
 }
 
 // AnalysisStep mirrors rideanalysis.StepResult's shape without importing
@@ -145,7 +166,7 @@ func (d *DB) GetAnalysis(ctx context.Context, sessionID string) (SessionAnalysis
                normalized_power, intensity_factor, tss, duration_ratio,
                max_hr, best_hr_1200, best_speed_1200, best_speed_1800,
                power_zone_seconds, hr_zone_seconds, power_curve, steps,
-               feel, level_delta, analysed_at
+               feel, level_delta, legs, stress, analysed_at
         FROM session_analyses WHERE session_id = ?`), sessionID)
 	a, err := scanAnalysis(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -167,7 +188,7 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
                a.normalized_power, a.intensity_factor, a.tss, a.duration_ratio,
                a.max_hr, a.best_hr_1200, a.best_speed_1200, a.best_speed_1800,
                a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps,
-               a.feel, a.level_delta, a.analysed_at
+               a.feel, a.level_delta, a.legs, a.stress, a.analysed_at
         FROM session_analyses a
         JOIN completed_sessions s ON s.id = a.session_id
         WHERE a.rider = ? AND s.date >= ?
@@ -199,7 +220,7 @@ func scanAnalysis(row rowScanner) (SessionAnalysis, error) {
 		&a.NormalizedPower, &a.IntensityFactor, &a.TSS, &a.DurationRatio,
 		&a.MaxHR, &a.BestHR1200, &a.BestSpeed1200, &a.BestSpeed1800,
 		&powerZones, &hrZones, &powerCurve, &steps,
-		&a.Feel, &a.LevelDelta, &a.AnalysedAt); err != nil {
+		&a.Feel, &a.LevelDelta, &a.Legs, &a.Stress, &a.AnalysedAt); err != nil {
 		return SessionAnalysis{}, err
 	}
 	if len(powerZones) > 0 {
@@ -236,6 +257,24 @@ func (d *DB) SetAnalysisFeel(ctx context.Context, sessionID string, feel int, le
 	result, err := d.db.ExecContext(ctx, d.query(
 		`UPDATE session_analyses SET feel = ?, level_delta = ? WHERE session_id = ?`),
 		feel, levelDelta, sessionID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("workout: no such session %q", sessionID)
+	}
+	return nil
+}
+
+// SetAnalysisSurvey records the whole post-ride survey and the level delta it
+// produced, replacing what was there: an omitted legs or stress ("") clears
+// it, so the rider's last tap is the whole truth. Feel is required by the
+// caller; this only persists. Like SetAnalysisFeel it does not work out
+// levelDelta.
+func (d *DB) SetAnalysisSurvey(ctx context.Context, sessionID string, feel int, legs, stress string, levelDelta float64) error {
+	result, err := d.db.ExecContext(ctx, d.query(
+		`UPDATE session_analyses SET feel = ?, legs = ?, stress = ?, level_delta = ? WHERE session_id = ?`),
+		feel, legs, stress, levelDelta, sessionID)
 	if err != nil {
 		return err
 	}
