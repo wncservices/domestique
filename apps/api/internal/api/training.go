@@ -939,7 +939,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before)
+	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before, "profile_saved")
 	if err != nil {
 		s.logger().Error("level recalibration failed", "rider", rider, "err", err)
 	}

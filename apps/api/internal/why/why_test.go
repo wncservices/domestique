@@ -131,14 +131,47 @@ func TestFactsForEveryRule(t *testing.T) {
 			},
 		},
 		{
-			"level recalibration", why.LevelRecalibration,
-			why.LevelRecalibrationInputs{FTPFrom: 250, FTPTo: 280, Zone: "threshold", LevelFrom: 5.5, LevelTo: 4.5, Trigger: "ftp_rise"},
+			"threshold auto with nothing set before", why.ThresholdAuto,
+			why.ThresholdAutoInputs{Field: "max_hr", From: 0, To: 188, Source: "rides"},
+			"Threshold updated",
+			[]why.Fact{
+				{Label: "Setting", Value: "Max heart rate"},
+				{Label: "Was", Value: "not set"},
+				{Label: "Now", Value: "188"},
+				{Label: "From", Value: "your rides"},
+			},
+		},
+		{
+			"level recalibration after an FTP that was applied", why.LevelRecalibration,
+			why.LevelRecalibrationInputs{FTPFrom: 250, FTPTo: 280, Zone: "sweet_spot", LevelFrom: 5.5, LevelTo: 4.5, Trigger: "auto_applied"},
+			"Level recalibrated",
+			[]why.Fact{
+				{Label: "FTP", Value: "250 → 280 W"},
+				{Label: "Zone", Value: "sweet spot"},
+				{Label: "Level", Value: "5.5 → 4.5"},
+				{Label: "Because", Value: "a new FTP was applied from your rides or a test"},
+			},
+		},
+		{
+			"level recalibration after an accepted suggestion", why.LevelRecalibration,
+			why.LevelRecalibrationInputs{FTPFrom: 250, FTPTo: 280, Zone: "threshold", LevelFrom: 5.5, LevelTo: 4.5, Trigger: "suggestion_accepted"},
 			"Level recalibrated",
 			[]why.Fact{
 				{Label: "FTP", Value: "250 → 280 W"},
 				{Label: "Zone", Value: "threshold"},
 				{Label: "Level", Value: "5.5 → 4.5"},
-				{Label: "Trigger", Value: "ftp_rise"},
+				{Label: "Because", Value: "you accepted a new FTP"},
+			},
+		},
+		{
+			"level recalibration after a profile edit", why.LevelRecalibration,
+			why.LevelRecalibrationInputs{FTPFrom: 250, FTPTo: 280, Zone: "threshold", LevelFrom: 5.5, LevelTo: 4.5, Trigger: "profile_saved"},
+			"Level recalibrated",
+			[]why.Fact{
+				{Label: "FTP", Value: "250 → 280 W"},
+				{Label: "Zone", Value: "threshold"},
+				{Label: "Level", Value: "5.5 → 4.5"},
+				{Label: "Because", Value: "you changed your FTP"},
 			},
 		},
 		{
@@ -150,6 +183,12 @@ func TestFactsForEveryRule(t *testing.T) {
 				{Label: "Level", Value: "4.2 → 4.6"},
 				{Label: "FTP", Value: "250 → 262 W"},
 			},
+		},
+		{
+			"season refresh only knows today's FTP", why.SeasonRefresh,
+			why.SeasonRefreshInputs{NameFrom: "Threshold", NameTo: "Threshold", LevelFrom: 4.2, LevelTo: 4.2, FTPTo: 262},
+			"Week rebuilt",
+			[]why.Fact{{Label: "FTP now", Value: "262 W"}},
 		},
 	}
 	for _, tc := range cases {

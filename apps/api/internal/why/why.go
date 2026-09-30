@@ -266,7 +266,11 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 		if !ok {
 			return nil
 		}
-		out := []Fact{{"Setting", fieldLabel(in.Field)}, {"Was", num(in.From)}, {"Now", num(in.To)}}
+		was := "not set"
+		if in.From != 0 {
+			was = num(in.From)
+		}
+		out := []Fact{{"Setting", fieldLabel(in.Field)}, {"Was", was}, {"Now", num(in.To)}}
 		switch in.Source {
 		case "test":
 			out = append(out, Fact{"From", "your FTP test"})
@@ -286,7 +290,7 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 			{"FTP", arrow(in.FTPFrom, in.FTPTo) + " W"},
 			{"Zone", zoneLabel(in.Zone)},
 			{"Level", arrow(in.LevelFrom, in.LevelTo)},
-			{"Trigger", in.Trigger},
+			{"Because", triggerLabel(in.Trigger)},
 		}
 	case SeasonRefresh:
 		in, ok := decode[SeasonRefreshInputs](inputs)
@@ -300,8 +304,13 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 		if in.LevelFrom != in.LevelTo {
 			out = append(out, Fact{"Level", arrow(in.LevelFrom, in.LevelTo)})
 		}
-		if in.FTPFrom != in.FTPTo {
+		switch {
+		case in.FTPFrom > 0 && in.FTPFrom != in.FTPTo:
 			out = append(out, Fact{"FTP", arrow(in.FTPFrom, in.FTPTo) + " W"})
+		case in.FTPFrom == 0 && in.FTPTo > 0:
+			// A workout does not record the FTP it was built on, so only
+			// today's is known.
+			out = append(out, Fact{"FTP now", num(in.FTPTo) + " W"})
 		}
 		return out
 	}
@@ -341,6 +350,19 @@ func dayLabel(date string) string {
 }
 
 func zoneLabel(zone string) string { return strings.ReplaceAll(zone, "_", " ") }
+
+// triggerLabel says what moved the FTP a recalibration answered.
+func triggerLabel(trigger string) string {
+	switch trigger {
+	case "auto_applied":
+		return "a new FTP was applied from your rides or a test"
+	case "suggestion_accepted":
+		return "you accepted a new FTP"
+	case "profile_saved":
+		return "you changed your FTP"
+	}
+	return trigger
+}
 
 func fieldLabel(field string) string {
 	switch field {

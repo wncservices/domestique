@@ -217,9 +217,17 @@ func (s *Server) recordAdjustment(ctx context.Context, rider, workoutID string, 
 		}
 		rec.Inputs["indoor"] = true
 	}
+	s.recordSubjectAdjustment(ctx, rider, workout.SubjectWorkout, workoutID, rec)
+}
+
+// recordSubjectAdjustment is the one place an adjustment is written and its
+// failure handled: a Warn naming the rule (never the inputs, which are health
+// or fitness values) and nothing else, because the change it explains has
+// already landed and stands.
+func (s *Server) recordSubjectAdjustment(ctx context.Context, rider, kind, subjectID string, rec why.Record) {
 	day := s.now().Format("2006-01-02")
-	if err := s.Training.RecordAdjustment(ctx, rider, workout.SubjectWorkout, workoutID, rec, day); err != nil {
-		s.logger().Warn("adapt: could not record why a workout was changed", "workout", workoutID, "rider", rider, "rule", string(rec.Rule), "err", err)
+	if err := s.Training.RecordAdjustment(ctx, rider, kind, subjectID, rec, day); err != nil {
+		s.logger().Warn("could not record why a change was made", "kind", kind, "subject", subjectID, "rider", rider, "rule", string(rec.Rule), "err", err)
 	}
 }
 
