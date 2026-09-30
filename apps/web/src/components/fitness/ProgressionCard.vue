@@ -10,7 +10,7 @@
 // It used to be one bar per zone, which showed where a level is but never
 // whether it was moving.
 import { computed, ref } from 'vue'
-import type { ProgressionLevel, ProgressionPoint, Sport } from '@/api/types'
+import type { ProgressionLevel, ProgressionPoint, Sport, Why } from '@/api/types'
 import LevelSparkline from './LevelSparkline.vue'
 import {
   buildChanges,
@@ -20,6 +20,7 @@ import {
   RANGE_DAYS,
 } from '@/utils/progressionSeries'
 import { formatLevel, zoneAccent, zoneLabel } from '@/utils/zones'
+import WhyPopover from '@/components/plan/WhyPopover.vue'
 
 const props = defineProps<{
   levels: ProgressionLevel[]
@@ -59,6 +60,12 @@ function deltaMeta(d: number) {
   if (r > 0) return { icon: 'i-lucide-trending-up', class: 'text-success' }
   if (r < 0) return { icon: 'i-lucide-trending-down', class: 'text-warning' }
   return { icon: 'i-lucide-minus', class: 'text-muted' }
+}
+
+// The structured reason for a zone's latest automatic move, when its current
+// level still rests on it (the API only sends one then).
+function whyFor(sport: string, zone: string): Why | undefined {
+  return props.levels.find((l) => l.sport === sport && l.zone === zone)?.why
 }
 
 function accent(zone: string): string {
@@ -135,6 +142,7 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
               <span class="text-muted">since {{ windowStart }}</span>
             </p>
             <LevelSparkline :points="s.points" :color="accent(s.zone)" :label="`${zoneLabel(s.zone)} level`" />
+            <WhyPopover v-if="whyFor(s.sport, s.zone)" :why="whyFor(s.sport, s.zone)" />
           </div>
         </div>
       </div>

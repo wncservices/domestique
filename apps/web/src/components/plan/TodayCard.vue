@@ -30,6 +30,7 @@ import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
 import WeatherBanner from './WeatherBanner.vue'
 import WeatherChip from './WeatherChip.vue'
+import WhyPopover from './WhyPopover.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
@@ -361,10 +362,7 @@ function onRated(analysis: SessionAnalysis) {
             </p>
           </div>
           <WorkoutProfile :steps="firstWorkout.steps" :profile="profile" interactive />
-          <p v-if="adjustmentNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-info">
-            <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
-            <span>{{ adjustmentNote(firstWorkout.description) }}</span>
-          </p>
+          <WhyPopover :why="firstWorkout.why" :note="adjustmentNote(firstWorkout.description)" />
           <p v-if="swapNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-muted">
             <UIcon name="i-lucide-shuffle" class="mt-0.5 shrink-0" />
             <span>{{ swapNote(firstWorkout.description) }}</span>

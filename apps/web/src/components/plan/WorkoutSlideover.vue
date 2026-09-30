@@ -5,14 +5,15 @@
 // doc's "Workout builder" section. The page still owns workoutForm/saveWorkout;
 // this only renders it and emits back — see forms.ts for the WorkoutForm shape.
 import { computed } from 'vue'
-import type { RiderProfile, Sport, WorkoutStep } from '@/api/types'
+import type { RiderProfile, Sport, Why, WorkoutStep } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { sports } from '@/components/plan/forms'
 import IndoorBadge from '@/components/plan/IndoorBadge.vue'
+import WhyPopover from '@/components/plan/WhyPopover.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import ZoneLevelBadge from '@/components/plan/ZoneLevelBadge.vue'
-import { flattenSteps, formatDuration } from '@/utils/workoutMath'
+import { adjustmentNote, flattenSteps, formatDuration } from '@/utils/workoutMath'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -22,6 +23,8 @@ const props = defineProps<{
   goalOptions: { value: string; label: string }[]
   profile: RiderProfile
   saving: boolean
+  /** Why the workout being edited was last changed automatically, if it was. */
+  why?: Why
 }>()
 
 const emit = defineEmits<{ 'update:form': [WorkoutForm]; save: [] }>()
@@ -45,6 +48,7 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">
         <div class="sticky top-0 z-10 bg-default flex flex-col gap-1 pb-2 border-b border-default">
           <WorkoutProfile :steps="form.steps" :profile="profile" :height="64" interactive />
+          <WhyPopover :why="why" :note="adjustmentNote(form.description)" />
           <!-- With no timed steps WorkoutProfile shows its own "No timed steps"
                placeholder; a duration/step-count line under that would read
                as "— · 0 steps", so it only appears once there's something to
