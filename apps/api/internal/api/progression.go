@@ -11,6 +11,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
+	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -130,6 +131,63 @@ func (s *Server) handleGetProgression(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// applyEffortLoad lets the rating stand in for the flat load guess, and only
+// for it. A ride whose load rests on power or heart rate (the analysis says
+// so, and the session's own summary has a usable reading) keeps its measured
+// load whatever the rider said. Where the fallback did apply, the session's
+// load and its basis change and the fitness snapshots are recomputed, since
+// they are built from the sessions' loads. Best effort: the rating itself has
+// already been saved, so a failure here is a Warn and the flat guess stays.
+func (s *Server) applyEffortLoad(ctx context.Context, a workout.SessionAnalysis, effort int) {
+	src := rideanalysis.LoadSource(a.LoadSource)
+	if src != rideanalysis.LoadSourceEstimate && src != rideanalysis.LoadSourceSessionRPE {
+		return
+	}
+	sess, err := s.Training.GetSession(ctx, a.SessionID)
+	if err != nil {
+		s.logger().Warn("effort load: reading the session failed", "rider", a.Rider, "session", a.SessionID, "err", err)
+		return
+	}
+	profile, _, err := s.Training.GetProfile(ctx, a.Rider)
+	if err != nil {
+		s.logger().Warn("effort load: reading the profile failed", "rider", a.Rider, "err", err)
+		return
+	}
+	if workout.HasMeasuredLoad(sess.AvgPowerWatts, sess.AvgHR, profile) {
+		return
+	}
+	load := workout.TrainingLoadWithEffort(sess.DurationSeconds, 0, 0, profile, effort)
+	if err := s.Training.SetSessionLoad(ctx, sess.ID, load); err != nil {
+		s.logger().Warn("effort load: saving the session's load failed", "rider", a.Rider, "session", sess.ID, "err", err)
+		return
+	}
+	if err := s.Training.SetAnalysisLoadSource(ctx, sess.ID, string(rideanalysis.LoadSourceSessionRPE)); err != nil {
+		s.logger().Warn("effort load: saving the load basis failed", "rider", a.Rider, "session", sess.ID, "err", err)
+	}
+	if err := s.Training.RecomputeFitnessSnapshots(ctx, a.Rider); err != nil {
+		s.logger().Warn("effort load: recomputing fitness failed", "rider", a.Rider, "err", err)
+	}
+}
+
+// ratedEfforts is the effort the rider gave each recently analysed ride, keyed
+// by session id, for the metrics sync (which rewrites every session's load
+// each time it sees the ride and must not undo a session-RPE load).
+func (s *Server) ratedEfforts(ctx context.Context, rider string) map[string]int {
+	since := s.now().AddDate(0, 0, -60).Format("2006-01-02")
+	analyses, err := s.Training.ListAnalyses(ctx, rider, since)
+	if err != nil {
+		s.logger().Warn("metrics sync: reading ride ratings failed", "rider", rider, "err", err)
+		return nil
+	}
+	out := make(map[string]int, len(analyses))
+	for _, a := range analyses {
+		if a.Feel >= 1 {
+			out[a.SessionID] = a.Feel
+		}
+	}
+	return out
 }
 
 // seedLevelsForRidersGoals initialises progression levels — via levelsFor,
@@ -277,6 +335,8 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+
+	s.applyEffortLoad(r.Context(), analysis, body.Feel)
 
 	s.logger().Info("session feel recorded", "session", id, "rider", identity.User)
 

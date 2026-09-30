@@ -130,6 +130,28 @@ func RollFitness(ctl, atl, load float64) (newCTL, newATL float64) {
 // reserve as a stand-in for intensity factor, a coarser proxy real
 // TRIMP-style HR training-load formulas refine further than this does.
 func TrainingLoad(durationSeconds, avgPowerWatts float64, avgHR int, profile RiderProfile) float64 {
+	return TrainingLoadWithEffort(durationSeconds, avgPowerWatts, avgHR, profile, 0)
+}
+
+// sessionRPEIntensity is the intensity factor the post-ride effort rating
+// (1 Easy .. 5 All-out) stands for when there is nothing to measure. Foster's
+// session-RPE multiplies a CR-10 rating by minutes; the five labels sit on the
+// CR-10 anchors (2, 4, 6, 8, 10) and are turned into a TSS-shaped number
+// (hours x 100 x IF^2) instead, so the result lands on the same fitness chart.
+var sessionRPEIntensity = [...]float64{1: 0.55, 2: 0.65, 3: 0.78, 4: 0.90, 5: 1.00}
+
+// HasMeasuredLoad is whether TrainingLoad has a measurement to work from: power
+// and an FTP to read it against, or heart rate and a max to read it against.
+// Anything less is the flat fallback, and only the fallback yields to effort.
+func HasMeasuredLoad(avgPowerWatts float64, avgHR int, profile RiderProfile) bool {
+	return (avgPowerWatts > 0 && profile.FTPWatts > 0) || (avgHR > 0 && profile.MaxHR > 0)
+}
+
+// TrainingLoadWithEffort is TrainingLoad that lets a rated effort (1-5; 0 or
+// anything else is unrated) replace the flat hours x 50 fallback — and nothing
+// else: a ride with power or heart rate keeps its measured load whatever the
+// rider said about it.
+func TrainingLoadWithEffort(durationSeconds, avgPowerWatts float64, avgHR int, profile RiderProfile, effort int) float64 {
 	hours := durationSeconds / 3600
 	switch {
 	case avgPowerWatts > 0 && profile.FTPWatts > 0:
@@ -137,6 +159,9 @@ func TrainingLoad(durationSeconds, avgPowerWatts float64, avgHR int, profile Rid
 		return hours * intensity * intensity * 100
 	case avgHR > 0 && profile.MaxHR > 0:
 		intensity := float64(avgHR) / float64(profile.MaxHR)
+		return hours * intensity * intensity * 100
+	case effort >= 1 && effort <= 5:
+		intensity := sessionRPEIntensity[effort]
 		return hours * intensity * intensity * 100
 	default:
 		return hours * 50

@@ -284,6 +284,14 @@ func (d *DB) SetAnalysisSurvey(ctx context.Context, sessionID string, feel int, 
 	return nil
 }
 
+// SetAnalysisLoadSource records which basis a session's load now rests on,
+// for the one case that changes after analysis: an effort rating standing in
+// for the flat estimate ("session_rpe").
+func (d *DB) SetAnalysisLoadSource(ctx context.Context, sessionID, source string) error {
+	_, err := d.db.ExecContext(ctx, d.query(`UPDATE session_analyses SET load_source = ? WHERE session_id = ?`), source, sessionID)
+	return err
+}
+
 // SetSessionLoad updates a completed session's training_load to the
 // analysed figure (rideanalysis's TSS, when available) — a more accurate
 // number than the estimate UpsertSession originally recorded from
