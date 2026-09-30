@@ -78,6 +78,8 @@ func TestAMissedKeySessionIsMadeUpInPlaceOfTheNextEasyDay(t *testing.T) {
 func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()
+	now := utcNoon(2026, time.October, 7)
+	h.srv.Clock = func() time.Time { return now }
 
 	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
 	if err != nil {
@@ -86,7 +88,7 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 	// Six brutal days just behind the rider: fatigue (ATL) outruns fitness
 	// (CTL) by a wide margin.
 	for d := 1; d <= 6; d++ {
-		date := time.Now().AddDate(0, 0, -d).Format("2006-01-02")
+		date := now.AddDate(0, 0, -d).Format("2006-01-02")
 		if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
 			Rider: "wilant", Provider: "garmin", ExternalID: fmt.Sprintf("s%d", d), Sport: "cycling",
 			Date: date, DurationSeconds: 5400, TrainingLoad: 300,
@@ -98,8 +100,8 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	today := time.Now().Format("2006-01-02")
-	inThreeDays := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+	today := now.Format("2006-01-02")
+	inThreeDays := now.AddDate(0, 0, 3).Format("2006-01-02")
 	hard, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "VO2max intervals", today, 3600))
 	later, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "VO2max intervals", inThreeDays, 3600))
 
