@@ -20,6 +20,7 @@ import type {
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
 import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
+import { summariseEfforts, type EffortGrade } from '@/utils/effortSummary'
 import { adjustmentNote, describeTarget, formatDuration, isPlanMadeSession, pickAnalysedSession, swapNote } from '@/utils/workoutMath'
 import AlternatesMenu from './AlternatesMenu.vue'
 import FeelRating from './FeelRating.vue'
@@ -215,17 +216,19 @@ const tiredForTest = computed(
 const analysedSession = computed(() => (props.day ? pickAnalysedSession(props.day.completed) : undefined))
 const canOpenResults = computed(() => (analysedSession.value?.analysis?.steps?.length ?? 0) > 0)
 
-// Counts only hard steps (see AnalysisStep.hard's own doc comment) — a
-// recovery interval hitting its (real but easy) target isn't an "effort"
-// worth reporting alongside the hard ones.
-const hardStepsLine = computed(() => {
-  const steps = analysedSession.value?.analysis?.steps
-  if (!steps) return null
-  const hard = steps.filter((s) => s.hard)
-  if (hard.length === 0) return null
-  const hits = hard.filter((s) => s.result === 'hit').length
-  return `${hits} of ${hard.length} efforts on target`
-})
+// How the hard efforts went: a headline on a five-step scale and one line per
+// effort saying by how much. See summariseEfforts for the grades.
+const efforts = computed(() => summariseEfforts(analysedSession.value?.analysis?.steps))
+
+const TONE_CLASS = { success: 'text-success', warning: 'text-warning', error: 'text-error' } as const
+// The dot repeats what the words already say, so colour is never the only cue.
+const GRADE_DOT: Record<EffortGrade, string> = {
+  on: 'bg-success',
+  justUnder: 'bg-warning',
+  justOver: 'bg-warning',
+  under: 'bg-error',
+  over: 'bg-warning',
+}
 
 const resultsOpen = ref(false)
 const resultsTitle = computed(() => {
@@ -318,7 +321,19 @@ function onRated(analysis: SessionAnalysis) {
           <p v-if="testUnreadable" class="text-xs text-muted">
             The ride had no usable power for this test, so your FTP is unchanged. You can schedule another.
           </p>
-          <p v-if="hardStepsLine" class="text-xs text-muted">{{ hardStepsLine }}</p>
+          <div v-if="efforts" class="mt-1 flex flex-col gap-1">
+            <p class="flex items-center gap-1 text-sm font-medium" :class="TONE_CLASS[efforts.tone]">
+              <UIcon :name="efforts.icon" class="size-4 shrink-0" />
+              {{ efforts.label }}
+            </p>
+            <ul class="flex flex-col gap-0.5">
+              <li v-for="(e, i) in efforts.efforts" :key="i" class="flex items-baseline gap-2 text-xs text-muted">
+                <span class="size-2 shrink-0 translate-y-[-1px] rounded-full" :class="GRADE_DOT[e.grade]" aria-hidden="true" />
+                <span class="text-default">{{ e.name }}</span>
+                <span class="font-mono tabular-nums">{{ e.detail }}</span>
+              </li>
+            </ul>
+          </div>
           <FeelRating
             v-if="analysedSession?.analysis"
             class="mt-2"
