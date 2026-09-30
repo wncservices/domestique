@@ -116,7 +116,10 @@ func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load
 		restReasons = append(restReasons, formReason(*tsb))
 	}
 
-	if ratio, ok := acwr(loads, nowDate); ok && ratio >= 1.5 {
+	// The load that decides how today may go is what came before today.
+	// Counted through today, the ride the verdict is about raises its own
+	// acute load: finish the session and the same day turns "take care".
+	if ratio, ok := acwr(loads, nowDate.AddDate(0, 0, -1)); ok && ratio >= 1.5 {
 		cautionReasons = append(cautionReasons, loadReason(ratio))
 	}
 
@@ -305,6 +308,10 @@ func formatSigned(v float64) string {
 // entry) would never accumulate 21 distinct dated entries and the rule
 // would stay dead forever. Days without an entry still count as zero load
 // in both means, unchanged.
+//
+// Below minChronicLoad a day the ratio is not read at all: the denominator is
+// so small that a single ride after a break reads as a fourfold spike, and
+// the rider who has rested for weeks is told to take care.
 func acwr(loads []Load, referenceDate time.Time) (float64, bool) {
 	start28 := referenceDate.AddDate(0, 0, -27)
 	start7 := referenceDate.AddDate(0, 0, -6)
@@ -333,11 +340,16 @@ func acwr(loads []Load, referenceDate time.Time) (float64, bool) {
 		return 0, false
 	}
 	mean28 := sum28 / 28
-	if mean28 == 0 {
+	if mean28 < minChronicLoad {
 		return 0, false
 	}
 	return (sum7 / 7) / mean28, true
 }
+
+// minChronicLoad is the 28-day mean daily load (TSS) below which the
+// acute:chronic ratio says nothing: 10 a day is about an hour of endurance
+// riding a week and a half, and a load that light is no base to spike from.
+const minChronicLoad = 10.0
 
 func loadReason(ratio float64) string {
 	return fmt.Sprintf("your load this week is %.1f× your usual", ratio)

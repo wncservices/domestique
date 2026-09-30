@@ -267,7 +267,7 @@ func TestFormNilTSBNeverFires(t *testing.T) {
 
 func loadsForACWR(days int, load float64) []Load {
 	out := make([]Load, days)
-	base := date("2026-09-28")
+	base := date("2026-09-27") // yesterday: today's own load is not counted
 	for i := 0; i < days; i++ {
 		out[i] = Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: load}
 	}
@@ -291,13 +291,14 @@ func TestACWRSparseScheduleFiresWhenHistoryReachesTwentyOneDays(t *testing.T) {
 	// dead; the calendar-coverage gate only needs the earliest entry to
 	// reach back 21+ days, which this schedule satisfies (27 days back).
 	today := date("2026-09-28")
+	yesterday := today.AddDate(0, 0, -1)
 	offsets := []int{27, 25, 23, 21, 20, 18, 16, 14, 13, 11, 9, 7} // weeks 4-2, moderate load
 	loads := make([]Load, 0, len(offsets)+4)
 	for _, off := range offsets {
-		loads = append(loads, Load{Date: today.AddDate(0, 0, -off).Format(dateLayout), Load: 50})
+		loads = append(loads, Load{Date: yesterday.AddDate(0, 0, -off).Format(dateLayout), Load: 50})
 	}
 	for _, off := range []int{6, 4, 2, 0} { // last week, heavy
-		loads = append(loads, Load{Date: today.AddDate(0, 0, -off).Format(dateLayout), Load: 150})
+		loads = append(loads, Load{Date: yesterday.AddDate(0, 0, -off).Format(dateLayout), Load: 150})
 	}
 	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, today)
 	if got.Verdict != Caution {
@@ -351,7 +352,7 @@ func TestACWRMissingDaysCountAsZeroLoad(t *testing.T) {
 	// and nothing else — missing days count as 0, still enough to cross
 	// the ratio given a high enough recent load.
 	loads := []Load{}
-	base := date("2026-09-28")
+	base := date("2026-09-27") // yesterday: today's own load is not counted
 	for i := 0; i < 7; i++ {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 200})
 	}
@@ -364,6 +365,29 @@ func TestACWRMissingDaysCountAsZeroLoad(t *testing.T) {
 	}
 }
 
+// Today's own ride is what the verdict is about: finishing it must not turn
+// the same day into "take care".
+func TestACWRDoesNotCountTodaysOwnLoad(t *testing.T) {
+	today := date("2026-09-28")
+	loads := loadsForACWR(28, 50) // yesterday and the 27 days before
+	loads = append(loads, Load{Date: today.Format(dateLayout), Load: 400})
+	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, today)
+	assertAssessment(t, got, Ready)
+}
+
+// Back after weeks off, a ride or two against a near-empty 28 days is a huge
+// ratio of nothing: no caution for a rider who is as fresh as they get.
+func TestACWRSilentAfterABreak(t *testing.T) {
+	yesterday := date("2026-09-27")
+	loads := []Load{
+		{Date: yesterday.AddDate(0, 0, -40).Format(dateLayout), Load: 60}, // history reaches back
+		{Date: yesterday.Format(dateLayout), Load: 45},
+		{Date: yesterday.AddDate(0, 0, -2).Format(dateLayout), Load: 45},
+	}
+	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, date("2026-09-28"))
+	assertAssessment(t, got, Ready)
+}
+
 // --- Combined / ordering --------------------------------------------------
 
 func TestRestVerdictAppendsCautionReasonsThatAlsoFired(t *testing.T) {
@@ -372,7 +396,7 @@ func TestRestVerdictAppendsCautionReasonsThatAlsoFired(t *testing.T) {
 	// 22 days of load (earliest 21 days back, opening the calendar gate)
 	// crossing the ACWR caution threshold.
 	loads := []Load{}
-	base := date("2026-09-28")
+	base := date("2026-09-27")
 	for i := 0; i < 7; i++ {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 200})
 	}

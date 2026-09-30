@@ -184,11 +184,13 @@ const testResult = computed(() => props.day?.planned.find((w) => w.testProtocol 
 const testUnreadable = computed(() => !testResult.value && !!props.day?.planned.some((w) => w.testProtocol && w.testUnreadable))
 
 // Testing tired under-reads FTP. On the day of a test, a low readiness verdict
-// says so and offers the same Move the missed-session nudge does.
+// says so and offers the same Move the missed-session nudge does. Once the
+// day has a ride there is nothing left to move.
 const tiredForTest = computed(
   () =>
     showingToday.value &&
     !!firstWorkout.value?.testProtocol &&
+    !props.day?.completed.length &&
     (props.readinessVerdict === 'caution' || props.readinessVerdict === 'rest'),
 )
 

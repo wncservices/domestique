@@ -60,7 +60,10 @@ verdict `ready`, `caution` or `rest`.
   - sleep score 40–59;
   - resting HR baseline + 4 … + 6 bpm;
   - acute:chronic load ratio ≥ 1.5 (7-day mean daily load ÷ 28-day mean,
-    needs ≥ 21 days of history).
+    needs ≥ 21 days of history). Both windows end yesterday: today's own
+    ride is what the verdict is about, and counting it made finishing the
+    session turn the same day to caution. Not read below a 28-day mean of
+    10 TSS a day, where one ride after a break reads as a fourfold spike.
 - **ready** otherwise. With no Garmin row for today (Wahoo-only riders,
   watch not worn), only the load/form rules apply.
 
