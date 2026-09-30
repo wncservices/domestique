@@ -223,6 +223,8 @@ func TestEaseThenConvertAndConvertThenEaseBothEndIndoorWithOneMarker(t *testing.
 func TestAFatigueSwapKeepsAnIndoorSessionIndoor(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()
+	now := utcNoon(2026, time.October, 7)
+	h.srv.Clock = func() time.Time { return now }
 	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Stay Fit"})
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +235,7 @@ func TestAFatigueSwapKeepsAnIndoorSessionIndoor(t *testing.T) {
 	for d := 1; d <= 6; d++ {
 		if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
 			Rider: "wilant", Provider: "garmin", ExternalID: fmt.Sprintf("s%d", d), Sport: "cycling",
-			Date: time.Now().AddDate(0, 0, -d).Format("2006-01-02"), DurationSeconds: 5400, TrainingLoad: 300,
+			Date: now.AddDate(0, 0, -d).Format("2006-01-02"), DurationSeconds: 5400, TrainingLoad: 300,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -241,7 +243,7 @@ func TestAFatigueSwapKeepsAnIndoorSessionIndoor(t *testing.T) {
 	if err := h.store.RecomputeFitnessSnapshots(ctx, "wilant"); err != nil {
 		t.Fatal(err)
 	}
-	req := generated("wilant", goal.ID, "VO2max intervals", time.Now().Format("2006-01-02"), 3600)
+	req := generated("wilant", goal.ID, "VO2max intervals", now.Format("2006-01-02"), 3600)
 	req.Steps = longRideSteps(9600)
 	hard, err := h.store.CreateWorkout(ctx, req)
 	if err != nil {

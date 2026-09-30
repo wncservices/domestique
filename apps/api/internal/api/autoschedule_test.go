@@ -34,6 +34,11 @@ type autoScheduleHarness struct {
 	// store deliberately has no method for (a fitness snapshot with a chosen
 	// date — RecomputeFitnessSnapshots always runs to the real today).
 	conn *sql.DB
+	// now is the harness clock, a fixed Monday (2026-10-05) unless a test moves
+	// it. Several tests here used the real time.Now, which is why they passed
+	// on a Monday and failed on any other day: filling "this week" mid-week
+	// behaves differently from filling it on its first day.
+	now time.Time
 }
 
 func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
@@ -68,7 +73,9 @@ func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &autoScheduleHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, settings: appSettings, srv: srv, conn: db.Conn()}
+	h := &autoScheduleHarness{t: t, client: server.Client(), base: server.URL, store: trainingStore, settings: appSettings, srv: srv, conn: db.Conn(), now: utcNoon(2026, time.October, 5)}
+	srv.Clock = func() time.Time { return h.now }
+	return h
 }
 
 func (h *autoScheduleHarness) as(user, groups, method, path, body string) *http.Response {
@@ -106,7 +113,7 @@ func seasonSessions(t *testing.T, h *autoScheduleHarness, rider string) int {
 	}
 	total := 0
 	for _, g := range goals {
-		plan, err := periodization.Build(g, profile, time.Now())
+		plan, err := periodization.Build(g, profile, h.now)
 		if err != nil {
 			continue
 		}
@@ -123,7 +130,7 @@ func TestAutoScheduleTickDoesNothingWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{
-		Rider: "wilant", Name: "Race Day", EventDate: time.Now().AddDate(0, 0, 70).Format("2006-01-02"),
+		Rider: "wilant", Name: "Race Day", EventDate: h.now.AddDate(0, 0, 70).Format("2006-01-02"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +162,7 @@ func TestAutoScheduleTickSchedulesEveryRidersCurrentWeek(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02")
+	eventDate := h.now.AddDate(0, 0, 70).Format("2006-01-02")
 	for _, rider := range []string{"wilant", "other"} {
 		if _, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{
 			Rider: rider, Name: "Race Day", EventDate: eventDate,
@@ -208,7 +215,7 @@ func TestAutoScheduleTickSkipsAPastGoalWithoutBlockingOthers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{
-		Rider: "wilant", Name: "Race Day", EventDate: time.Now().AddDate(0, 0, 70).Format("2006-01-02"),
+		Rider: "wilant", Name: "Race Day", EventDate: h.now.AddDate(0, 0, 70).Format("2006-01-02"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +307,7 @@ func TestAutoScheduleTickNeverDoubleBooksTwoGoals(t *testing.T) {
 		t.Fatal(err)
 	}
 	dated, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{
-		Rider: "wilant", Name: "Race Day", EventDate: time.Now().AddDate(0, 0, 70).Format("2006-01-02"),
+		Rider: "wilant", Name: "Race Day", EventDate: h.now.AddDate(0, 0, 70).Format("2006-01-02"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +335,7 @@ func TestAutoScheduleTickNeverDoubleBooksTwoGoals(t *testing.T) {
 	// Up to the event's own week the dated goal keeps every day; only the weeks
 	// after the event, which the dated goal has no plan for, fall to the
 	// rolling one.
-	eventWeekEnd := periodization.MondayOf(time.Now().AddDate(0, 0, 70)).AddDate(0, 0, 6).Format("2006-01-02")
+	eventWeekEnd := periodization.MondayOf(h.now.AddDate(0, 0, 70)).AddDate(0, 0, 6).Format("2006-01-02")
 	datedCount := 0
 	for _, wk := range workouts {
 		if wk.Date <= eventWeekEnd {
