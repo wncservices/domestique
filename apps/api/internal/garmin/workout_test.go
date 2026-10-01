@@ -275,3 +275,19 @@ func TestDeleteWorkoutRefusesAnEmptyId(t *testing.T) {
 		t.Fatal("expected an error for an empty id")
 	}
 }
+
+// A ramp step is one wattage. Sent as 85-85 W, the Edge's gauge had no width
+// and read red at 86 W; it goes as a band centred on the target instead.
+func TestBuildWorkoutWidensASingleValueTarget(t *testing.T) {
+	dto, err := buildWorkout("FTP Test (ramp)", "cycling", []fitworkout.Step{
+		{Name: "Ramp 85 W", Intensity: "interval", Duration: fitworkout.DurationTime, Seconds: 60,
+			Target: fitworkout.TargetPower, TargetLow: 85, TargetHigh: 85},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := dto.WorkoutSegments[0].WorkoutSteps[0]
+	if *step.TargetValueOne != 80 || *step.TargetValueTwo != 90 {
+		t.Errorf("target = %v-%v W, want 80-90 W around the planned 85", *step.TargetValueOne, *step.TargetValueTwo)
+	}
+}
