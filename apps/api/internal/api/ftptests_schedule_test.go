@@ -35,6 +35,7 @@ type ftpWorkoutOut struct {
 	TestProtocol    string  `json:"testProtocol"`
 	TestResultWatts float64 `json:"testResultWatts"`
 	Steps           []struct {
+		Intensity  string  `json:"intensity"`
 		Target     string  `json:"target"`
 		TargetLow  float64 `json:"targetLow"`
 		TargetHigh float64 `json:"targetHigh"`
@@ -76,7 +77,7 @@ func TestScheduleAnFTPTestCreatesItOnTheDayLinkedToTheFocusGoal(t *testing.T) {
 	// Ramp steps start at 50% of the profile FTP: 125 W.
 	var first float64
 	for _, s := range out.Steps {
-		if s.Target == "power" {
+		if s.Target == "power" && s.Intensity == "interval" { // the warmup has easy power too
 			first = s.TargetLow
 			break
 		}
@@ -176,7 +177,7 @@ func TestATypedFTPGuessBuildsTheRampAndIsNotSaved(t *testing.T) {
 	}
 	var first float64
 	for _, s := range out.Steps {
-		if s.Target == "power" {
+		if s.Target == "power" && s.Intensity == "interval" { // the warmup has easy power too
 			first = s.TargetLow
 			break
 		}
