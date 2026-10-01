@@ -499,6 +499,10 @@ const (
 	PushOriginManual = "manual"
 )
 
+// deviceEncoding is bumped whenever the push or export encoding of the same
+// steps changes; see ContentHash.
+const deviceEncoding = 2
+
 // ContentHash fingerprints what a provider is shown of a workout — name (as
 // DeviceName shows it, so flagging a workout indoor changes it even when its
 // steps do not, as with an FTP test), sport and steps. The date is
@@ -510,7 +514,11 @@ func ContentHash(w Workout) string {
 		Name  string
 		Sport model.Sport
 		Steps []WorkoutStep
-	}{DeviceName(w.Name, w.Indoor), w.Sport, w.Steps})
+		// Encoding changes when what a device is sent for the same steps
+		// changes, so copies already pushed are refreshed: 2 is
+		// fitworkout.DeviceRange widening a single-value target to a band.
+		Encoding int
+	}{DeviceName(w.Name, w.Indoor), w.Sport, w.Steps, deviceEncoding})
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }

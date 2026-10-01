@@ -377,10 +377,7 @@ func setCustomRange(step *mesgdef.WorkoutStep, s Step, offset, scale float64) er
 	if s.TargetLow <= 0 || s.TargetHigh <= 0 {
 		return fmt.Errorf("fitworkout: step %q has target %q but no low/high value", s.Name, s.Target)
 	}
-	low, high := s.TargetLow, s.TargetHigh
-	if low > high {
-		low, high = high, low
-	}
+	low, high := DeviceRange(s.Target, s.TargetLow, s.TargetHigh)
 	step.SetCustomTargetValueLow(uint32(math.Round(low*scale + offset)))
 	step.SetCustomTargetValueHigh(uint32(math.Round(high*scale + offset)))
 	return nil
@@ -396,4 +393,34 @@ func SportFromString(sport string) typedef.Sport {
 		return typedef.SportRunning
 	}
 	return typedef.SportCycling
+}
+
+// DeviceRange is the low/high a head unit is given for a target. A range is
+// passed through, ordered. A single value (low == high, as every ramp test
+// step is) becomes a band centred on it: a Garmin given 85-85 W draws a gauge
+// with no width, the needle pinned to one edge and red the moment the power
+// wobbles by a watt. Centred, so ERG — which holds the middle of the range —
+// still holds the planned value. The stored workout keeps its single value;
+// ride scoring has its own tolerance (rideanalysis.classifyStep).
+func DeviceRange(target Target, low, high float64) (float64, float64) {
+	if low > high {
+		low, high = high, low
+	}
+	if low != high {
+		return low, high
+	}
+	var half float64
+	switch target {
+	case TargetPower:
+		half = math.Round(math.Max(5, low*0.05)) // ±5 %, never under ±5 W
+	case TargetHeartRate:
+		half = math.Max(3, math.Round(low*0.02)) // ±2 %, never under ±3 bpm
+	case TargetCadence:
+		half = 5
+	case TargetPace:
+		half = low * 0.03 // ±3 % of the speed the pace is stored as
+	default:
+		return low, high
+	}
+	return math.Max(0, low-half), high + half
 }

@@ -254,10 +254,7 @@ func encodeTarget(step *workoutStepDTO, s fitworkout.Step) error {
 	if s.TargetLow <= 0 || s.TargetHigh <= 0 {
 		return fmt.Errorf("garmin: step %q has target %q but no low/high value", s.Name, s.Target)
 	}
-	low, high := s.TargetLow, s.TargetHigh
-	if low > high {
-		low, high = high, low
-	}
+	low, high := fitworkout.DeviceRange(s.Target, s.TargetLow, s.TargetHigh)
 	step.TargetValueOne = &low
 	step.TargetValueTwo = &high
 	return nil
