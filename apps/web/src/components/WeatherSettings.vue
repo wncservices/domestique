@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // Opt in to weather: pick a town, say which hours you usually ride, or stop.
+// Lives on the Settings page: it is set once, not looked at with the fitness
+// numbers it used to sit under.
 // Self-contained (it saves through its own endpoints, not the profile's Save
 // bar) because choosing a town is an opt-in with a privacy consequence, and
 // "Stop using weather" removes it at once.
@@ -135,7 +137,11 @@ onMounted(load)
 <template>
   <UCard v-if="available && !loading" variant="outline">
     <template #header>
-      <h2 class="text-lg font-semibold">Weather</h2>
+      <h2 class="flex items-center gap-2 font-medium text-highlighted">
+        <UIcon name="i-lucide-cloud-sun" />
+        Weather
+      </h2>
+      <p class="text-sm text-muted">Forecasts for your planned rides. Your own, for this account only.</p>
     </template>
 
     <div class="flex flex-col gap-4">

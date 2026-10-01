@@ -8,11 +8,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, ProgressionLevel, RiderProfile, ThresholdSuggestion } from '@/api/types'
+import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, ProgressionLevel,
+  ProgressionPoint, RiderProfile, ThresholdSuggestion } from '@/api/types'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
-import WeatherSettings from '@/components/plan/WeatherSettings.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
@@ -322,11 +322,13 @@ const hasFitnessHistory = computed(() => (fitness.value?.snapshots.length ?? 0) 
 // --- progression levels (Task 6) ---
 
 const progressionLevels = ref<ProgressionLevel[]>([])
+const progressionHistory = ref<ProgressionPoint[]>([])
 
 async function loadProgression() {
   try {
     const result = await api.progression()
     progressionLevels.value = result.levels
+    progressionHistory.value = result.history ?? []
   } catch {
     // Silent: the Progression card simply hides itself with no levels — not
     // worth a toast alongside the fitness/profile loads above, which are the
@@ -373,7 +375,7 @@ onMounted(() => {
       @sync="syncMetrics"
     />
 
-    <ProgressionCard :levels="progressionLevels" />
+    <ProgressionCard :levels="progressionLevels" :history="progressionHistory" />
 
     <RecoveryCard :days="recoveryDays" />
 
@@ -424,8 +426,6 @@ onMounted(() => {
         @build-max-hr-test="buildMaxHRTest"
       />
     </UCard>
-
-    <WeatherSettings />
 
     <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
   </div>
