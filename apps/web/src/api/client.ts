@@ -71,7 +71,7 @@ import type {
   ThresholdSuggestion,
   ThresholdSuggestionsResponse,
   TrainingWeek,
-  ProgressionLevel,
+  ProgressionResponse,
   SessionAnalysis,
   ReadinessResponse,
   EaseTomorrowResult,
@@ -913,7 +913,7 @@ export const api = {
   /** The rider's own progression levels, one per sport/zone — the
    *  Progression card's own source. Initialised server-side on first read
    *  for any sport the rider has a goal for — see handleGetProgression. */
-  progression: () => request<{ levels: ProgressionLevel[] }>('/api/training/progression'),
+  progression: () => request<ProgressionResponse>('/api/training/progression'),
   /** Today's readiness verdict (from Garmin HRV/sleep/resting HR, form and
    *  load) plus the last 7 days of Garmin wellness — the Today card's chip
    *  and the Fitness page's Recovery card share this one call. See

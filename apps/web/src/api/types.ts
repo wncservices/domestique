@@ -950,6 +950,23 @@ export interface ProgressionLevel {
   updatedAt?: string
 }
 
+/** One value a level held from `at` (RFC 3339) on — mirrors
+ *  apps/api/internal/api's progressionPointDTO. */
+export interface ProgressionPoint {
+  sport: Sport
+  zone: string
+  level: number
+  reason?: string
+  at: string
+}
+
+/** GET /api/training/progression. `history` is the last year of moves,
+ *  oldest first, led per zone by the value held before the year began. */
+export interface ProgressionResponse {
+  levels: ProgressionLevel[]
+  history: ProgressionPoint[]
+}
+
 /** How hard today should be allowed to be — readiness only ever makes a day
  *  easier, never harder. Mirrors internal/readiness.Verdict. See
  *  docs/superpowers/specs/2026-09-28-readiness-design.md. */
