@@ -78,10 +78,19 @@ var ErrBlocked = errors.New(
 // derived and can be thrown away. Store these two encrypted, the way a Komoot
 // session is stored.
 type Session struct {
-	OAuth1Token  string    `json:"oauth1Token"`
-	OAuth1Secret string    `json:"oauth1Secret"`
-	DisplayName  string    `json:"displayName,omitempty"`
-	ObtainedAt   time.Time `json:"obtainedAt"`
+	OAuth1Token  string `json:"oauth1Token"`
+	OAuth1Secret string `json:"oauth1Secret"`
+	// DisplayName is the account's name for the UI: the rider's full name
+	// when Connect has one.
+	DisplayName string `json:"displayName,omitempty"`
+	// ProfileID is Connect's own "displayName", the opaque handle the
+	// wellness endpoints take in their path (sleep, daily summary, resting
+	// HR). Not the same as DisplayName above: putting the full name in
+	// those paths gets a 404, read as "no reading", and every night's sleep
+	// and resting HR came back empty. Empty on sessions stored before this
+	// field existed; Client.ProfileID looks it up.
+	ProfileID  string    `json:"profileId,omitempty"`
+	ObtainedAt time.Time `json:"obtainedAt"`
 }
 
 // TokenExpiry is when an OAuth1 token stops working, near enough.

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
@@ -186,6 +187,7 @@ func (l LiveGarmin) named(ctx context.Context, client *garmin.Client) garmin.Ses
 	session := client.Session()
 	if profile, err := client.Profile(ctx); err == nil {
 		session.DisplayName = profile.Name()
+		session.ProfileID = profile.DisplayName
 	} else if l.Log != nil {
 		l.Log("garmin profile lookup failed; the connection is kept without a name", "err", err)
 	}
@@ -277,10 +279,11 @@ func (l LiveGarmin) PushWorkout(ctx context.Context, consumer GarminConsumer, se
 // RestingHeartRate fetches one day's resting heart rate from a connected
 // account's wellness data.
 func (l LiveGarmin) RestingHeartRate(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (int, error) {
-	client, err := l.resume(consumer, session)
+	client, err := l.resume(consumer, withKnownProfileID(session))
 	if err != nil {
 		return 0, err
 	}
+	defer rememberProfileID(client)
 	return client.RestingHeartRate(ctx, date)
 }
 
@@ -296,11 +299,34 @@ func (l LiveGarmin) Biometrics(ctx context.Context, consumer GarminConsumer, ses
 // Wellness fetches one day's HRV, sleep, Training Readiness and resting
 // heart rate from a connected account.
 func (l LiveGarmin) Wellness(ctx context.Context, consumer GarminConsumer, session garmin.Session, date time.Time) (garmin.Wellness, error) {
-	client, err := l.resume(consumer, session)
+	client, err := l.resume(consumer, withKnownProfileID(session))
 	if err != nil {
 		return garmin.Wellness{}, err
 	}
+	defer rememberProfileID(client)
 	return client.Wellness(ctx, date)
+}
+
+// profileIDs remembers, per OAuth1 token, the Connect handle a session stored
+// before garmin.Session.ProfileID existed had to look up. Every wellness call
+// resumes a fresh client, so without it a 28-day backfill would ask for the
+// profile 28 times. In memory only: a restart costs one lookup per rider.
+// Reconnecting stores the handle in the session itself.
+var profileIDs sync.Map
+
+func withKnownProfileID(session garmin.Session) garmin.Session {
+	if session.ProfileID == "" {
+		if id, ok := profileIDs.Load(session.OAuth1Token); ok {
+			session.ProfileID = id.(string)
+		}
+	}
+	return session
+}
+
+func rememberProfileID(client *garmin.Client) {
+	if s := client.Session(); s.ProfileID != "" {
+		profileIDs.Store(s.OAuth1Token, s.ProfileID)
+	}
 }
 
 // UpdateWorkout replaces a workout already on a connected account.

@@ -54,7 +54,7 @@ func newRHRFake(t *testing.T, replies map[string]rhrReply) *rhrFake {
 	c := New()
 	c.APIBase = server.URL
 	c.SetConsumer(testKey, testSecret)
-	c.Resume(Session{OAuth1Token: "tok-1", OAuth1Secret: "sec-1", DisplayName: "wilant-n"})
+	c.Resume(Session{OAuth1Token: "tok-1", OAuth1Secret: "sec-1", ProfileID: "wilant-n"})
 	f.client = c
 	return f
 }

@@ -60,3 +60,21 @@ func (c *Client) Profile(ctx context.Context) (Profile, error) {
 	}
 	return profile, nil
 }
+
+// ProfileID returns the handle the wellness endpoints take in their path,
+// asking Connect's profile once when the stored session predates
+// Session.ProfileID, and keeping the answer on this client.
+func (c *Client) ProfileID(ctx context.Context) (string, error) {
+	if c.session.ProfileID != "" {
+		return c.session.ProfileID, nil
+	}
+	p, err := c.Profile(ctx)
+	if err != nil {
+		return "", err
+	}
+	if p.DisplayName == "" {
+		return "", errors.New("garmin: the profile response carried no displayName to ask the wellness endpoints for")
+	}
+	c.session.ProfileID = p.DisplayName
+	return p.DisplayName, nil
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -188,12 +189,11 @@ type sleepRHRSource func(ctx context.Context) (int, error)
 // daily summary's own failure is returned as an error; a failing fallback is
 // noted in the diagnostics and the next source is tried.
 func (c *Client) RestingHeartRate(ctx context.Context, date time.Time) (int, error) {
-	if c.session.DisplayName == "" {
-		return 0, errors.New("garmin: no display name on the stored session to ask the wellness endpoint for — reconnect to fetch one")
-	}
-
 	bearer, err := c.bearerToken(ctx)
 	if err != nil {
+		return 0, err
+	}
+	if _, err := c.ProfileID(ctx); err != nil {
 		return 0, err
 	}
 
@@ -211,7 +211,7 @@ func (c *Client) restingHeartRate(ctx context.Context, bearer string, date time.
 	day := date.Format("2006-01-02")
 
 	// 1. The daily summary.
-	url := fmt.Sprintf("%s%s/%s?calendarDate=%s", c.APIBase, dailySummaryPath, c.session.DisplayName, day)
+	url := fmt.Sprintf("%s%s/%s?calendarDate=%s", c.APIBase, dailySummaryPath, url.PathEscape(c.session.ProfileID), day)
 	raw, status, err := c.do(ctx, http.MethodGet, url, nil, "", c.wellnessHeaders(bearer)...)
 	if err != nil {
 		return 0, err
@@ -258,7 +258,7 @@ func (c *Client) restingHeartRate(ctx context.Context, bearer string, date time.
 }
 
 func (c *Client) restingFromStats(ctx context.Context, bearer, day string) (int, error) {
-	url := fmt.Sprintf("%s%s/%s?fromDate=%s&untilDate=%s&metricId=60", c.APIBase, rhrStatsPath, c.session.DisplayName, day, day)
+	url := fmt.Sprintf("%s%s/%s?fromDate=%s&untilDate=%s&metricId=60", c.APIBase, rhrStatsPath, url.PathEscape(c.session.ProfileID), day, day)
 	raw, status, err := c.do(ctx, http.MethodGet, url, nil, "", c.wellnessHeaders(bearer)...)
 	if err != nil {
 		return 0, err
@@ -386,10 +386,6 @@ type Wellness struct {
 // recorded in Partial and does not stop the others, so a rider missing only
 // last night's HRV still gets sleep, readiness and resting HR back.
 func (c *Client) Wellness(ctx context.Context, date time.Time) (Wellness, error) {
-	if c.session.DisplayName == "" {
-		return Wellness{}, errors.New("garmin: no display name on the stored session to ask the wellness endpoints for — reconnect to fetch one")
-	}
-
 	bearer, err := c.bearerToken(ctx)
 	if err != nil {
 		return Wellness{}, err
@@ -400,12 +396,23 @@ func (c *Client) Wellness(ctx context.Context, date time.Time) (Wellness, error)
 	if err := c.fetchHRV(ctx, bearer, date, &w); err != nil {
 		w.Partial = append(w.Partial, partialName("hrv", err))
 	}
-	sleepErr := c.fetchSleep(ctx, bearer, date, &w)
-	if sleepErr != nil {
+	// Sleep and resting HR take the profile handle in their path; HRV and
+	// Training Readiness are asked for by date alone, so a profile lookup
+	// that fails costs only the two signals that need it.
+	_, profileErr := c.ProfileID(ctx)
+	var sleepErr error
+	if profileErr != nil {
+		sleepErr = profileErr
+		w.Partial = append(w.Partial, "sleep:profile")
+	} else if sleepErr = c.fetchSleep(ctx, bearer, date, &w); sleepErr != nil {
 		w.Partial = append(w.Partial, partialName("sleep", sleepErr))
 	}
 	if err := c.fetchTrainingReadiness(ctx, bearer, date, &w); err != nil {
 		w.Partial = append(w.Partial, partialName("readiness", err))
+	}
+	if profileErr != nil {
+		w.Partial = append(w.Partial, "resting_hr:profile")
+		return w, nil
 	}
 	// The sleep response is already in hand (or already failed and named in
 	// Partial), so the resting-HR fallback reads it rather than asking again.
@@ -451,7 +458,7 @@ func (c *Client) fetchHRV(ctx context.Context, bearer string, date time.Time, w 
 
 func (c *Client) fetchSleep(ctx context.Context, bearer string, date time.Time, w *Wellness) error {
 	url := fmt.Sprintf("%s%s/%s?date=%s&nonSleepBufferMinutes=60",
-		c.APIBase, sleepPath, c.session.DisplayName, date.Format("2006-01-02"))
+		c.APIBase, sleepPath, url.PathEscape(c.session.ProfileID), date.Format("2006-01-02"))
 	raw, status, err := c.do(ctx, http.MethodGet, url, nil, "", c.wellnessHeaders(bearer)...)
 	if err != nil {
 		return err
