@@ -142,9 +142,10 @@ CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider
 -- progression_levels holds each rider's current 1-10 level per sport/zone
 -- (internal/progression computes the numbers; this table just stores the
 -- result). One row per rider/sport/zone, upserted on every level change —
--- this is the current value and the reason it last moved; every move is
--- also kept in progression_history, for the chart only (see SessionAnalysis.LevelDelta for how a re-rate finds and undoes
--- the specific change it is replacing).
+-- the current value and the reason it last moved (see
+-- SessionAnalysis.LevelDelta for how a re-rate finds and undoes the specific
+-- change it is replacing). Every move is also kept in progression_history,
+-- read only by the chart.
 CREATE TABLE IF NOT EXISTS progression_levels (
     rider      TEXT NOT NULL,
     sport      TEXT NOT NULL,
