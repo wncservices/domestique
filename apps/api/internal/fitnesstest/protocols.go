@@ -182,13 +182,52 @@ func TwoByEightWorkout() workout.CreateWorkoutRequest {
 // BuildTestWorkout returns the workout for a protocol. ftp is only read by the
 // ramp; ok is false for an unknown protocol.
 func BuildTestWorkout(protocol string, ftp float64) (workout.CreateWorkoutRequest, bool) {
+	var req workout.CreateWorkoutRequest
 	switch protocol {
 	case ProtocolRamp:
-		return RampWorkout(ftp), true
+		req = RampWorkout(ftp)
 	case ProtocolTwentyMinute:
-		return FTPTestWorkout(), true
+		req = FTPTestWorkout()
 	case ProtocolTwoByEight:
-		return TwoByEightWorkout(), true
+		req = TwoByEightWorkout()
+	default:
+		return workout.CreateWorkoutRequest{}, false
 	}
-	return workout.CreateWorkoutRequest{}, false
+	req.Steps = withEasyPower(req.Steps, ftp)
+	return req, true
+}
+
+// Easy steps' power, as a share of FTP: below the ramp's first step (50 %),
+// so the warmup leads into it rather than above it.
+const (
+	easyLowPct  = 0.40
+	easyHighPct = 0.55
+)
+
+// withEasyPower gives the open warmup, cooldown and recovery steps a power
+// range when an FTP is known. Left open, a smart trainer in ERG lets go of
+// the resistance for those minutes (or holds whatever it last had), and the
+// head unit shows a target with nothing on it. Only the easy steps: an effort
+// step stays open, because a test measures the rider and ERG would hold the
+// target instead (see the protocol notes).
+func withEasyPower(steps []workout.WorkoutStep, ftp float64) []workout.WorkoutStep {
+	if ftp <= 0 {
+		return steps
+	}
+	out := make([]workout.WorkoutStep, len(steps))
+	for i, s := range steps {
+		if s.Repeat >= 2 {
+			s.Steps = withEasyPower(s.Steps, ftp)
+		} else if s.Target == workout.TargetOpen && isEasy(s.Intensity) {
+			s.Target = workout.TargetPower
+			s.TargetLow = roundTo5(ftp * easyLowPct)
+			s.TargetHigh = roundTo5(ftp * easyHighPct)
+		}
+		out[i] = s
+	}
+	return out
+}
+
+func isEasy(i workout.Intensity) bool {
+	return i == workout.IntensityWarmup || i == workout.IntensityCooldown || i == workout.IntensityRecovery
 }

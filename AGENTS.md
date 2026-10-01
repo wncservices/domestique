@@ -328,6 +328,8 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
   into next week would leave that week holding the test alone.
 - **Effort steps stay `open`.** ERG would lock the watts and the test would
   measure the target, not the rider; only the ramp's steps are power targets.
+  The easy steps (warmup, cooldown, recovery) get 40-55% of FTP when one is
+  known (`withEasyPower`), so a trainer in ERG holds them instead of letting go.
   Anything that converts workouts for an indoor trainer must skip a workout with
   `test_protocol` set (the indoor spec already says so).
 - **A ride can be linked by hand** when the automatic match (same date, same
