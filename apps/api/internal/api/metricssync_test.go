@@ -763,7 +763,7 @@ func liveGarminFake(t *testing.T, summary, stats, sleep string) *api.LiveGarmin 
 
 func (h *metricsSyncHarness) seedNamedGarminSession(rider string) {
 	h.t.Helper()
-	sealed, err := json.Marshal(garmin.Session{OAuth1Token: "tok", OAuth1Secret: "sec", DisplayName: "wilant-n"})
+	sealed, err := json.Marshal(garmin.Session{OAuth1Token: "tok", OAuth1Secret: "sec", DisplayName: "Wilant N", ProfileID: "wilant-n"})
 	if err != nil {
 		h.t.Fatal(err)
 	}
