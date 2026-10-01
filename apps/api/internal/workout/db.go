@@ -142,8 +142,8 @@ CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider
 -- progression_levels holds each rider's current 1-10 level per sport/zone
 -- (internal/progression computes the numbers; this table just stores the
 -- result). One row per rider/sport/zone, upserted on every level change —
--- there is no history table, just the current value and the reason it last
--- moved (see SessionAnalysis.LevelDelta for how a re-rate finds and undoes
+-- this is the current value and the reason it last moved; every move is
+-- also kept in progression_history, for the chart only (see SessionAnalysis.LevelDelta for how a re-rate finds and undoes
 -- the specific change it is replacing).
 CREATE TABLE IF NOT EXISTS progression_levels (
     rider      TEXT NOT NULL,
@@ -154,6 +154,21 @@ CREATE TABLE IF NOT EXISTS progression_levels (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (rider, sport, zone)
 );
+
+-- progression_history is every value a level has held, one row per move,
+-- so the Progression card can draw a level over time rather than only where
+-- it sits now. progression_levels stays the current value (what every
+-- reader of "the rider's level" uses); this table is written alongside it
+-- by SaveLevel and only read for the chart. at is RFC 3339.
+CREATE TABLE IF NOT EXISTS progression_history (
+    rider  TEXT NOT NULL,
+    sport  TEXT NOT NULL,
+    zone   TEXT NOT NULL,
+    level  DOUBLE PRECISION NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS progression_history_rider_idx ON progression_history (rider, at);
 
 -- daily_wellness holds one row per rider per calendar day: the daily
 -- aggregates internal/garmin's Wellness call reads (HRV, sleep, Garmin's
@@ -387,6 +402,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addPushOriginColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.backfillProgressionHistory(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.rescoreFTPTestAnalyses(); err != nil {
