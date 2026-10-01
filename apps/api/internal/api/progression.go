@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -41,9 +42,25 @@ type progressionLevelDTO struct {
 	UpdatedAt string  `json:"updatedAt,omitempty"`
 }
 
+// progressionPointDTO is one value a level held from At on — see
+// workout.LevelPoint.
+type progressionPointDTO struct {
+	Sport  string  `json:"sport"`
+	Zone   string  `json:"zone"`
+	Level  float64 `json:"level"`
+	Reason string  `json:"reason,omitempty"`
+	At     string  `json:"at"`
+}
+
 type progressionResponseDTO struct {
 	Levels []progressionLevelDTO `json:"levels"`
+	// History is the last year of level moves, oldest first, led for each
+	// zone by the value it held before the year began.
+	History []progressionPointDTO `json:"history"`
 }
+
+// progressionHistoryDays is how far back the Progression chart can reach.
+const progressionHistoryDays = 365
 
 // handleGetProgression returns a rider's own progression levels, owner-only
 // like every other training endpoint. A rider with nothing saved yet — never
@@ -79,6 +96,17 @@ func (s *Server) handleGetProgression(w http.ResponseWriter, r *http.Request) {
 	for _, l := range existing {
 		out.Levels = append(out.Levels, progressionLevelDTO{
 			Sport: string(l.Sport), Zone: string(l.Zone), Level: l.Level, Reason: l.Reason, UpdatedAt: l.UpdatedAt,
+		})
+	}
+	history, err := s.Training.LevelHistory(r.Context(), rider, s.now().AddDate(0, 0, -progressionHistoryDays).UTC().Format(time.RFC3339))
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	out.History = make([]progressionPointDTO, 0, len(history))
+	for _, p := range history {
+		out.History = append(out.History, progressionPointDTO{
+			Sport: string(p.Sport), Zone: string(p.Zone), Level: p.Level, Reason: p.Reason, At: p.At,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

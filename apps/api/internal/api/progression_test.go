@@ -334,3 +334,38 @@ func TestSetSessionFeelReRateAtTheFloorUsesTheAppliedDeltaNotTheRawOne(t *testin
 		t.Fatalf("LevelDelta = %v (ok=%v), want -0.1 (the applied change, not Delta's raw result)", analysis.LevelDelta, ok)
 	}
 }
+
+// The Progression chart draws from history: each move is a point, oldest
+// first, and another rider's moves never show.
+func TestGetProgressionReturnsTheLevelHistory(t *testing.T) {
+	h := newTrainingHarness(t)
+	ctx := context.Background()
+	for _, l := range []workout.ProgressionLevel{
+		{Rider: "wilant", Sport: model.SportCycling, Zone: workout.ZoneThreshold, Level: 4.0},
+		{Rider: "wilant", Sport: model.SportCycling, Zone: workout.ZoneThreshold, Level: 4.3, Reason: "Nailed Threshold 4x8"},
+		{Rider: "other", Sport: model.SportCycling, Zone: workout.ZoneThreshold, Level: 9.0},
+	} {
+		if err := h.store.SaveLevel(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/progression", "")
+	var out struct {
+		History []struct {
+			Zone   string  `json:"zone"`
+			Level  float64 `json:"level"`
+			Reason string  `json:"reason"`
+			At     string  `json:"at"`
+		} `json:"history"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.History) != 2 || out.History[0].Level != 4.0 || out.History[1].Level != 4.3 || out.History[1].Reason != "Nailed Threshold 4x8" {
+		t.Fatalf("history = %+v, want wilant's two moves in order", out.History)
+	}
+	if out.History[1].At == "" {
+		t.Error("a point needs its time")
+	}
+}
