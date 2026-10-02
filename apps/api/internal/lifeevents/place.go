@@ -92,6 +92,13 @@ func newPlanner(in Input) *planner {
 	for d := range p.after {
 		p.noPlace[d] = true
 	}
+	// A session moved into a return window would never be eased (a moved
+	// session is already adjusted), so a move does not land in one.
+	for _, e := range in.Events {
+		for _, d := range rampWindow(e) {
+			p.noPlace[d] = true
+		}
+	}
 	for _, w := range in.Workouts {
 		if w.Date == "" {
 			continue
@@ -145,9 +152,30 @@ func (p *planner) run() {
 	}
 	scope[classGym] = gymSessions
 	p.forgetLeavingHardDays(scope)
+
+	// An FTP test inside an illness is rehomed after the recovery, not
+	// removed with the rest or moved a day or two.
+	var tests []scoped
+	for _, c := range []class{classProper, classMild} {
+		var rest []scoped
+		for _, s := range scope[c] {
+			if s.w.TestProtocol != "" {
+				tests = append(tests, s)
+			} else {
+				rest = append(rest, s)
+			}
+		}
+		scope[c] = rest
+	}
+	ramped := p.rampEventsOf()
+
 	p.removeProper(scope[classProper])
+	p.mildSessions(scope[classMild])
+	p.rehomeTests(tests, ramped)
 	p.moveSessions(scope[classMove])
 	p.gym(scope[classGym])
+	p.ramp(ramped)
+	p.advise(ramped)
 	p.refill()
 }
 

@@ -309,6 +309,10 @@ type Input struct {
 	// fall in, built by the caller from scheduler.WeekWorkouts; Preview picks
 	// which of them go back.
 	Refill []workout.CreateWorkoutRequest
+	// RampAll applies the return ramp of every event that has one, not only of
+	// events new or changed in this edit. The automatic pass that ramps weeks
+	// filled after the event was made sets it; a preview does not.
+	RampAll bool
 	// Now carries the rider's zone: today is its calendar date.
 	Now  time.Time
 	Caps Capabilities
