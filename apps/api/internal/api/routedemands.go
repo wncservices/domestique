@@ -309,32 +309,33 @@ func demandDurations(cl []demandClimbDTO) []float64 {
 	return out
 }
 
-// routeDemandFor is what a goal's route asks of generated sessions, or nil.
-// Anything that stops it being computed is nil, never an error: a missing or
-// invisible route, no elevation, no FTP, a running goal or a library that
-// cannot be read must not block planning, which then goes on as it would
-// without a route. The one line it logs carries the goal, the route slug and
-// the outcome, never a number about the rider.
-func (s *Server) routeDemandFor(ctx context.Context, g workout.Goal, profile workout.RiderProfile) *scheduler.RouteDemand {
+// routeDemandFor is what a goal's route asks of generated sessions. Nil with a
+// nil error means there is none: no route, a missing or invisible one, no
+// elevation, no FTP, a running goal. Those must not block planning, which goes
+// on as it would without a route. A non-nil error means the library could not be
+// read just now: the caller waits for the next pass rather than plan without it.
+// The one line it logs carries the goal, the route slug and the outcome, never a
+// number about the rider.
+func (s *Server) routeDemandFor(ctx context.Context, g workout.Goal, profile workout.RiderProfile) (*scheduler.RouteDemand, error) {
 	if g.RouteSlug == "" {
-		return nil
+		return nil, nil
 	}
 	outcome := "unavailable"
 	defer func() {
 		s.logger().Debug("route demand", "goal", g.ID, "route", g.RouteSlug, "outcome", outcome)
 	}()
 	if profile.FTPWatts <= 0 || (g.Sport != "" && g.Sport != model.SportCycling) {
-		return nil
+		return nil, nil
 	}
 	rp, code, err := s.loadRouteProfile(ctx, g.Rider, g.RouteSlug)
 	if err != nil {
 		outcome = "unreadable"
 		s.logger().Warn("route demand: reading the route failed", "goal", g.ID, "route", g.RouteSlug, "err", err)
-		return nil
+		return nil, err
 	}
 	if code != "" {
 		outcome = code
-		return nil
+		return nil, nil
 	}
 	ph := pacing.DefaultPhysics(profile.WeightKG)
 	ifv := g.PacingIF
@@ -347,7 +348,7 @@ func (s *Server) routeDemandFor(ctx context.Context, g workout.Goal, profile wor
 	if demand != nil {
 		outcome = "biased"
 	}
-	return demand
+	return demand, nil
 }
 
 // biasFor reports what generation does with this route. The phase is best
@@ -355,7 +356,7 @@ func (s *Server) routeDemandFor(ctx context.Context, g workout.Goal, profile wor
 // from, and the card then just leaves it out.
 func (s *Server) biasFor(ctx context.Context, g workout.Goal, rp *routeProfile, cl []demandClimbDTO) biasDTO {
 	demand := scheduler.DemandFromClimbs(rp.Climbs, demandDurations(cl), rp.Route.Stats.AscentM, rp.Route.Stats.DistanceM)
-	out := biasDTO{Active: demand != nil && (demand.Sustained > 0 || demand.Short > 0 || demand.Punchy > 0 || demand.Climbing)}
+	out := biasDTO{Active: demand != nil && (demand.Sustained > 0 || demand.Short > 0 || demand.Climbing)}
 	if demand != nil {
 		out.SustainedSec, out.ShortSec = demand.Sustained, demand.Short
 	}

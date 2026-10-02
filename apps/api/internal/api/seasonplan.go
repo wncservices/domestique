@@ -87,6 +87,12 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 			}
 			res.weeksMarkedFromOld++
 		case !isRecorded:
+			// A week within reach is recorded as fresh the moment it is filled,
+			// so it must not be filled from a route that could not be read: the
+			// bias would never be applied. A far week is refreshed later anyway.
+			if week.StartDate <= horizon && sc.demandUnreadable() {
+				continue
+			}
 			created, _, err := s.fillWeek(ctx, g, sc, week, existing, "")
 			existing = append(existing, created...)
 			res.sessionsCreated += len(created)
@@ -97,6 +103,9 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 				return res, err
 			}
 		case !refreshed && week.StartDate <= horizon:
+			if sc.demandUnreadable() {
+				continue // try again next pass rather than consume the refresh
+			}
 			n, err := s.refreshWeek(ctx, g, sc, week, existing, today)
 			res.sessionsRefreshed += n
 			res.weeksRefreshed++

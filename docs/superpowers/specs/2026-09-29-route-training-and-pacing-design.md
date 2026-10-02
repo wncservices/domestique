@@ -143,7 +143,7 @@ The demand reduces to a wanted effort length per zone:
 |---|---|---|
 | `threshold`, `sweet_spot` | the longest climb of 4 to 30 min, capped at 20 min | sustained and medium climbs |
 | `vo2max` | median duration of climbs under 6 min | short climbs |
-| `anaerobic` | duration of the steepest climb under 2 min | punchy ramps |
+| `anaerobic` | none: not biased (see Out of scope) | |
 
 No qualifying climb gives no wanted length and the slot is generated exactly as today. With one, a new
 `workoutlib.PickNear(ladder, level, capSeconds, wantWork)` chooses among the rungs one level either side of
@@ -310,4 +310,5 @@ pacing pushes (`riderdelete.go`).
 Weather and wind, drafting, per-rider CdA or Crr, altitude and heat, multi-route or multi-day events,
 changing zones or the phase mix for a route, adjusting weekly hours, nutrition and fuelling plans, a
 device-side workout with per-climb targets, live guidance, importing pacing back, running and swimming,
-automatic push of a pacing course, HR-only plans without FTP, Strava segment lookups (a third-party call).
+automatic push of a pacing course, HR-only plans without FTP, Strava segment lookups (a third-party call),
+biasing anaerobic slots (the training bar of 1 km at 3 % leaves no climb under 2 minutes to rehearse with 30 to 90 second efforts; a 500 m bar would be needed).

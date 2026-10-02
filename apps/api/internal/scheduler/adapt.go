@@ -44,7 +44,7 @@ func IsGenerated(w workout.Workout) bool {
 // today). A workout with a zone is classified from that instead; see
 // IsKeySession's own doc comment.
 var keyNames = map[string]bool{
-	"Long ride": true, ClimbingLongRideName: true, "Long run": true,
+	"Long ride": true, "Long run": true,
 	"Tempo ride": true, "Tempo run": true,
 	"VO2max intervals": true, "Interval session": true,
 }
@@ -63,7 +63,7 @@ func IsKeySession(w workout.Workout) bool {
 	if workout.IsStructuredZone(w.Zone) {
 		return true
 	}
-	return keyNames[w.Name]
+	return keyNames[w.Name] || IsLongRideName(w.Name)
 }
 
 // IsHardSession reports whether w is a tempo or interval session — the ones

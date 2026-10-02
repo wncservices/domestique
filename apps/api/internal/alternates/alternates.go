@@ -140,8 +140,8 @@ func EnduranceRide(w workout.Workout, totalSeconds float64, profile workout.Ride
 // differently ("Long ride" against "Endurance ride"): asking it for a long
 // session of any length and comparing names avoids a second copy of the names.
 func isLong(w workout.Workout, totalSeconds float64, profile workout.RiderProfile) bool {
-	return scheduler.BuildEnduranceSession(totalSeconds/3600, true, w.Sport, profile).Name == w.Name ||
-		w.Name == scheduler.ClimbingLongRideName
+	return scheduler.IsLongRideName(w.Name) ||
+		scheduler.BuildEnduranceSession(totalSeconds/3600, true, w.Sport, profile).Name == w.Name
 }
 
 // Options returns the alternates on offer for w, in the order easier, harder,

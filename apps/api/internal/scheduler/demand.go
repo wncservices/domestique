@@ -9,7 +9,8 @@ import (
 
 // RouteDemand is what a goal's route asks of the sessions that train for it,
 // reduced to the one thing generation can use: how long an effort to favour,
-// per kind of slot. It carries no route, no coordinates and no rider: distances
+// per kind of slot. Anaerobic slots are not biased: the training bar (1 km at
+// 3 %) leaves no climb short enough to rehearse with 30 to 90 second efforts. It carries no route, no coordinates and no rider: distances
 // and durations only.
 //
 // The route chooses the *shape* of a session (3 x 12 min rather than 4 x 8),
@@ -24,9 +25,6 @@ type RouteDemand struct {
 	// Short is the wanted work length for vo2max slots: the median duration of
 	// the climbs under 6 minutes.
 	Short int
-	// Punchy is the wanted work length for anaerobic slots: the duration of the
-	// steepest climb under 2 minutes.
-	Punchy int
 	// Climbing is whether the route is hilly enough (10 m/km or 1 500 m in
 	// total) that the long ride should be done on a climbing route.
 	Climbing bool
@@ -54,8 +52,6 @@ func (d *RouteDemand) wantFor(zone string) int {
 		return d.Sustained
 	case "vo2max":
 		return d.Short
-	case "anaerobic":
-		return d.Punchy
 	default:
 		return 0
 	}
@@ -92,7 +88,6 @@ const (
 	maxSustainedClimbSec = 30 * 60
 	sustainedCapSec      = 20 * 60
 	shortClimbSec        = 6 * 60
-	punchyClimbSec       = 2 * 60
 	climbingMPerKm       = 10.0
 	climbingTotalM       = 1500.0
 )
@@ -110,17 +105,13 @@ func DemandFromClimbs(cs []climbs.Climb, durations []float64, ascentM, distanceM
 
 	var longest float64
 	var shorts []float64
-	var steepest float64
-	for i, c := range cs {
+	for i := range cs {
 		sec := durations[i]
 		if sec >= minSustainedClimbSec && sec <= maxSustainedClimbSec && sec > longest {
 			longest = sec
 		}
 		if sec < shortClimbSec {
 			shorts = append(shorts, sec)
-		}
-		if sec < punchyClimbSec && c.AvgGradient > steepest {
-			steepest, d.Punchy = c.AvgGradient, int(sec+0.5)
 		}
 	}
 	if longest > 0 {

@@ -51,11 +51,13 @@ func TestDemandFromClimbsPerTheSpecTable(t *testing.T) {
 		}
 	})
 
-	t.Run("punchy is the duration of the steepest climb under 2 minutes", func(t *testing.T) {
-		d := DemandFromClimbs([]climbs.Climb{cl(8), cl(11), cl(14)},
-			[]float64{100, 90, 130}, 100, 20_000)
-		if d.Punchy != 90 {
-			t.Errorf("Punchy = %d, want 90 (the 11 %% one; the 14 %% one takes over 2 min)", d.Punchy)
+	t.Run("a very short climb asks nothing of anaerobic slots", func(t *testing.T) {
+		d := DemandFromClimbs([]climbs.Climb{cl(11)}, []float64{90}, 100, 20_000)
+		if d == nil || d.Sustained != 0 || d.wantFor("anaerobic") != 0 {
+			t.Errorf("a 90 s climb gave %+v; it may bias vo2max (Short) but never threshold or anaerobic", d)
+		}
+		if got := (&RouteDemand{Sustained: 600, Short: 300}).wantFor("anaerobic"); got != 0 {
+			t.Errorf("wantFor(anaerobic) = %d, want 0", got)
 		}
 	})
 
@@ -94,7 +96,7 @@ func demandWeek(phase periodization.Phase, recovery bool) (periodization.Week, w
 	return week, profile, levels
 }
 
-var testDemand = &RouteDemand{Sustained: 12 * 60, Short: 5 * 60, Punchy: 45, Climbing: true}
+var testDemand = &RouteDemand{Sustained: 12 * 60, Short: 5 * 60, Climbing: true}
 
 func weekWith(t *testing.T, phase periodization.Phase, recovery bool, opts ...Option) []workout.CreateWorkoutRequest {
 	t.Helper()
@@ -245,7 +247,7 @@ func TestBiasIsOneLevelAbovePickAtMost(t *testing.T) {
 			plain, _ := WeekWorkouts(week, profile, levels, "wilant", "g1", model.SportCycling)
 			for _, want := range []int{60, 240, 720, 1200} {
 				biased, _ := WeekWorkouts(week, profile, levels, "wilant", "g1", model.SportCycling,
-					WithRouteDemand(&RouteDemand{Sustained: want, Short: want, Punchy: want}))
+					WithRouteDemand(&RouteDemand{Sustained: want, Short: want}))
 				for i := range plain {
 					if biased[i].Level > plain[i].Level+1 {
 						t.Fatalf("%s level %.1f want %d: %s is level %v, more than one above the plain %v", phase, lvl, want, biased[i].Zone, biased[i].Level, plain[i].Level)
