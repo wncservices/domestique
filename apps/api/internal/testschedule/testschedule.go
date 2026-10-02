@@ -76,6 +76,9 @@ type Input struct {
 	// LastTestDate is the date of the rider's most recent test that has been
 	// ridden and read ("" if none).
 	LastTestDate string
+	// Blackout is the days the rider is away from training (a life event): no
+	// test is suggested for one.
+	Blackout map[string]bool
 	// Now carries the rider's zone: "today" is its calendar date.
 	Now time.Time
 }
@@ -288,7 +291,7 @@ func (s *suggester) chooseDay(from, to time.Time) (date, replaces string, ok boo
 		byDate[w.Date] = append(byDate[w.Date], w)
 	}
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-		if !s.available(d) || s.nearAEvent(d) {
+		if !s.available(d) || s.nearAEvent(d) || s.in.Blackout[d.Format(dateLayout)] {
 			continue
 		}
 		key := d.Format(dateLayout)

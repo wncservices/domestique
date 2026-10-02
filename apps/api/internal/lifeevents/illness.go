@@ -71,6 +71,18 @@ func Ramp(e Event) (easyDays, untilDay int, ok bool) {
 	return 0, 0, false
 }
 
+// NoTestDays is the days an FTP test is not suggested: every event day, and the
+// return window after one, when the rider is meant to be easing back in.
+func NoTestDays(events []Event) map[string]bool {
+	out := Blackout(events)
+	for _, e := range events {
+		for _, d := range rampWindow(e) {
+			out[d] = true
+		}
+	}
+	return out
+}
+
 // rampDay is the date of ramp day n of e.
 func rampDay(e Event, n int) string {
 	end, ok := parseDate(e.End)

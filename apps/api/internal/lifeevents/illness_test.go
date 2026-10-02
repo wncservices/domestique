@@ -371,6 +371,18 @@ func TestMovedSessionsAvoidTheRampWindow(t *testing.T) {
 	}
 }
 
+func TestNoTestDaysCoverTheEventAndItsReturnWindow(t *testing.T) {
+	got := NoTestDays([]Event{ill("2026-10-08", "2026-10-09", OptionMild)})
+	for _, d := range []string{"2026-10-08", "2026-10-09", "2026-10-10", "2026-10-12"} {
+		if !got[d] {
+			t.Errorf("%s should not be offered for a test", d)
+		}
+	}
+	if got["2026-10-13"] || got["2026-10-07"] {
+		t.Error("a day outside the event and its ramp was excluded")
+	}
+}
+
 func TestOneRungEasier(t *testing.T) {
 	w := hard("w", "2026-10-12", 60)
 	req, ok := scheduler.OneRungEasier(w, profile())

@@ -23,6 +23,10 @@ type Options struct {
 	StartHour, EndHour int      // the rider's configured ride window
 	Today              string
 	Now                time.Time
+	// Blackout is the days the rider is away from training (a life event):
+	// nothing is suggested for a session on one, and none is offered as an
+	// alternative.
+	Blackout map[string]bool
 }
 
 // Day is one forecast day judged over the rider's configured window.
@@ -106,6 +110,9 @@ func Suggest(f Forecast, workouts []workout.Workout, ridden map[string]bool, o O
 	days := Days(f, o)
 
 	occupied := map[string]bool{}
+	for d := range o.Blackout {
+		occupied[d] = true
+	}
 	for _, wk := range workouts {
 		if wk.Date != "" {
 			occupied[wk.Date] = true
@@ -114,7 +121,7 @@ func Suggest(f Forecast, workouts []workout.Workout, ridden map[string]bool, o O
 
 	var out []Suggestion
 	for _, wk := range workouts {
-		if !candidate(wk, horizonDays, ridden) {
+		if o.Blackout[wk.Date] || !candidate(wk, horizonDays, ridden) {
 			continue
 		}
 		end := WindowFor(o.StartHour, o.EndHour, workout.PlannedSeconds(wk.Steps))

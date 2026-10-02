@@ -14,6 +14,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/testschedule"
@@ -126,6 +127,11 @@ func (s *Server) handleGetFTPTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	events, err := s.lifeEventsFor(ctx, rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	yesterday := now.AddDate(0, 0, -1).Format(dateLayout)
 	var upcoming []workout.Workout
 	for _, wk := range workouts {
@@ -136,6 +142,7 @@ func (s *Server) handleGetFTPTests(w http.ResponseWriter, r *http.Request) {
 	if sug := testschedule.Suggest(testschedule.Input{
 		Plan: plan, Profile: profile, Upcoming: upcoming, Goals: goals,
 		HasPower: hasPower, LastTestProtocol: lastProtocol, LastTestDate: lastReadDate, Now: now,
+		Blackout: lifeevents.NoTestDays(events),
 	}); sug != nil {
 		out.Suggestion = &ftpTestSuggestionDTO{
 			Reason: sug.Reason, Message: sug.Message, Date: sug.Date,
@@ -300,6 +307,16 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 	if body.Date != "" {
 		if body.Date < today {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "That day is already in the past."})
+			return
+		}
+		away, err := s.blackoutFor(ctx, rider)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if away[body.Date] {
+			s.logger().Info("ftp test not scheduled: that day is inside a life event", "rider", rider)
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "You are away that day."})
 			return
 		}
 		ridden, err := s.riddenOn(ctx, rider, body.Date)

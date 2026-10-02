@@ -167,10 +167,14 @@ func (s *Server) refreshWeek(ctx context.Context, g workout.Goal, sc seasonConte
 		byDate[req.Date] = req
 	}
 
+	blackout, err := s.blackoutFor(ctx, g.Rider)
+	if err != nil {
+		return 0, err
+	}
 	start, end := weekBounds(week)
 	changed := 0
 	for _, wk := range existing {
-		if wk.GoalID != g.ID || wk.Date < start || wk.Date > end || wk.Date <= today {
+		if wk.GoalID != g.ID || wk.Date < start || wk.Date > end || wk.Date <= today || blackout[wk.Date] {
 			continue
 		}
 		if !untouchedPlanSession(wk) {

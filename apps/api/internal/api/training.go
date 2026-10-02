@@ -699,6 +699,15 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 	// goals first (see workout.DB.ListAllGoals). A workout the rider built by
 	// hand carries no goal and blocks nothing.
 	alreadyScheduled := make(map[string]bool, len(existing))
+	// A day a life event covers is taken too: the rider is away, and a session
+	// a life event removed has to stay removed whatever builds the week.
+	blackout, err := s.blackoutFor(ctx, g.Rider)
+	if err != nil {
+		return nil, 0, err
+	}
+	for d := range blackout {
+		alreadyScheduled[d] = true
+	}
 	for _, wk := range existing {
 		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true

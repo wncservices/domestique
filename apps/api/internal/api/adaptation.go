@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -106,13 +107,23 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 
 	assessment := s.assessReadiness(ctx, rider, sessions, latest)
 
+	// A life event takes days out of the plan. Adaptation must neither make a
+	// session up on one nor read a session removed for one as missed, so it
+	// does not run at all when the events cannot be read.
+	events, err := s.lifeEventsFor(ctx, rider)
+	if err != nil {
+		s.logger().Warn("adapt: reading life events failed", "rider", rider, "err", err)
+		return
+	}
+	blackout := lifeevents.Blackout(events)
+
 	// AdaptSessions already keeps each workout to at most one Change per pass
 	// (stepDownTarget skips ids its own per-session loop has claimed — see
 	// its doc comment); this is a second, independent guard here so a bug in
 	// that bookkeeping cannot silently apply two Changes to the same workout
 	// — first one wins, and a second is loud rather than a quiet clobber.
 	appliedFor := map[string]bool{}
-	for _, c := range adapter.AdaptSessions(workouts, sessions, profile, s.now(), byWorkout, assessment) {
+	for _, c := range adapter.AdaptSessionsAround(workouts, sessions, profile, s.now(), byWorkout, assessment, blackout) {
 		if appliedFor[c.WorkoutID] {
 			s.logger().Warn("adapt: a second change was produced for the same workout in one pass; ignoring it", "workout", c.WorkoutID, "rider", rider)
 			continue
@@ -130,6 +141,17 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 		// rider's name. The stored adjustment (see recordAdjustment) is where
 		// the explanation lives, and it is only ever shown to its owner.
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "rule", string(c.Why.Rule))
+	}
+
+	// The return ramp for weeks filled after an event was made, after the
+	// rules above so one workout is never changed twice, and before the
+	// day-before-a-test easing for the same reason.
+	s.applyReturnRamp(ctx, rider, workouts, profile, events, appliedFor)
+	// A session the rider kept on an event day is not eased for a test.
+	for _, w := range workouts {
+		if blackout[w.Date] {
+			appliedFor[w.ID] = true
+		}
 	}
 
 	s.easeBeforeFTPTests(ctx, rider, workouts, profile, appliedFor)

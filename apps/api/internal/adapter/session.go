@@ -126,6 +126,16 @@ func change(c Change, rule why.Rule, inputs any) Change {
 // below for what it does to today's hard session; a zero-value Assessment
 // (Verdict "") behaves exactly like Ready: no readiness-driven change.
 func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSession, profile workout.RiderProfile, today time.Time, analyses map[string]workout.SessionAnalysis, assessment readiness.Assessment) []Change {
+	return AdaptSessionsAround(workouts, sessions, profile, today, analyses, assessment, nil)
+}
+
+// AdaptSessionsAround is AdaptSessions for a rider who has life events: the
+// days they cover (blackout, "YYYY-MM-DD" to true) are never chosen as a
+// make-up day or as an easy day to give up, a session on one is never read as
+// missed or eased (a session a life event took away does not exist, and one
+// the rider kept there is theirs to decide), and the rest of the rules are
+// exactly the same. A nil blackout is AdaptSessions.
+func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.CompletedSession, profile workout.RiderProfile, today time.Time, analyses map[string]workout.SessionAnalysis, assessment readiness.Assessment, blackout map[string]bool) []Change {
 	day := func(t time.Time) string { return t.Format("2006-01-02") }
 	todayStr := day(today)
 	weekStart := day(mondayOf(today))
@@ -143,6 +153,10 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		if w.Date != "" {
 			taken[w.Date] = true
 		}
+	}
+	// An event day is not a free day.
+	for d := range blackout {
+		taken[d] = true
 	}
 	available := map[string]bool{}
 	for _, d := range profile.AvailableDays {
@@ -163,7 +177,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 	claimed := map[string]bool{}
 	var changes []Change
 	for _, w := range ordered {
-		if w.Date == "" || !scheduler.IsGenerated(w) || done(w, sessions, analyses) {
+		if w.Date == "" || blackout[w.Date] || !scheduler.IsGenerated(w) || done(w, sessions, analyses) {
 			continue
 		}
 
@@ -184,7 +198,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 				}, why.MissedMoved, why.MissedMovedInputs{From: w.Date, To: next}))
 				continue
 			}
-			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced); ok {
+			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced, blackout); ok {
 				replaced[slot.ID] = true
 				claimed[w.ID] = true
 				claimed[slot.ID] = true
@@ -220,7 +234,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// (scheduler.EasyVariant) — that works for a legacy zone-less hard
 		// workout just as well as a structured one, so rest does not need
 		// the structured-zone restriction caution's step-down does.
-		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, false); ok {
+		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, false, blackout); ok {
 			claimed[w.ID] = true
 			changes = append(changes, change(Change{
 				WorkoutID: w.ID, Downgrade: true,
@@ -232,7 +246,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// a legacy hard workout with no zone has no ladder to step down on,
 		// the same reason stepDownTarget itself requires
 		// workout.IsStructuredZone.
-		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, true); ok {
+		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, true, blackout); ok {
 			claimed[w.ID] = true
 			changes = append(changes, change(Change{
 				WorkoutID: w.ID, StepDown: true, StepDownSourceID: readinessSourceID(today),
@@ -241,7 +255,7 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		}
 	}
 
-	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed); ok {
+	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed, blackout); ok {
 		changes = append(changes, change(Change{
 			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
 			Reason: stepDownReason(src, feltAllOut(analyses[src.ID])),
@@ -266,9 +280,9 @@ func readinessSourceID(today time.Time) string {
 // caution's step-down, which needs a zone with a ladder to step down on
 // (see stepDownTarget); rest's downgrade replaces the workout wholesale and
 // has no such requirement.
-func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool, requireStructuredZone bool) (workout.Workout, bool) {
+func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool, requireStructuredZone bool, blackout map[string]bool) (workout.Workout, bool) {
 	for _, w := range ordered {
-		if w.Date != todayStr || claimed[w.ID] || !scheduler.IsGenerated(w) || !scheduler.IsHardSession(w) || done(w, sessions, analyses) {
+		if w.Date != todayStr || blackout[w.Date] || claimed[w.ID] || !scheduler.IsGenerated(w) || !scheduler.IsHardSession(w) || done(w, sessions, analyses) {
 			continue
 		}
 		if requireStructuredZone && !workout.IsStructuredZone(w.Zone) {
@@ -321,7 +335,7 @@ func hasStepDownSource(ordered []workout.Workout, sourceID string) bool {
 // replaced, or downgraded this pass is skipped as a step-down target so it
 // never ends up with two Changes (a missed-session reschedule onto a
 // same-zone slot, say, followed by that same slot being stepped down).
-func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time, claimed map[string]bool) (workout.Workout, workout.Workout, bool) {
+func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time, claimed, blackout map[string]bool) (workout.Workout, workout.Workout, bool) {
 	var source workout.Workout
 	found := false
 	for _, w := range ordered {
@@ -345,7 +359,7 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 		return workout.Workout{}, workout.Workout{}, false
 	}
 	for _, w := range ordered {
-		if w.Date <= source.Date || w.Zone != source.Zone || !scheduler.IsGenerated(w) || claimed[w.ID] {
+		if w.Date <= source.Date || w.Zone != source.Zone || !scheduler.IsGenerated(w) || claimed[w.ID] || blackout[w.Date] {
 			continue
 		}
 		d, err := time.Parse("2006-01-02", w.Date)
@@ -440,9 +454,9 @@ func nextFreeDay(today time.Time, weekEnd string, available, taken map[string]bo
 // the end of the week that the rider has not already done — the one a missed
 // key session may take the place of. replaced holds slots already promised to
 // an earlier miss this pass.
-func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, today, weekEnd string, replaced map[string]bool) (workout.Workout, bool) {
+func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, today, weekEnd string, replaced, blackout map[string]bool) (workout.Workout, bool) {
 	for _, w := range ordered {
-		if w.Date < today || w.Date > weekEnd || replaced[w.ID] {
+		if w.Date < today || w.Date > weekEnd || replaced[w.ID] || blackout[w.Date] {
 			continue
 		}
 		if !scheduler.IsGenerated(w) || scheduler.IsKeySession(w) || done(w, sessions, analyses) {

@@ -1035,6 +1035,8 @@ export interface ReadinessResponse {
     verdict: ReadinessVerdict
     reasons?: string[]
     wellness?: DailyWellnessDTO
+    /** Today is inside one of the rider's life events: hide the chip. */
+    lifeEvent?: boolean
   }
   days: DailyWellnessDTO[]
   /** Forecast for tomorrow's hard session — absent when tomorrow has no
