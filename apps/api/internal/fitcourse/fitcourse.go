@@ -73,6 +73,40 @@ func SportFromString(sport string) typedef.Sport {
 	return typedef.SportCycling
 }
 
+// CoursePoint is a named point at a distance along the track.
+type CoursePoint struct {
+	// DistanceM is metres from the start; it is clamped to the track.
+	DistanceM float64
+	Name      string
+	Type      typedef.CoursePoint
+}
+
+// CategoryType is the FIT course point type for a climb category as
+// climbs.Category reports it: 4 to 1, 0 for hors categorie. ok false (a climb
+// too small to be rated) gives the generic type.
+func CategoryType(cat int, ok bool) typedef.CoursePoint {
+	if !ok {
+		return typedef.CoursePointGeneric
+	}
+	return climbCategory(cat)
+}
+
+// nearestIndex is the index of the distance closest to d: distances is
+// cumulative and so sorted.
+func nearestIndex(distances []float64, d float64) int {
+	i := sort.SearchFloat64s(distances, d)
+	switch {
+	case i <= 0:
+		return 0
+	case i >= len(distances):
+		return len(distances) - 1
+	case d-distances[i-1] <= distances[i]-d:
+		return i - 1
+	default:
+		return i
+	}
+}
+
 // Options tunes the generated course.
 type Options struct {
 	// Name shown in the device's course list. Devices truncate this; keep it
@@ -97,6 +131,14 @@ type Options struct {
 	// and a wrong one is worse than none. Needs every point to carry
 	// elevation, or it finds nothing. See DeriveClimbs.
 	ClimbCues bool
+	// CoursePoints are named points written at given distances along the track,
+	// alongside any turn and climb cues (which they never change): the pacing
+	// course puts a "C3 250-265W" at the foot of each climb. Each lands on the
+	// nearest track point. A device shows the name as the point's on-map label
+	// and pop-up, and a FIT course point has no notes field, so the name is all
+	// the text there is: keep it short and ASCII (older Edges show about 10
+	// characters, newer ones about 15).
+	CoursePoints []CoursePoint
 	// CreatedAt stamps the file. Zero uses the current time.
 	CreatedAt time.Time
 }
@@ -199,6 +241,22 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 					SetDistanceScaled(distances[climb.SummitIndex]).
 					SetType(typedef.CoursePointSummit).
 					SetName("Summit"))
+		}
+	}
+
+	if len(opts.CoursePoints) > 0 {
+		given := append([]CoursePoint(nil), opts.CoursePoints...)
+		sort.SliceStable(given, func(i, j int) bool { return given[i].DistanceM < given[j].DistanceM })
+		for _, cp := range given {
+			idx := nearestIndex(distances, cp.DistanceM)
+			course.CoursePoints = append(course.CoursePoints,
+				mesgdef.NewCoursePoint(nil).
+					SetTimestamp(timeAt(idx)).
+					SetPositionLatDegrees(points[idx].Lat).
+					SetPositionLongDegrees(points[idx].Lon).
+					SetDistanceScaled(distances[idx]).
+					SetType(cp.Type).
+					SetName(cp.Name))
 		}
 	}
 

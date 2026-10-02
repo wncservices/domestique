@@ -70,6 +70,9 @@ type ClimbTarget struct {
 	LengthM        float64
 	AvgGradient    float64
 	Watts, Seconds float64
+	// HRLow and HRHigh are the steady-state heart rate for Watts, 0 when the
+	// rider has no HR data.
+	HRLow, HRHigh int
 }
 
 // Plan is the pacing plan: where to ride at what, and what it adds up to.
@@ -154,10 +157,12 @@ func Build(in Input) Plan {
 	}
 	plan.Segments = merge(legs, in)
 	for _, c := range in.Climbs {
-		plan.Climbs = append(plan.Climbs, ClimbTarget{
+		ct := ClimbTarget{
 			Index: c.Index, StartM: c.StartM, EndM: c.EndM, LengthM: c.LengthM, AvgGradient: c.AvgGradient,
 			Watts: cw[c.Index], Seconds: ClimbSeconds(c, in.Segs, ph, cw[c.Index]),
-		})
+		}
+		ct.HRLow, ct.HRHigh = hrFor(in.Profile, ct.Watts/in.FTP)
+		plan.Climbs = append(plan.Climbs, ct)
 	}
 	return plan
 }
