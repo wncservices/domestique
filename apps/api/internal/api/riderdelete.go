@@ -32,6 +32,7 @@ type purgeSummary struct {
 	// AdjustmentsRemoved is the "Why?" records of the rider's plan changes:
 	// their sleep, HRV and load, so they go with the rider.
 	AdjustmentsRemoved int
+	PacingPushes       int
 }
 
 // purgeRiderData removes every trace of rider from this app's own database —
@@ -191,6 +192,16 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("removing share links: %w", err)
 		}
 		sum.ShareLinks = n
+	}
+	// The pacing courses they pushed: the record of which course on their own
+	// account each plan became. The courses themselves are on a device that is
+	// theirs; only our record of them goes.
+	if s.PacingPushes != nil {
+		n, err := s.PacingPushes.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing pacing pushes: %w", err)
+		}
+		sum.PacingPushes = n
 	}
 
 	return sum, nil
