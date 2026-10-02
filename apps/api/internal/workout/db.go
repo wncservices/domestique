@@ -266,7 +266,24 @@ CREATE TABLE IF NOT EXISTS adjustments (
     created_at   TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS adjustments_subject_day_rule_idx ON adjustments (rider, subject_kind, subject_id, day, rule);
-CREATE INDEX IF NOT EXISTS adjustments_rider_subject_idx ON adjustments (rider, subject_kind, subject_id);`, d.Blob, d.Boolean)
+CREATE INDEX IF NOT EXISTS adjustments_rider_subject_idx ON adjustments (rider, subject_kind, subject_id);
+
+-- life_events are stretches of days a rider is away from training (travel,
+-- illness, busy). Dates are inclusive YYYY-MM-DD text. The rules that turn one
+-- into plan changes live in internal/lifeevents; this is only where they are
+-- kept. Owner-only: every read and write names the rider.
+CREATE TABLE IF NOT EXISTS life_events (
+    id         TEXT PRIMARY KEY,
+    rider      TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date   TEXT NOT NULL,
+    option     TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS life_events_rider_idx ON life_events (rider, start_date);`, d.Blob, d.Boolean)
 }
 
 // DeleteRider removes everything this package holds about rider, in one
