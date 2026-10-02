@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/pacing"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -72,9 +73,14 @@ type coverageDTO struct {
 	Message             string  `json:"message,omitempty"`
 }
 
+// biasDTO says whether generation favours effort lengths for this route (only
+// Build and Peak weeks do), the phase the rider is in now, and the lengths, so
+// the card can say "Build and Peak sessions favour 12-minute efforts".
 type biasDTO struct {
-	Active bool   `json:"active"`
-	Phase  string `json:"phase,omitempty"`
+	Active       bool   `json:"active"`
+	Phase        string `json:"phase,omitempty"`
+	SustainedSec int    `json:"sustainedSec,omitempty"`
+	ShortSec     int    `json:"shortSec,omitempty"`
 }
 
 type routeDemandsDTO struct {
@@ -294,6 +300,76 @@ func routeAssumptions(weightKG, ifv float64, derived bool) []string {
 	return out
 }
 
+// demandDurations is each climb's duration, for scheduler.DemandFromClimbs.
+func demandDurations(cl []demandClimbDTO) []float64 {
+	out := make([]float64, len(cl))
+	for i, c := range cl {
+		out[i] = c.DurationSec
+	}
+	return out
+}
+
+// routeDemandFor is what a goal's route asks of generated sessions, or nil.
+// Anything that stops it being computed is nil, never an error: a missing or
+// invisible route, no elevation, no FTP, a running goal or a library that
+// cannot be read must not block planning, which then goes on as it would
+// without a route. The one line it logs carries the goal, the route slug and
+// the outcome, never a number about the rider.
+func (s *Server) routeDemandFor(ctx context.Context, g workout.Goal, profile workout.RiderProfile) *scheduler.RouteDemand {
+	if g.RouteSlug == "" {
+		return nil
+	}
+	outcome := "unavailable"
+	defer func() {
+		s.logger().Debug("route demand", "goal", g.ID, "route", g.RouteSlug, "outcome", outcome)
+	}()
+	if profile.FTPWatts <= 0 || (g.Sport != "" && g.Sport != model.SportCycling) {
+		return nil
+	}
+	rp, code, err := s.loadRouteProfile(ctx, g.Rider, g.RouteSlug)
+	if err != nil {
+		outcome = "unreadable"
+		s.logger().Warn("route demand: reading the route failed", "goal", g.ID, "route", g.RouteSlug, "err", err)
+		return nil
+	}
+	if code != "" {
+		outcome = code
+		return nil
+	}
+	ph := pacing.DefaultPhysics(profile.WeightKG)
+	ifv := g.PacingIF
+	if ifv == 0 {
+		ifv = pacing.DerivedIF(rp.Segs, ph, profile.FTPWatts)
+	}
+	cl := demandClimbs(rp, profile.FTPWatts, ph, ifv)
+	demand := scheduler.DemandFromClimbs(rp.Climbs, demandDurations(cl), rp.Route.Stats.AscentM, rp.Route.Stats.DistanceM)
+	outcome = "none"
+	if demand != nil {
+		outcome = "biased"
+	}
+	return demand
+}
+
+// biasFor reports what generation does with this route. The phase is best
+// effort: a goal with no event date or one in the past has no plan to read it
+// from, and the card then just leaves it out.
+func (s *Server) biasFor(ctx context.Context, g workout.Goal, rp *routeProfile, cl []demandClimbDTO) biasDTO {
+	demand := scheduler.DemandFromClimbs(rp.Climbs, demandDurations(cl), rp.Route.Stats.AscentM, rp.Route.Stats.DistanceM)
+	out := biasDTO{Active: demand != nil && (demand.Sustained > 0 || demand.Short > 0 || demand.Punchy > 0 || demand.Climbing)}
+	if demand != nil {
+		out.SustainedSec, out.ShortSec = demand.Sustained, demand.Short
+	}
+	if plan, _, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider); err == nil {
+		today := s.now().Format(dateLayout)
+		for _, wk := range plan.Weeks {
+			if start, end := weekBounds(wk); today >= start && today <= end {
+				out.Phase = string(wk.Phase)
+			}
+		}
+	}
+	return out
+}
+
 // goalForOwner loads goal id for its owner, or writes the 404 every
 // not-yours-or-not-there case gets: the same answer for both, so a goal's
 // existence is not confirmed to another rider.
@@ -377,6 +453,6 @@ func (s *Server) handleRouteDemands(w http.ResponseWriter, r *http.Request) {
 		Assumptions: routeAssumptions(profile.WeightKG, ifv, derived),
 		Climbs:      cl,
 		Coverage:    coverageFor(cl, longest, zone),
-		Bias:        biasDTO{},
+		Bias:        s.biasFor(r.Context(), g, rp, cl),
 	})
 }

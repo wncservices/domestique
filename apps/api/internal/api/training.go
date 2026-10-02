@@ -703,6 +703,17 @@ type seasonContext struct {
 	plan    periodization.Plan
 	profile workout.RiderProfile
 	levels  map[string]float64
+	// demand is what the goal's route asks of Build and Peak sessions, read
+	// once here. nil when there is no route, it is not visible, has no
+	// elevation, the rider has no FTP, or anything else stops it being
+	// computed: planning then goes on exactly as it does without a route.
+	demand *scheduler.RouteDemand
+}
+
+// options is what generation reads from the context: only the route demand
+// today. A nil demand adds nothing.
+func (sc seasonContext) options() []scheduler.Option {
+	return []scheduler.Option{scheduler.WithRouteDemand(sc.demand)}
 }
 
 func (s *Server) seasonContext(ctx context.Context, g workout.Goal) (seasonContext, error) {
@@ -714,7 +725,7 @@ func (s *Server) seasonContext(ctx context.Context, g workout.Goal) (seasonConte
 	if err != nil {
 		return seasonContext{}, err
 	}
-	return seasonContext{plan: plan, profile: profile, levels: levels}, nil
+	return seasonContext{plan: plan, profile: profile, levels: levels, demand: s.routeDemandFor(ctx, g, profile)}, nil
 }
 
 func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
@@ -740,7 +751,7 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
 	if err != nil {
 		return nil, 0, err
 	}

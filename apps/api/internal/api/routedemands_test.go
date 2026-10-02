@@ -51,8 +51,10 @@ type demandsOut struct {
 		Message             string  `json:"message"`
 	} `json:"coverage"`
 	Bias struct {
-		Active bool   `json:"active"`
-		Phase  string `json:"phase"`
+		Active       bool    `json:"active"`
+		Phase        string  `json:"phase"`
+		SustainedSec float64 `json:"sustainedSec"`
+		ShortSec     float64 `json:"shortSec"`
 	} `json:"bias"`
 }
 
@@ -169,8 +171,10 @@ func TestRouteDemandsReportClimbsWithTimeAndWatts(t *testing.T) {
 	if out.Coverage.Uncovered != 2 || out.Coverage.LongestSustainedSec != 0 || !strings.Contains(out.Coverage.Message, "2 climbs") {
 		t.Errorf("coverage = %+v", out.Coverage)
 	}
-	if out.Bias.Active {
-		t.Errorf("bias reported active before generation uses it: %+v", out.Bias)
+	// The route has a 9 minute climb and a 4.5 minute one, so generation does
+	// bias toward it, and the card says what it favours and in which phase.
+	if !out.Bias.Active || out.Bias.Phase == "" || out.Bias.SustainedSec < 480 || out.Bias.ShortSec == 0 {
+		t.Errorf("bias = %+v, want active with a phase and the wanted effort lengths", out.Bias)
 	}
 	joined := strings.Join(out.Assumptions, " | ")
 	if !strings.Contains(joined, "75 kg") {

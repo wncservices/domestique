@@ -158,7 +158,7 @@ func (s *Server) recordLegacyWeek(ctx context.Context, g workout.Goal, weekStart
 // alone, so only the timestamp shows it). Only days after today are
 // rebuilt, so a session being ridden or already ridden is never touched.
 func (s *Server) refreshWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, today string) (int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
 	if err != nil {
 		return 0, err
 	}
