@@ -64,8 +64,15 @@ type Goal struct {
 	TargetDistanceM  float64
 	TargetElevationM float64
 	Notes            string
-	CreatedAt        string
-	UpdatedAt        string
+	// RouteSlug is the library route this goal is for, "" when none. It is
+	// only ever a slug: the route's geometry stays in the library, and the
+	// API checks the rider may see the route before a goal can carry it.
+	RouteSlug string
+	// PacingIF overrides the pacing plan's derived intensity factor; 0 means
+	// derived from the event's duration.
+	PacingIF  float64
+	CreatedAt string
+	UpdatedAt string
 }
 
 // RiderProfile is what the planner (once it exists — see docs/training-plan.md
@@ -87,6 +94,11 @@ type RiderProfile struct {
 	// has looked at and confirmed is never silently touched again.
 	FTPWatts     float64
 	FTPEstimated bool
+	// WeightKG is the rider's body weight, 0 when unset. Typed by the rider,
+	// never estimated from a provider. Read-only here: SaveProfile never
+	// writes it (every automatic writer builds a profile that does not know
+	// the weight, and would zero it), only DB.SetWeight does.
+	WeightKG float64
 	// Estimated names every *other* field that was filled in automatically
 	// rather than typed by the rider (Field* constants below) — from
 	// Garmin's own biometrics, or inferred from the rider's completed
@@ -393,6 +405,8 @@ type CreateGoalRequest struct {
 	TargetDistanceM  float64
 	TargetElevationM float64
 	Notes            string
+	RouteSlug        string
+	PacingIF         float64
 }
 
 // UpdateGoalRequest edits a goal. Nil fields are left alone.
@@ -404,6 +418,10 @@ type UpdateGoalRequest struct {
 	TargetDistanceM  *float64
 	TargetElevationM *float64
 	Notes            *string
+	// RouteSlug nil keeps the link, empty clears it. PacingIF nil keeps it,
+	// 0 goes back to derived.
+	RouteSlug *string
+	PacingIF  *float64
 }
 
 // CreateWorkoutRequest creates a workout. Rider must be set by the caller

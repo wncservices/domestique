@@ -765,6 +765,11 @@ export interface Goal {
   targetDistanceM?: number
   targetElevationM?: number
   notes?: string
+  /** The library route this goal is for. Only a slug: no coordinates ride on a goal. */
+  routeSlug?: string
+  /** The rider's override of the pacing plan's intensity factor (0.60 to 1.05);
+   *  absent means derived from the event's duration. */
+  pacingIf?: number
   createdAt: string
   updatedAt: string
 }
@@ -777,6 +782,8 @@ export interface CreateGoalRequest {
   targetDistanceM?: number
   targetElevationM?: number
   notes?: string
+  routeSlug?: string
+  pacingIf?: number
 }
 
 export interface UpdateGoalRequest {
@@ -787,6 +794,10 @@ export interface UpdateGoalRequest {
   targetDistanceM?: number
   targetElevationM?: number
   notes?: string
+  /** Empty clears the link; absent keeps it. */
+  routeSlug?: string
+  /** 0 goes back to derived; absent keeps it. */
+  pacingIf?: number
 }
 
 /** 0 (or absent) means unset for every numeric field here — never inferred
@@ -799,6 +810,9 @@ export interface RiderProfile {
    *  Saving the profile by hand always clears this, whatever value is in
    *  the field at the time — see the API's own comment on why. */
   ftpEstimated?: boolean
+  /** Body weight in kg (30 to 250). Absent on a save keeps the stored value,
+   *  0 clears it; unset, pacing assumes 75 kg and says so. */
+  weightKg?: number
   thresholdPaceSecPerKm?: number
   maxHr?: number
   /** Lactate threshold heart rate (LTHR) — the anchor for HR zones when known. */

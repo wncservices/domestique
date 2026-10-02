@@ -110,21 +110,29 @@ type goalDTO struct {
 	TargetDistanceM  float64 `json:"targetDistanceM,omitempty"`
 	TargetElevationM float64 `json:"targetElevationM,omitempty"`
 	Notes            string  `json:"notes,omitempty"`
-	CreatedAt        string  `json:"createdAt"`
-	UpdatedAt        string  `json:"updatedAt"`
+	// RouteSlug is the library route the goal is for; PacingIF the rider's
+	// override of the derived pacing intensity. Both omitted when unset.
+	RouteSlug string  `json:"routeSlug,omitempty"`
+	PacingIF  float64 `json:"pacingIf,omitempty"`
+	CreatedAt string  `json:"createdAt"`
+	UpdatedAt string  `json:"updatedAt"`
 }
 
 func goalDTOFrom(g workout.Goal) goalDTO {
 	return goalDTO{
 		ID: g.ID, Name: g.Name, Sport: string(g.Sport), EventDate: g.EventDate,
 		Priority: string(g.Priority), TargetDistanceM: g.TargetDistanceM, TargetElevationM: g.TargetElevationM,
-		Notes: g.Notes, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt,
+		Notes: g.Notes, RouteSlug: g.RouteSlug, PacingIF: g.PacingIF, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt,
 	}
 }
 
 type riderProfileDTO struct {
-	FTPWatts              float64  `json:"ftpWatts,omitempty"`
-	FTPEstimated          bool     `json:"ftpEstimated,omitempty"`
+	FTPWatts     float64 `json:"ftpWatts,omitempty"`
+	FTPEstimated bool    `json:"ftpEstimated,omitempty"`
+	// WeightKG is the rider's body weight. A pointer so a save that does not
+	// mention it keeps the stored value (nil), and 0 clears it; omitted from
+	// a response when unset.
+	WeightKG              *float64 `json:"weightKg,omitempty"`
 	ThresholdPaceSecPerKM float64  `json:"thresholdPaceSecPerKm,omitempty"`
 	MaxHR                 int      `json:"maxHr,omitempty"`
 	ThresholdHR           int      `json:"thresholdHr,omitempty"`
@@ -150,7 +158,12 @@ type riderProfileDTO struct {
 }
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
+	var weight *float64
+	if p.WeightKG > 0 {
+		weight = &p.WeightKG
+	}
 	return riderProfileDTO{
+		WeightKG: weight,
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
 		MaxHR: p.MaxHR, ThresholdHR: p.ThresholdHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
@@ -268,6 +281,8 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 		TargetDistanceM  float64 `json:"targetDistanceM"`
 		TargetElevationM float64 `json:"targetElevationM"`
 		Notes            string  `json:"notes"`
+		RouteSlug        string  `json:"routeSlug"`
+		PacingIF         float64 `json:"pacingIf"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
@@ -275,10 +290,19 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rider := auth.FromContext(r.Context()).User
+	if !validPacingIF(body.PacingIF) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "pacingIf must be 0 (derived) or between 0.60 and 1.05"})
+		return
+	}
+	if status, msg := s.checkGoalRoute(r.Context(), rider, model.Sport(body.Sport), strings.TrimSpace(body.RouteSlug)); status != 0 {
+		writeJSON(w, status, map[string]string{"error": msg})
+		return
+	}
 	g, err := s.Training.CreateGoal(r.Context(), workout.CreateGoalRequest{
 		Rider: rider, Name: body.Name, Sport: model.Sport(body.Sport), EventDate: body.EventDate,
 		Priority: workout.Priority(body.Priority), TargetDistanceM: body.TargetDistanceM,
 		TargetElevationM: body.TargetElevationM, Notes: body.Notes,
+		RouteSlug: body.RouteSlug, PacingIF: body.PacingIF,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -316,15 +340,43 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		TargetDistanceM  *float64 `json:"targetDistanceM"`
 		TargetElevationM *float64 `json:"targetElevationM"`
 		Notes            *string  `json:"notes"`
+		RouteSlug        *string  `json:"routeSlug"`
+		PacingIF         *float64 `json:"pacingIf"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
 
+	if body.PacingIF != nil && !validPacingIF(*body.PacingIF) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "pacingIf must be 0 (derived) or between 0.60 and 1.05"})
+		return
+	}
+	// The route the goal will carry and the sport it will have, after this
+	// update: the visibility check runs only when the link is being set (a
+	// link already made is not re-litigated by an unrelated edit), the sport
+	// check whenever either side moves.
+	slug, sport := g.RouteSlug, g.Sport
+	if body.RouteSlug != nil {
+		slug = strings.TrimSpace(*body.RouteSlug)
+	}
+	if body.Sport != nil {
+		sport = model.Sport(*body.Sport)
+	}
+	if body.RouteSlug != nil && slug != "" {
+		if status, msg := s.checkGoalRoute(r.Context(), g.Rider, sport, slug); status != 0 {
+			writeJSON(w, status, map[string]string{"error": msg})
+			return
+		}
+	} else if slug != "" && sport != "" && sport != model.SportCycling {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "a route can only be linked to a cycling goal"})
+		return
+	}
+
 	req := workout.UpdateGoalRequest{
 		Name: body.Name, EventDate: body.EventDate,
 		TargetDistanceM: body.TargetDistanceM, TargetElevationM: body.TargetElevationM, Notes: body.Notes,
+		RouteSlug: body.RouteSlug, PacingIF: body.PacingIF,
 	}
 	if body.Sport != nil {
 		sport := model.Sport(*body.Sport)
@@ -921,6 +973,11 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if body.WeightKG != nil && !validWeightKG(*body.WeightKG) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "weightKg must be 0 (unset) or between 30 and 250"})
+		return
+	}
+
 	rider := auth.FromContext(r.Context()).User
 	// before is what recalibrateLevelsForFTP needs; the marker is not carried
 	// forward into the save below because SaveProfile never writes it.
@@ -943,6 +1000,15 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+	// Weight has its own writer: SaveProfile never touches it, so this save
+	// (and every automatic one) cannot zero what the form did not mention.
+	if body.WeightKG != nil {
+		if err := s.Training.SetWeight(r.Context(), rider, *body.WeightKG); err != nil {
+			s.fail(w, err)
+			return
+		}
+		saved.WeightKG = *body.WeightKG
 	}
 	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before, "profile_saved")
 	if err != nil {
