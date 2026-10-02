@@ -43,6 +43,15 @@ func hrFor(profile workout.RiderProfile, pct float64) (low, high int) {
 	return int(math.Round(l)), int(math.Round(h))
 }
 
+// HRForWatts is the heart-rate range for riding at watts, for a rider whose
+// FTP is ftp: the table hrFor uses for every segment of the plan.
+func HRForWatts(profile workout.RiderProfile, watts, ftp float64) (low, high int) {
+	if ftp <= 0 {
+		return 0, 0
+	}
+	return hrFor(profile, watts/ftp)
+}
+
 // maxCueName is how many characters a course point name may have: older Garmin
 // Edges show about 10, newer ones about 15.
 const maxCueName = 15

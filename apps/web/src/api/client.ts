@@ -65,6 +65,7 @@ import type {
   UpdateWorkoutRequest,
   RiderProfile,
   RouteDemands,
+  PacingPlan,
   FitnessResponse,
   GoalProposal,
   LinkSessionRequest,
@@ -499,6 +500,12 @@ export const api = {
    *  needing to re-upload the file. A no-op, not an error, on a route that
    *  already has real elevation. 412s if this deployment has no elevation
    *  lookup configured at all. */
+  /** The race-day pacing plan for a route: targets per climb and segment and
+   *  the expected time. `goalId` takes that goal's intensity override. */
+  pacing: (slug: string, goalId?: string) =>
+    request<PacingPlan>(
+      `/api/routes/${encodeSlug(slug)}/pacing${goalId ? `?goal=${encodeURIComponent(goalId)}` : ''}`,
+    ),
   recalculateElevation: (slug: string) =>
     request<Route>(`/api/routes/${encodeSlug(slug)}/recalculate-elevation`, { method: 'POST' }),
 
