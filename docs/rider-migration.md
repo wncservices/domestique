@@ -47,12 +47,24 @@ because the issuer decides it — not you, not this app. So:
 
 ## What it touches
 
-Five columns across four tables — more than "the `rider` column," because
-`accounts.id` is a derived composite key (`"<provider>:<rider>"`), and
-`sync_state.account_id` carries that same string as half of its own primary
-key. Renaming only the `rider` column and missing these two would silently
-orphan every account's push history — the next push would look like it needs
-to happen again from scratch, with no error telling you why.
+Every table that names a rider, not only the four below: the training data
+(goals, plan, completed sessions, fitness, HRV and sleep, progression), crews,
+shares, weather location and the legacy Komoot table move too. The list is the
+`riderTables` registry in `internal/api/riderdata.go`, the same one the purge of
+a removed rider uses, and a test fails if a table is added without saying what
+a rename does to it. `domestique rename-rider --dry-run` prints a row count per
+table.
+
+Beyond the `rider` column, `accounts.id` is a derived composite key
+(`"<provider>:<rider>"`), and `sync_state.account_id` carries that same string
+as half of its own primary key. Renaming only the `rider` column and missing
+these two would silently orphan every account's push history — the next push
+would look like it needs to happen again from scratch, with no error telling
+you why.
+
+Columns that name a rider as an author or owner (`created_by`, `owner`,
+`decided_by`, `updated_by`) are renamed as well: they are the same person, and
+leaving the old name would credit somebody who no longer exists.
 
 | Table | Column(s) | Why |
 |---|---|---|
@@ -61,15 +73,18 @@ to happen again from scratch, with no error telling you why.
 | `sync_state` | `account_id` | inherits from `accounts.id` — must move with it or history is orphaned |
 | `provider_links` | `rider` | composite key `(provider, rider)`, no derived id elsewhere |
 
-If you are on Postgres and want to check by hand before trusting the tool,
-these four tables and columns are everything it reads and writes — nothing
-else in the schema carries a rider string.
+The four tables above are the ones that need more than a column rewrite; the
+rest are plain `UPDATE ... SET col = new WHERE col = old` per registry entry.
+Sessions are not renamed (the identity inside them is sealed): stop the server
+first, as step 4 says, and the rider signs in again afterwards.
 
 ## If it finds a conflict
 
 The tool checks, before writing anything, whether the target rider already
-owns a colliding row (an existing `garmin:auth0|...` account, or an existing
-provider sign-in for that pair). If it does, the whole operation aborts and
+owns a colliding row (an existing `garmin:auth0|...` account, an existing
+provider sign-in for that pair, or any row in a table where the rider is part of
+a unique key: a profile, a wellness row for the same date, a membership of the
+same crew). If it does, the whole operation aborts, names the table, and
 nothing is written — resolve the conflict (usually: you migrated this rider
 already, or two Authelia accounts are being merged into one identity, which
 needs a decision about which account's data wins) and retry.
@@ -91,6 +106,11 @@ it.
 ```bash
 domestique rename-rider --dry-run --replace wilant 'auth0|64f2a1b2c3d4e5f6'
 ```
+
+`--replace` only ever resolves conflicts in accounts, sync state and provider
+sign-ins. A collision in any other table (a profile, health data, a crew
+membership) is always refused: remove the new identity's row by hand if it
+really is the throwaway one.
 
 Read the "replaced on conflict" counts as carefully as the ordinary ones —
 they name rows this run would delete. If the *new* identity's row is

@@ -663,7 +663,7 @@ This repository is **public**. Everything below assumes a reader who is not you.
 - `domestique.yaml` holds account **ids and labels only**, and is gitignored anyway;
   `domestique.example.yaml` is the committed template.
 - If a credential is ever committed, rotate it. Removing the commit is not enough.
-- **Every new table that holds rider data (a `rider`/`created_by` column, or keyed through a workout, session, goal or account id) must be registered in `riderTables` (`internal/api/riderdata.go`) and deleted by `purgeRiderData`** — health and location data must not outlive the rider. `TestEveryRiderKeyedTableIsRegistered` and `TestPurgeRemovesEveryRidersData` fail until it is.
+- **Every new table that holds rider data (a `rider`/`created_by` column, or keyed through a workout, session, goal or account id) must be registered in `riderTables` (`internal/api/riderdata.go`) and deleted by `purgeRiderData`** — health and location data must not outlive the rider. `TestEveryRiderKeyedTableIsRegistered` and `TestPurgeRemovesEveryRidersData` fail until it is. The same entry carries a `Rename` rule that `domestique rename-rider` (`api.RenameRider`) runs in one transaction; `TestEveryRegisteredTableHasARenameRule` fails if it misses a rider column.
 - **GPX files are personal location data** — a route usually starts at somebody's front door.
   They belong in a private source, never in this repo. `examples/routes/` holds one synthetic
   route and must stay that way.
