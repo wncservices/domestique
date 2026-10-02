@@ -197,6 +197,21 @@ func (p *planner) forgetLeavingHardDays(scope map[class][]scoped) {
 	}
 }
 
+// FreedDays are the dates, today or later, that were inside an event before a
+// change and are not after it: the days a shortened or deleted event gives
+// back, sorted.
+func FreedDays(previous, next []Event, today string) []string {
+	after := Blackout(next)
+	var out []string
+	for d := range Blackout(previous) {
+		if !after[d] && d >= today {
+			out = append(out, d)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (p *planner) finish() Diff {
 	sort.SliceStable(p.diff.Changes, func(i, j int) bool {
 		a, b := p.diff.Changes[i], p.diff.Changes[j]
@@ -315,6 +330,10 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 		return eligible
 	case scheduler.IsGenerated(w):
 		return eligible
+	case lifeRamped(w):
+		// Only a life event's own ramp touched it, and the rider has since
+		// made another event over its day: it is still the plan's session.
+		return eligible
 	case w.GoalID == "" || !strings.HasPrefix(w.Description, scheduler.GeneratedDescription):
 		return ineligibleBuilt
 	case strings.Contains(w.Description, scheduler.SwappedMarker):
@@ -322,6 +341,15 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 	default:
 		return ineligibleAdjusted
 	}
+}
+
+// lifeRamped is a plan-made session whose only automatic change is a life
+// event's return ramp (not a readiness easing, not a swap, not a move).
+func lifeRamped(w workout.Workout) bool {
+	return w.GoalID != "" && strings.HasPrefix(w.Description, scheduler.GeneratedDescription) &&
+		strings.Contains(w.Description, scheduler.AdjustedMarker+" "+rampNotePrefix) &&
+		strings.Count(w.Description, scheduler.AdjustedMarker) == 1 &&
+		!strings.Contains(w.Description, scheduler.SwappedMarker)
 }
 
 func (p *planner) leave(w workout.Workout, why string) {

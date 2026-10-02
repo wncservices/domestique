@@ -313,6 +313,24 @@ func TestNoRideReason(t *testing.T) {
 	}
 }
 
+func TestASessionOnlyAnEarlierRampTouchedIsStillThePlansToRemove(t *testing.T) {
+	// An illness over Thursday eased Saturday's session (ramp day 2). Making the
+	// illness longer so it covers Saturday must still remove that session, not
+	// treat it as one the rider touched.
+	ramped := easy("sat", "2026-10-10", 60)
+	ramped.Description += " " + scheduler.AdjustedMarker + " Life event: eased after illness (return to training)."
+	prev := []Event{ill("2026-10-08", "2026-10-08", OptionProper)}
+	now := []Event{ill("2026-10-08", "2026-10-10", OptionProper)}
+	d := preview(now, prev, ramped)
+	c := mustFind(t, d, "remove:sat")
+	if !c.Default {
+		t.Error("removing a ramp-touched session should be ticked")
+	}
+	if len(d.LeftAlone) != 0 {
+		t.Errorf("left alone: %+v", d.LeftAlone)
+	}
+}
+
 func TestLongIllnessAddsTheClinicianLine(t *testing.T) {
 	short := preview([]Event{ill("2026-10-08", "2026-10-20", OptionProper)}, nil)
 	if len(short.Advice) != 0 {

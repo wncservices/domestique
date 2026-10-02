@@ -1292,6 +1292,81 @@ export interface TrainingWeek {
     plannedSeconds: number
     completedSeconds: number
   }
+  /** The rider's life events overlapping this week, for the bands. */
+  lifeEvents?: LifeEvent[]
+}
+
+export type LifeEventKind = 'travel' | 'illness' | 'busy' | 'other'
+export type LifeEventOption = 'no_bike' | 'gym' | 'mild' | 'proper'
+
+/** Mirrors lifeEventDTO in internal/api/lifeevents.go. */
+export interface LifeEvent {
+  id: string
+  kind: LifeEventKind
+  startDate: string
+  endDate: string
+  option?: LifeEventOption
+  note?: string
+}
+
+export type LifeChangeOp = 'remove' | 'move' | 'ease' | 'shorten' | 'indoor' | 'add'
+
+/** One line of a life-event preview. `id` is deterministic ("<op>:<workoutId>",
+ *  "add:<date>"), which is what the skip and include lists name. */
+export interface LifeChange {
+  id: string
+  op: LifeChangeOp
+  workoutId?: string
+  date: string
+  toDate?: string
+  name: string
+  kind?: LifeEventKind
+  reason: string
+  /** Whether the preview ticks it; the removal of a session the rider built is not. */
+  default: boolean
+}
+
+export interface LifeLeftAlone {
+  workoutId: string
+  date: string
+  name: string
+  reason: string
+}
+
+export interface LifeDiff {
+  changes: LifeChange[]
+  leftAlone: LifeLeftAlone[]
+  advice: string[]
+}
+
+export interface LifeApplied {
+  removed: number
+  moved: number
+  eased: number
+  shortened: number
+  indoor: number
+  added: number
+}
+
+/** Mirrors lifeResultDTO. A dry run has a diff and nothing else. */
+export interface LifeEventResult {
+  event?: LifeEvent
+  diff: LifeDiff
+  applied?: LifeApplied
+}
+
+/** The request of a create or an edit. The client never supplies the diff:
+ *  the server recomputes it, and applies it minus `skip` (plus the opt-in
+ *  changes named in `include`). */
+export interface LifeEventRequest {
+  kind: LifeEventKind
+  startDate: string
+  endDate: string
+  option?: LifeEventOption | ''
+  note?: string
+  dryRun?: boolean
+  skip?: string[]
+  include?: string[]
 }
 
 /** POST /api/training/replan's response — see internal/api/replan.go.
