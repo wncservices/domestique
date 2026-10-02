@@ -1462,3 +1462,77 @@ export interface TrainNowResponse {
   verdict: 'ready' | 'caution' | 'rest'
   suggestions: TrainNowSuggestion[]
 }
+
+export type ProjectionVerdictKey =
+  | 'unavailable'
+  | 'incomplete'
+  | 'undertrained'
+  | 'fatigued'
+  | 'fresh'
+  | 'on_track'
+
+/** The typical race-day form for an event's length. A default, not a goal. */
+export interface ProjectionBand {
+  low: number
+  high: number
+}
+
+export interface ProjectionPoint {
+  date: string
+  ctl: number
+  atl: number
+  tsb: number
+  /** That day's load: ridden before and on today, planned after. */
+  load: number
+}
+
+export interface ProjectionVerdict {
+  key: ProjectionVerdictKey
+  message: string
+  /** A Nuxt UI colour name; absent when there is nothing to colour. */
+  tone?: 'success' | 'warning' | 'info'
+}
+
+export interface ProjectionRampWarning {
+  weekStart: string
+  perWeek: number
+  excessTss: number
+}
+
+/** Text plus the numbers behind it. Nothing applies it. */
+export interface ProjectionSuggestion {
+  text: string
+  days?: number
+  tsb?: number
+  reaches?: boolean
+  excessTss?: number
+}
+
+export interface ProjectionEvent {
+  goalId: string
+  name: string
+  date: string
+  priority: 'A' | 'B' | 'C'
+  ctl: number
+  atl: number
+  tsb: number
+  band: ProjectionBand
+}
+
+/** GET /api/training/projection: what the planned season does to form up to the
+ *  primary event. Computed on every read; the endpoint stores nothing. B and C
+ *  events get no verdict, ramp or suggestion. */
+export interface ProjectionResponse {
+  available: boolean
+  reason?: string
+  goal: { id: string; name: string; eventDate: string; priority: 'A' | 'B' | 'C' } | null
+  points: ProjectionPoint[]
+  raceDay: { date: string; ctl: number; atl: number; tsb: number } | null
+  band: ProjectionBand | null
+  targetCtl: number
+  verdict: ProjectionVerdict | null
+  ramp: { maxPerWeek: number; warnings: ProjectionRampWarning[] } | null
+  suggestion: ProjectionSuggestion | null
+  events: ProjectionEvent[]
+  assumptions: string[]
+}

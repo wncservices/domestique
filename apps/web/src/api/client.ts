@@ -74,6 +74,7 @@ import type {
   ProgressionResponse,
   SessionAnalysis,
   ReadinessResponse,
+  ProjectionResponse,
   EaseTomorrowResult,
   IndoorPreview,
   WeatherPrefs,
@@ -920,6 +921,11 @@ export const api = {
    *  handleGetReadiness. */
   readiness: (today?: string) =>
     request<ReadinessResponse>(`/api/training/readiness${today ? `?today=${encodeURIComponent(today)}` : ''}`),
+  /** The race-day projection for the nearest A goal (or the one named): form
+   *  rolled forward through the planned season. Read-only; see
+   *  internal/api/projection.go. */
+  projection: (goalId?: string) =>
+    request<ProjectionResponse>(`/api/training/projection${goalId ? `?goal=${encodeURIComponent(goalId)}` : ''}`),
   /** Eases tomorrow's hard session ahead of time, after the server has
    *  recomputed the forecast itself. today is the browser's local date
    *  (YYYY-MM-DD), the same reasoning upcomingRides' own from param gives.
