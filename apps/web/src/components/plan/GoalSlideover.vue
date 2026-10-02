@@ -3,6 +3,8 @@
 // (design's "Goal and workout forms move from UModal to USlideover"). Pure
 // presentation: the page still owns goalForm/saveGoal/proposeGoal, this only
 // renders them and emits back — see forms.ts for the GoalForm shape.
+import { computed, ref, watch } from 'vue'
+import { api } from '@/api/client'
 import type { GoalPriority, Sport } from '@/api/types'
 import type { GoalForm } from '@/components/plan/forms'
 import { NO_ROUTE, sports } from '@/components/plan/forms'
@@ -25,6 +27,34 @@ const emit = defineEmits<{ 'update:form': [GoalForm]; propose: []; save: [] }>()
 
 function set<K extends keyof GoalForm>(field: K, value: GoalForm[K]) {
   emit('update:form', { ...props.form, [field]: value })
+}
+
+// Pacing intensity: derived from how long the event takes, and shown here as the
+// slider's starting point. The rider changes it only on demand: the switch is
+// off (derived) until they turn it on, and turning it off again goes back to
+// derived.
+const MIN_IF = 0.6
+const MAX_IF = 1.05
+const derivedIf = ref<number | null>(null)
+const customIf = computed(() => props.form.pacingIf > 0)
+
+watch(
+  () => [open.value, props.form.routeSlug] as const,
+  async ([isOpen, slug]) => {
+    derivedIf.value = null
+    if (!isOpen || slug === NO_ROUTE) return
+    try {
+      const plan = await api.pacing(slug)
+      if (plan.available) derivedIf.value = plan.assumptions.if
+    } catch {
+      // The slider falls back to a middle value; the plan itself explains why.
+    }
+  },
+  { immediate: true },
+)
+
+function setCustomIf(on: boolean) {
+  set('pacingIf', on ? (derivedIf.value ?? 0.85) : 0)
 }
 
 const priorities: { value: GoalPriority; label: string }[] = [
@@ -108,6 +138,28 @@ const priorities: { value: GoalPriority; label: string }[] = [
             class="w-full"
             @update:model-value="(v: string) => set('routeSlug', v)"
           />
+        </UFormField>
+        <UFormField
+          v-if="form.sport === 'cycling' && form.routeSlug !== NO_ROUTE"
+          label="Pacing intensity"
+          :help="customIf
+            ? 'Normalised power as a share of your FTP over the whole route. Lower is easier.'
+            : `Derived from how long the event takes${derivedIf ? ` (${derivedIf.toFixed(2)})` : ''}. Turn this on to set your own.`"
+        >
+          <div class="flex flex-col gap-2">
+            <USwitch :model-value="customIf" label="Set my own" @update:model-value="(v: boolean) => setCustomIf(v)" />
+            <div v-if="customIf" class="flex items-center gap-3">
+              <USlider
+                class="flex-1"
+                :min="MIN_IF"
+                :max="MAX_IF"
+                :step="0.01"
+                :model-value="form.pacingIf"
+                @update:model-value="(v: number | undefined) => set('pacingIf', v ?? form.pacingIf)"
+              />
+              <span class="w-12 text-right font-mono tabular-nums text-sm">{{ form.pacingIf.toFixed(2) }}</span>
+            </div>
+          </div>
         </UFormField>
         <UFormField label="Notes">
           <UTextarea :model-value="form.notes" class="w-full" @update:model-value="(v: string) => set('notes', String(v))" />

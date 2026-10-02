@@ -20,6 +20,9 @@ export interface GoalForm {
   notes: string
   /** The library route this goal is for, or NO_ROUTE. */
   routeSlug: string
+  /** The rider's pacing intensity factor for the route; 0 means derived from
+   *  how long the event takes. Edited only on demand. */
+  pacingIf: number
 }
 
 // Reka UI's <SelectItem> forbids '' (see NO_GOAL below), so "no route" needs
@@ -30,6 +33,7 @@ export function freshGoalForm(): GoalForm {
   return {
     name: '', sport: 'cycling', eventDate: '', priority: 'B', targetDistanceKm: '', targetElevationM: '', notes: '',
     routeSlug: NO_ROUTE,
+    pacingIf: 0,
   }
 }
 

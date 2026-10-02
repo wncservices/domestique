@@ -178,6 +178,17 @@ func TestAdjacentSegmentsOfOneKindAreMerged(t *testing.T) {
 	}
 }
 
+// The few metres where a summit rolls over are part of the descent, not a
+// ten-second "flat" line of their own.
+func TestASummitRolloverIsNotAFlatLineOfItsOwn(t *testing.T) {
+	plan := Build(hillyInput(250, 0.85, workout.RiderProfile{}))
+	for i, s := range plan.Segments {
+		if s.Kind == KindFlat && s.EndM-s.StartM < 200 && i > 0 && i < len(plan.Segments)-1 {
+			t.Errorf("segment %d is a %.0f m flat stub between %s and %s", i, s.EndM-s.StartM, plan.Segments[i-1].Kind, plan.Segments[i+1].Kind)
+		}
+	}
+}
+
 func TestTargetsAreThreePercentEitherSideRoundedToFiveWatts(t *testing.T) {
 	plan := Build(hillyInput(250, 0.85, workout.RiderProfile{}))
 	for _, s := range plan.Segments {
