@@ -519,6 +519,52 @@ func TestChangingTheOptionOrKindTreatsTheWholeRangeAsFresh(t *testing.T) {
 	mustFind(t, d, "remove:thu")
 }
 
+func TestCheckMoveAppliesTheMoveRules(t *testing.T) {
+	moved := easy("moved", "2026-10-12", 60)
+	moved.Description += " Rescheduled by you: moved from 2026-10-10."
+	busy := Event{ID: "b", Kind: KindBusy, Start: "2026-10-14", End: "2026-10-14"}
+	p := profile()
+	p.AvailableDays = []string{"mon", "tue", "wed", "thu", "fri", "sat"} // not Sunday
+	ws := []workout.Workout{
+		hard("thr", "2026-10-08", 60), built("fri", "2026-10-09", 30),
+		hard("hardMon", "2026-10-12", 60), // a hard session on the 12th
+	}
+	in := Input{Events: []Event{busy}, Workouts: ws, Profile: p, Now: wed}
+	cases := []struct {
+		name string
+		to   string
+		want string // substring of the refusal, "" for allowed
+	}{
+		{"a free available day", "2026-10-10", ""},
+		{"not a date", "soon", "not valid"},
+		{"the same day", "2026-10-08", "already on"},
+		{"before today", "2026-10-05", "already gone"},
+		{"inside an event", "2026-10-14", "life event"},
+		{"not an available day", "2026-10-11", "available days"},
+		{"a day with a session", "2026-10-09", "already has a session"},
+		{"two hard days in a row", "2026-10-13", "consecutive days"},
+	}
+	for _, c := range cases {
+		err := CheckMove(in, ws[0], c.to)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: refused: %v", c.name, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s: err = %v, want it to mention %q", c.name, err, c.want)
+		}
+	}
+	// A vacated day is not free either.
+	vacatedIn := in
+	vacatedIn.Workouts = []workout.Workout{ws[0], moved}
+	if err := CheckMove(vacatedIn, ws[0], "2026-10-10"); err == nil || !strings.Contains(err.Error(), "earlier move") {
+		t.Errorf("a vacated day: %v", err)
+	}
+	// An easy session may follow a hard day.
+	if err := CheckMove(in, easy("e", "2026-10-08", 60), "2026-10-13"); err != nil {
+		t.Errorf("an easy session was refused next to a hard one: %v", err)
+	}
+}
+
 func TestPreviewReadsTodayInTheClocksOwnZone(t *testing.T) {
 	// 01:00 on Wednesday 7 October in Brussels is 23:00 on Tuesday the 6th in
 	// UTC. Today follows the clock's own zone, never the machine's: Tuesday's
