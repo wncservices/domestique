@@ -322,6 +322,29 @@ func (s *Store) ListRiders(provider string) ([]string, error) {
 	return out, rows.Err()
 }
 
+// DeleteRider removes every connection a rider has, of any provider, for when
+// the rider themselves is deleted (see the API package's purgeRiderData).
+//
+// It also removes the rider from komoot_links, the table adoptKomootLinks
+// leaves behind on purpose. Without that, the next start would copy the
+// fossil's sealed Komoot token straight back into provider_links — the one
+// copy a purge of provider_links alone would resurrect.
+func (s *Store) DeleteRider(rider string) error {
+	rider = strings.ToLower(strings.TrimSpace(rider))
+	if rider == "" {
+		return errors.New("providerlink: no rider to delete")
+	}
+	if _, err := s.db.Exec(s.dialect.Rebind(`DELETE FROM provider_links WHERE rider = ?`), rider); err != nil {
+		return err
+	}
+	if s.tableExists("komoot_links") {
+		if _, err := s.db.Exec(s.dialect.Rebind(`DELETE FROM komoot_links WHERE rider = ?`), rider); err != nil {
+			return fmt.Errorf("remove legacy komoot_links row: %w", err)
+		}
+	}
+	return nil
+}
+
 // Delete removes a rider's connection. Deleting one that is not there is not
 // an error: the caller wanted it gone, and it is.
 func (s *Store) Delete(provider, rider string) error {

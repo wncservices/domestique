@@ -245,6 +245,67 @@ CREATE TABLE IF NOT EXISTS scheduled_weeks (
 );`, d.Blob, d.Boolean)
 }
 
+// DeleteRider removes everything this package holds about rider, in one
+// transaction, and returns how many rows that was. Used when a rider is
+// deleted (see the API package's purgeRiderData): goals, profile, workouts and
+// their push records, completed sessions and their analyses, fitness
+// snapshots, HRV and sleep, progression levels and history, threshold
+// suggestions and session links are all health and training data about one
+// person, and none of it has a use once they are gone.
+//
+// workout_pushes and scheduled_weeks carry no rider of their own — they hang
+// off a workout and a goal — so they go first, while the rows that say whose
+// they are still exist. A table added to schema that holds rider data has to be
+// added here too; TestEveryRiderKeyedTableIsRegistered in the API package
+// fails until it is registered, and its purge test until it is deleted.
+//
+// All or nothing: a failure part-way rolls back, so a retry starts from the
+// same place rather than from a half-purged rider. Deleting a rider with no
+// rows is not an error.
+func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
+	rider = strings.ToLower(strings.TrimSpace(rider))
+	if rider == "" {
+		return 0, errors.New("workout: no rider to delete")
+	}
+
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("workout: purge rider: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Every statement is a constant with the rider bound, in dependency order.
+	stmts := []string{
+		`DELETE FROM workout_pushes WHERE workout_id IN (SELECT id FROM workouts WHERE rider = ?)`,
+		`DELETE FROM scheduled_weeks WHERE goal_id IN (SELECT id FROM goals WHERE rider = ?)`,
+		`DELETE FROM workouts WHERE rider = ?`,
+		`DELETE FROM goals WHERE rider = ?`,
+		`DELETE FROM session_links WHERE rider = ?`,
+		`DELETE FROM session_analyses WHERE rider = ?`,
+		`DELETE FROM completed_sessions WHERE rider = ?`,
+		`DELETE FROM fitness_snapshots WHERE rider = ?`,
+		`DELETE FROM daily_wellness WHERE rider = ?`,
+		`DELETE FROM progression_history WHERE rider = ?`,
+		`DELETE FROM progression_levels WHERE rider = ?`,
+		`DELETE FROM threshold_suggestions WHERE rider = ?`,
+		`DELETE FROM rider_profiles WHERE rider = ?`,
+	}
+	total := 0
+	for _, stmt := range stmts {
+		// #nosec G701 -- constant statement, bound parameter.
+		res, err := tx.ExecContext(ctx, d.query(stmt), rider)
+		if err != nil {
+			return 0, fmt.Errorf("workout: purge rider (%s): %w", stmt, err)
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("workout: purge rider: %w", err)
+	}
+	return total, nil
+}
+
 // WeekScheduled reports whether goalID's plan week starting weekStart (a
 // Monday, "YYYY-MM-DD") has been filled before.
 func (d *DB) WeekScheduled(ctx context.Context, goalID, weekStart string) (bool, error) {

@@ -499,5 +499,11 @@ func (s *Store) ClearCreatedBy(ctx context.Context, rider string) (int, error) {
 		return 0, fmt.Errorf("clear ride authorship: %w", err)
 	}
 	affected, _ := result.RowsAffected()
+	// A recurring series names its author the same way, and is just as much
+	// the crew's plan. Not counted: the count is rides.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`UPDATE ride_series SET created_by = '' WHERE created_by = ?`), rider); err != nil {
+		return 0, fmt.Errorf("clear series authorship: %w", err)
+	}
 	return int(affected), nil
 }
