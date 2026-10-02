@@ -52,6 +52,19 @@ type Point struct {
 // estimate. An event that is today, past, unparseable or further than MaxDays
 // away yields no points. A snapshot dated after today is treated as dated today.
 func Roll(in Input) []Point {
+	all := RollWithHistory(in)
+	for i, p := range all {
+		if p.Date >= in.Today {
+			return all[i:]
+		}
+	}
+	return nil
+}
+
+// RollWithHistory is Roll with the days between the snapshot and today kept
+// in front, for the one reader that needs them: the weekly ramp of the current
+// week begins at a Monday that is usually already past.
+func RollWithHistory(in Input) []Point {
 	today, err := time.Parse(dateLayout, in.Today)
 	if err != nil {
 		return nil
@@ -70,22 +83,16 @@ func Roll(in Input) []Point {
 	}
 
 	ctl, atl := in.Start.CTL, in.Start.ATL
-	// The gap between the snapshot and today: actual loads only.
-	for ; cursor.Before(today); cursor = cursor.AddDate(0, 0, 1) {
-		ctl, atl = workout.RollFitness(ctl, atl, in.Actual[cursor.Format(dateLayout)])
-	}
-
-	points := make([]Point, 0, days+1)
-	for d := today; !d.After(event); d = d.AddDate(0, 0, 1) {
+	points := make([]Point, 0, days+1+int(today.Sub(cursor).Hours()/24))
+	for d := cursor; !d.After(event); d = d.AddDate(0, 0, 1) {
 		date := d.Format(dateLayout)
 		p := Point{Date: date, CTL: ctl, ATL: atl, TSB: ctl - atl}
-		if d.Equal(event) {
-			points = append(points, p)
-			break
-		}
-		if a, ok := in.Actual[date]; ok {
+		switch a, ridden := in.Actual[date]; {
+		case d.Equal(event):
+			// The start line: the event's own load is not the rider's yet.
+		case ridden:
 			p.Load = a
-		} else {
+		case !d.Before(today):
 			p.Load = in.Planned[date]
 		}
 		points = append(points, p)
