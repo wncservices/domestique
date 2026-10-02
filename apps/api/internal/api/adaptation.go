@@ -316,6 +316,18 @@ func (s *Server) assessReadiness(ctx context.Context, rider string, sessions []w
 // tomorrow forecast anchors to the browser's own day (?today=), and the
 // verdict feeding it has to describe that same day.
 func (s *Server) assessReadinessAt(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time) readiness.Assessment {
+	return s.assessReadinessWith(ctx, rider, sessions, latest, now, true)
+}
+
+// assessReadinessForForecast is today's assessment as the tomorrow forecast
+// reads it: without the post-ride survey. The forecast's inputs are load-based
+// by design, and how the legs felt is today's caution, not a reason to ease
+// tomorrow too (see docs/superpowers/specs/2026-09-29-ride-survey-and-why-design.md).
+func (s *Server) assessReadinessForForecast(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time) readiness.Assessment {
+	return s.assessReadinessWith(ctx, rider, sessions, latest, now, false)
+}
+
+func (s *Server) assessReadinessWith(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time, withSurvey bool) readiness.Assessment {
 	todayStr := now.Format("2006-01-02")
 	sinceDate := now.AddDate(0, 0, -readinessHistoryDays).Format("2006-01-02")
 
@@ -349,8 +361,11 @@ func (s *Server) assessReadinessAt(ctx context.Context, rider string, sessions [
 		tsb, tsbDate = &v, latest.Date
 	}
 
-	return readiness.AssessWithSurvey(today, history, tsb, tsbDate, dailyLoadsForReadiness(sessions),
-		s.surveyDays(ctx, rider, sessions, now), now)
+	var survey []readiness.SurveyDay
+	if withSurvey {
+		survey = s.surveyDays(ctx, rider, sessions, now)
+	}
+	return readiness.AssessWithSurvey(today, history, tsb, tsbDate, dailyLoadsForReadiness(sessions), survey, now)
 }
 
 // surveyLookbackDays is how far back readiness reads the post-ride survey: its

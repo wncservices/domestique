@@ -148,6 +148,12 @@ func (s *Server) handleLinkSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The rider's answers about how the ride felt belong to the ride, not to
+	// the analysis being thrown away: carried onto the fresh one below.
+	var carried *feelRequestDTO
+	if analysed && current.Feel >= 1 {
+		carried = &feelRequestDTO{Feel: current.Feel, Legs: current.Legs, Stress: current.Stress}
+	}
 	if err := s.Training.DeleteAnalysis(ctx, sess.ID); err != nil {
 		s.fail(w, err)
 		return
@@ -167,7 +173,27 @@ func (s *Server) handleLinkSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if carried != nil {
+		s.carrySurvey(ctx, sess.ID, *carried)
+	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// carrySurvey puts a re-linked ride's survey back on its fresh analysis, through
+// the same path a rating takes, so the level move is worked out for the session
+// the ride is now linked to (an all-out rating still counts as a struggle there)
+// and a no-power, no-HR ride keeps its effort load instead of reverting to the
+// flat guess. If the sync did not manage to analyse the ride again there is
+// nothing to put it on; that is a Warn, and the rider can rate it again.
+func (s *Server) carrySurvey(ctx context.Context, sessionID string, survey feelRequestDTO) {
+	fresh, ok, err := s.Training.GetAnalysis(ctx, sessionID)
+	if err != nil || !ok {
+		s.logger().Warn("re-link: the ride was not analysed again, so its survey could not be carried over", "session", sessionID, "analysed", ok, "err", err)
+		return
+	}
+	if _, err := s.applySurvey(ctx, fresh, survey); err != nil {
+		s.logger().Warn("re-link: carrying the survey over failed", "session", sessionID, "err", err)
+	}
 }
 
 // rideLinkedTo returns another of the rider's rides that is already scored

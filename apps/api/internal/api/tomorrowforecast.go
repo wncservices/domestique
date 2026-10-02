@@ -223,7 +223,7 @@ func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions
 	// One UTC-anchored "now" for both today's verdict and the forecast, so
 	// they describe the same day whatever zone the process runs in.
 	today := calendarDay(s.now().UTC())
-	todayAssessment := s.assessReadinessAt(ctx, rider, sessions, latest, today)
+	todayAssessment := s.assessReadinessForForecast(ctx, rider, sessions, latest, today)
 	forecast, _, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
 	if ok && forecast.Verdict != readiness.Ready {
 		s.logger().Info("tomorrow's session may need easing", "rider", rider, "risk", string(forecast.Verdict))
