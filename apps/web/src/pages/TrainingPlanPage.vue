@@ -20,6 +20,7 @@ import type {
   FtpTests,
   Me,
   PeriodizationPlan,
+  ProjectionResponse,
   ReadinessResponse,
   RiderProfile,
   TrainingWeek,
@@ -565,6 +566,29 @@ watch(
   { immediate: true },
 )
 
+// The race-day projection, fetched once for the header chip and the timeline
+// markers. It is an extra: when it cannot load nothing changes and nothing
+// is said. A goal added, moved or re-prioritised changes the answer, so the
+// goal list's own signature reloads it.
+const projection = ref<ProjectionResponse | null>(null)
+
+async function loadProjection() {
+  try {
+    projection.value = await api.projection()
+  } catch {
+    projection.value = null
+  }
+}
+
+watch(
+  () => goals.value.map((g) => `${g.id}:${g.eventDate ?? ''}:${g.priority}`).join('|'),
+  (signature) => {
+    if (signature) loadProjection()
+    else projection.value = null
+  },
+  { immediate: true },
+)
+
 const seasonEventDate = computed(() => goals.value.find((g) => g.id === effectiveFocus.value?.goalId)?.eventDate)
 
 function selectSeasonWeek(startDate: string) {
@@ -603,6 +627,7 @@ async function confirmReplan() {
     await loadWeek()
     await loadReadiness()
     await loadFtpTests()
+    await loadProjection()
   } catch (err) {
     // 409: a background auto-schedule tick held the lock at the same
     // moment — nothing broke, nothing ran either. Not an error the rider
@@ -688,6 +713,7 @@ onMounted(() => {
       <PlanGoalHeader
         :focus="effectiveFocus"
         :goals="goals"
+        :projection="projection"
         :narration-enabled="!!me?.narrationEnabled"
         :explaining="headerExplaining"
         :explanation="headerExplanation"
@@ -770,6 +796,7 @@ onMounted(() => {
         :event-date="seasonEventDate"
         :today="week.today"
         :selected-start="week.start"
+        :events="projection?.events"
         @select="selectSeasonWeek"
       />
     </template>

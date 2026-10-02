@@ -5,6 +5,7 @@ import type {
   CompletedSession,
   FitnessSnapshot,
   ProjectionBand,
+  ProjectionEvent,
   ProjectionResponse,
   ProjectionVerdict,
   RiderProfile,
@@ -239,6 +240,17 @@ export function formatBand(band: ProjectionBand): string {
 // which have no verdict.
 export function projectionTone(verdict: ProjectionVerdict | null | undefined): 'success' | 'warning' | 'info' | 'neutral' {
   return verdict?.tone ?? 'neutral'
+}
+
+// A season-timeline marker's colour. An A event is held to its band (edges
+// inclusive, judged on whole points like the server's verdict); B and C are
+// information only, so they never read as good or bad.
+export function eventTone(event: ProjectionEvent): 'success' | 'warning' | 'info' {
+  if (event.priority !== 'A') return 'info'
+  const tsb = Math.round(event.tsb)
+  if (tsb < event.band.low) return 'warning'
+  if (tsb > event.band.high) return 'info'
+  return 'success'
 }
 
 // ---------- Training zones ----------

@@ -5,7 +5,8 @@
 // HTML table (Task 4/5's redesign), which read one week at a time instead
 // of letting a rider see the whole shape of the season at a glance.
 import { computed, onMounted, ref, useTemplateRef } from 'vue'
-import type { PeriodizationPhase, PeriodizationPlan, PeriodizationWeek } from '@/api/types'
+import type { PeriodizationPhase, PeriodizationPlan, PeriodizationWeek, ProjectionEvent } from '@/api/types'
+import { eventTone, formatSigned, parseLocalDate } from '@/utils/fitnessMath'
 import { phaseBandFill, phaseDotStyle, phaseFill, phaseFillClass, phaseLabel, phaseOrder } from './phaseStyle'
 
 const props = defineProps<{
@@ -13,6 +14,9 @@ const props = defineProps<{
   eventDate?: string
   today: string
   selectedStart: string
+  /** Every future event with its projected form, from the race-day projection.
+   *  Each gets a marker coloured by its info-only tone; absent until it loads. */
+  events?: ProjectionEvent[]
 }>()
 
 const emit = defineEmits<{ select: [startDate: string] }>()
@@ -101,6 +105,31 @@ function weekIndexForDate(date?: string): number {
 const todayIndex = computed(() => weekIndexForDate(props.today))
 const eventIndex = computed(() => weekIndexForDate(props.eventDate))
 
+const TONE_FILL: Record<ReturnType<typeof eventTone>, string> = {
+  success: 'var(--ui-success)',
+  warning: 'var(--ui-warning)',
+  info: 'var(--ui-info)',
+}
+
+// One marker per projected event that lands inside the plotted weeks (a week
+// is 7 days, so an event past the last week's end is off the chart).
+const eventMarkers = computed(() => {
+  const list = props.events ?? []
+  const last = weeks.value[weeks.value.length - 1]
+  if (!last) return []
+  const lastDay = parseLocalDate(last.startDate)
+  lastDay.setDate(lastDay.getDate() + 6)
+  return list.flatMap((e) => {
+    const i = weekIndexForDate(e.date)
+    if (i < 0 || parseLocalDate(e.date) > lastDay) return []
+    const day = parseLocalDate(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    return [{ key: e.goalId, index: i, fill: TONE_FILL[eventTone(e)], title: `${e.name}, ${day}: form ${formatSigned(e.tsb)} projected` }]
+  })
+})
+// The primary dot stays for a deployment whose projection is not there (still
+// loading, or unavailable), so the event week is always marked.
+const showPrimaryDot = computed(() => eventIndex.value >= 0 && !eventMarkers.value.some((m) => m.index === eventIndex.value))
+
 function selectWeek(w: PeriodizationWeek) {
   emit('select', w.startDate)
 }
@@ -145,9 +174,19 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
         <title>This week</title>
       </line>
 
-      <circle v-if="eventIndex >= 0" :cx="colX(eventIndex) + colWidth / 2" cy="4" r="3" fill="var(--ui-primary)">
+      <circle v-if="showPrimaryDot" :cx="colX(eventIndex) + colWidth / 2" cy="4" r="3" fill="var(--ui-primary)">
         <title>Event week</title>
       </circle>
+
+      <g v-for="m in eventMarkers" :key="`event-${m.key}`" data-testid="event-marker">
+        <!-- A diamond, so it reads as an event and not as the round "today" dot. -->
+        <polygon
+          :points="`${colX(m.index) + colWidth / 2},0 ${colX(m.index) + colWidth / 2 + 4},4 ${colX(m.index) + colWidth / 2},8 ${colX(m.index) + colWidth / 2 - 4},4`"
+          :fill="m.fill"
+        >
+          <title>{{ m.title }}</title>
+        </polygon>
+      </g>
 
       <g
         v-for="(w, i) in weeks"

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   clampBand,
+  eventTone,
   eventWithinRange,
   extendSeries,
   filterByRange,
@@ -96,6 +97,19 @@ test('formatSigned and formatBand use a typographic minus and whole points', () 
   assert.equal(formatSigned(-5.6), '−6')
   assert.equal(formatSigned(0.2), '0')
   assert.equal(formatBand({ low: 5, high: 15 }), '+5 to +15')
+})
+
+test('eventTone colours an A event by its band and a B or C event as information only', () => {
+  const band = { low: 5, high: 15 }
+  const ev = (priority, tsb) => ({ goalId: 'g', name: 'x', date: '2026-12-13', priority, ctl: 60, atl: 50, tsb, band })
+  assert.equal(eventTone(ev('A', 5)), 'success') // edges inclusive
+  assert.equal(eventTone(ev('A', 15)), 'success')
+  assert.equal(eventTone(ev('A', 4)), 'warning')
+  assert.equal(eventTone(ev('A', 16)), 'info')
+  for (const tsb of [-20, 8, 40]) {
+    assert.equal(eventTone(ev('B', tsb)), 'info', 'B events get no band colouring')
+    assert.equal(eventTone(ev('C', tsb)), 'info', 'C events get no band colouring')
+  }
 })
 
 test('projectionTone maps a verdict to a Nuxt UI colour, neutral when there is none', () => {
