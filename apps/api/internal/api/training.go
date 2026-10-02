@@ -363,7 +363,11 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	if body.Sport != nil {
 		sport = model.Sport(*body.Sport)
 	}
-	if body.RouteSlug != nil && slug != "" {
+	// A slug equal to the one already linked is not checked again: the edit form
+	// sends the current link back on every save, and a route that has since
+	// been un-shared must not make the goal's date or name uneditable. Only a
+	// link being made or changed is held to visibility.
+	if slug != "" && slug != g.RouteSlug {
 		if status, msg := s.checkGoalRoute(r.Context(), g.Rider, sport, slug); status != 0 {
 			writeJSON(w, status, map[string]string{"error": msg})
 			return

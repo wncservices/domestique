@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -57,6 +58,43 @@ func (s *Server) routeVisibleTo(ctx context.Context, rider, slug string) (model.
 		}
 	}
 	return model.Route{}, false, nil
+}
+
+type goalRouteDTO struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// handleGoalRoutes answers GET /api/training/goal-routes: the cycling routes a
+// rider may link to a goal. Strictly config.VisibleTo, with no admin bypass, so
+// the picker offers exactly what handleCreateGoal and handleUpdateGoal accept
+// (the library list shows an admin every route).
+func (s *Server) handleGoalRoutes(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+	out := []goalRouteDTO{}
+	if s.Source != nil {
+		routes, _, err := s.Source.List(r.Context())
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		var snap crew.Snapshot
+		if s.Crew != nil {
+			if snap, err = s.Crew.Snapshot(r.Context()); err != nil {
+				s.fail(w, err)
+				return
+			}
+		}
+		for _, rt := range routes {
+			if rt.EffectiveSport() == model.SportCycling && config.VisibleTo(rt, rider, snap) {
+				out = append(out, goalRouteDTO{Slug: rt.Slug, Name: rt.Name})
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // checkGoalRoute validates the route a goal is about to carry: the rider must
