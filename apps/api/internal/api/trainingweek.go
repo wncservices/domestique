@@ -148,6 +148,13 @@ func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, 
 		dto.Days = append(dto.Days, day)
 	}
 
+	// One read for the whole week's reasons.
+	planned := make([][]workoutDTO, 0, len(dto.Days))
+	for _, d := range dto.Days {
+		planned = append(planned, d.Planned)
+	}
+	s.attachWhy(ctx, rider, planned...)
+
 	focus, err := s.weekFocus(ctx, rider, start, now)
 	if err != nil {
 		return trainingWeekDTO{}, err

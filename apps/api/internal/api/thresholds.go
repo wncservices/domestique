@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/autoprofile"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/thresholds"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -51,6 +52,12 @@ type detectedThresholdDTO struct {
 	Field  string  `json:"field"`
 	Value  float64 `json:"value"`
 	Reason string  `json:"reason,omitempty"`
+	// previous and fromTest are for the record of why (see
+	// recordDetectedThresholds), not for the client: what the field held
+	// before this sync, and whether an FTP test rather than ordinary rides
+	// produced the value.
+	previous float64
+	fromTest bool
 }
 
 // ---------- Sync-time detection ----------
@@ -205,10 +212,13 @@ func (s *Server) detectThresholdsFresh(ctx context.Context, rider string, profil
 				sugg.ThresholdHR = int(math.Round(f.Value))
 			}
 			var changed []string
+			previous := profileThreshold(result.Profile, f.Field)
 			result.Profile, changed = autoprofile.Apply(result.Profile, sugg)
 			if len(changed) > 0 {
 				result.AutoFields = append(result.AutoFields, changed...)
-				result.Detected = append(result.Detected, detectedThresholdDTO{Field: f.Field, Value: f.Value, Reason: f.Reason})
+				result.Detected = append(result.Detected, detectedThresholdDTO{
+					Field: f.Field, Value: f.Value, Reason: f.Reason, previous: previous, fromTest: f.FromTest,
+				})
 				s.logger().Info("threshold auto-applied", "rider", rider, "field", f.Field)
 				result.recordFTPOutcome(f, "applied")
 			}
@@ -245,6 +255,38 @@ func (s *Server) detectThresholdsFresh(ctx context.Context, rider string, profil
 	}
 
 	return result, nil
+}
+
+// profileThreshold is the value a profile holds for one detectable field.
+func profileThreshold(p workout.RiderProfile, field string) float64 {
+	switch field {
+	case "ftp":
+		return p.FTPWatts
+	case workout.FieldMaxHR:
+		return float64(p.MaxHR)
+	case workout.FieldThresholdPace:
+		return p.ThresholdPaceSecPerKM
+	case workout.FieldThresholdHR:
+		return float64(p.ThresholdHR)
+	}
+	return 0
+}
+
+// recordDetectedThresholds stores why each auto-applied threshold changed.
+// Called only after the profile save that applied them has landed. A
+// threshold is neither a workout nor a zone level, so it is kept under the
+// level kind with a "profile:<field>" subject; a suggestion the rider accepts
+// is their own action and is never recorded here.
+func (s *Server) recordDetectedThresholds(ctx context.Context, rider string, detected []detectedThresholdDTO) {
+	for _, d := range detected {
+		source := "rides"
+		if d.fromTest {
+			source = "test"
+		}
+		in := why.ThresholdAutoInputs{Field: d.Field, From: d.previous, To: d.Value, Source: source, Reason: d.Reason}
+		s.recordSubjectAdjustment(ctx, rider, workout.SubjectLevel, "profile:"+d.Field,
+			why.NewRecord(why.ThresholdAuto, why.ThresholdText(in), in))
+	}
 }
 
 // recordFTPOutcome notes what became of an FTP finding, keyed by its source
@@ -433,7 +475,7 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		if sug.Field == "ftp" {
 			// The accepted FTP is already stored; a failure to adjust
 			// levels is logged, not surfaced as a failed accept.
-			dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), sug.Rider, before)
+			dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), sug.Rider, before, "suggestion_accepted")
 			if err != nil {
 				s.logger().Error("level recalibration failed", "rider", sug.Rider, "err", err)
 			}

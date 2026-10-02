@@ -40,6 +40,10 @@ type progressionLevelDTO struct {
 	Level     float64 `json:"level"`
 	Reason    string  `json:"reason,omitempty"`
 	UpdatedAt string  `json:"updatedAt,omitempty"`
+	// Why is the structured reason for the level's latest automatic move (a
+	// recalibration after an FTP rise). A level whose last move was a ride
+	// has only Reason.
+	Why *whyDTO `json:"why,omitempty"`
 }
 
 // progressionPointDTO is one value a level held from At on — see
@@ -93,10 +97,26 @@ func (s *Server) handleGetProgression(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := progressionResponseDTO{Levels: make([]progressionLevelDTO, 0, len(existing))}
+	ids := make([]string, 0, len(existing))
 	for _, l := range existing {
-		out.Levels = append(out.Levels, progressionLevelDTO{
+		ids = append(ids, string(l.Sport)+":"+string(l.Zone))
+	}
+	// One read for every level's reason; a failure leaves them with only
+	// their own Reason, as before.
+	whys, err := s.Training.LatestAdjustments(r.Context(), rider, workout.SubjectLevel, ids)
+	if err != nil {
+		s.logger().Warn("could not read why for levels", "rider", rider, "err", err)
+	}
+	for _, l := range existing {
+		dto := progressionLevelDTO{
 			Sport: string(l.Sport), Zone: string(l.Zone), Level: l.Level, Reason: l.Reason, UpdatedAt: l.UpdatedAt,
-		})
+		}
+		// Only while the level still rests on that move: a ride that moved it
+		// since has its own Reason, and the older why would contradict it.
+		if a, ok := whys[string(l.Sport)+":"+string(l.Zone)]; ok && whyIsCurrent(a.CreatedAt, l.UpdatedAt) {
+			dto.Why = whyDTOFrom(a)
+		}
+		out.Levels = append(out.Levels, dto)
 	}
 	history, err := s.Training.LevelHistory(r.Context(), rider, s.now().AddDate(0, 0, -progressionHistoryDays).UTC().Format(time.RFC3339))
 	if err != nil {

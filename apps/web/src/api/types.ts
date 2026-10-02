@@ -835,6 +835,22 @@ export interface WorkoutStep {
   steps?: WorkoutStep[]
 }
 
+/** One label/value row in the "Why?" popover. */
+export interface WhyFact {
+  label: string
+  value: string
+}
+
+/** Why an automatic change was made - mirrors apps/api/internal/api's
+ *  whyDTO. Only ever present on the owner's own workouts and levels. */
+export interface Why {
+  rule: string
+  title: string
+  text: string
+  day: string
+  facts: WhyFact[]
+}
+
 export interface Workout {
   id: string
   sport: Sport
@@ -874,6 +890,10 @@ export interface Workout {
   plannedSeconds: number
   createdAt: string
   updatedAt: string
+  /** Why the latest automatic change was made; absent for a workout nobody
+   *  changed, or one adjusted before reasons were recorded (the note in
+   *  `description` is then the only explanation). */
+  why?: Why
 }
 
 export interface CreateWorkoutRequest {
@@ -948,6 +968,9 @@ export interface ProgressionLevel {
   level: number
   reason?: string
   updatedAt?: string
+  /** Why the level last moved on its own (a recalibration); absent when its
+   *  last move was a ride, which only has `reason`. */
+  why?: Why
 }
 
 /** One value a level held from `at` (RFC 3339) on — mirrors

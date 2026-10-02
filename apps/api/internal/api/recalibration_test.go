@@ -82,7 +82,7 @@ func (h *recalHarness) changeFTP(ftp float64) workout.RiderProfile {
 
 func (h *recalHarness) recalibrate(before workout.RiderProfile) (levelsRecalibratedDTO, bool) {
 	h.t.Helper()
-	dto, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before)
+	dto, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before, "profile_saved")
 	if err != nil {
 		h.t.Fatalf("recalibrateLevelsForFTP: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestRecalibrateSameRiseMovesLevelsExactlyOnce(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				_, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before)
+				_, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before, "profile_saved")
 				if err != nil {
 					t.Errorf("recalibrateLevelsForFTP: %v", err)
 				}
@@ -456,7 +456,7 @@ func TestRecalibrateRestoresTheMarkerWhenALevelWriteFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := h.changeFTP(268)
-	if _, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before); err == nil || changed {
+	if _, changed, err := h.s.recalibrateLevelsForFTP(context.Background(), "wilant", before, "profile_saved"); err == nil || changed {
 		t.Fatalf("changed=%v err=%v, want the write failure reported", changed, err)
 	}
 	if got := h.marker(); got != 255 {

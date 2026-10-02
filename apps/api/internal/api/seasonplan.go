@@ -3,11 +3,14 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -184,9 +187,38 @@ func (s *Server) refreshWeek(ctx context.Context, g workout.Goal, sc seasonConte
 			return changed, err
 		}
 		changed++
+		s.recordSeasonRefresh(ctx, g.Rider, wk, req, sc.profile.FTPWatts)
 	}
 	return changed, s.Training.MarkWeekRefreshed(ctx, g.ID, week.StartDate)
 }
+
+// recordSeasonRefresh explains a rebuilt session. It is only called for one
+// whose content actually changed (sameContent has already skipped the rest),
+// and it leaves the description alone, so the session can still take one
+// automatic adaptation later. The workout does not record the FTP it was
+// built on, so only today's is stored.
+func (s *Server) recordSeasonRefresh(ctx context.Context, rider string, was workout.Workout, now workout.CreateWorkoutRequest, ftp float64) {
+	weekday := was.Date
+	if d, err := time.Parse(dateLayout, was.Date); err == nil {
+		weekday = d.Weekday().String()
+	}
+	text := fmt.Sprintf("Rebuilt %s from your current levels and FTP.", weekday)
+	if now.Level != was.Level {
+		label := strings.ReplaceAll(string(now.Zone), "_", " ")
+		if label == "" {
+			label = now.Name
+		}
+		if label == "" {
+			label = "session"
+		}
+		text = fmt.Sprintf("Rebuilt %s from your current levels: %s %s, was %s", weekday, strings.ToUpper(label[:1])+label[1:], levelString(now.Level), levelString(was.Level))
+	}
+	s.recordSubjectAdjustment(ctx, rider, workout.SubjectWorkout, was.ID, why.NewRecord(why.SeasonRefresh, text, why.SeasonRefreshInputs{
+		NameFrom: was.Name, NameTo: now.Name, LevelFrom: was.Level, LevelTo: now.Level, FTPTo: ftp,
+	}))
+}
+
+func levelString(l float64) string { return strconv.FormatFloat(l, 'f', -1, 64) }
 
 func untouchedPlanSession(wk workout.Workout) bool {
 	return scheduler.IsGenerated(wk) &&
