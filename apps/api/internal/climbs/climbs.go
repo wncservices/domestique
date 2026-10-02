@@ -172,6 +172,14 @@ func Detect(points []gpx.Point, cfg Config) []Climb {
 // Distances is the cumulative distance in metres at each point.
 func Distances(points []gpx.Point) []float64 { return cumulativeDistances(points) }
 
+// SmoothedElevation is each point's elevation averaged over radiusM either
+// side, the same denoising Detect applies, so a consumer that slices the
+// track into grades (pacing) reads the profile Detect saw. Every point must
+// carry elevation; the caller checks.
+func SmoothedElevation(points []gpx.Point, radiusM float64) []float64 {
+	return smoothElevation(points, cumulativeDistances(points), radiusM)
+}
+
 func cumulativeDistances(points []gpx.Point) []float64 {
 	out := make([]float64, len(points))
 	for i := 1; i < len(points); i++ {
