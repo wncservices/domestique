@@ -1348,6 +1348,50 @@ export interface ScheduledWorkouts {
  *  internal/narration.ExplainPlan. A plain-language summary of the same
  *  reconciled plan the periodization table already shows; 412 instead of
  *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
+export type RouteDemandsReasonCode =
+  | 'no_route'
+  | 'route_unavailable'
+  | 'no_elevation'
+  | 'not_cycling'
+  | 'no_ftp'
+
+/** One climb of a goal's route. Distances and elevations only: no latitude
+ *  or longitude is ever sent. */
+export interface DemandClimb {
+  index: number
+  startM: number
+  endM: number
+  lengthM: number
+  gainM: number
+  avgGradient: number
+  /** "4" to "1" or "HC"; absent when too small to be rated. */
+  category?: string
+  /** Estimated time to ride it at the race's intensity. */
+  durationSec: number
+  watts: number
+  pctFtp: number
+  kind: 'short' | 'medium' | 'sustained' | 'long'
+  /** The plan's longest sustained effort is at least 80 % of durationSec. */
+  covered: boolean
+}
+
+export interface RouteDemandsUnavailable {
+  available: false
+  reason: string
+  reasonCode: RouteDemandsReasonCode
+}
+
+export interface RouteDemandsAvailable {
+  available: true
+  route: { slug: string; name: string }
+  assumptions: string[]
+  climbs: DemandClimb[]
+  coverage: { longestSustainedSec: number; uncovered: number; message?: string }
+  bias: { active: boolean; phase?: string }
+}
+
+export type RouteDemands = RouteDemandsAvailable | RouteDemandsUnavailable
+
 export interface PlanExplanation {
   text: string
 }

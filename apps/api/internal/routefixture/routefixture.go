@@ -58,11 +58,12 @@ func GPX(name string, withEle bool, spacingM, baseEle float64, pieces ...Piece) 
 	return b.Bytes()
 }
 
-// Hilly is the standard fixture: a flat lead-in, a 2 km climb at 6 %, a
-// descent, a second 1.2 km climb at 7 %, and a flat finish. About 9 km with
-// roughly 200 m of ascent, two climbs a training bar of 1 km and 3 % keeps.
+// Hilly is the standard fixture: a flat lead-in, a 2.3 km climb at 6 % (a
+// sustained effort at race pace, about 9 min), a descent, a flat stretch, a
+// 1 km climb at 8 % (about 4.5 min), and a flat finish. About 9.5 km with
+// roughly 220 m of ascent: two climbs a training bar of 1 km and 3 % keeps.
 func Hilly() []Piece {
 	return []Piece{
-		{1500, 0}, {2000, 6}, {1000, -5}, {500, 0}, {1200, 7}, {1000, -4}, {1500, 0},
+		{1500, 0}, {2300, 6}, {1000, -5}, {500, 0}, {1000, 8}, {1000, -4}, {1500, 0},
 	}
 }
