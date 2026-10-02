@@ -59,7 +59,10 @@ accounts only** — the safe default for a shared library. Naming a crew in
 `config.VisibleTo`) and makes it eligible for that crew's own explicit
 "Sync now" action, but does not change what a general-purpose push (CLI,
 "Push to devices", auto-sync) reaches — that stays owner-only regardless of
-`targets`. See `config.PushTargetsFor` vs `config.TargetsFor`.
+`targets`. See `config.PushTargetsFor` vs `config.TargetsFor`. Scheduling a
+crew ride is the other explicit act: it sends that one route to that one
+crew's approved members' devices at once (`pushRideRoute`, the same
+`pushRouteToCrew` Sync now uses), and a failure there never undoes the ride.
 
 ## Authentication and roles
 

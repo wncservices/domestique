@@ -216,7 +216,16 @@ async function push(items: { accountId: string; slug: string }[]) {
       <template #description>
         <ul class="flex flex-col gap-0.5">
           <li v-for="ride in upcomingRides" :key="ride.id">
-            {{ ride.routeName }} with {{ ride.crewName }} — {{ formatRideWhen(ride) }}
+            <button
+              v-if="routes.some((r) => r.slug === ride.slug)"
+              type="button"
+              class="font-medium underline-offset-2 hover:underline focus-visible:underline focus:outline-none"
+              @click="selectedSlug = ride.slug"
+            >
+              {{ ride.routeName }}
+            </button>
+            <template v-else>{{ ride.routeName }}</template>
+            with {{ ride.crewName }} — {{ formatRideWhen(ride) }}
           </li>
         </ul>
       </template>
