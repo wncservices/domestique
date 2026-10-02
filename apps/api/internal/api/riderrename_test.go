@@ -147,8 +147,8 @@ func TestRenameRiderMovesEveryTable(t *testing.T) {
 		before := map[string]int{}
 		otherBefore := map[string]int{}
 		for _, s := range seeds {
-			before[s.table] = count(t, env, s.table, s.probeColumn, s.probe(a, aID))
-			otherBefore[s.table] = count(t, env, s.table, s.probeColumn, s.probe(other, otherID))
+			before[s.table] = count(t, env, s.table, s.probeColumn, s.probeValue(env, a, aID))
+			otherBefore[s.table] = count(t, env, s.table, s.probeColumn, s.probeValue(env, other, otherID))
 			if before[s.table] == 0 {
 				t.Fatalf("%s: seed for the renamed rider did not land", s.table)
 			}
@@ -163,23 +163,32 @@ func TestRenameRiderMovesEveryTable(t *testing.T) {
 		}
 
 		for _, s := range seeds {
+			if riderTables[s.table].Rename.Skip != "" {
+				if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, a, aID)); n != before[s.table] {
+					t.Errorf("%s: %d rows after skipped rename, want unchanged count %d", s.table, n, before[s.table])
+				}
+				if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, other, otherID)); n != otherBefore[s.table] {
+					t.Errorf("%s: skipped rename changed another rider's %d rows, want %d", s.table, n, otherBefore[s.table])
+				}
+				continue
+			}
 			idKeyed := slices.Contains(idColumns, s.probeColumn) && s.probeColumn != "account_id"
 			if idKeyed {
 				// Reached through an id the rider owns; the id does not change,
 				// so the rows are still there and still hang off a workout, goal
 				// or session that is now B's.
-				if n := count(t, env, s.table, s.probeColumn, s.probe(a, aID)); n != before[s.table] {
+				if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, a, aID)); n != before[s.table] {
 					t.Errorf("%s: %d rows reachable by id after the rename, want %d", s.table, n, before[s.table])
 				}
 			} else {
-				if n := count(t, env, s.table, s.probeColumn, s.probe(a, aID)); n != 0 {
+				if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, a, aID)); n != 0 {
 					t.Errorf("%s: %d rows left under the old rider", s.table, n)
 				}
-				if n := count(t, env, s.table, s.probeColumn, s.probe(b, aID)); n != before[s.table] {
+				if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, b, aID)); n != before[s.table] {
 					t.Errorf("%s: %d rows under the new rider, want %d", s.table, n, before[s.table])
 				}
 			}
-			if n := count(t, env, s.table, s.probeColumn, s.probe(other, otherID)); n != otherBefore[s.table] {
+			if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, other, otherID)); n != otherBefore[s.table] {
 				t.Errorf("%s: the other rider has %d rows, want %d", s.table, n, otherBefore[s.table])
 			}
 		}
@@ -261,11 +270,11 @@ func TestRenameRiderRefusesACollisionAndChangesNothing(t *testing.T) {
 					t.Errorf("error = %q, want it to name %s and say nothing changed", err, c.table)
 				}
 				for _, s := range seeds {
-					if n := count(t, env, s.table, s.probeColumn, s.probe(a, "a"+tok)); n == 0 {
+					if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, a, "a"+tok)); n == 0 {
 						t.Errorf("%s: the old rider lost rows although the rename was refused", s.table)
 					}
 					if s.table != c.table && !slices.Contains(idColumns, s.probeColumn) {
-						if n := count(t, env, s.table, s.probeColumn, s.probe(b, "a"+tok)); n != 0 {
+						if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, b, "a"+tok)); n != 0 {
 							t.Errorf("%s: %d rows reached the new rider although the rename was refused", s.table, n)
 						}
 					}

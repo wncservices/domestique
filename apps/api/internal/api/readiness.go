@@ -9,6 +9,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -188,9 +189,27 @@ func (s *Server) tomorrowFor(ctx context.Context, rider string, today time.Time,
 	if err != nil {
 		return readiness.Assessment{}, workout.Workout{}, false, err
 	}
-	todayAssessment := s.assessReadinessAt(ctx, rider, sessions, latest, today)
+	todayAssessment := s.assessReadinessForForecast(ctx, rider, sessions, latest, today)
 	forecast, target, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
 	return forecast, target, ok, nil
+}
+
+// forecastSignal gives one of the forecast's reason sentences a label that says
+// what it is about, keyed on the wording readiness.ForecastTomorrow uses. A
+// sentence it does not recognise is labelled "Forecast" rather than guessed at.
+func forecastSignal(reason string) why.Signal {
+	kind, label := "forecast", "Forecast"
+	switch {
+	case strings.Contains(reason, "form is projected"):
+		kind, label = "form", "Projected form"
+	case strings.Contains(reason, "needed to rest today"):
+		kind, label = "readiness", "Rest day today"
+	case strings.Contains(reason, "load this week"):
+		kind, label = "load", "Load with today counted"
+	case strings.Contains(reason, "third hard day"):
+		kind, label = "load", "Hard days in a row"
+	}
+	return why.Signal{Kind: kind, Label: label, Value: reason}
 }
 
 // easeTomorrowRefusedMessage is what a rider sees when the fresh forecast no
@@ -244,7 +263,18 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reason := "Eased ahead of time — " + strings.Join(forecast.Reasons, "; ")
-	change := adapter.Change{WorkoutID: target.ID, Reason: reason}
+	// A rider-confirmed click on an automatic suggestion: the reason and the
+	// inputs are the forecast's, not the rider's, so it is recorded like any
+	// automatic change. The forecast's reasons already carry their numbers
+	// (projected form, load ratio), so each is kept as its own signal.
+	signals := make([]why.Signal, 0, len(forecast.Reasons))
+	for _, r := range forecast.Reasons {
+		signals = append(signals, forecastSignal(r))
+	}
+	change := adapter.Change{
+		WorkoutID: target.ID, Reason: reason,
+		Why: why.NewRecord(why.ReadinessTomorrow, reason, why.ReadinessInputs{Verdict: string(forecast.Verdict), Signals: signals}),
+	}
 	if forecast.Verdict == readiness.Rest {
 		change.Downgrade = true
 	} else {

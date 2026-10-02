@@ -17,6 +17,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/testschedule"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -587,6 +588,25 @@ func (s *Server) easeBeforeFTPTests(ctx context.Context, rider string, workouts 
 			s.logger().Warn("adapt: could not ease the day before an FTP test", "workout", wk.ID, "rider", rider, "err", err)
 			continue
 		}
+		test := testOnDay(workouts, wk.Date)
+		s.recordAdjustment(ctx, rider, wk.ID, why.NewRecord(why.FTPTestEve, scheduler.EasedBeforeTestReason,
+			why.FTPTestEveInputs{TestDate: test.Date, Protocol: test.TestProtocol}), update.Indoor != nil && *update.Indoor)
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "eased before an FTP test")
 	}
+}
+
+// testOnDay is the FTP test dated the day after date, the one that made that
+// day an easy one. NeedsEasingBeforeTest has already established it exists.
+func testOnDay(workouts []workout.Workout, date string) workout.Workout {
+	day, err := time.Parse(dateLayout, date)
+	if err != nil {
+		return workout.Workout{}
+	}
+	next := day.AddDate(0, 0, 1).Format(dateLayout)
+	for _, w := range workouts {
+		if w.TestProtocol != "" && w.Date == next {
+			return w
+		}
+	}
+	return workout.Workout{}
 }

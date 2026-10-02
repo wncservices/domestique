@@ -177,10 +177,12 @@ func TestSetSessionFeelReAppliesTheLevelChange(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("rate(5) status = %d, want 200", status)
 	}
-	// Re-rate must undo the 0.5 bump and reapply from the same cur=5.0:
-	// bump = 0.3-0.2=0.1 -> 5.1, not 5.5+0.1=5.6.
-	if afterHard != 5.1 {
-		t.Fatalf("level after re-rating feel=5 = %v, want 5.1 (replaced, not stacked)", afterHard)
+	// Re-rate must undo the 0.5 bump and reapply from the same cur=5.0. An
+	// all-out effort on a nailed ride now counts as a struggle
+	// (SessionAnalysis.EffectiveOutcome), which earns no bump at all: 5.0, not
+	// the old +0.1 floor and not 5.5 with anything on top.
+	if afterHard != 5.0 {
+		t.Fatalf("level after re-rating feel=5 = %v, want 5.0 (replaced, not stacked, no bump for an all-out ride)", afterHard)
 	}
 }
 

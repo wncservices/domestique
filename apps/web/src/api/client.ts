@@ -74,6 +74,7 @@ import type {
   ProgressionResponse,
   SessionAnalysis,
   ReadinessResponse,
+  ProjectionResponse,
   EaseTomorrowResult,
   IndoorPreview,
   WeatherPrefs,
@@ -920,6 +921,11 @@ export const api = {
    *  handleGetReadiness. */
   readiness: (today?: string) =>
     request<ReadinessResponse>(`/api/training/readiness${today ? `?today=${encodeURIComponent(today)}` : ''}`),
+  /** The race-day projection for the nearest A goal (or the one named): form
+   *  rolled forward through the planned season. Read-only; see
+   *  internal/api/projection.go. */
+  projection: (goalId?: string) =>
+    request<ProjectionResponse>(`/api/training/projection${goalId ? `?goal=${encodeURIComponent(goalId)}` : ''}`),
   /** Eases tomorrow's hard session ahead of time, after the server has
    *  recomputed the forecast itself. today is the browser's local date
    *  (YYYY-MM-DD), the same reasoning upcomingRides' own from param gives.
@@ -930,15 +936,16 @@ export const api = {
       `/api/training/readiness/tomorrow/ease${today ? `?today=${encodeURIComponent(today)}` : ''}`,
       { method: 'POST' },
     ),
-  /** Rates (or re-rates) how a completed, analysed session felt, 1 (easy) to
-   *  5 (all-out) — re-applies that ride's own progression-level change with
-   *  the new feel factored in rather than stacking a second one on top. See
-   *  handleSetSessionFeel. */
-  setSessionFeel: (id: string, feel: number) =>
+  /** Saves the post-ride survey for a completed, analysed session: effort 1
+   *  (easy) to 5 (all-out), plus optional legs and life stress. A full
+   *  replace — an omitted legs or stress clears it — and re-applies the
+   *  ride's own progression-level change with the new effort factored in
+   *  rather than stacking a second one on top. See handleSetSessionFeel. */
+  setSessionFeel: (id: string, survey: { feel: number; legs?: string; stress?: string }) =>
     request<SessionAnalysis>(`/api/training/sessions/${encodeURIComponent(id)}/feel`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feel }),
+      body: JSON.stringify(survey),
     }),
   /** Says which planned session a ride was, when the automatic match (same
    *  day, same sport) got it wrong or found nothing. The server re-scores the

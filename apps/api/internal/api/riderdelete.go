@@ -29,6 +29,9 @@ type purgeSummary struct {
 	ShareLinks   int
 	// SessionsEnded is the logins (one per device) that were ended.
 	SessionsEnded int
+	// AdjustmentsRemoved is the "Why?" records of the rider's plan changes:
+	// their sleep, HRV and load, so they go with the rider.
+	AdjustmentsRemoved int
 }
 
 // purgeRiderData removes every trace of rider from this app's own database —
@@ -166,6 +169,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("removing training data: %w", err)
 		}
 		sum.TrainingRows = n
+		n, err = s.Training.DeleteRiderAdjustments(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing plan-change reasons: %w", err)
+		}
+		sum.AdjustmentsRemoved = n
 	}
 	if s.WeatherPrefs != nil {
 		if err := s.WeatherPrefs.Delete(ctx, rider); err != nil {
@@ -247,6 +255,7 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("rider deleted own account", "rider", rider, "routes", sum.Routes,
 		"accountsUnlinked", sum.AccountsUnlinked, "providerLinks", sum.ProviderLinks, "crewMemberships", sum.CrewMemberships,
-		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks, "sessionsEnded", sum.SessionsEnded)
+		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks, "sessionsEnded", sum.SessionsEnded,
+		"adjustmentsRemoved", sum.AdjustmentsRemoved)
 	writeJSON(w, http.StatusOK, map[string]string{"redirectTo": redirectTo})
 }

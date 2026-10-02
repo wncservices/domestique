@@ -31,6 +31,9 @@ const (
 	LoadSourceProviderTSS LoadSource = "provider_tss"
 	LoadSourceFITHR       LoadSource = "fit_hr"
 	LoadSourceEstimate    LoadSource = "estimate"
+	// LoadSourceSessionRPE is set later, not by Analyze: the rider's effort
+	// rating replaced the flat estimate for a ride with no power or heart rate.
+	LoadSourceSessionRPE LoadSource = "session_rpe"
 )
 
 // StepResult is one planned step scored against what the ride actually did.

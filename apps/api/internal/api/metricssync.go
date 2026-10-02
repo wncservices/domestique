@@ -250,6 +250,11 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		s.syncRiderWellness(ctx, rider, consumer, garminSession)
 	}
 
+	// The effort the rider gave each ride they have rated, by session id, so a
+	// re-sync that rewrites a session's load does not throw a session-RPE
+	// load back to the flat guess. One read for the whole sync.
+	efforts := s.ratedEfforts(ctx, rider)
+
 	if garminConnected {
 		consumer, _ := s.garminConsumer()
 		activities, err := s.Garmin.ListActivities(ctx, consumer, garminSession)
@@ -260,7 +265,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 				if a.ID == "" || a.StartTime.IsZero() {
 					continue
 				}
-				load := workout.TrainingLoad(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile)
+				load := workout.TrainingLoadWithEffort(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile, efforts["garmin:"+a.ID])
 				session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 					Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
 					Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
@@ -310,7 +315,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 					if wk.ID == "" || wk.Starts.IsZero() {
 						continue
 					}
-					load := workout.TrainingLoad(wk.DurationSeconds, wk.AvgPowerWatts, wk.AvgHR, profile)
+					load := workout.TrainingLoadWithEffort(wk.DurationSeconds, wk.AvgPowerWatts, wk.AvgHR, profile, efforts["wahoo:"+wk.ID])
 					session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 						// Wahoo's completed-workout list does not carry a
 						// sport this pass decodes (see internal/wahoo's own
@@ -424,12 +429,13 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 			return syncMetricsResultDTO{}, err
 		}
 		s.logger().Info("training profile auto-filled", "rider", rider, "fields", autoFilled)
+		s.recordDetectedThresholds(ctx, rider, tdr.Detected)
 		// Whichever source produced a new FTP (Garmin, threshold detection,
 		// the EstimateFTP fallback), the over-reach risk is the same, so all
 		// of them go through the one helper. The profile write has already
 		// landed, so a failure here is logged rather than failing the sync.
 		if profile.FTPWatts != before.FTPWatts {
-			dto, changed, err := s.recalibrateLevelsForFTP(ctx, rider, before)
+			dto, changed, err := s.recalibrateLevelsForFTP(ctx, rider, before, "auto_applied")
 			if err != nil {
 				s.logger().Error("level recalibration failed", "rider", rider, "err", err)
 			}

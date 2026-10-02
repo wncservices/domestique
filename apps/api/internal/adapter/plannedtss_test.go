@@ -113,3 +113,18 @@ func TestPlannedTSSUsesTheIntensityFractionsForStepsWithoutPower(t *testing.T) {
 		t.Errorf("warmup = %v, want 30.25", got)
 	}
 }
+
+// EstimatePlannedTSS reads the first power target (the warm-up) as the whole
+// session's intensity; PlannedTSS sizes every step. For a structured session
+// the season sum needs the second, so it must come out higher.
+func TestPlannedTSSExceedsTheFirstTargetEstimateForAStructuredSession(t *testing.T) {
+	const ftp = 250
+	w := rung(t, "threshold", 4, ftp)
+	full, ok := PlannedTSS(w, ftp)
+	if !ok {
+		t.Fatal("threshold session not sized")
+	}
+	if first := EstimatePlannedTSS(w, ftp); full <= first {
+		t.Errorf("PlannedTSS %v <= EstimatePlannedTSS %v: the step-by-step estimate must exceed the first-target one for a structured session", full, first)
+	}
+}

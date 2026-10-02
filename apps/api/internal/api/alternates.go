@@ -322,7 +322,7 @@ func (s *Server) handleAlternateApply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger().Info("workout swapped", "rider", wk.Rider, "workout", wk.ID, "kind", string(body.Kind))
 	s.repushToday(r.Context(), updated)
-	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), updated))
 }
 
 // handleAlternateRevert puts the session back as the plan made it. Idempotent:
@@ -341,7 +341,7 @@ func (s *Server) handleAlternateRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if wk.PlannedSnapshot == nil {
-		writeJSON(w, http.StatusOK, workoutDTOFrom(wk))
+		writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), wk))
 		return
 	}
 
@@ -371,7 +371,7 @@ func (s *Server) handleAlternateRevert(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger().Info("workout reverted to the planned version", "rider", wk.Rider, "workout", wk.ID)
 	s.repushToday(r.Context(), updated)
-	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), updated))
 }
 
 // plannedSnapshotOf is wk as it stands, for the store to keep if it has no

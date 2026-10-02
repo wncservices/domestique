@@ -8,6 +8,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -101,6 +102,18 @@ type Change struct {
 	StepDownSourceID string
 	// Reason is shown to the rider.
 	Reason string
+	// Why is the structured record of the rule that produced this change:
+	// which rule, the inputs it decided on, and Reason as its sentence. The
+	// caller stores it once the change has landed; nothing here does, since
+	// this package is pure.
+	Why why.Record
+}
+
+// change builds a Change whose record and Reason cannot disagree: the
+// sentence the rider reads is the same one stored next to the inputs.
+func change(c Change, rule why.Rule, inputs any) Change {
+	c.Why = why.NewRecord(rule, c.Reason, inputs)
+	return c
 }
 
 // AdaptSessions decides what to change this week. analyses is ride-analysis's
@@ -165,20 +178,20 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 			if next, ok := nextFreeDay(today, weekEnd, available, taken); ok {
 				taken[next] = true
 				claimed[w.ID] = true
-				changes = append(changes, Change{
+				changes = append(changes, change(Change{
 					WorkoutID: w.ID, NewDate: next,
 					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s.", w.Date, next),
-				})
+				}, why.MissedMoved, why.MissedMovedInputs{From: w.Date, To: next}))
 				continue
 			}
 			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced); ok {
 				replaced[slot.ID] = true
 				claimed[w.ID] = true
 				claimed[slot.ID] = true
-				changes = append(changes, Change{
+				changes = append(changes, change(Change{
 					WorkoutID: w.ID, NewDate: slot.Date, ReplaceWorkoutID: slot.ID,
 					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s in place of an easy day.", w.Date, slot.Date),
-				})
+				}, why.MissedMoved, why.MissedMovedInputs{From: w.Date, To: slot.Date, ReplacedEasy: true}))
 			}
 
 		// Upcoming: today or tomorrow, hard, and the rider is exhausted —
@@ -186,10 +199,10 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// analyses themselves say (see detectFatigue).
 		case fatigue.active && scheduler.IsHardSession(w) && (w.Date == todayStr || w.Date == day(today.AddDate(0, 0, 1))):
 			claimed[w.ID] = true
-			changes = append(changes, Change{
+			changes = append(changes, change(Change{
 				WorkoutID: w.ID, Downgrade: true,
 				Reason: fatigue.reason,
-			})
+			}, fatigue.rule, fatigue.inputs))
 		}
 	}
 
@@ -209,10 +222,10 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// the structured-zone restriction caution's step-down does.
 		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, false); ok {
 			claimed[w.ID] = true
-			changes = append(changes, Change{
+			changes = append(changes, change(Change{
 				WorkoutID: w.ID, Downgrade: true,
 				Reason: "Swapped for an easy ride — " + reasons,
-			})
+			}, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
 		}
 	case readiness.Caution:
 		// A step-down needs a rung on its own zone's ladder (workoutlib) —
@@ -221,18 +234,18 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 		// workout.IsStructuredZone.
 		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, true); ok {
 			claimed[w.ID] = true
-			changes = append(changes, Change{
+			changes = append(changes, change(Change{
 				WorkoutID: w.ID, StepDown: true, StepDownSourceID: readinessSourceID(today),
 				Reason: "Eased one level — " + reasons,
-			})
+			}, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
 		}
 	}
 
 	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed); ok {
-		changes = append(changes, Change{
+		changes = append(changes, change(Change{
 			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
-			Reason: stepDownReason(src),
-		})
+			Reason: stepDownReason(src, feltAllOut(analyses[src.ID])),
+		}, why.StruggleStepDown, why.StruggleStepDownInputs{SourceDate: src.Date, SourceZone: string(src.Zone), FeltAllOut: feltAllOut(analyses[src.ID])}))
 	}
 	return changes
 }
@@ -316,7 +329,7 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 			continue
 		}
 		a, ok := analyses[w.ID]
-		if !ok || a.Outcome != string(outcomeStruggled) || !withinDays(w.Date, today, stepDownWindowDays) {
+		if !ok || a.EffectiveOutcome() != string(outcomeStruggled) || !withinDays(w.Date, today, stepDownWindowDays) {
 			continue
 		}
 		if !found || w.Date > source.Date {
@@ -347,13 +360,23 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 // stepDownReason names the struggled session that triggered the step-down,
 // in the spec's own shape: weekday, then the zone label — "Stepped down
 // after Tuesday's threshold session was under target."
-func stepDownReason(w workout.Workout) string {
+func stepDownReason(w workout.Workout, allOut bool) string {
 	weekday := w.Date
 	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
 		weekday = d.Weekday().String()
 	}
 	zone := strings.ReplaceAll(string(w.Zone), "_", " ")
+	if allOut {
+		return fmt.Sprintf("Stepped down after %s's %s session felt all-out to you (5 of 5)", weekday, zone)
+	}
 	return fmt.Sprintf("Stepped down after %s's %s session was under target", weekday, zone)
+}
+
+// feltAllOut is whether a ride counts as a struggle only because the rider
+// called it all-out: the power file said it went to plan. Reason text says so
+// in the rider's name, since the numbers would say the opposite.
+func feltAllOut(a workout.SessionAnalysis) bool {
+	return a.EffectiveOutcome() == string(outcomeStruggled) && a.Outcome != string(outcomeStruggled)
 }
 
 // WorkoutDone is done without any ride analysis — for a caller looking at a
@@ -448,6 +471,9 @@ func mondayOf(t time.Time) time.Time {
 type fatigueSignal struct {
 	active bool
 	reason string
+	// rule and inputs are the record of which trigger fired.
+	rule   why.Rule
+	inputs any
 }
 
 // detectFatigue looks for either of two independent ride-analysis signs that
@@ -459,14 +485,25 @@ type fatigueSignal struct {
 // internal/readiness, alongside HRV, sleep and resting heart rate — see
 // AdaptSessions' own readiness.Verdict switch for what replaces it.
 func detectFatigue(workouts []workout.Workout, profile workout.RiderProfile, analyses map[string]workout.SessionAnalysis, today time.Time) fatigueSignal {
-	if w, a, ok := lastTwoStruggledKeySessions(workouts, analyses, today); ok {
-		return fatigueSignal{active: true, reason: struggleReason(w, a)}
+	if pair, ok := lastTwoStruggledKeySessions(workouts, analyses, today); ok {
+		var recorded []why.StruggledSession
+		for _, e := range pair {
+			hit, total := hardStepCounts(e.a)
+			recorded = append(recorded, why.StruggledSession{
+				Date: e.w.Date, Zone: string(e.w.Zone), Outcome: e.a.Outcome, HardHit: hit, HardTotal: total,
+				FeltAllOut: feltAllOut(e.a),
+			})
+		}
+		return fatigueSignal{
+			active: true, reason: struggleReason(pair[0].w, pair[0].a),
+			rule: why.FatigueStruggles, inputs: why.FatigueStrugglesInputs{Sessions: recorded},
+		}
 	}
 	if analysed, planned, ok := overloadedWeek(workouts, analyses, profile.FTPWatts, today); ok {
 		return fatigueSignal{active: true, reason: fmt.Sprintf(
 			"swapped for an easy session — the last %d days carried %.0f TSS against a planned %.0f, more load than the plan called for, and a hard day now would only add to it.",
 			overloadLookbackDays, analysed, planned,
-		)}
+		), rule: why.FatigueOverload, inputs: why.FatigueOverloadInputs{AnalysedTSS: analysed, PlannedTSS: planned, Ratio: analysed / planned}}
 	}
 	return fatigueSignal{}
 }
@@ -476,12 +513,8 @@ func detectFatigue(workouts []workout.Workout, profile workout.RiderProfile, ana
 // reports whether both struggled. A single struggled ride is not a pattern;
 // two in a row, closest one returned for the reason text, is the spec's own
 // bar for treating it as fatigue rather than one off day.
-func lastTwoStruggledKeySessions(workouts []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time) (workout.Workout, workout.SessionAnalysis, bool) {
-	type entry struct {
-		w workout.Workout
-		a workout.SessionAnalysis
-	}
-	var entries []entry
+func lastTwoStruggledKeySessions(workouts []workout.Workout, analyses map[string]workout.SessionAnalysis, today time.Time) ([2]struggledEntry, bool) {
+	var entries []struggledEntry
 	for _, w := range workouts {
 		if !scheduler.IsGenerated(w) || !scheduler.IsKeySession(w) || w.Date == "" {
 			continue
@@ -490,13 +523,34 @@ func lastTwoStruggledKeySessions(workouts []workout.Workout, analyses map[string
 		if !ok || !withinDays(w.Date, today, struggleLookbackDays) {
 			continue
 		}
-		entries = append(entries, entry{w, a})
+		entries = append(entries, struggledEntry{w, a})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].w.Date > entries[j].w.Date })
-	if len(entries) < 2 || entries[0].a.Outcome != string(outcomeStruggled) || entries[1].a.Outcome != string(outcomeStruggled) {
-		return workout.Workout{}, workout.SessionAnalysis{}, false
+	if len(entries) < 2 || entries[0].a.EffectiveOutcome() != string(outcomeStruggled) || entries[1].a.EffectiveOutcome() != string(outcomeStruggled) {
+		return [2]struggledEntry{}, false
 	}
-	return entries[0].w, entries[0].a, true
+	return [2]struggledEntry{entries[0], entries[1]}, true
+}
+
+// struggledEntry is an analysed session and the workout it matched.
+type struggledEntry struct {
+	w workout.Workout
+	a workout.SessionAnalysis
+}
+
+// hardStepCounts is how many of a ride's Hard steps were hit, out of how
+// many. See struggleReason for why only Hard steps are counted.
+func hardStepCounts(a workout.SessionAnalysis) (hit, total int) {
+	for _, s := range a.Steps {
+		if !s.Hard {
+			continue
+		}
+		total++
+		if s.Result == "hit" {
+			hit++
+		}
+	}
+	return hit, total
 }
 
 // struggleReason names the most recent of the two struggled rides that
@@ -512,16 +566,13 @@ func struggleReason(w workout.Workout, a workout.SessionAnalysis) string {
 	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
 		weekday = d.Weekday().String()
 	}
-	hit, total := 0, 0
-	for _, s := range a.Steps {
-		if !s.Hard {
-			continue
-		}
-		total++
-		if s.Result == "hit" {
-			hit++
-		}
+	if feltAllOut(a) {
+		return fmt.Sprintf(
+			"swapped for an easy session — %s's %s session felt all-out to you (5 of 5), and two struggled sessions in a row call for a break before more intensity.",
+			weekday, strings.ToLower(strings.TrimSuffix(w.Name, " session")),
+		)
 	}
+	hit, total := hardStepCounts(a)
 	// A session can struggle on duration alone (an endurance ride cut short,
 	// no hard interval steps to score) — total stays 0 and there is no
 	// "N of M" to report, so the "(0 of 0)" clause is dropped rather than

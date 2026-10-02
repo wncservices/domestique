@@ -11,6 +11,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
+	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -40,6 +41,10 @@ type progressionLevelDTO struct {
 	Level     float64 `json:"level"`
 	Reason    string  `json:"reason,omitempty"`
 	UpdatedAt string  `json:"updatedAt,omitempty"`
+	// Why is the structured reason for the level's latest automatic move (a
+	// recalibration after an FTP rise). A level whose last move was a ride
+	// has only Reason.
+	Why *whyDTO `json:"why,omitempty"`
 }
 
 // progressionPointDTO is one value a level held from At on — see
@@ -93,10 +98,26 @@ func (s *Server) handleGetProgression(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := progressionResponseDTO{Levels: make([]progressionLevelDTO, 0, len(existing))}
+	ids := make([]string, 0, len(existing))
 	for _, l := range existing {
-		out.Levels = append(out.Levels, progressionLevelDTO{
+		ids = append(ids, string(l.Sport)+":"+string(l.Zone))
+	}
+	// One read for every level's reason; a failure leaves them with only
+	// their own Reason, as before.
+	whys, err := s.Training.LatestAdjustments(r.Context(), rider, workout.SubjectLevel, ids)
+	if err != nil {
+		s.logger().Warn("could not read why for levels", "rider", rider, "err", err)
+	}
+	for _, l := range existing {
+		dto := progressionLevelDTO{
 			Sport: string(l.Sport), Zone: string(l.Zone), Level: l.Level, Reason: l.Reason, UpdatedAt: l.UpdatedAt,
-		})
+		}
+		// Only while the level still rests on that move: a ride that moved it
+		// since has its own Reason, and the older why would contradict it.
+		if a, ok := whys[string(l.Sport)+":"+string(l.Zone)]; ok && whyIsCurrent(a.CreatedAt, l.UpdatedAt) {
+			dto.Why = whyDTOFrom(a)
+		}
+		out.Levels = append(out.Levels, dto)
 	}
 	history, err := s.Training.LevelHistory(r.Context(), rider, s.now().AddDate(0, 0, -progressionHistoryDays).UTC().Format(time.RFC3339))
 	if err != nil {
@@ -110,6 +131,63 @@ func (s *Server) handleGetProgression(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// applyEffortLoad lets the rating stand in for the flat load guess, and only
+// for it. A ride whose load rests on power or heart rate (the analysis says
+// so, and the session's own summary has a usable reading) keeps its measured
+// load whatever the rider said. Where the fallback did apply, the session's
+// load and its basis change and the fitness snapshots are recomputed, since
+// they are built from the sessions' loads. Best effort: the rating itself has
+// already been saved, so a failure here is a Warn and the flat guess stays.
+func (s *Server) applyEffortLoad(ctx context.Context, a workout.SessionAnalysis, effort int) {
+	src := rideanalysis.LoadSource(a.LoadSource)
+	if src != rideanalysis.LoadSourceEstimate && src != rideanalysis.LoadSourceSessionRPE {
+		return
+	}
+	sess, err := s.Training.GetSession(ctx, a.SessionID)
+	if err != nil {
+		s.logger().Warn("effort load: reading the session failed", "rider", a.Rider, "session", a.SessionID, "err", err)
+		return
+	}
+	profile, _, err := s.Training.GetProfile(ctx, a.Rider)
+	if err != nil {
+		s.logger().Warn("effort load: reading the profile failed", "rider", a.Rider, "err", err)
+		return
+	}
+	if workout.HasMeasuredLoad(sess.AvgPowerWatts, sess.AvgHR, profile) {
+		return
+	}
+	load := workout.TrainingLoadWithEffort(sess.DurationSeconds, 0, 0, profile, effort)
+	if err := s.Training.SetSessionLoad(ctx, sess.ID, load); err != nil {
+		s.logger().Warn("effort load: saving the session's load failed", "rider", a.Rider, "session", sess.ID, "err", err)
+		return
+	}
+	if err := s.Training.SetAnalysisLoadSource(ctx, sess.ID, string(rideanalysis.LoadSourceSessionRPE)); err != nil {
+		s.logger().Warn("effort load: saving the load basis failed", "rider", a.Rider, "session", sess.ID, "err", err)
+	}
+	if err := s.Training.RecomputeFitnessSnapshots(ctx, a.Rider); err != nil {
+		s.logger().Warn("effort load: recomputing fitness failed", "rider", a.Rider, "err", err)
+	}
+}
+
+// ratedEfforts is the effort the rider gave each recently analysed ride, keyed
+// by session id, for the metrics sync (which rewrites every session's load
+// each time it sees the ride and must not undo a session-RPE load).
+func (s *Server) ratedEfforts(ctx context.Context, rider string) map[string]int {
+	since := s.now().AddDate(0, 0, -60).Format("2006-01-02")
+	analyses, err := s.Training.ListAnalyses(ctx, rider, since)
+	if err != nil {
+		s.logger().Warn("metrics sync: reading ride ratings failed", "rider", rider, "err", err)
+		return nil
+	}
+	out := make(map[string]int, len(analyses))
+	for _, a := range analyses {
+		if a.Feel >= 1 {
+			out[a.SessionID] = a.Feel
+		}
+	}
+	return out
 }
 
 // seedLevelsForRidersGoals initialises progression levels — via levelsFor,
@@ -138,9 +216,21 @@ func (s *Server) seedLevelsForRidersGoals(ctx context.Context, rider string) err
 	return nil
 }
 
+// feelRequestDTO is the whole post-ride survey. It is a full replace: an
+// omitted or empty Legs/Stress clears what was there, so the rider's last tap
+// is the whole truth. Feel stays required, the survey starts with it.
 type feelRequestDTO struct {
-	Feel int `json:"feel"`
+	Feel   int    `json:"feel"`
+	Legs   string `json:"legs"`
+	Stress string `json:"stress"`
 }
+
+// validSurveyLegs and validSurveyStress are the only answers the survey
+// takes; "" (unanswered) is allowed for both.
+var (
+	validSurveyLegs   = map[string]bool{"": true, "fresh": true, "normal": true, "heavy": true}
+	validSurveyStress = map[string]bool{"": true, "low": true, "normal": true, "high": true}
+)
 
 // handleSetSessionFeel records a rider's own "how did it feel" 1-5 rating
 // for one analysed session, and re-applies the level change that ride
@@ -166,6 +256,14 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "feel must be between 1 and 5"})
 		return
 	}
+	if !validSurveyLegs[body.Legs] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "legs must be fresh, normal or heavy"})
+		return
+	}
+	if !validSurveyStress[body.Stress] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "stress must be low, normal or high"})
+		return
+	}
 
 	id := r.PathValue("id")
 	identity := auth.FromContext(r.Context())
@@ -180,32 +278,55 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	analysis, err = s.applySurvey(r.Context(), analysis, body)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.logger().Info("session feel recorded", "session", id, "rider", identity.User)
+
+	writeJSON(w, http.StatusOK, sessionAnalysisDTOFrom(analysis))
+}
+
+// applySurvey stores a whole survey on an analysis and does everything that
+// follows from it: the level move the ride's outcome now earns (the effective
+// outcome, so an all-out ride that scored well counts as a struggle), the load
+// a no-power, no-HR ride takes from its effort, and the stored answers. It is
+// the one place that happens, shared by the rating endpoint and by a re-link
+// that carries an existing survey onto the ride's fresh analysis. The returned
+// analysis is the input with the survey and the new level delta filled in.
+func (s *Server) applySurvey(ctx context.Context, analysis workout.SessionAnalysis, body feelRequestDTO) (workout.SessionAnalysis, error) {
+	// The outcome progression reacts to is the one this rating would give the
+	// ride, not the one stored under the previous rating: all-out on a nailed
+	// ride is a struggle, and a re-rate to anything else takes that back.
+	rated := analysis
+	rated.Feel = body.Feel
+	effective := rated.EffectiveOutcome()
+
 	newDelta := 0.0
 	if analysis.WorkoutID != "" {
-		wk, err := s.Training.GetWorkout(r.Context(), analysis.WorkoutID)
+		wk, err := s.Training.GetWorkout(ctx, analysis.WorkoutID)
 		if err != nil && !errors.Is(err, workout.ErrWorkoutNotFound) {
-			s.fail(w, err)
-			return
+			return analysis, err
 		}
 		if err == nil && workout.IsStructuredZone(wk.Zone) && wk.Level > 0 {
-			profile, _, err := s.Training.GetProfile(r.Context(), analysis.Rider)
+			profile, _, err := s.Training.GetProfile(ctx, analysis.Rider)
 			if err != nil {
-				s.fail(w, err)
-				return
+				return analysis, err
 			}
-			levels, err := s.levelsFor(r.Context(), analysis.Rider, profile, wk.Sport)
+			levels, err := s.levelsFor(ctx, analysis.Rider, profile, wk.Sport)
 			if err != nil {
-				s.fail(w, err)
-				return
+				return analysis, err
 			}
 
 			// Undo this ride's own previous change before applying the new
 			// one — a re-rate replaces the delta, it never stacks a second
 			// adjustment on top of the first.
 			curWithout := levels[string(wk.Zone)] - analysis.LevelDelta
-			rawDelta := progression.Delta(curWithout, wk.Level, progression.Outcome(analysis.Outcome), body.Feel)
+			rawDelta := progression.Delta(curWithout, wk.Level, progression.Outcome(effective), body.Feel)
 			newLevel := progression.Apply(curWithout, rawDelta)
-			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, progression.Outcome(analysis.Outcome))
+			reason := progression.Reason(wk.Name, string(wk.Zone), wk.Level, curWithout, newLevel, progression.Outcome(effective))
 
 			// Store what Apply actually did (newLevel - curWithout, rounded),
 			// not Delta's raw, unclamped result — see
@@ -214,26 +335,24 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 			// value would drift a later re-rate's own curWithout.
 			newDelta = roundLevelDelta(newLevel - curWithout)
 
-			if err := s.Training.SaveLevel(r.Context(), workout.ProgressionLevel{
+			if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
 				Rider: analysis.Rider, Sport: wk.Sport, Zone: wk.Zone, Level: newLevel, Reason: reason,
 			}); err != nil {
-				s.fail(w, err)
-				return
+				return analysis, err
 			}
 		}
 		// A workout with no structured zone or level (or since deleted) has
-		// nothing to move — newDelta stays 0 and only the feel rating itself
-		// is recorded below.
+		// nothing to move — newDelta stays 0 and only the survey itself is
+		// recorded below.
 	}
 
-	if err := s.Training.SetAnalysisFeel(r.Context(), id, body.Feel, newDelta); err != nil {
-		s.fail(w, err)
-		return
+	if err := s.Training.SetAnalysisSurvey(ctx, analysis.SessionID, body.Feel, body.Legs, body.Stress, newDelta); err != nil {
+		return analysis, err
 	}
 
-	s.logger().Info("session feel recorded", "session", id, "rider", identity.User, "feel", body.Feel)
+	s.applyEffortLoad(ctx, analysis, body.Feel)
 
-	analysis.Feel = body.Feel
+	analysis.Feel, analysis.Legs, analysis.Stress = body.Feel, body.Legs, body.Stress
 	analysis.LevelDelta = newDelta
-	writeJSON(w, http.StatusOK, sessionAnalysisDTOFrom(analysis))
+	return analysis, nil
 }

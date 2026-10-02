@@ -24,6 +24,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/state"
 	"github.com/wncservices/domestique/apps/api/internal/weather"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -136,8 +137,8 @@ func eachRiderDataEngine(t *testing.T, run func(t *testing.T, env *riderDataEnv)
 // riderColumns are the columns that tie a row to a rider. idColumns tie it to
 // something a rider owns, so the row is theirs by one step removed.
 var (
-	riderColumns = []string{"rider", "created_by", "owner", "uploaded_by", "decided_by", "updated_by", "added_by", "rider_key"}
-	idColumns    = []string{"workout_id", "session_id", "goal_id", "account_id"}
+	riderColumns = []string{"rider", "created_by", "owner", "uploaded_by", "decided_by", "updated_by", "added_by"}
+	idColumns    = []string{"workout_id", "session_id", "goal_id", "account_id", "rider_key"}
 )
 
 // TestEveryRiderKeyedTableIsRegistered is the guard: it reads the real schema
@@ -309,6 +310,10 @@ func riderSeeds() []seed {
 		}, "rider", byRider},
 		{"threshold_suggestions", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO threshold_suggestions (id, rider, field, created_at, updated_at) VALUES (?, ?, 'ftp', ?, ?)`, "sugg-"+id, rider, ts, ts)
+		}, "rider", byRider},
+		{"adjustments", func(e *riderDataEnv, rider, id string) error {
+			rec := why.NewRecord(why.MissedMoved, "moved", why.MissedMovedInputs{})
+			return e.srv.Training.RecordAdjustment(context.Background(), rider, workout.SubjectWorkout, "workout-"+id, rec, "2026-01-02")
 		}, "rider", byRider},
 		{"sessions", func(e *riderDataEnv, rider, id string) error {
 			// Two sessions, as a rider on a phone and a laptop has.

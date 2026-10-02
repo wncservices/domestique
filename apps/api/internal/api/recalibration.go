@@ -7,6 +7,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -57,9 +58,13 @@ var recalibratedZones = map[workout.Zone]bool{
 // Levels move only for a 3-25% rise, and only for zones the rider already
 // has a saved level for.
 //
+// trigger says what moved the FTP ("auto_applied", "suggestion_accepted" or
+// "profile_saved") and is stored with each lowered zone's reason: the levels
+// move on their own whoever changed the FTP, so each move is explained.
+//
 // The bool reports whether any level actually moved — a rider with no
 // levels, or every level already on the floor, has nothing to be told.
-func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, before workout.RiderProfile) (levelsRecalibratedDTO, bool, error) {
+func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, before workout.RiderProfile, trigger string) (levelsRecalibratedDTO, bool, error) {
 	saved, ok, err := s.Training.GetProfile(ctx, rider)
 	if err != nil || !ok {
 		return levelsRecalibratedDTO{}, false, err
@@ -144,10 +149,17 @@ func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, befo
 			continue
 		}
 		reason := progression.RecalibrationReason(base, newFTP, string(l.Zone), l.Level, to)
+		from := l.Level
 		l.Level, l.Reason, l.UpdatedAt = to, reason, "" // "" so SaveLevel stamps now
 		if err := s.Training.SaveLevel(ctx, l); err != nil {
 			return fail(err)
 		}
+		// Only after the level is saved, and never a reason to fail: the
+		// level has moved and its own Reason still says why.
+		s.recordSubjectAdjustment(ctx, rider, workout.SubjectLevel, string(l.Sport)+":"+string(l.Zone), why.NewRecord(
+			why.LevelRecalibration, reason, why.LevelRecalibrationInputs{
+				FTPFrom: base, FTPTo: newFTP, Zone: string(l.Zone), LevelFrom: from, LevelTo: to, Trigger: trigger,
+			}))
 		moved = true
 	}
 	if !moved {

@@ -68,9 +68,10 @@ var riderTables = map[string]riderTable{
 	"komoot_links": {Purged: true, Note: "Links.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
 
-	// internal/sessions: the identity is sealed, so rider_key is a keyed
-	// one-way stand-in for the rider, which is how their logins are found.
-	"sessions": {Purged: true, Note: "Sessions.DeleteRider: every login of the rider ends at once"},
+	// internal/sessions: rider_key is a keyed one-way stand-in for the rider;
+	// the sealed identity cannot be renamed by the generic column rewriter.
+	"sessions": {Purged: true, Note: "Sessions.DeleteRider: every login of the rider ends at once",
+		Rename: renameRule{Skip: "rider_key is a keyed HMAC, not the rider name"}},
 
 	// internal/garminmfa
 	"garmin_mfa_challenges": {Purged: true, Note: "GarminMFA.DeleteRider",
@@ -123,6 +124,9 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"threshold_suggestions": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
+	"adjustments": {Purged: true, Note: "Training.DeleteRiderAdjustments",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true,
+			With: []string{"subject_kind", "subject_id", "day", "rule"}}},
 
 	// internal/settings: updated_by names the admin who last saved a
 	// deployment-wide value. The value is the deployment's, not the admin's,

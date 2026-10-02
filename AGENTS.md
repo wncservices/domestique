@@ -63,7 +63,10 @@ accounts only** — the safe default for a shared library. Naming a crew in
 `config.VisibleTo`) and makes it eligible for that crew's own explicit
 "Sync now" action, but does not change what a general-purpose push (CLI,
 "Push to devices", auto-sync) reaches — that stays owner-only regardless of
-`targets`. See `config.PushTargetsFor` vs `config.TargetsFor`.
+`targets`. See `config.PushTargetsFor` vs `config.TargetsFor`. Scheduling a
+crew ride is the other explicit act: it sends that one route to that one
+crew's approved members' devices at once (`pushRideRoute`, the same
+`pushRouteToCrew` Sync now uses), and a failure there never undoes the ride.
 
 ## Authentication and roles
 
@@ -760,6 +763,9 @@ state file ──────Open────> state.Store ───┘
   and panicking takes the server down, so the caller has to decide.
 - `internal/sync` — the diff engine. Pure: give it routes, config and a store, get a plan.
 - `internal/targets` — one adapter per provider. Adapters are dumb; the engine decides what to do.
+- `internal/why` — the rules, inputs and popover facts behind "Why?" on every automatic change; rows live
+  in the `adjustments` table and are shown only while they still describe their subject. `threshold_auto`
+  rows (subject `profile:<field>`) are stored for history and nothing renders them yet.
 - `internal/api` — JSON API plus the built SPA.
 
 `model.Route` carries **no file paths**. A route is a row; fetch its track through the library.

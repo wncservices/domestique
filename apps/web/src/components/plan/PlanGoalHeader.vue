@@ -5,12 +5,14 @@
 // empty state (Task 5) takes over in that case, so this component doesn't
 // need its own "no goals yet" copy.
 import { computed } from 'vue'
-import type { Goal, PeriodizationPhase, WeekFocus } from '@/api/types'
+import type { Goal, PeriodizationPhase, ProjectionResponse, WeekFocus } from '@/api/types'
 import { shortDate } from '@/utils/planDates'
+import RaceDayChip from './RaceDayChip.vue'
 
 const props = defineProps<{
   focus?: WeekFocus
   goals: Goal[]
+  projection?: ProjectionResponse | null
   narrationEnabled: boolean
   explaining: boolean
   explanation: string
@@ -92,6 +94,7 @@ const newMenuItems = computed(() => [
             </UDropdownMenu>
             <span v-else-if="focus" class="text-lg font-semibold text-highlighted">{{ focus.name }}</span>
             <UBadge v-if="focus" color="neutral" variant="subtle" size="sm">{{ focus.priority }}</UBadge>
+            <RaceDayChip v-if="focus" :projection="projection ?? null" :goal-id="focus.goalId" />
           </div>
           <p v-if="focus" class="text-sm text-muted">{{ metaLine }}</p>
         </div>
