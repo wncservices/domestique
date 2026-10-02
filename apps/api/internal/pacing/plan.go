@@ -185,7 +185,38 @@ func classify(segs []Seg, cs []climbs.Climb) []leg {
 		}
 		out[i] = p
 	}
+	absorbTransitions(out)
 	return out
+}
+
+// transitionM is the longest flat run squeezed between a climb or descent and
+// a descent that is treated as part of the descent: the few metres where a
+// summit rolls over, which would otherwise be a one-line "flat" segment of ten
+// seconds in the table.
+const transitionM = 200.0
+
+// absorbTransitions folds a short flat run that sits between non-flat legs, at
+// least one of them a descent, into the descent. The power for those metres is
+// the descent's soft pedal rather than the flat power, which is also what a
+// rider does as the road tips over.
+func absorbTransitions(legs []leg) {
+	for i := 0; i < len(legs); {
+		if legs[i].kind != KindFlat {
+			i++
+			continue
+		}
+		j := i
+		for j < len(legs) && legs[j].kind == KindFlat {
+			j++
+		}
+		if i > 0 && j < len(legs) && legs[j-1].seg.EndM-legs[i].seg.StartM < transitionM &&
+			(legs[i-1].kind == KindDescent || legs[j].kind == KindDescent) {
+			for k := i; k < j; k++ {
+				legs[k].kind = KindDescent
+			}
+		}
+		i = j
+	}
 }
 
 // evaluate runs the plan at flat-level power pf: it sets each leg's watts and

@@ -38,6 +38,7 @@ import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
 import LinkRideModal from '@/components/plan/LinkRideModal.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
+import PacingCard from '@/components/PacingCard.vue'
 import RouteDemandsCard from '@/components/plan/RouteDemandsCard.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
@@ -816,6 +817,13 @@ onMounted(() => {
       />
 
       <RouteDemandsCard v-if="routedGoal" :key="`${routedGoal.id}:${routedGoal.routeSlug}:${routedGoal.updatedAt}`" :goal-id="routedGoal.id" />
+
+      <PacingCard
+        v-if="routedGoal?.routeSlug"
+        :key="`${routedGoal.id}:${routedGoal.routeSlug}:${routedGoal.updatedAt}`"
+        :slug="routedGoal.routeSlug"
+        :goal-id="routedGoal.id"
+      />
     </template>
 
     <GoalsSection

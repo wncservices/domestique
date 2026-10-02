@@ -78,6 +78,7 @@ export function usePlanGoals(deps: {
       targetElevationM: g.targetElevationM ? String(g.targetElevationM) : '',
       notes: g.notes ?? '',
       routeSlug: g.routeSlug || NO_ROUTE,
+      pacingIf: g.pacingIf ?? 0,
     }
     goalModalOpen.value = true
     void loadRouteOptions(g.routeSlug ?? '')
@@ -179,9 +180,9 @@ export function usePlanGoals(deps: {
       // the field is simply left out.
       const slug = goalForm.value.sport === 'cycling' && goalForm.value.routeSlug !== NO_ROUTE ? goalForm.value.routeSlug : ''
       if (editingGoalId.value) {
-        await api.updateGoal(editingGoalId.value, { ...req, routeSlug: slug })
+        await api.updateGoal(editingGoalId.value, { ...req, routeSlug: slug, pacingIf: slug ? goalForm.value.pacingIf : 0 })
       } else {
-        await api.createGoal({ ...req, routeSlug: slug || undefined })
+        await api.createGoal({ ...req, routeSlug: slug || undefined, pacingIf: slug && goalForm.value.pacingIf ? goalForm.value.pacingIf : undefined })
       }
       toast.add({
         title: `Saved ${goalForm.value.name.trim()}`,
