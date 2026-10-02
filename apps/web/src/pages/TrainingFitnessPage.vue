@@ -9,11 +9,12 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, ProgressionLevel,
-  ProgressionPoint, RiderProfile, ThresholdSuggestion } from '@/api/types'
+  ProgressionPoint, ProjectionResponse, RiderProfile, ThresholdSuggestion } from '@/api/types'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
+import RaceDayCard from '@/components/fitness/RaceDayCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
 import SaveBar from '@/components/fitness/SaveBar.vue'
@@ -259,6 +260,18 @@ async function loadFitness() {
   }
 }
 
+// The race-day projection is an extra on top of the history: when it cannot
+// be loaded the chart and the card simply stay as they were, with no toast.
+const projection = ref<ProjectionResponse | null>(null)
+
+async function loadProjection() {
+  try {
+    projection.value = await api.projection()
+  } catch {
+    projection.value = null
+  }
+}
+
 async function syncMetrics() {
   syncingMetrics.value = true
   try {
@@ -300,6 +313,8 @@ async function syncMetrics() {
     }
     announceRecalibration(result.levelsRecalibrated)
     await loadFitness()
+    // New rides and an FTP change both move the projection.
+    await loadProjection()
     if (result.autoFilled?.length || lastDetected.value.length) await loadProfile()
     // The Progression card carries the per-zone Reason for the adjustment.
     if (result.levelsRecalibrated) await loadProgression()
@@ -354,6 +369,7 @@ onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
   loadProfile()
   loadFitness()
+  loadProjection()
   loadProgression()
   loadReadiness()
   loadThresholdSuggestions()
@@ -375,6 +391,8 @@ onMounted(() => {
       @sync="syncMetrics"
     />
 
+    <RaceDayCard :projection="projection" />
+
     <ProgressionCard :levels="progressionLevels" :history="progressionHistory" />
 
     <RecoveryCard :days="recoveryDays" />
@@ -383,7 +401,7 @@ onMounted(() => {
       <template #header>
         <h2 class="text-lg font-semibold">Fitness, fatigue and form</h2>
       </template>
-      <FitnessChart :snapshots="fitness!.snapshots" />
+      <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
     </UCard>
 
     <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
