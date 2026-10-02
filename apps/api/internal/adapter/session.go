@@ -244,8 +244,8 @@ func AdaptSessions(workouts []workout.Workout, sessions []workout.CompletedSessi
 	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed); ok {
 		changes = append(changes, change(Change{
 			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
-			Reason: stepDownReason(src),
-		}, why.StruggleStepDown, why.StruggleStepDownInputs{SourceDate: src.Date, SourceZone: string(src.Zone)}))
+			Reason: stepDownReason(src, feltAllOut(analyses[src.ID])),
+		}, why.StruggleStepDown, why.StruggleStepDownInputs{SourceDate: src.Date, SourceZone: string(src.Zone), FeltAllOut: feltAllOut(analyses[src.ID])}))
 	}
 	return changes
 }
@@ -329,7 +329,7 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 			continue
 		}
 		a, ok := analyses[w.ID]
-		if !ok || a.Outcome != string(outcomeStruggled) || !withinDays(w.Date, today, stepDownWindowDays) {
+		if !ok || a.EffectiveOutcome() != string(outcomeStruggled) || !withinDays(w.Date, today, stepDownWindowDays) {
 			continue
 		}
 		if !found || w.Date > source.Date {
@@ -360,13 +360,23 @@ func stepDownTarget(ordered []workout.Workout, analyses map[string]workout.Sessi
 // stepDownReason names the struggled session that triggered the step-down,
 // in the spec's own shape: weekday, then the zone label — "Stepped down
 // after Tuesday's threshold session was under target."
-func stepDownReason(w workout.Workout) string {
+func stepDownReason(w workout.Workout, allOut bool) string {
 	weekday := w.Date
 	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
 		weekday = d.Weekday().String()
 	}
 	zone := strings.ReplaceAll(string(w.Zone), "_", " ")
+	if allOut {
+		return fmt.Sprintf("Stepped down after %s's %s session felt all-out to you (5 of 5)", weekday, zone)
+	}
 	return fmt.Sprintf("Stepped down after %s's %s session was under target", weekday, zone)
+}
+
+// feltAllOut is whether a ride counts as a struggle only because the rider
+// called it all-out: the power file said it went to plan. Reason text says so
+// in the rider's name, since the numbers would say the opposite.
+func feltAllOut(a workout.SessionAnalysis) bool {
+	return a.EffectiveOutcome() == string(outcomeStruggled) && a.Outcome != string(outcomeStruggled)
 }
 
 // WorkoutDone is done without any ride analysis — for a caller looking at a
@@ -481,6 +491,7 @@ func detectFatigue(workouts []workout.Workout, profile workout.RiderProfile, ana
 			hit, total := hardStepCounts(e.a)
 			recorded = append(recorded, why.StruggledSession{
 				Date: e.w.Date, Zone: string(e.w.Zone), Outcome: e.a.Outcome, HardHit: hit, HardTotal: total,
+				FeltAllOut: feltAllOut(e.a),
 			})
 		}
 		return fatigueSignal{
@@ -515,7 +526,7 @@ func lastTwoStruggledKeySessions(workouts []workout.Workout, analyses map[string
 		entries = append(entries, struggledEntry{w, a})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].w.Date > entries[j].w.Date })
-	if len(entries) < 2 || entries[0].a.Outcome != string(outcomeStruggled) || entries[1].a.Outcome != string(outcomeStruggled) {
+	if len(entries) < 2 || entries[0].a.EffectiveOutcome() != string(outcomeStruggled) || entries[1].a.EffectiveOutcome() != string(outcomeStruggled) {
 		return [2]struggledEntry{}, false
 	}
 	return [2]struggledEntry{entries[0], entries[1]}, true
@@ -554,6 +565,12 @@ func struggleReason(w workout.Workout, a workout.SessionAnalysis) string {
 	weekday := w.Date
 	if d, err := time.Parse("2006-01-02", w.Date); err == nil {
 		weekday = d.Weekday().String()
+	}
+	if feltAllOut(a) {
+		return fmt.Sprintf(
+			"swapped for an easy session — %s's %s session felt all-out to you (5 of 5), and two struggled sessions in a row call for a break before more intensity.",
+			weekday, strings.ToLower(strings.TrimSuffix(w.Name, " session")),
+		)
 	}
 	hit, total := hardStepCounts(a)
 	// A session can struggle on duration alone (an endurance ride cut short,

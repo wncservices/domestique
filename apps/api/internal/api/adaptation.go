@@ -316,6 +316,18 @@ func (s *Server) assessReadiness(ctx context.Context, rider string, sessions []w
 // tomorrow forecast anchors to the browser's own day (?today=), and the
 // verdict feeding it has to describe that same day.
 func (s *Server) assessReadinessAt(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time) readiness.Assessment {
+	return s.assessReadinessWith(ctx, rider, sessions, latest, now, true)
+}
+
+// assessReadinessForForecast is today's assessment as the tomorrow forecast
+// reads it: without the post-ride survey. The forecast's inputs are load-based
+// by design, and how the legs felt is today's caution, not a reason to ease
+// tomorrow too (see docs/superpowers/specs/2026-09-29-ride-survey-and-why-design.md).
+func (s *Server) assessReadinessForForecast(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time) readiness.Assessment {
+	return s.assessReadinessWith(ctx, rider, sessions, latest, now, false)
+}
+
+func (s *Server) assessReadinessWith(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, now time.Time, withSurvey bool) readiness.Assessment {
 	todayStr := now.Format("2006-01-02")
 	sinceDate := now.AddDate(0, 0, -readinessHistoryDays).Format("2006-01-02")
 
@@ -349,7 +361,58 @@ func (s *Server) assessReadinessAt(ctx context.Context, rider string, sessions [
 		tsb, tsbDate = &v, latest.Date
 	}
 
-	return readiness.Assess(today, history, tsb, tsbDate, dailyLoadsForReadiness(sessions), now)
+	var survey []readiness.SurveyDay
+	if withSurvey {
+		survey = s.surveyDays(ctx, rider, sessions, now)
+	}
+	return readiness.AssessWithSurvey(today, history, tsb, tsbDate, dailyLoadsForReadiness(sessions), survey, now)
+}
+
+// surveyLookbackDays is how far back readiness reads the post-ride survey: its
+// heavy-legs rule needs today, yesterday and the day before.
+const surveyLookbackDays = 3
+
+// surveyDays folds the rider's recent survey answers into one entry per day.
+// Analyses carry no date of their own, so each is dated by its session; several
+// rides in a day become one entry where heavy legs and high stress win, since
+// either on any ride is what the rule is asking about. A failed read degrades
+// to no survey, as a failed wellness read does.
+func (s *Server) surveyDays(ctx context.Context, rider string, sessions []workout.CompletedSession, now time.Time) []readiness.SurveyDay {
+	since := now.AddDate(0, 0, -surveyLookbackDays).Format("2006-01-02")
+	analyses, err := s.Training.ListAnalyses(ctx, rider, since)
+	if err != nil {
+		s.logger().Warn("adapt: reading the ride survey failed", "rider", rider, "err", err)
+		return nil
+	}
+	dateOf := make(map[string]string, len(sessions))
+	for _, sess := range sessions {
+		dateOf[sess.ID] = sess.Date
+	}
+	byDate := map[string]*readiness.SurveyDay{}
+	var order []string
+	for _, a := range analyses {
+		date, ok := dateOf[a.SessionID]
+		if !ok || (a.Legs == "" && a.Stress == "") {
+			continue
+		}
+		day, seen := byDate[date]
+		if !seen {
+			day = &readiness.SurveyDay{Date: date}
+			byDate[date] = day
+			order = append(order, date)
+		}
+		if a.Legs == "heavy" || day.Legs == "" {
+			day.Legs = a.Legs
+		}
+		if a.Stress == "high" || day.Stress == "" {
+			day.Stress = a.Stress
+		}
+	}
+	out := make([]readiness.SurveyDay, 0, len(order))
+	for _, date := range order {
+		out = append(out, *byDate[date])
+	}
+	return out
 }
 
 // dailyLoadsForReadiness sums each completed session's own TrainingLoad by

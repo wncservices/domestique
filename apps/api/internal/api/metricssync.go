@@ -250,6 +250,11 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		s.syncRiderWellness(ctx, rider, consumer, garminSession)
 	}
 
+	// The effort the rider gave each ride they have rated, by session id, so a
+	// re-sync that rewrites a session's load does not throw a session-RPE
+	// load back to the flat guess. One read for the whole sync.
+	efforts := s.ratedEfforts(ctx, rider)
+
 	if garminConnected {
 		consumer, _ := s.garminConsumer()
 		activities, err := s.Garmin.ListActivities(ctx, consumer, garminSession)
@@ -260,7 +265,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 				if a.ID == "" || a.StartTime.IsZero() {
 					continue
 				}
-				load := workout.TrainingLoad(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile)
+				load := workout.TrainingLoadWithEffort(a.DurationSeconds, a.AvgPowerWatts, a.AvgHR, profile, efforts["garmin:"+a.ID])
 				session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 					Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
 					Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
@@ -310,7 +315,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 					if wk.ID == "" || wk.Starts.IsZero() {
 						continue
 					}
-					load := workout.TrainingLoad(wk.DurationSeconds, wk.AvgPowerWatts, wk.AvgHR, profile)
+					load := workout.TrainingLoadWithEffort(wk.DurationSeconds, wk.AvgPowerWatts, wk.AvgHR, profile, efforts["wahoo:"+wk.ID])
 					session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 						// Wahoo's completed-workout list does not carry a
 						// sport this pass decodes (see internal/wahoo's own

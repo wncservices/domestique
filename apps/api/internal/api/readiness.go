@@ -189,7 +189,7 @@ func (s *Server) tomorrowFor(ctx context.Context, rider string, today time.Time,
 	if err != nil {
 		return readiness.Assessment{}, workout.Workout{}, false, err
 	}
-	todayAssessment := s.assessReadinessAt(ctx, rider, sessions, latest, today)
+	todayAssessment := s.assessReadinessForForecast(ctx, rider, sessions, latest, today)
 	forecast, target, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
 	return forecast, target, ok, nil
 }

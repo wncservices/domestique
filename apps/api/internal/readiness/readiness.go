@@ -92,6 +92,23 @@ const dateLayout = "2006-01-02"
 // With no Garmin row for today (Present false), only the form and load
 // rules can fire — there is nothing else to read.
 func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load, now time.Time) Assessment {
+	return AssessWithSurvey(today, history, tsb, tsbDate, loads, nil, now)
+}
+
+// SurveyDay is what a rider said about one day's rides in the post-ride
+// survey: how the legs were ("fresh", "normal", "heavy") and how the rest of
+// life was ("low", "normal", "high"), either "" when unanswered. A caller with
+// several rides on one day folds them into one entry, heavy and high winning.
+type SurveyDay struct {
+	Date   string
+	Legs   string
+	Stress string
+}
+
+// AssessWithSurvey is Assess with the survey days of the last few days. The
+// survey adds one caution reason at most (see surveyCaution) and never a rest:
+// how the legs felt is the rider's word, worth a step down, not a day off.
+func AssessWithSurvey(today Day, history []Day, tsb *float64, tsbDate string, loads []Load, survey []SurveyDay, now time.Time) Assessment {
 	nowDate := dateOnly(now)
 
 	var rest, caution findings
@@ -141,6 +158,10 @@ func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load
 	// acute load: finish the session and the same day turns "take care".
 	if ratio, ok := acwr(loads, nowDate.AddDate(0, 0, -1)); ok && ratio >= 1.5 {
 		caution.add(loadReason(ratio), loadSignal(ratio))
+	}
+
+	if r, sig, ok := surveyCaution(survey, nowDate); ok {
+		caution.add(r, sig)
 	}
 
 	switch {
@@ -450,6 +471,46 @@ func loadSignal(ratio float64) Signal {
 
 func loadReason(ratio float64) string {
 	return fmt.Sprintf("your load this week is %.1f× your usual", ratio)
+}
+
+// --- Survey -----------------------------------------------------------
+
+// surveyCaution is the heavy-legs rule. Looking at the two-day windows that end
+// today or yesterday (latest first), it fires when the legs were heavy on both
+// days, or when they were heavy on the later day and stress was high on both.
+// A single heavy report, stress on its own, a gap day between two reports, or
+// reports that ended before yesterday do nothing. High stress on both days of
+// a heavy pair is added to the wording.
+func surveyCaution(survey []SurveyDay, nowDate time.Time) (string, Signal, bool) {
+	byDate := make(map[string]SurveyDay, len(survey))
+	for _, d := range survey {
+		byDate[d.Date] = d
+	}
+	for back := 0; back <= 1; back++ {
+		later := nowDate.AddDate(0, 0, -back)
+		earlier := later.AddDate(0, 0, -1)
+		l, lok := byDate[later.Format(dateLayout)]
+		e, eok := byDate[earlier.Format(dateLayout)]
+		if !lok || !eok || l.Legs != "heavy" {
+			continue
+		}
+		bothHigh := l.Stress == "high" && e.Stress == "high"
+		days := earlier.Weekday().String() + " and " + later.Weekday().String()
+		switch {
+		case e.Legs == "heavy":
+			reason := "you reported heavy legs on " + days
+			if bothHigh {
+				reason += ", both high-stress days"
+			}
+			return reason, Signal{Kind: "survey_legs", Label: "Legs", Value: "heavy " + days}, true
+		case bothHigh:
+			return "heavy legs after two high-stress days", Signal{
+				Kind: "survey_legs", Label: "Legs",
+				Value: "heavy " + later.Weekday().String() + ", high stress " + days,
+			}, true
+		}
+	}
+	return "", Signal{}, false
 }
 
 // --- Dates -------------------------------------------------------------

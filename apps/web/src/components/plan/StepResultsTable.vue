@@ -18,6 +18,8 @@ defineProps<{
   // once there's a real session to rate.
   sessionId?: string
   feel?: number
+  legs?: string
+  stress?: string
 }>()
 const emit = defineEmits<{ 'update:open': [boolean]; rated: [analysis: SessionAnalysis] }>()
 
@@ -96,6 +98,8 @@ function formatActual(step: AnalysisStep): string {
         class="mt-4"
         :session-id="sessionId"
         :feel="feel"
+        :legs="legs"
+        :stress="stress"
         @rated="(analysis: SessionAnalysis) => emit('rated', analysis)"
       />
     </template>

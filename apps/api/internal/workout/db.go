@@ -539,6 +539,10 @@ func (d *DB) addAnalysisFeelColumns() error {
 	for _, stmt := range []string{
 		`ALTER TABLE session_analyses ADD COLUMN feel INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE session_analyses ADD COLUMN level_delta DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		// The post-ride survey's two optional answers next to feel: how the
+		// legs were and how the rest of life was. '' is unanswered.
+		`ALTER TABLE session_analyses ADD COLUMN legs TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE session_analyses ADD COLUMN stress TEXT NOT NULL DEFAULT ''`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {

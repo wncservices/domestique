@@ -25,6 +25,7 @@ import type {
   TrainingWeek,
   WeatherSuggestion,
   WeekFocus,
+  Why,
   Workout,
 } from '@/api/types'
 import FtpTestBanner from '@/components/plan/FtpTestBanner.vue'
@@ -142,16 +143,19 @@ async function loadWorkouts() {
 
 const workoutModalOpen = ref(false)
 const editingWorkoutId = ref<string | null>(null)
+const editingWhy = ref<Why | undefined>(undefined)
 const workoutForm = ref<WorkoutForm>(freshWorkoutForm())
 
 function openCreateWorkout() {
   editingWorkoutId.value = null
+  editingWhy.value = undefined
   workoutForm.value = freshWorkoutForm()
   workoutModalOpen.value = true
 }
 
 async function openEditWorkout(w: Workout) {
   editingWorkoutId.value = w.id
+  editingWhy.value = w.why
   workoutForm.value = {
     name: w.name,
     sport: w.sport,
@@ -813,6 +817,7 @@ onMounted(() => {
       :goal-options="goalOptions"
       :profile="profile"
       :saving="savingWorkout"
+      :why="editingWhy"
       @update:form="(f) => (workoutForm = f)"
       @save="saveWorkout"
     />
