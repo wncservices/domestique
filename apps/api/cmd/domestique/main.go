@@ -80,7 +80,8 @@ commands:
   fit           export a route as a Garmin FIT course
   fit-workout   export a structured workout as a FIT workout file
   serve         run the HTTP API and the web UI
-  rename-rider  move one rider's routes, accounts and sign-ins to a new identity
+  rename-rider  move everything one rider owns (routes, accounts, sign-ins,
+                training data) to a new identity
                 (see docs/rider-migration.md before running this for real;
                 --replace resolves a conflict by keeping the old rider's row)
   keygen        print a new DOMESTIQUE_ENCRYPTION_KEY

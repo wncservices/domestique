@@ -32,7 +32,11 @@ Three words that are easy to confuse, and the distinction is the whole design:
   who and `Remote-Groups` says what they may do. Under `mode: oidc` the app
   holds its own server-side session (`internal/sessions`, keyed by an opaque
   cookie) behind a login it verifies itself — see **Authentication and
-  roles** below.
+  roles** below. A session row carries a keyed HMAC of the rider and of the
+  OIDC `sub` (`secrets.Box.MAC`), so removing a rider ends their logins by
+  index (`Sessions.DeleteRider`/`DeleteSub`) without opening every sealed
+  identity. Changing someone's role ends their sessions too, because the role
+  is resolved from the groups stored at sign-in.
 - A **rider** is that user's name as it appears on things they own —
   `preferred_username` falling back through `name`/`nickname`/`sub` under
   `mode: oidc`, simply the Authelia username under `mode: proxy`. Either way
@@ -666,6 +670,7 @@ This repository is **public**. Everything below assumes a reader who is not you.
 - `domestique.yaml` holds account **ids and labels only**, and is gitignored anyway;
   `domestique.example.yaml` is the committed template.
 - If a credential is ever committed, rotate it. Removing the commit is not enough.
+- **Every new table that holds rider data (a `rider`/`created_by` column, or keyed through a workout, session, goal or account id) must be registered in `riderTables` (`internal/api/riderdata.go`) and deleted by `purgeRiderData`** — health and location data must not outlive the rider. `TestEveryRiderKeyedTableIsRegistered` and `TestPurgeRemovesEveryRidersData` fail until it is. The same entry carries a `Rename` rule that `domestique rename-rider` (`api.RenameRider`) runs in one transaction; `TestEveryRegisteredTableHasARenameRule` fails if it misses a rider column.
 - **GPX files are personal location data** — a route usually starts at somebody's front door.
   They belong in a private source, never in this repo. `examples/routes/` holds one synthetic
   route and must stay that way.

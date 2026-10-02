@@ -303,6 +303,42 @@ func (s *Store) Touch(ctx context.Context, shareID, rider string) error {
 	return nil
 }
 
+// DeleteRider removes the share links a rider created, everyone's record of
+// having viewed them, and the record of what the rider themselves viewed — for
+// when the rider is deleted (see the API package's purgeRiderData). Their
+// routes are deleted by the same purge, so a link of theirs would only point
+// at nothing; and who viewed what is a log of one person's activity. Returns
+// how many links went.
+func (s *Store) DeleteRider(ctx context.Context, rider string) (int, error) {
+	rider = strings.ToLower(strings.TrimSpace(rider))
+	if rider == "" {
+		return 0, errors.New("routeshare: no rider to delete")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("routeshare: purge rider: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// #nosec G701 -- constant statements, bound parameters.
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM route_share_redemptions
+        WHERE rider = ? OR share_id IN (SELECT id FROM route_shares WHERE created_by = ?)`),
+		rider, rider); err != nil {
+		return 0, fmt.Errorf("routeshare: purge redemptions: %w", err)
+	}
+	// #nosec G701 -- constant statement, bound parameter.
+	res, err := tx.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM route_shares WHERE created_by = ?`), rider)
+	if err != nil {
+		return 0, fmt.Errorf("routeshare: purge shares: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("routeshare: purge rider: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // Revoke ends a share immediately — every subsequent Lookup returns
 // ErrNotFound from then on. Revoking one that is already revoked, or that
 // does not exist, is not an error: the same rule every other Store in this

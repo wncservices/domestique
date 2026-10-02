@@ -23,14 +23,20 @@ type purgeSummary struct {
 	ProviderLinks    int
 	CrewMemberships  int
 	RidesOrphaned    int
+	// TrainingRows is every row of goals, plan, sessions, fitness, wellness
+	// and progression removed; ShareLinks the route links they had created.
+	TrainingRows int
+	ShareLinks   int
+	// SessionsEnded is the logins (one per device) that were ended.
+	SessionsEnded int
 	// AdjustmentsRemoved is the "Why?" records of the rider's plan changes:
 	// their sleep, HRV and load, so they go with the rider.
 	AdjustmentsRemoved int
 }
 
 // purgeRiderData removes every trace of rider from this app's own database —
-// routes, linked accounts and their sync state, provider sign-ins, and crew
-// membership. It never touches Auth0 — callers purge local data first and
+// routes, linked accounts and their sync state, provider sign-ins, crew
+// membership, and all training, health (HRV, sleep) and location data. It never touches Auth0 — callers purge local data first and
 // only then call PeopleConnector.DeleteUser, so a failure here never leaves
 // an Auth0 identity gone with local data still attached to it.
 //
@@ -40,11 +46,39 @@ type purgeSummary struct {
 // single cross-table transaction could span every step here regardless (see
 // s.riderIdentityInUse for the same reasoning applied to a read). Every step
 // below tolerates "already gone" so a retry after a partial failure is safe.
+//
+// A failure is logged at Error and returned: a rider whose purge stopped half
+// way still has health and location data here, which is an incident, not
+// background noise. Every step is idempotent, so the retry finishes the job.
+//
+// What stays, deliberately: crews and the rides the rider scheduled (the
+// crew's, with the author blanked), and deployment settings. What goes: see
+// riderTables, which the tests hold this function to.
 func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary, error) {
+	sum, err := s.purgeRiderSteps(ctx, rider)
+	if err != nil {
+		s.logger().Error("purging a rider's data failed part-way; some of it may remain", "rider", rider, "err", err)
+	}
+	return sum, err
+}
+
+func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummary, error) {
 	var sum purgeSummary
 	rider = strings.ToLower(strings.TrimSpace(rider))
 	if rider == "" {
 		return sum, errors.New("purge: no rider")
+	}
+
+	// First, so the rider cannot sign in again, or keep a page open that writes
+	// data, while the rest of this is being removed. A removed rider's cookie
+	// would otherwise stay valid until it expires: the session is a row of its
+	// own, and the rider's data going away does not touch it.
+	if s.Sessions != nil {
+		n, err := s.Sessions.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("ending sessions: %w", err)
+		}
+		sum.SessionsEnded = n
 	}
 
 	if s.Source != nil {
@@ -102,6 +136,11 @@ func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary
 			}
 			sum.ProviderLinks++
 		}
+		// Anything the three above did not cover: the legacy komoot_links
+		// table, which would otherwise be adopted back on the next start.
+		if err := s.Links.DeleteRider(rider); err != nil {
+			return sum, fmt.Errorf("removing remaining sign-ins: %w", err)
+		}
 	}
 
 	if s.Crew != nil {
@@ -120,12 +159,38 @@ func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary
 		sum.RidesOrphaned = n
 	}
 
+	// Health and location data. Every store is its own table set and some are
+	// nil in a deployment that does not use the feature, so each is nil-checked
+	// like the steps above; riderTables (riderdata.go) is what says none was
+	// forgotten.
 	if s.Training != nil {
-		n, err := s.Training.DeleteRiderAdjustments(ctx, rider)
+		n, err := s.Training.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing training data: %w", err)
+		}
+		sum.TrainingRows = n
+		n, err = s.Training.DeleteRiderAdjustments(ctx, rider)
 		if err != nil {
 			return sum, fmt.Errorf("removing plan-change reasons: %w", err)
 		}
 		sum.AdjustmentsRemoved = n
+	}
+	if s.WeatherPrefs != nil {
+		if err := s.WeatherPrefs.Delete(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing weather location: %w", err)
+		}
+	}
+	if s.GarminMFA != nil {
+		if err := s.GarminMFA.DeleteRider(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing pending Garmin challenges: %w", err)
+		}
+	}
+	if s.Shares != nil {
+		n, err := s.Shares.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing share links: %w", err)
+		}
+		sum.ShareLinks = n
 	}
 
 	return sum, nil
@@ -189,6 +254,8 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("rider deleted own account", "rider", rider, "routes", sum.Routes,
-		"accountsUnlinked", sum.AccountsUnlinked, "providerLinks", sum.ProviderLinks, "crewMemberships", sum.CrewMemberships)
+		"accountsUnlinked", sum.AccountsUnlinked, "providerLinks", sum.ProviderLinks, "crewMemberships", sum.CrewMemberships,
+		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks, "sessionsEnded", sum.SessionsEnded,
+		"adjustmentsRemoved", sum.AdjustmentsRemoved)
 	writeJSON(w, http.StatusOK, map[string]string{"redirectTo": redirectTo})
 }

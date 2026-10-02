@@ -355,6 +355,22 @@ func (s *Store) Update(ctx context.Context, rider, token string, ch garmin.MFACh
 	return nil
 }
 
+// DeleteRider drops every pending challenge a rider has, for when the rider
+// is deleted (see the API package's purgeRiderData). Unlike Consume it needs
+// no token, and unlike every other method it works without an encryption key:
+// the rows are deleted, never read.
+func (s *Store) DeleteRider(ctx context.Context, rider string) error {
+	if s == nil {
+		return nil
+	}
+	// #nosec G701 -- constant statement, bound parameter.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM garmin_mfa_challenges WHERE rider = ?`), normalise(rider)); err != nil {
+		return fmt.Errorf("garminmfa: remove rider's challenges: %w", err)
+	}
+	return nil
+}
+
 // Consume deletes a challenge: on success, or once it is spent. Deleting one
 // that is not there is not an error. Scoped to the rider so a caller that has
 // not Resolved as the owner cannot delete someone else's challenge.

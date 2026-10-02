@@ -14,6 +14,7 @@
 package sessions
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -21,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -49,20 +51,59 @@ CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
     identity   BLOB NOT NULL,
     created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    rider_key  TEXT NOT NULL DEFAULT '',
+    sub_key    TEXT NOT NULL DEFAULT ''
 );`
 	const postgres = `
 CREATE TABLE IF NOT EXISTS sessions (
     token      TEXT PRIMARY KEY,
     identity   BYTEA NOT NULL,
     created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    rider_key  TEXT NOT NULL DEFAULT '',
+    sub_key    TEXT NOT NULL DEFAULT ''
 );`
 
 	if d.Name == dbx.Postgres.Name {
 		return postgres
 	}
 	return sqlite
+}
+
+// riderKeyPurpose and subKeyPurpose separate the two stand-in columns, so a
+// rider_key can never equal a sub_key for the same text.
+const (
+	riderKeyPurpose = "sessions.rider"
+	subKeyPurpose   = "sessions.sub"
+)
+
+// normaliseRider is the form a rider is compared in everywhere else (purge
+// lower-cases and trims), so an admin's capitalisation cannot miss a session.
+func normaliseRider(rider string) string { return strings.ToLower(strings.TrimSpace(rider)) }
+
+// riderKey and subKey are what the table holds instead of the rider and the
+// OIDC subject. The identity stays sealed (the table's whole design), but
+// "end every session of this rider" needs an index, and decrypting every row
+// to find them does not scale and cannot be done in SQL. A keyed HMAC is
+// findable without being readable: a copy of the table shows which sessions
+// share a rider, never who, and the low-entropy name cannot be brute-forced
+// without the key. See secrets.Box.MAC. An empty input has no key: "" is
+// "unkeyed", which DeleteRider/DeleteSub refuse to match on.
+func (s *Store) riderKey(rider string) string {
+	rider = normaliseRider(rider)
+	if rider == "" {
+		return ""
+	}
+	return s.box.MAC(riderKeyPurpose, rider)
+}
+
+func (s *Store) subKey(sub string) string {
+	sub = strings.TrimSpace(sub)
+	if sub == "" {
+		return ""
+	}
+	return s.box.MAC(subKeyPurpose, sub)
 }
 
 // UseDB puts the table in an already-open database.
@@ -80,7 +121,93 @@ func UseDB(db *sql.DB, dsn string, box *secrets.Box) (*Store, error) {
 	if _, err := db.Exec(schema(d)); err != nil {
 		return nil, fmt.Errorf("create sessions table: %w", err)
 	}
+	if err := store.migrate(); err != nil {
+		return nil, err
+	}
 	return store, nil
+}
+
+// migrate brings a table that predates the rider and sub keys up to date, and
+// is safe to run on every start.
+//
+// CREATE TABLE IF NOT EXISTS leaves an existing table alone, so the columns
+// are added separately. Rows from before have no key and so cannot be found by
+// DeleteRider: a removed rider's old login would outlive the removal until it
+// expired, up to a month. Rather than expiring everyone, the keys are
+// backfilled by opening each such row once with the key the server already
+// holds. A row that will not open (wrong key, tampered) is deleted: nobody
+// could use it, and leaving it unkeyed would leave a row no removal can reach.
+// With no key nothing can be opened, so nothing is touched.
+func (s *Store) migrate() error {
+	for _, col := range []string{"rider_key", "sub_key"} {
+		// #nosec G701 -- col comes from the literal list above.
+		_, err := s.db.Exec(`ALTER TABLE sessions ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`)
+		if err != nil {
+			msg := strings.ToLower(err.Error())
+			if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
+				return fmt.Errorf("sessions: adding %s: %w", col, err)
+			}
+		}
+	}
+	for _, idx := range []string{
+		`CREATE INDEX IF NOT EXISTS sessions_rider_key ON sessions (rider_key)`,
+		`CREATE INDEX IF NOT EXISTS sessions_sub_key ON sessions (sub_key)`,
+	} {
+		if _, err := s.db.Exec(idx); err != nil {
+			return fmt.Errorf("sessions: creating index: %w", err)
+		}
+	}
+	if !s.CanStore() {
+		return nil
+	}
+
+	// Unkeyed rows: every legacy row, plus any whose sealed identity names no
+	// rider (which Create refuses to make, so only a corrupt one).
+	rows, err := s.db.Query(`SELECT token, identity FROM sessions WHERE rider_key = ''`)
+	if err != nil {
+		return fmt.Errorf("sessions: reading unkeyed rows: %w", err)
+	}
+	type unkeyed struct {
+		token  string
+		sealed []byte
+	}
+	var pending []unkeyed
+	for rows.Next() {
+		var u unkeyed
+		if err := rows.Scan(&u.token, &u.sealed); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("sessions: reading unkeyed rows: %w", err)
+		}
+		pending = append(pending, u)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, u := range pending {
+		var stored storedIdentity
+		raw, err := s.box.Open(u.sealed)
+		if err == nil {
+			err = json.Unmarshal([]byte(raw), &stored)
+		}
+		if err != nil || s.riderKey(stored.User) == "" {
+			// #nosec G701 -- constant statement, bound parameter.
+			if _, err := s.db.Exec(s.dialect.Rebind(`DELETE FROM sessions WHERE token = ?`), u.token); err != nil {
+				return fmt.Errorf("sessions: dropping an unreadable row: %w", err)
+			}
+			continue
+		}
+		// #nosec G701 -- constant statement, bound parameters.
+		if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE sessions SET rider_key = ?, sub_key = ? WHERE token = ?`),
+			s.riderKey(stored.User), s.subKey(stored.Sub), u.token); err != nil {
+			return fmt.Errorf("sessions: keying a legacy row: %w", err)
+		}
+	}
+	return nil
 }
 
 // CanStore reports whether a session can be created at all.
@@ -145,8 +272,9 @@ func (s *Store) Create(id auth.Identity, ttl time.Duration) (token string, expir
 
 	// #nosec G701 -- constant statement, bound parameters.
 	if _, err := s.db.Exec(s.dialect.Rebind(
-		`INSERT INTO sessions (token, identity, created_at, expires_at) VALUES (?, ?, ?, ?)`),
-		hashToken(tok), sealed, now.Format(time.RFC3339), expiresAt.Format(time.RFC3339)); err != nil {
+		`INSERT INTO sessions (token, identity, created_at, expires_at, rider_key, sub_key) VALUES (?, ?, ?, ?, ?, ?)`),
+		hashToken(tok), sealed, now.Format(time.RFC3339), expiresAt.Format(time.RFC3339),
+		s.riderKey(id.User), s.subKey(id.Sub)); err != nil {
 		return "", time.Time{}, fmt.Errorf("sessions: creating session: %w", err)
 	}
 	return tok, expiresAt, nil
@@ -238,6 +366,58 @@ func (s *Store) Delete(token string) error {
 	_, err := s.db.Exec(s.dialect.Rebind(`DELETE FROM sessions WHERE token = ?`), hashToken(token))
 	return err
 }
+
+// DeleteRider ends every session a rider holds, on every device, and says how
+// many it ended. This is what makes removing a rider log them out now rather
+// than whenever their cookie expires (a month): the session is the credential,
+// and the rider's data being gone does not stop a live cookie authenticating
+// as them.
+//
+// Not an error when there are none, and safe to repeat: purge is retried
+// after a partial failure. Matching is on the rider key (see riderKey), never
+// by opening rows. Nil-safe, like Delete: a deployment with no sessions store
+// has none to end.
+func (s *Store) DeleteRider(ctx context.Context, rider string) (int, error) {
+	if !s.CanStore() {
+		return 0, nil
+	}
+	key := s.riderKey(rider)
+	if key == "" {
+		return 0, nil
+	}
+	// #nosec G701 -- constant statement, bound parameter.
+	res, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM sessions WHERE rider_key = ?`), key)
+	if err != nil {
+		return 0, fmt.Errorf("sessions: ending a rider's sessions: %w", err)
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+// DeleteSub ends every session of one OIDC identity (the issuer's subject).
+// The rider name an admin removes someone under is a guess the UI offers and
+// can be blank or wrong; the subject is the id of the very identity being
+// deleted, so it is the reliable key for removal, and for forcing a fresh
+// login after a role change. An empty sub matches nothing: it would
+// otherwise match every session made without one.
+func (s *Store) DeleteSub(ctx context.Context, sub string) error {
+	if !s.CanStore() {
+		return nil
+	}
+	key := s.subKey(sub)
+	if key == "" {
+		return nil
+	}
+	// #nosec G701 -- constant statement, bound parameter.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM sessions WHERE sub_key = ?`), key); err != nil {
+		return fmt.Errorf("sessions: ending an identity's sessions: %w", err)
+	}
+	return nil
+}
+
+// RiderKey is the value DeleteRider matches on, exposed so a test can look for
+// a rider's rows by it.
+func (s *Store) RiderKey(rider string) string { return s.riderKey(rider) }
 
 // newToken is 32 random bytes, URL-safe base64 — opaque, unguessable, and
 // plain enough to be a cookie value with no further encoding.
