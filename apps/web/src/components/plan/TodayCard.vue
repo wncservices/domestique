@@ -30,6 +30,7 @@ import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
 import WeatherBanner from './WeatherBanner.vue'
 import WeatherChip from './WeatherChip.vue'
+import WhyPopover from './WhyPopover.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
@@ -315,7 +316,7 @@ function onRated(analysis: SessionAnalysis) {
               aria-label="View ride results"
               @click="openResults"
             >
-              <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
+              <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
             </button>
           </div>
           <p v-if="testUnreadable" class="text-xs text-muted">
@@ -339,6 +340,8 @@ function onRated(analysis: SessionAnalysis) {
             class="mt-2"
             :session-id="analysedSession.id"
             :feel="analysedSession.analysis.feel"
+            :legs="analysedSession.analysis.legs"
+            :stress="analysedSession.analysis.stress"
             @rated="onRated"
           />
         </div>
@@ -361,10 +364,7 @@ function onRated(analysis: SessionAnalysis) {
             </p>
           </div>
           <WorkoutProfile :steps="firstWorkout.steps" :profile="profile" interactive />
-          <p v-if="adjustmentNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-info">
-            <UIcon name="i-lucide-wand-sparkles" class="mt-0.5 shrink-0" />
-            <span>{{ adjustmentNote(firstWorkout.description) }}</span>
-          </p>
+          <WhyPopover :why="firstWorkout.why" :note="adjustmentNote(firstWorkout.description)" />
           <p v-if="swapNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-muted">
             <UIcon name="i-lucide-shuffle" class="mt-0.5 shrink-0" />
             <span>{{ swapNote(firstWorkout.description) }}</span>
@@ -428,7 +428,7 @@ function onRated(analysis: SessionAnalysis) {
             aria-label="View ride results"
             @click="openResults"
           >
-            <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
+            <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
           </button>
         </div>
 
@@ -447,6 +447,8 @@ function onRated(analysis: SessionAnalysis) {
       :steps="analysedSession?.analysis?.steps ?? []"
       :session-id="analysedSession?.id"
       :feel="analysedSession?.analysis?.feel"
+      :legs="analysedSession?.analysis?.legs"
+      :stress="analysedSession?.analysis?.stress"
       @rated="onRated"
     />
   </div>
