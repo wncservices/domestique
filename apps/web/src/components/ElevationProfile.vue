@@ -10,6 +10,9 @@ const props = defineProps<{
    *  here. Ignored while a local pointer hover is active; that always wins,
    *  see activeIndex below. */
   externalDistanceM?: number | null
+  /** Climbs to shade and label C1..Cn, as distances along the route (from the
+   *  route-demands response). Absent draws the plain chart. */
+  climbs?: { startM: number; endM: number }[]
 }>()
 
 const emit = defineEmits<{
@@ -248,7 +251,16 @@ const chart = computed(() => {
     gradients.push(stepGradients[i])
   }
 
+  // Climb bands: a shaded column and a "C1".."Cn" label per climb, clamped to
+  // the chart so a climb that runs off the end of the profile still draws.
+  const climbBands = (props.climbs ?? []).map((c, i) => {
+    const x1 = x(Math.max(0, Math.min(maxDistance, c.startM)))
+    const x2 = x(Math.max(0, Math.min(maxDistance, c.endM)))
+    return { x: x1, width: Math.max(2, x2 - x1), label: `C${i + 1}`, labelX: Math.min(Math.max((x1 + x2) / 2, 10), WIDTH.value - 10) }
+  })
+
   return {
+    climbBands,
     segments,
     gradients,
     xs,
@@ -428,6 +440,14 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
         stroke-linecap="round"
         stroke-linejoin="round"
       />
+
+      <!-- Climbs from the route-demands response: shaded under the line and
+           labelled C1..Cn, in the theme's primary tone so they read as "the
+           parts the plan trains for" rather than as another gradient colour. -->
+      <g v-for="band in chart.climbBands" :key="band.label" class="text-primary">
+        <rect :x="band.x" y="0" :width="band.width" :height="HEIGHT - 1" fill="currentColor" fill-opacity="0.12" />
+        <text :x="band.labelX" :y="HEIGHT - 12" text-anchor="middle" font-size="8" font-weight="600" fill="currentColor">{{ band.label }}</text>
+      </g>
 
       <text x="2" y="9" font-size="8" fill="currentColor" class="text-dimmed">{{ chart.maxEle }} m</text>
       <text x="2" :y="HEIGHT - 3" font-size="8" fill="currentColor" class="text-dimmed">{{ chart.minEle }} m</text>

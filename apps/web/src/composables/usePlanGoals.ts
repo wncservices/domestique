@@ -9,7 +9,7 @@ import { ref } from 'vue'
 import type { LocationQuery, Router } from 'vue-router'
 import { api } from '@/api/client'
 import type { Goal } from '@/api/types'
-import { freshGoalForm } from '@/components/plan/forms'
+import { freshGoalForm, NO_ROUTE } from '@/components/plan/forms'
 
 export function usePlanGoals(deps: {
   toast: { add: (opts: Record<string, unknown>) => void }
@@ -36,6 +36,20 @@ export function usePlanGoals(deps: {
     }
   }
 
+  // Cycling routes the goal form's picker offers, loaded when the form opens.
+  const routeOptions = ref<{ value: string; label: string }[]>([])
+  async function loadRouteOptions() {
+    try {
+      const library = await api.routes()
+      routeOptions.value = library.routes
+        .filter((r) => r.sport === 'cycling')
+        .map((r) => ({ value: r.slug, label: r.name }))
+    } catch {
+      // The picker is optional; a library that will not load just leaves it empty.
+      routeOptions.value = []
+    }
+  }
+
   const goalModalOpen = ref(false)
   const editingGoalId = ref<string | null>(null)
   const goalForm = ref(freshGoalForm())
@@ -46,6 +60,7 @@ export function usePlanGoals(deps: {
     goalExplanation.value = ''
     goalForm.value = freshGoalForm()
     goalModalOpen.value = true
+    void loadRouteOptions()
   }
 
   function openEditGoal(g: Goal) {
@@ -60,8 +75,10 @@ export function usePlanGoals(deps: {
       targetDistanceKm: g.targetDistanceM ? String(g.targetDistanceM / 1000) : '',
       targetElevationM: g.targetElevationM ? String(g.targetElevationM) : '',
       notes: g.notes ?? '',
+      routeSlug: g.routeSlug || NO_ROUTE,
     }
     goalModalOpen.value = true
+    void loadRouteOptions()
   }
 
   // --- goal shortcuts: describe it in a sentence, start from a route in the
@@ -114,6 +131,8 @@ export function usePlanGoals(deps: {
         sport: found.sport,
         targetDistanceKm: String(Math.round(found.distanceM / 100) / 10),
         targetElevationM: String(Math.round(found.ascentM)),
+        // "Train for this route" now keeps the link: saving the goal names it.
+        routeSlug: found.sport === 'cycling' ? found.slug : NO_ROUTE,
       }
     } catch (err) {
       toast.add({ title: 'Could not load that route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
@@ -154,10 +173,13 @@ export function usePlanGoals(deps: {
         targetElevationM: goalForm.value.targetElevationM ? Number(goalForm.value.targetElevationM) : undefined,
         notes: goalForm.value.notes || undefined,
       }
+      // A running goal carries no route. On edit, '' clears a link; on create
+      // the field is simply left out.
+      const slug = goalForm.value.sport === 'cycling' && goalForm.value.routeSlug !== NO_ROUTE ? goalForm.value.routeSlug : ''
       if (editingGoalId.value) {
-        await api.updateGoal(editingGoalId.value, req)
+        await api.updateGoal(editingGoalId.value, { ...req, routeSlug: slug })
       } else {
-        await api.createGoal(req)
+        await api.createGoal({ ...req, routeSlug: slug || undefined })
       }
       toast.add({
         title: `Saved ${goalForm.value.name.trim()}`,
@@ -243,6 +265,7 @@ export function usePlanGoals(deps: {
     goalModalOpen,
     editingGoalId,
     goalForm,
+    routeOptions,
     openCreateGoal,
     openEditGoal,
     goalNote,

@@ -1386,6 +1386,8 @@ export interface RouteDemandsAvailable {
   route: { slug: string; name: string }
   assumptions: string[]
   climbs: DemandClimb[]
+  /** Elevation by distance, thinned for drawing. */
+  profile: { distanceM: number; eleM: number }[]
   coverage: { longestSustainedSec: number; uncovered: number; message?: string }
   /** Build and Peak sessions favour efforts of these lengths (seconds). */
   bias: { active: boolean; phase?: string; sustainedSec?: number; shortSec?: number }

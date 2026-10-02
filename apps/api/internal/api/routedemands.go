@@ -88,8 +88,10 @@ type routeDemandsDTO struct {
 	Route       routeRefDTO      `json:"route"`
 	Assumptions []string         `json:"assumptions"`
 	Climbs      []demandClimbDTO `json:"climbs"`
-	Coverage    coverageDTO      `json:"coverage"`
-	Bias        biasDTO          `json:"bias"`
+	// Profile is the route's elevation by distance, for the chart.
+	Profile  []profilePointDTO `json:"profile"`
+	Coverage coverageDTO       `json:"coverage"`
+	Bias     biasDTO           `json:"bias"`
 }
 
 type routeDemandsUnavailableDTO struct {
@@ -106,6 +108,36 @@ type routeProfile struct {
 	Route  model.Route
 	Segs   []pacing.Seg
 	Climbs []climbs.Climb
+	// Profile is the elevation along the route, at most maxProfilePoints
+	// samples of (distance, elevation) so the card can draw it and shade the
+	// climbs. Distances and heights only.
+	Profile []profilePointDTO
+}
+
+// profilePointDTO is one sample of the elevation profile.
+type profilePointDTO struct {
+	DistanceM float64 `json:"distanceM"`
+	EleM      float64 `json:"eleM"`
+}
+
+const maxProfilePoints = 150
+
+// sampleProfile thins points to at most maxProfilePoints (distance, elevation)
+// pairs, rounded to the metre: enough to draw, nothing that places the route.
+func sampleProfile(points []gpx.Point) []profilePointDTO {
+	dist := climbs.Distances(points)
+	step := 1
+	if len(points) > maxProfilePoints {
+		step = (len(points) + maxProfilePoints - 1) / maxProfilePoints
+	}
+	out := make([]profilePointDTO, 0, maxProfilePoints+1)
+	for i := 0; i < len(points); i += step {
+		out = append(out, profilePointDTO{DistanceM: math.Round(dist[i]), EleM: math.Round(points[i].Ele)})
+	}
+	if last := len(points) - 1; last%step != 0 {
+		out = append(out, profilePointDTO{DistanceM: math.Round(dist[last]), EleM: math.Round(points[last].Ele)})
+	}
+	return out
 }
 
 // loadRouteProfile reads a rider's route for training use. The reason is ""
@@ -135,9 +167,10 @@ func (s *Server) loadRouteProfile(ctx context.Context, rider, slug string) (*rou
 		return nil, reasonNoElevation, nil
 	}
 	return &routeProfile{
-		Route:  rt,
-		Segs:   pacing.Segments(points, 100, 500),
-		Climbs: climbs.Detect(points, climbs.TrainingConfig),
+		Route:   rt,
+		Segs:    pacing.Segments(points, 100, 500),
+		Climbs:  climbs.Detect(points, climbs.TrainingConfig),
+		Profile: sampleProfile(points),
 	}, "", nil
 }
 
@@ -453,6 +486,7 @@ func (s *Server) handleRouteDemands(w http.ResponseWriter, r *http.Request) {
 		Route:       routeRefDTO{Slug: rp.Route.Slug, Name: rp.Route.Name},
 		Assumptions: routeAssumptions(profile.WeightKG, ifv, derived),
 		Climbs:      cl,
+		Profile:     rp.Profile,
 		Coverage:    coverageFor(cl, longest, zone),
 		Bias:        s.biasFor(r.Context(), g, rp, cl),
 	})

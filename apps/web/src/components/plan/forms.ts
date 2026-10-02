@@ -18,10 +18,19 @@ export interface GoalForm {
   targetDistanceKm: string
   targetElevationM: string
   notes: string
+  /** The library route this goal is for, or NO_ROUTE. */
+  routeSlug: string
 }
 
+// Reka UI's <SelectItem> forbids '' (see NO_GOAL below), so "no route" needs
+// a sentinel too.
+export const NO_ROUTE = 'none'
+
 export function freshGoalForm(): GoalForm {
-  return { name: '', sport: 'cycling', eventDate: '', priority: 'B', targetDistanceKm: '', targetElevationM: '', notes: '' }
+  return {
+    name: '', sport: 'cycling', eventDate: '', priority: 'B', targetDistanceKm: '', targetElevationM: '', notes: '',
+    routeSlug: NO_ROUTE,
+  }
 }
 
 export interface WorkoutForm {

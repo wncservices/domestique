@@ -38,6 +38,7 @@ import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
 import LinkRideModal from '@/components/plan/LinkRideModal.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
+import RouteDemandsCard from '@/components/plan/RouteDemandsCard.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
 import TrainNowSlideover from '@/components/plan/TrainNowSlideover.vue'
@@ -103,6 +104,7 @@ const {
   proposingGoal,
   goalExplanation,
   proposeGoal,
+  routeOptions,
   startGoalFromRoute,
   startingGeneralPlan,
   startGeneralPlan,
@@ -523,6 +525,15 @@ const effectiveFocus = computed<WeekFocus | undefined>(() => {
   return { goalId: fallback.id, name: fallback.name, priority: fallback.priority, sport: fallback.sport, eventDate: fallback.eventDate }
 })
 
+// The focused goal when it names a route: the Route demands card reads it. Keyed
+// on the goal's updatedAt so editing the goal (a new route, a new FTP-driven
+// plan) reloads the card.
+const routedGoal = computed(() => {
+  const id = effectiveFocus.value?.goalId
+  const g = id ? goals.value.find((x) => x.id === id) : undefined
+  return g?.routeSlug ? g : undefined
+})
+
 const headerExplaining = computed(() => !!effectiveFocus.value && explainingGoal.value === effectiveFocus.value.goalId)
 const headerExplanation = computed(() =>
   effectiveFocus.value && explanationFor.value === effectiveFocus.value.goalId ? explanationText.value : '',
@@ -803,6 +814,8 @@ onMounted(() => {
         :events="projection?.events"
         @select="selectSeasonWeek"
       />
+
+      <RouteDemandsCard v-if="routedGoal" :key="`${routedGoal.id}:${routedGoal.routeSlug}:${routedGoal.updatedAt}`" :goal-id="routedGoal.id" />
     </template>
 
     <GoalsSection
@@ -832,6 +845,7 @@ onMounted(() => {
       :saving="savingGoal"
       :proposing="proposingGoal"
       :explanation="goalExplanation"
+      :route-options="routeOptions"
       @update:form="(f) => (goalForm = f)"
       @propose="proposeGoal"
       @save="saveGoal"
