@@ -38,15 +38,17 @@ export function usePlanGoals(deps: {
 
   // Cycling routes the goal form's picker offers, loaded when the form opens.
   const routeOptions = ref<{ value: string; label: string }[]>([])
-  async function loadRouteOptions() {
+  async function loadRouteOptions(currentSlug = '') {
     try {
-      const library = await api.routes()
-      routeOptions.value = library.routes
-        .filter((r) => r.sport === 'cycling')
-        .map((r) => ({ value: r.slug, label: r.name }))
+      routeOptions.value = (await api.goalRoutes()).map((r) => ({ value: r.slug, label: r.name }))
     } catch {
       // The picker is optional; a library that will not load just leaves it empty.
       routeOptions.value = []
+    }
+    // The route a goal already links stays selectable even when it is no longer
+    // offered (un-shared, say), so saving the goal's other fields keeps the link.
+    if (currentSlug && !routeOptions.value.some((o) => o.value === currentSlug)) {
+      routeOptions.value = [...routeOptions.value, { value: currentSlug, label: `${currentSlug} (no longer available)` }]
     }
   }
 
@@ -78,7 +80,7 @@ export function usePlanGoals(deps: {
       routeSlug: g.routeSlug || NO_ROUTE,
     }
     goalModalOpen.value = true
-    void loadRouteOptions()
+    void loadRouteOptions(g.routeSlug ?? '')
   }
 
   // --- goal shortcuts: describe it in a sentence, start from a route in the

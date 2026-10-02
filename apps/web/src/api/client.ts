@@ -721,6 +721,10 @@ export const api = {
   routeDemands: (id: string) =>
     request<RouteDemands>(`/api/training/goals/${encodeURIComponent(id)}/route-demands`),
 
+  /** The cycling routes the goal form's picker offers: what the server will
+   *  accept on a goal, so an admin is not offered routes it refuses. */
+  goalRoutes: () => request<{ slug: string; name: string }[]>('/api/training/goal-routes'),
+
   riderProfile: () => request<RiderProfile>('/api/training/profile'),
   saveRiderProfile: (req: RiderProfile) =>
     request<RiderProfile>('/api/training/profile', {

@@ -1344,10 +1344,7 @@ export interface ScheduledWorkouts {
   skipped?: number
 }
 
-/** GET /api/training/goals/{id}/explain's response — see
- *  internal/narration.ExplainPlan. A plain-language summary of the same
- *  reconciled plan the periodization table already shows; 412 instead of
- *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
+/** Why a goal's route demands cannot be shown; the UI keys off it. */
 export type RouteDemandsReasonCode =
   | 'no_route'
   | 'route_unavailable'
@@ -1358,7 +1355,12 @@ export type RouteDemandsReasonCode =
 /** One climb of a goal's route. Distances and elevations only: no latitude
  *  or longitude is ever sent. */
 export interface DemandClimb {
+  /** The climb's number among the training climbs (1 km and 3 % or more). */
   index: number
+  /** The climb's number as the pacing plan, the course point on a head unit and
+   *  the elevation chart call it (C1..Cn, found at the 500 m device bar). Use
+   *  this for labels, so every surface agrees. Absent from an older server. */
+  deviceIndex?: number
   startM: number
   endM: number
   lengthM: number
@@ -1395,6 +1397,10 @@ export interface RouteDemandsAvailable {
 
 export type RouteDemands = RouteDemandsAvailable | RouteDemandsUnavailable
 
+/** GET /api/training/goals/{id}/explain's response — see
+ *  internal/narration.ExplainPlan. A plain-language summary of the same
+ *  reconciled plan the periodization table already shows; 412 instead of
+ *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
 export interface PlanExplanation {
   text: string
 }

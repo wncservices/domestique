@@ -65,7 +65,10 @@ const biasNote = computed(() => {
     </p>
 
     <div v-else-if="available" class="flex flex-col gap-4">
-      <ElevationProfile :points="available.profile" :climbs="available.climbs" />
+      <ElevationProfile
+        :points="available.profile"
+        :climbs="available.climbs.map((c) => ({ startM: c.startM, endM: c.endM, index: c.deviceIndex ?? c.index }))"
+      />
 
       <p v-if="!available.climbs.length" class="text-sm text-muted">
         No sustained climbs on this route (1 km or more at 3% or steeper), so the plan is not shaped to it.
@@ -87,7 +90,7 @@ const biasNote = computed(() => {
           <tbody>
             <tr v-for="c in available.climbs" :key="c.index" class="border-t border-default">
               <td class="py-2 pr-3 whitespace-nowrap">
-                <span class="font-medium text-highlighted">C{{ c.index + 1 }}</span>
+                <span class="font-medium text-highlighted">C{{ (c.deviceIndex ?? c.index) + 1 }}</span>
                 <UBadge v-if="c.category" color="neutral" variant="subtle" size="sm" class="ml-1.5">{{ c.category === 'HC' ? 'HC' : `Cat ${c.category}` }}</UBadge>
                 <span class="block text-xs text-muted">{{ kindLabel[c.kind] }}</span>
               </td>

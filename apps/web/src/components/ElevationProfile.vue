@@ -12,7 +12,7 @@ const props = defineProps<{
   externalDistanceM?: number | null
   /** Climbs to shade and label C1..Cn, as distances along the route (from the
    *  route-demands response). Absent draws the plain chart. */
-  climbs?: { startM: number; endM: number }[]
+  climbs?: { startM: number; endM: number; index?: number }[]
 }>()
 
 const emit = defineEmits<{
@@ -256,7 +256,7 @@ const chart = computed(() => {
   const climbBands = (props.climbs ?? []).map((c, i) => {
     const x1 = x(Math.max(0, Math.min(maxDistance, c.startM)))
     const x2 = x(Math.max(0, Math.min(maxDistance, c.endM)))
-    return { x: x1, width: Math.max(2, x2 - x1), label: `C${i + 1}`, labelX: Math.min(Math.max((x1 + x2) / 2, 10), WIDTH.value - 10) }
+    return { x: x1, width: Math.max(2, x2 - x1), label: `C${(c.index ?? i) + 1}`, labelX: Math.min(Math.max((x1 + x2) / 2, 10), WIDTH.value - 10) }
   })
 
   return {
