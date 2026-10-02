@@ -89,6 +89,7 @@ func (s *Server) handleWahooRouteList(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	routes = s.dropPacingRoutes(r.Context(), rider, routes)
 
 	library, _, err := s.Source.List(r.Context())
 	if err != nil {
@@ -200,7 +201,7 @@ func (s *Server) handleWahooRouteDuplicates(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, groupDuplicateWahooRoutes(routes))
+	writeJSON(w, http.StatusOK, groupDuplicateWahooRoutes(s.dropPacingRoutes(r.Context(), rider, routes)))
 }
 
 // groupDuplicateWahooRoutes groups routes sharing a name (case-insensitive,
@@ -338,6 +339,7 @@ func (s *Server) importWahooRoutes(ctx context.Context, uploader, rider, token s
 	if err != nil {
 		return wahooRouteImportResult{}, fmt.Errorf("wahoo would not list the routes on this account just now: %w", err)
 	}
+	routes = s.dropPacingRoutes(ctx, rider, routes)
 	byID := map[string]wahoo.Route{}
 	for _, rt := range routes {
 		byID[rt.ID] = rt

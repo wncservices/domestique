@@ -37,6 +37,10 @@ type fakeWahooUpstream struct {
 	tokenCalls int
 	// nextRouteID is what the next POST /v1/routes returns as "id".
 	nextRouteID int
+	// updateStatus, when set, is the status every PUT /v1/routes/{id} answers
+	// with instead of updating — a 404 for a route deleted on the account, a
+	// 500 for an outage.
+	updateStatus int
 
 	// createdRoutes/updatedRoutes/deletedRoutes/routeAuth record what
 	// reached the routes endpoints, for tests that care what a push sent.
@@ -125,6 +129,10 @@ func newFakeWahooUpstream(t *testing.T) *fakeWahooUpstream {
 		f.routeAuth = append(f.routeAuth, r.Header.Get("Authorization"))
 		switch r.Method {
 		case http.MethodPut:
+			if f.updateStatus != 0 {
+				w.WriteHeader(f.updateStatus)
+				return
+			}
 			if err := r.ParseForm(); err != nil {
 				t.Fatal(err)
 			}

@@ -76,6 +76,27 @@ func (s *Store) Put(ctx context.Context, rider, provider, key, remoteID string) 
 	return err
 }
 
+// RemoteIDs is every remote id recorded for the rider on a provider: the
+// courses this app made from pacing plans. Sync-back uses it to leave them out
+// of what it offers to import.
+func (s *Store) RemoteIDs(ctx context.Context, rider, provider string) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(
+		`SELECT remote_id FROM pacing_pushes WHERE rider = ? AND provider = ?`), normalize(rider), provider)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // Forget drops the record. Forgetting what is not there is not an error.
 func (s *Store) Forget(ctx context.Context, rider, provider, key string) error {
 	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(

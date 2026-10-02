@@ -12,9 +12,11 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
+	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/pacing"
 	"github.com/wncservices/domestique/apps/api/internal/targets"
+	"github.com/wncservices/domestique/apps/api/internal/wahoo"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -65,6 +67,10 @@ func (s *Server) buildPacingCourse(ctx context.Context, rider string, identity a
 			}
 			if err != nil || !isOwnTraining(identity, g.Rider) {
 				return nil, notFound(workout.ErrGoalNotFound.Error())
+			}
+			if g.RouteSlug != slug {
+				// The goal's intensity and event belong to its own route.
+				return nil, &pacingFailure{status: http.StatusUnprocessableEntity, msg: errGoalRouteMismatch}
 			}
 			goal = &g
 		}
@@ -238,10 +244,11 @@ func (s *Server) handlePacingPush(w http.ResponseWriter, r *http.Request) {
 		}
 		if previous != "" {
 			remoteID, err = client.UpdateRoute(r.Context(), previous, req)
-			if err != nil {
-				// The route may have been deleted on the account since: make a new
-				// one rather than fail, and replace the record.
-				s.logger().Warn("pacing push: updating the Wahoo route failed, creating a new one", "rider", rider, "route", slug, "err", err)
+			if errors.Is(err, wahoo.ErrNotFound) {
+				// Deleted on the account since: make it again and move the record.
+				// Any other failure is reported and leaves the record, so the next
+				// push tries the same route rather than adding a copy beside it.
+				s.logger().Warn("pacing push: the Wahoo route is gone, creating a new one", "rider", rider, "route", slug)
 				remoteID, err = client.CreateRoute(r.Context(), req)
 			}
 		} else {
@@ -263,6 +270,52 @@ func (s *Server) handlePacingPush(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger().Info("pacing course pushed", "rider", rider, "route", slug, "provider", string(provider), "outcome", map[bool]string{true: "replaced", false: "created"}[previous != ""])
 	writeJSON(w, http.StatusOK, map[string]any{"provider": string(provider), "name": c.Name, "replaced": previous != ""})
+}
+
+// dropPacingCourses removes from a Garmin course list the pacing courses this
+// app pushed for the rider: they are derived from a route already in the library,
+// so they are neither something to bring back nor a duplicate of anything. A
+// failure to read the record leaves the list whole: the worst outcome is a
+// pacing course shown among the rest.
+func (s *Server) dropPacingCourses(ctx context.Context, rider string, courses []garmin.Course) []garmin.Course {
+	ours := s.pacingRemoteIDs(ctx, rider, string(model.ProviderGarmin))
+	if len(ours) == 0 {
+		return courses
+	}
+	out := make([]garmin.Course, 0, len(courses))
+	for _, c := range courses {
+		if !ours[c.ID] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// dropPacingRoutes is dropPacingCourses for a Wahoo route list.
+func (s *Server) dropPacingRoutes(ctx context.Context, rider string, routes []wahoo.Route) []wahoo.Route {
+	ours := s.pacingRemoteIDs(ctx, rider, string(model.ProviderWahoo))
+	if len(ours) == 0 {
+		return routes
+	}
+	out := make([]wahoo.Route, 0, len(routes))
+	for _, rt := range routes {
+		if !ours[rt.ID] {
+			out = append(out, rt)
+		}
+	}
+	return out
+}
+
+func (s *Server) pacingRemoteIDs(ctx context.Context, rider, provider string) map[string]bool {
+	if s.PacingPushes == nil || rider == "" {
+		return nil
+	}
+	ids, err := s.PacingPushes.RemoteIDs(ctx, rider, provider)
+	if err != nil {
+		s.logger().Warn("could not read pacing pushes for the import list", "rider", rider, "provider", provider, "err", err)
+		return nil
+	}
+	return ids
 }
 
 func providerName(p model.Provider) string {
