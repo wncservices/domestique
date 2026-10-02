@@ -116,6 +116,10 @@ const (
 	hrLagNote         = "Steady-state; HR lags the first minutes of a climb."
 )
 
+// errGoalRouteMismatch is the answer when a pacing request names a goal that is
+// not linked to the route being paced.
+const errGoalRouteMismatch = "that goal is not linked to this route"
+
 var pacingReasons = map[string]string{
 	reasonNoElevation: demandReasons[reasonNoElevation],
 	reasonNotCycling:  "A pacing plan is for cycling routes.",
@@ -241,6 +245,13 @@ func (s *Server) handlePacing(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		profile = p
+	}
+
+	if goal != nil && goal.RouteSlug != slug {
+		// A plan for one route with another route's goal would carry the wrong
+		// intensity and event: refuse it rather than guess.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": errGoalRouteMismatch})
+		return
 	}
 
 	rp, code, err := s.loadRouteProfile(r.Context(), rider, slug)

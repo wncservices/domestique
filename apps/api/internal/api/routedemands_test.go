@@ -37,6 +37,7 @@ type demandsOut struct {
 	} `json:"profile"`
 	Climbs []struct {
 		Index       int     `json:"index"`
+		DeviceIndex int     `json:"deviceIndex"`
 		StartM      float64 `json:"startM"`
 		EndM        float64 `json:"endM"`
 		LengthM     float64 `json:"lengthM"`

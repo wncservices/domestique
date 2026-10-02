@@ -494,18 +494,18 @@ export const api = {
       body: JSON.stringify({ name, description }),
     }),
 
-  /** Re-runs elevation backfill against the route's own already-stored GPX —
-   *  fixes a route uploaded before this deployment had elevation lookup
-   *  configured (or while the terrain service was briefly down), without
-   *  needing to re-upload the file. A no-op, not an error, on a route that
-   *  already has real elevation. 412s if this deployment has no elevation
-   *  lookup configured at all. */
   /** The race-day pacing plan for a route: targets per climb and segment and
    *  the expected time. `goalId` takes that goal's intensity override. */
   pacing: (slug: string, goalId?: string) =>
     request<PacingPlan>(
       `/api/routes/${encodeSlug(slug)}/pacing${goalId ? `?goal=${encodeURIComponent(goalId)}` : ''}`,
     ),
+  /** Re-runs elevation backfill against the route's own already-stored GPX —
+   *  fixes a route uploaded before this deployment had elevation lookup
+   *  configured (or while the terrain service was briefly down), without
+   *  needing to re-upload the file. A no-op, not an error, on a route that
+   *  already has real elevation. 412s if this deployment has no elevation
+   *  lookup configured at all. */
   recalculateElevation: (slug: string) =>
     request<Route>(`/api/routes/${encodeSlug(slug)}/recalculate-elevation`, { method: 'POST' }),
 

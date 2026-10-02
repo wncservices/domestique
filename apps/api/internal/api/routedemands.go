@@ -49,7 +49,12 @@ type routeRefDTO struct {
 // demandClimbDTO is one climb: where, how big, and how long it takes at the
 // intensity the race is ridden at. Distances only, no position.
 type demandClimbDTO struct {
+	// Index is the climb's number among the training climbs (1 km and 3 % or
+	// more). DeviceIndex is its number among the pacing plan's climbs (found at
+	// the 500 m device bar), which is the C-number the pacing plan, the course
+	// point on a head unit and the chart all use: label climbs with this.
 	Index       int     `json:"index"`
+	DeviceIndex int     `json:"deviceIndex"`
 	StartM      float64 `json:"startM"`
 	EndM        float64 `json:"endM"`
 	LengthM     float64 `json:"lengthM"`
@@ -213,7 +218,7 @@ func demandClimbs(rp *routeProfile, plan pacing.Plan, ftp float64) []demandClimb
 			continue
 		}
 		dto := demandClimbDTO{
-			Index: c.Index, StartM: math.Round(c.StartM), EndM: math.Round(c.EndM),
+			Index: c.Index, DeviceIndex: ct.Index, StartM: math.Round(c.StartM), EndM: math.Round(c.EndM),
 			LengthM: math.Round(c.LengthM), GainM: math.Round(c.GainM),
 			AvgGradient: math.Round(c.AvgGradient*10) / 10,
 			DurationSec: math.Round(ct.Seconds), Watts: math.Round(ct.Watts),
