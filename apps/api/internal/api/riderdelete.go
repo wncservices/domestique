@@ -27,6 +27,8 @@ type purgeSummary struct {
 	// and progression removed; ShareLinks the route links they had created.
 	TrainingRows int
 	ShareLinks   int
+	// SessionsEnded is the logins (one per device) that were ended.
+	SessionsEnded int
 }
 
 // purgeRiderData removes every trace of rider from this app's own database —
@@ -62,6 +64,18 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 	rider = strings.ToLower(strings.TrimSpace(rider))
 	if rider == "" {
 		return sum, errors.New("purge: no rider")
+	}
+
+	// First, so the rider cannot sign in again, or keep a page open that writes
+	// data, while the rest of this is being removed. A removed rider's cookie
+	// would otherwise stay valid until it expires: the session is a row of its
+	// own, and the rider's data going away does not touch it.
+	if s.Sessions != nil {
+		n, err := s.Sessions.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("ending sessions: %w", err)
+		}
+		sum.SessionsEnded = n
 	}
 
 	if s.Source != nil {
@@ -233,6 +247,6 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("rider deleted own account", "rider", rider, "routes", sum.Routes,
 		"accountsUnlinked", sum.AccountsUnlinked, "providerLinks", sum.ProviderLinks, "crewMemberships", sum.CrewMemberships,
-		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks)
+		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks, "sessionsEnded", sum.SessionsEnded)
 	writeJSON(w, http.StatusOK, map[string]string{"redirectTo": redirectTo})
 }

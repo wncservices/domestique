@@ -32,7 +32,11 @@ Three words that are easy to confuse, and the distinction is the whole design:
   who and `Remote-Groups` says what they may do. Under `mode: oidc` the app
   holds its own server-side session (`internal/sessions`, keyed by an opaque
   cookie) behind a login it verifies itself — see **Authentication and
-  roles** below.
+  roles** below. A session row carries a keyed HMAC of the rider and of the
+  OIDC `sub` (`secrets.Box.MAC`), so removing a rider ends their logins by
+  index (`Sessions.DeleteRider`/`DeleteSub`) without opening every sealed
+  identity. Changing someone's role ends their sessions too, because the role
+  is resolved from the groups stored at sign-in.
 - A **rider** is that user's name as it appears on things they own —
   `preferred_username` falling back through `name`/`nickname`/`sub` under
   `mode: oidc`, simply the Authelia username under `mode: proxy`. Either way

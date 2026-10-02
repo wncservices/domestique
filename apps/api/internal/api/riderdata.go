@@ -38,6 +38,10 @@ var riderTables = map[string]riderTable{
 	// the next start adopts the sealed token straight back.
 	"komoot_links": {Purged: true, Note: "Links.DeleteRider"},
 
+	// internal/sessions: the identity is sealed, so rider_key is a keyed
+	// one-way stand-in for the rider, which is how their logins are found.
+	"sessions": {Purged: true, Note: "Sessions.DeleteRider: every login of the rider ends at once"},
+
 	// internal/garminmfa
 	"garmin_mfa_challenges": {Purged: true, Note: "GarminMFA.DeleteRider"},
 

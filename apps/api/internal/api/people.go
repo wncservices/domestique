@@ -327,6 +327,11 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Roles are resolved from the groups stored in the session at sign-in, so
+	// a live session keeps the old role (a demoted admin stays one) until it
+	// expires. Ending it makes the next sign-in pick the new roles up.
+	s.endSessionsOf(r.Context(), id, "role changed")
+
 	s.logger().Info("person role changed", "id", id, "role", body.Role, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -401,6 +406,19 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+// endSessionsOf ends every login of one identity (an Auth0 user id, which is
+// the session's sub). A failure is logged and does not fail the request: the
+// Auth0 change the admin asked for is the point, and ending sessions is the
+// follow-through that expires on its own within sessionTTL anyway.
+func (s *Server) endSessionsOf(ctx context.Context, sub, why string) {
+	if s.Sessions == nil {
+		return
+	}
+	if err := s.Sessions.DeleteSub(ctx, sub); err != nil {
+		s.logger().Error("could not end the sessions of an identity; they stay valid until they expire", "reason", why, "id", sub, "err", err)
+	}
+}
+
 // handleDeletePerson removes a person entirely: this app's own local data
 // for their rider identity first (best-effort guess at which one — see
 // personDTO.LikelyRider, which the admin confirms or edits client-side
@@ -423,6 +441,11 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("rider")))
+
+	// The rider name is the UI's guess and may be blank, so the identity
+	// being deleted is ended by its own id as well: removing someone has to
+	// log them out even when no local data is purged.
+	s.endSessionsOf(r.Context(), id, "person deleted")
 
 	if rider != "" {
 		if _, err := s.purgeRiderData(r.Context(), rider); err != nil {

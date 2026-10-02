@@ -13,8 +13,11 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -31,6 +34,31 @@ var ErrNoKey = errors.New("no encryption key: set " + EnvKey)
 // Box seals and opens values. The zero Box is unusable; use FromEnv.
 type Box struct {
 	aead cipher.AEAD
+	key  []byte
+}
+
+// MAC returns a keyed, one-way stand-in for value: hex HMAC-SHA256 under a
+// subkey derived from the encryption key and purpose. It exists so a table can
+// find the rows that belong to a value (one rider's sessions) with an index,
+// without storing the value and without decrypting every row.
+//
+// Keyed rather than a plain hash on purpose: a rider name is low-entropy, so
+// an unkeyed hash of it is reversible by trying names. The purpose keeps two
+// tables from being joined on each other's stand-ins. Rotating the key changes
+// every MAC, which is harmless for its one user because the same rotation
+// already makes every sealed session unreadable.
+//
+// A nil Box returns "", which no caller stores (nothing can be stored
+// without a key at all).
+func (b *Box) MAC(purpose, value string) string {
+	if b == nil {
+		return ""
+	}
+	sub := hmac.New(sha256.New, b.key)
+	sub.Write([]byte("domestique/mac/" + purpose))
+	m := hmac.New(sha256.New, sub.Sum(nil))
+	m.Write([]byte(value))
+	return hex.EncodeToString(m.Sum(nil))
 }
 
 // GenerateKey returns a fresh key, encoded the way EnvKey expects.
@@ -74,7 +102,7 @@ func New(encoded string) (*Box, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Box{aead: aead}, nil
+	return &Box{aead: aead, key: key}, nil
 }
 
 // Seal encrypts plaintext. The nonce is random per call and prepended, so
