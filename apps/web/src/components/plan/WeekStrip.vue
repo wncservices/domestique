@@ -374,7 +374,7 @@ watch(
           :aria-label="`View ride results for ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
           @click.stop="openResults(day)"
         >
-          <OutcomeChip :outcome="analysedSession(day)!.analysis!.outcome" size="xs" />
+          <OutcomeChip :outcome="analysedSession(day)!.analysis!.outcome" :feel="analysedSession(day)!.analysis!.feel" size="xs" />
         </button>
       </div>
     </div>

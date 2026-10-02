@@ -316,7 +316,7 @@ function onRated(analysis: SessionAnalysis) {
               aria-label="View ride results"
               @click="openResults"
             >
-              <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
+              <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
             </button>
           </div>
           <p v-if="testUnreadable" class="text-xs text-muted">
@@ -428,7 +428,7 @@ function onRated(analysis: SessionAnalysis) {
             aria-label="View ride results"
             @click="openResults"
           >
-            <OutcomeChip :outcome="analysedSession.analysis!.outcome" />
+            <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
           </button>
         </div>
 
