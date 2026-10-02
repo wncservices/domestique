@@ -1105,9 +1105,7 @@ func (s *Server) handleGetWorkout(w http.ResponseWriter, r *http.Request) {
 		s.forbidTraining(w, r)
 		return
 	}
-	one := []workoutDTO{workoutDTOFrom(wk)}
-	s.attachWhy(r.Context(), wk.Rider, one)
-	writeJSON(w, http.StatusOK, one[0])
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), wk))
 }
 
 type workoutRequestBody struct {
@@ -1213,9 +1211,7 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("workout updated", "id", id, "by", identity.User)
-	one := []workoutDTO{workoutDTOFrom(updated)}
-	s.attachWhy(r.Context(), updated.Rider, one)
-	writeJSON(w, http.StatusOK, one[0])
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), updated))
 }
 
 // recordManualMove returns the description to save when an update moves a

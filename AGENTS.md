@@ -755,6 +755,9 @@ state file ──────Open────> state.Store ───┘
   and panicking takes the server down, so the caller has to decide.
 - `internal/sync` — the diff engine. Pure: give it routes, config and a store, get a plan.
 - `internal/targets` — one adapter per provider. Adapters are dumb; the engine decides what to do.
+- `internal/why` — the rules, inputs and popover facts behind "Why?" on every automatic change; rows live
+  in the `adjustments` table and are shown only while they still describe their subject. `threshold_auto`
+  rows (subject `profile:<field>`) are stored for history and nothing renders them yet.
 - `internal/api` — JSON API plus the built SPA.
 
 `model.Route` carries **no file paths**. A route is a row; fetch its track through the library.

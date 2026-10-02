@@ -130,7 +130,7 @@ func (s *Server) handleIndoorConvert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if wk.Indoor {
-		writeJSON(w, http.StatusOK, workoutDTOFrom(wk))
+		writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), wk))
 		return
 	}
 
@@ -149,7 +149,7 @@ func (s *Server) handleIndoorConvert(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger().Info("workout converted to indoor", "workout", wk.ID)
 	s.repushToday(r.Context(), updated)
-	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), updated))
 }
 
 // handleIndoorRevert puts the pre-conversion steps back. Idempotent: a workout
@@ -167,7 +167,7 @@ func (s *Server) handleIndoorRevert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !wk.Indoor || wk.OutdoorSteps == nil {
-		writeJSON(w, http.StatusOK, workoutDTOFrom(wk))
+		writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), wk))
 		return
 	}
 
@@ -185,7 +185,7 @@ func (s *Server) handleIndoorRevert(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger().Info("workout reverted to outdoor", "workout", wk.ID)
 	s.repushToday(r.Context(), updated)
-	writeJSON(w, http.StatusOK, workoutDTOFrom(updated))
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), updated))
 }
 
 // repushToday updates today's copy of the session on Garmin right away, so a

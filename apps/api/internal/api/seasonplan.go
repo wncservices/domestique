@@ -208,6 +208,9 @@ func (s *Server) recordSeasonRefresh(ctx context.Context, rider string, was work
 		if label == "" {
 			label = now.Name
 		}
+		if label == "" {
+			label = "session"
+		}
 		text = fmt.Sprintf("Rebuilt %s from your current levels: %s %s, was %s", weekday, strings.ToUpper(label[:1])+label[1:], levelString(now.Level), levelString(was.Level))
 	}
 	s.recordSubjectAdjustment(ctx, rider, workout.SubjectWorkout, was.ID, why.NewRecord(why.SeasonRefresh, text, why.SeasonRefreshInputs{

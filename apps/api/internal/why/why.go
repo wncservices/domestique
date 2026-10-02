@@ -317,6 +317,26 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 	return nil
 }
 
+// ThresholdText is the sentence stored with an auto-applied threshold: the
+// finding's own reason when it had one, otherwise one built from the inputs, so
+// the stored text is never empty.
+func ThresholdText(in ThresholdAutoInputs) string {
+	if in.Reason != "" {
+		return in.Reason
+	}
+	source := ""
+	switch in.Source {
+	case "test":
+		source = " (from your FTP test)"
+	default:
+		source = " (from your rides)"
+	}
+	if in.From == 0 {
+		return fmt.Sprintf("%s set to %s%s.", fieldLabel(in.Field), num(in.To), source)
+	}
+	return fmt.Sprintf("%s updated from %s to %s%s.", fieldLabel(in.Field), num(in.From), num(in.To), source)
+}
+
 // decode reads stored inputs back into their typed struct.
 func decode[T any](inputs map[string]any) (T, bool) {
 	var out T

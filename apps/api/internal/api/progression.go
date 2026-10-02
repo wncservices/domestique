@@ -111,7 +111,9 @@ func (s *Server) handleGetProgression(w http.ResponseWriter, r *http.Request) {
 		dto := progressionLevelDTO{
 			Sport: string(l.Sport), Zone: string(l.Zone), Level: l.Level, Reason: l.Reason, UpdatedAt: l.UpdatedAt,
 		}
-		if a, ok := whys[string(l.Sport)+":"+string(l.Zone)]; ok {
+		// Only while the level still rests on that move: a ride that moved it
+		// since has its own Reason, and the older why would contradict it.
+		if a, ok := whys[string(l.Sport)+":"+string(l.Zone)]; ok && whyIsCurrent(a.CreatedAt, l.UpdatedAt) {
 			dto.Why = whyDTOFrom(a)
 		}
 		out.Levels = append(out.Levels, dto)

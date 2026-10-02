@@ -283,10 +283,9 @@ func (s *Server) recordDetectedThresholds(ctx context.Context, rider string, det
 		if d.fromTest {
 			source = "test"
 		}
-		s.recordSubjectAdjustment(ctx, rider, workout.SubjectLevel, "profile:"+d.Field, why.NewRecord(
-			why.ThresholdAuto, d.Reason, why.ThresholdAutoInputs{
-				Field: d.Field, From: d.previous, To: d.Value, Source: source, Reason: d.Reason,
-			}))
+		in := why.ThresholdAutoInputs{Field: d.Field, From: d.previous, To: d.Value, Source: source, Reason: d.Reason}
+		s.recordSubjectAdjustment(ctx, rider, workout.SubjectLevel, "profile:"+d.Field,
+			why.NewRecord(why.ThresholdAuto, why.ThresholdText(in), in))
 	}
 }
 

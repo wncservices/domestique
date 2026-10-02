@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -34,6 +35,38 @@ func whyDTOFrom(a workout.Adjustment) *whyDTO {
 	return out
 }
 
+// whyIsCurrent is whether an adjustment still describes its subject: it was
+// recorded at or after the subject's last write. An automatic change writes
+// the subject first and records afterwards, so a genuine row always passes;
+// anything that rewrote the subject since (a manual edit, an indoor convert, an
+// alternate swap or its revert, a Train Now replace, a later level move) leaves
+// the row older than the subject, and an explanation of a session that no
+// longer exists is worse than none. The two stamps come in different widths
+// (seconds on the subject, nanoseconds on the row), so both are parsed; one
+// that does not parse counts as not current.
+func whyIsCurrent(adjustmentCreated, subjectUpdated string) bool {
+	created, err := time.Parse(time.RFC3339Nano, adjustmentCreated)
+	if err != nil {
+		return false
+	}
+	updated, err := time.Parse(time.RFC3339Nano, subjectUpdated)
+	if err != nil {
+		return false
+	}
+	return !created.Before(updated)
+}
+
+// workoutDTOWithWhy is workoutDTOFrom for a response that carries one workout:
+// every endpoint that answers with a workout the owner can read goes through
+// here (or attachWhy, for lists), so none can forget the why or send a stale
+// one. Responses to a create deliberately do not: a new workout has no
+// adjustment.
+func (s *Server) workoutDTOWithWhy(ctx context.Context, w workout.Workout) workoutDTO {
+	one := []workoutDTO{workoutDTOFrom(w)}
+	s.attachWhy(ctx, w.Rider, one)
+	return one[0]
+}
+
 // attachWhy fills Why on every workout in lists with one batched read for all
 // of them, never one per workout. A read failure is a Warn and leaves the
 // workouts without a why: the description note is still there for the UI to
@@ -55,7 +88,7 @@ func (s *Server) attachWhy(ctx context.Context, rider string, lists ...[]workout
 	}
 	for _, l := range lists {
 		for i := range l {
-			if a, ok := found[l[i].ID]; ok {
+			if a, ok := found[l[i].ID]; ok && whyIsCurrent(a.CreatedAt, l[i].UpdatedAt) {
 				l[i].Why = whyDTOFrom(a)
 			}
 		}

@@ -318,7 +318,7 @@ func (s *Server) handleTrainNowApply(w http.ResponseWriter, r *http.Request) {
 	if res.profile.AutoPushWorkouts {
 		s.pushWorkoutsForRider(r.Context(), rider)
 	}
-	writeJSON(w, http.StatusOK, workoutDTOFrom(result))
+	writeJSON(w, http.StatusOK, s.workoutDTOWithWhy(r.Context(), result))
 }
 
 // untouchedToday is today's plan-made session that a suggestion may replace in
