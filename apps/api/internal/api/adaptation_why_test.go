@@ -266,6 +266,14 @@ func TestTomorrowsEasingRecordsTheForecastThatTheRiderConfirmed(t *testing.T) {
 	if in.Verdict != "rest" || len(in.Signals) == 0 {
 		t.Errorf("inputs = %+v, want the forecast's verdict and reasons", in)
 	}
+	for _, sig := range in.Signals {
+		if sig.Label == "" || sig.Label == "Forecast" {
+			t.Errorf("signal %+v has a generic label; each should say what it is about", sig)
+		}
+	}
+	if in.Signals[0].Label != "Projected form" || in.Signals[0].Kind != "form" {
+		t.Errorf("first signal = %+v, want the projected-form one", in.Signals[0])
+	}
 	if !strings.HasPrefix(a.Text, "Eased ahead of time — ") {
 		t.Errorf("text = %q", a.Text)
 	}

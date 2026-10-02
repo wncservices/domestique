@@ -194,6 +194,24 @@ func (s *Server) tomorrowFor(ctx context.Context, rider string, today time.Time,
 	return forecast, target, ok, nil
 }
 
+// forecastSignal gives one of the forecast's reason sentences a label that says
+// what it is about, keyed on the wording readiness.ForecastTomorrow uses. A
+// sentence it does not recognise is labelled "Forecast" rather than guessed at.
+func forecastSignal(reason string) why.Signal {
+	kind, label := "forecast", "Forecast"
+	switch {
+	case strings.Contains(reason, "form is projected"):
+		kind, label = "form", "Projected form"
+	case strings.Contains(reason, "needed to rest today"):
+		kind, label = "readiness", "Rest day today"
+	case strings.Contains(reason, "load this week"):
+		kind, label = "load", "Load with today counted"
+	case strings.Contains(reason, "third hard day"):
+		kind, label = "load", "Hard days in a row"
+	}
+	return why.Signal{Kind: kind, Label: label, Value: reason}
+}
+
 // easeTomorrowRefusedMessage is what a rider sees when the fresh forecast no
 // longer calls for easing, or tomorrow's session is no longer one this may
 // touch. One plain message for every such case: the rider's next step is the
@@ -251,7 +269,7 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 	// (projected form, load ratio), so each is kept as its own signal.
 	signals := make([]why.Signal, 0, len(forecast.Reasons))
 	for _, r := range forecast.Reasons {
-		signals = append(signals, why.Signal{Kind: "forecast", Label: "Forecast", Value: r})
+		signals = append(signals, forecastSignal(r))
 	}
 	change := adapter.Change{
 		WorkoutID: target.ID, Reason: reason,
