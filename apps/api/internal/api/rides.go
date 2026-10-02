@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -26,6 +27,20 @@ type rideDTO struct {
 	// see schedule.Series and handleCreateRideSeries. Empty for an
 	// ordinary one-off ride.
 	SeriesID string `json:"seriesId,omitempty"`
+	// Sync is set only on the response to scheduling: what sending the
+	// route to the crew's devices did. A series sends once, so only its
+	// first ride carries it.
+	Sync *rideSyncDTO `json:"sync,omitempty"`
+}
+
+// rideSyncDTO is what pushing a newly scheduled ride's route to the crew did.
+// Applied counts devices the route was created or updated on; a route already
+// on every device is a success with 0. Error is set when the push could not
+// run at all; the ride is scheduled regardless.
+type rideSyncDTO struct {
+	Applied  int      `json:"applied"`
+	Failures []string `json:"failures"`
+	Error    string   `json:"error,omitempty"`
 }
 
 // upcomingRideDTO is a rideDTO plus the crew it belongs to — the shape
@@ -229,7 +244,9 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("crew ride scheduled", "crew", id, "slug", route.Slug, "date", body.Date, "by", identity.User)
-	writeJSON(w, http.StatusCreated, rideDTOFor(ride, map[string]string{route.Slug: route.Name}))
+	dto := rideDTOFor(ride, map[string]string{route.Slug: route.Name})
+	dto.Sync = s.pushRideRoute(r.Context(), id, route)
+	writeJSON(w, http.StatusCreated, dto)
 }
 
 // resolveRideRoute finds the named route among what identity may see,
@@ -373,6 +390,9 @@ func (s *Server) handleCreateRideSeries(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.logger().Info("crew ride series scheduled", "crew", id, "slug", route.Slug, "count", len(rides), "by", identity.User)
+	if len(out) > 0 {
+		out[0].Sync = s.pushRideRoute(r.Context(), id, route)
+	}
 	writeJSON(w, http.StatusCreated, out)
 }
 
@@ -657,22 +677,7 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linked, ok := s.linkedAccounts(r.Context(), w)
-	if !ok {
-		return
-	}
-	crews, ok := s.crewSnapshot(w, r)
-	if !ok {
-		return
-	}
-	scoped := make([]model.Account, 0, len(linked))
-	for _, a := range linked {
-		if crews.ApprovedRiders.Has(id, a.Rider) {
-			scoped = append(scoped, a)
-		}
-	}
-
-	resp, err := s.applyPush(r.Context(), []model.Route{routes[idx]}, scoped, crews, true, nil)
+	resp, err := s.pushRouteToCrew(r.Context(), id, routes[idx])
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -680,4 +685,49 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("crew ride synced", "crew", id, "ride", rideID, "slug", ride.Slug, "by", identity.User)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// pushRouteToCrew sends one route to the devices of one crew's approved
+// members, and nowhere else: handleSyncRide's own doc comment says why the
+// accounts are narrowed to this crew before the plan is built.
+func (s *Server) pushRouteToCrew(ctx context.Context, crewID string, route model.Route) (pushResponse, error) {
+	linked, err := s.Accounts.List(ctx)
+	if err != nil {
+		return pushResponse{}, err
+	}
+	crews := crew.Snapshot{}
+	if s.Crew != nil {
+		if crews, err = s.Crew.Snapshot(ctx); err != nil {
+			return pushResponse{}, err
+		}
+	}
+	scoped := make([]model.Account, 0, len(linked))
+	for _, a := range linked {
+		if crews.ApprovedRiders.Has(crewID, a.Rider) {
+			scoped = append(scoped, a)
+		}
+	}
+	return s.applyPush(ctx, []model.Route{route}, scoped, crews, true, nil)
+}
+
+// pushRideRoute is scheduling's own "Sync now": a ride is scheduled so the
+// crew rides that route, and until now it reached a friend's device only if
+// somebody pressed Sync now afterwards. Scheduling is the same explicit,
+// one-route, one-crew act Sync now is, by someone with more authority (it
+// takes CanSchedule), so it does what Sync now does. A failure never undoes
+// the schedule: it is reported, and Sync now is still there to retry.
+func (s *Server) pushRideRoute(ctx context.Context, crewID string, route model.Route) *rideSyncDTO {
+	resp, err := s.pushRouteToCrew(ctx, crewID, route)
+	if err != nil {
+		s.logger().Warn("crew ride scheduled but its route was not sent to the crew's devices", "crew", crewID, "slug", route.Slug, "err", err)
+		return &rideSyncDTO{Failures: []string{}, Error: err.Error()}
+	}
+	if len(resp.Failures) > 0 {
+		s.logger().Warn("crew ride scheduled, sending its route had failures", "crew", crewID, "slug", route.Slug, "failures", len(resp.Failures))
+	}
+	failures := resp.Failures
+	if failures == nil {
+		failures = []string{}
+	}
+	return &rideSyncDTO{Applied: resp.Applied, Failures: failures}
 }

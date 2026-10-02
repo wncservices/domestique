@@ -2,10 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { Crew, Person, Ride, RideSeriesInterval, UpcomingRide } from '@/api/types'
+import type { Crew, Person, Ride, RideSeriesInterval, RideSync, UpcomingRide } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
+import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import TrackPreview from '@/components/TrackPreview.vue'
 
 const { crews, accounts, routes, me, loading, error, refresh, can } = useLibrary()
@@ -496,13 +497,15 @@ async function scheduleRide() {
         icon: 'i-lucide-calendar-plus',
         color: 'success',
       })
+      announceRideSync(created[0]?.sync)
     } else {
-      await api.scheduleRide(crew.id, {
+      const created = await api.scheduleRide(crew.id, {
         slug: scheduleSlug.value,
         date: scheduleDate.value,
         time: scheduleTime.value || undefined,
       })
       toast.add({ title: 'Ride scheduled', icon: 'i-lucide-calendar-plus', color: 'success' })
+      announceRideSync(created.sync)
     }
     scheduleSlug.value = ''
     scheduleTime.value = ''
@@ -519,6 +522,35 @@ async function scheduleRide() {
   } finally {
     scheduling.value = false
   }
+}
+
+// Scheduling sends the route to the crew's devices straight away (see the
+// API's pushRideRoute); this says how that went. A failure never undoes the
+// schedule, and the ride's own Sync now button retries.
+function announceRideSync(sync: RideSync | undefined) {
+  if (!sync) return
+  if (sync.error || sync.failures.length) {
+    toast.add({
+      title: "The route could not reach every crew device",
+      description: sync.error ?? sync.failures.join(', '),
+      icon: 'i-lucide-triangle-alert',
+      color: 'warning',
+    })
+  } else if (sync.applied > 0) {
+    toast.add({
+      title: `Sent to ${sync.applied} crew device${sync.applied === 1 ? '' : 's'}`,
+      icon: 'i-lucide-refresh-cw',
+      color: 'success',
+    })
+  }
+}
+
+// A ride's route opens the same detail view the Library uses: map, profile,
+// GPX. Only for a route this rider can see; a deleted one stays plain text.
+const openRouteSlug = ref<string | null>(null)
+const openRoute = computed(() => routes.value.find((r) => r.slug === openRouteSlug.value) ?? null)
+function routeFor(slug: string) {
+  return routes.value.find((r) => r.slug === slug)
 }
 
 const deletingRide = ref('')
@@ -981,7 +1013,16 @@ async function saveShare() {
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="flex items-center gap-1 truncate text-sm font-medium text-highlighted">
-                    {{ ride.routeName }}
+                    <button
+                      v-if="routeFor(ride.slug)"
+                      type="button"
+                      class="truncate text-left hover:underline focus-visible:underline focus:outline-none"
+                      :aria-label="`Open ${ride.routeName}`"
+                      @click="openRouteSlug = ride.slug"
+                    >
+                      {{ ride.routeName }}
+                    </button>
+                    <template v-else>{{ ride.routeName }}</template>
                     <UTooltip v-if="ride.seriesId" text="Part of a repeating series">
                       <UIcon name="i-lucide-repeat" class="size-3 shrink-0 text-dimmed" />
                     </UTooltip>
@@ -1407,5 +1448,15 @@ async function saveShare() {
         </div>
       </template>
     </UModal>
+
+    <RouteDetailModal
+      :open="openRouteSlug !== null && !!openRoute"
+      :route="openRoute"
+      :accounts="accounts"
+      :writable="can('routes:upload')"
+      :me="me"
+      @update:open="(v: boolean) => { if (!v) openRouteSlug = null }"
+      @updated="backgroundRefresh"
+    />
   </div>
 </template>

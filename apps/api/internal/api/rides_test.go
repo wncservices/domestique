@@ -521,19 +521,70 @@ func TestSyncRide(t *testing.T) {
 		`{"provider":"wahoo"}`); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("friend linking wahoo: status = %d", resp.StatusCode)
 	}
+	// Scheduling already sends the route to the crew (TestSchedulingARide-
+	// SendsItsRouteToTheCrew); a friend who links a device afterwards is
+	// what Sync now is still for.
 	ride := h.mustScheduleRide(t, "wilant", crewID, route.Slug, "2026-09-05")
+	if resp := h.as("friend", "cyclists", http.MethodPost, "/api/accounts",
+		`{"provider":"garmin"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("friend linking garmin: status = %d", resp.StatusCode)
+	}
 
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/"+ride.ID+"/sync", "")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	out := h.decodeSync(t, resp)
-	if out.Applied != 2 {
-		t.Fatalf("applied = %d, want 2 (wilant's own account and friend's)", out.Applied)
+	if out.Applied != 1 {
+		t.Fatalf("applied = %d, want 1 (only friend's newly linked device)", out.Applied)
 	}
-	got := syncAccountIDs(out)
-	if !got["garmin:wilant"] || !got["wahoo:friend"] {
-		t.Fatalf("items = %+v, want garmin:wilant and wahoo:friend", out.Items)
+	if got := syncAccountIDs(out); !got["garmin:friend"] {
+		t.Fatalf("items = %+v, want garmin:friend", out.Items)
+	}
+}
+
+// Scheduling a ride sends its route to every approved member's devices at
+// once, so a friend does not depend on somebody remembering Sync now, and
+// says what it did. It stays inside the crew the ride is for.
+func TestSchedulingARideSendsItsRouteToTheCrew(t *testing.T) {
+	h := newAuthHarness(t, nil)
+	crewID := h.seedApprovedCrew(t, "wilant", "friend")
+	other := h.seedApprovedCrew(t, "wilant", "stranger")
+	route := h.seedRouteWithTargets(t, "Hill Loop", "wilant", []string{crewID, other})
+	for _, rider := range []string{"friend", "stranger"} {
+		if resp := h.as(rider, "cyclists", http.MethodPost, "/api/accounts",
+			`{"provider":"wahoo"}`); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("%s linking wahoo: status = %d", rider, resp.StatusCode)
+		}
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides",
+		`{"slug":"`+route.Slug+`","date":"2026-09-05"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	var created struct {
+		Sync *struct {
+			Applied  int      `json:"applied"`
+			Failures []string `json:"failures"`
+		} `json:"sync"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Sync == nil || created.Sync.Applied != 2 || len(created.Sync.Failures) != 0 {
+		t.Fatalf("sync = %+v, want the route sent to wilant's and friend's devices", created.Sync)
+	}
+
+	// Already on both, and never on the other crew's stranger: Sync now has
+	// nothing left to do for this crew.
+	ride := h.decodeRides(t, h.as("wilant", "cyclists", http.MethodGet, "/api/crews/"+crewID+"/rides", ""))[0]
+	out := h.decodeSync(t, h.as("wilant", "cyclists", http.MethodPost, "/api/crews/"+crewID+"/rides/"+ride.ID+"/sync", ""))
+	if out.Applied != 0 {
+		t.Fatalf("applied = %d after scheduling, want 0", out.Applied)
+	}
+	if got := syncAccountIDs(out); got["wahoo:stranger"] {
+		t.Fatalf("items = %+v, scheduling for one crew must never reach another", out.Items)
 	}
 }
 
