@@ -1,7 +1,14 @@
 // Pure math for the Fitness page redesign: form status, CTL/ATL/TSB deltas,
 // weekly training hours, the chart's range filter, and the three training
 // zone sets. No Vue, no API calls — Tasks 3-4 build UI on these exports.
-import type { CompletedSession, FitnessSnapshot, RiderProfile } from '@/api/types'
+import type {
+  CompletedSession,
+  FitnessSnapshot,
+  ProjectionBand,
+  ProjectionResponse,
+  ProjectionVerdict,
+  RiderProfile,
+} from '@/api/types'
 
 // ---------- Local date helpers ----------
 // Snapshot/session dates are plain 'YYYY-MM-DD' strings with no timezone of
@@ -141,9 +148,12 @@ export function weeklyHours(sessions: CompletedSession[], today: Date): { thisWe
 
 // ---------- Chart range filter ----------
 
-export type ChartRange = '6w' | '3m' | '6m' | '1y'
+// 'race' is the "To race" range: six weeks of history, then the projection to
+// the event. It only makes sense with a projection, so the chart offers it
+// only then.
+export type ChartRange = '6w' | '3m' | '6m' | '1y' | 'race'
 
-const RANGE_DAYS: Record<ChartRange, number> = { '6w': 42, '3m': 91, '6m': 182, '1y': 365 }
+const RANGE_DAYS: Record<ChartRange, number> = { '6w': 42, '3m': 91, '6m': 182, '1y': 365, race: 42 }
 
 // Inclusive of the boundary day: a snapshot exactly `days` old is kept, one
 // day older is dropped.
@@ -152,6 +162,83 @@ export function filterByRange(snapshots: FitnessSnapshot[], range: ChartRange, t
   return snapshots
     .filter((s) => parseLocalDate(s.date) >= cutoff)
     .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+// ---------- Race-day projection (display only) ----------
+//
+// The maths lives on the server (internal/projection); these helpers only
+// shape its series for the chart and format its numbers.
+
+export interface ChartPoint {
+  date: string
+  ctl: number
+  atl: number
+  tsb: number
+  /** True for a day that has not happened yet: drawn dashed, read as "Projected". */
+  projected: boolean
+}
+
+// A history range reaches back from today, so "the event falls within it"
+// means the event is no further ahead than the range is long. "To race"
+// always reaches the event.
+export function eventWithinRange(eventDate: string, range: ChartRange, today: Date): boolean {
+  if (range === 'race') return true
+  const limit = addDays(startOfLocalDay(today), RANGE_DAYS[range])
+  return parseLocalDate(eventDate) <= limit
+}
+
+// The chart's series: the range's history, then (when there is a projection
+// and the event is inside the range) the projected days after the last
+// snapshot. A projected day a snapshot already covers is dropped, so the solid
+// line never doubles back over the dashed one.
+export function extendSeries(
+  snapshots: FitnessSnapshot[],
+  projection: ProjectionResponse | null,
+  range: ChartRange,
+  today: Date,
+): ChartPoint[] {
+  const history: ChartPoint[] = filterByRange(snapshots, range, today).map((s) => ({
+    date: s.date,
+    ctl: s.ctl,
+    atl: s.atl,
+    tsb: s.tsb,
+    projected: false,
+  }))
+  if (!projection || !projection.available || !projection.goal || projection.points.length === 0) return history
+  if (!eventWithinRange(projection.goal.eventDate, range, today)) return history
+
+  const lastHistory = history.length ? history[history.length - 1]!.date : ''
+  const future: ChartPoint[] = projection.points
+    .filter((p) => p.date > lastHistory)
+    .map((p) => ({ date: p.date, ctl: p.ctl, atl: p.atl, tsb: p.tsb, projected: true }))
+  return [...history, ...future]
+}
+
+// The target band clipped to the part of the TSB axis actually plotted; null
+// when none of it is in view, so no empty strip is drawn.
+export function clampBand(band: ProjectionBand, min: number, max: number): ProjectionBand | null {
+  const low = Math.max(band.low, min)
+  const high = Math.min(band.high, max)
+  return high > low ? { low, high } : null
+}
+
+// Whole points with an explicit sign and a typographic minus, as the server
+// words its verdicts ("form −6", "+12").
+export function formatSigned(value: number): string {
+  const rounded = Math.round(value)
+  if (rounded > 0) return `+${rounded}`
+  if (rounded < 0) return `−${Math.abs(rounded)}`
+  return '0'
+}
+
+export function formatBand(band: ProjectionBand): string {
+  return `${formatSigned(band.low)} to ${formatSigned(band.high)}`
+}
+
+// A verdict's Nuxt UI colour; neutral for "unavailable" and for B/C events,
+// which have no verdict.
+export function projectionTone(verdict: ProjectionVerdict | null | undefined): 'success' | 'warning' | 'info' | 'neutral' {
+  return verdict?.tone ?? 'neutral'
 }
 
 // ---------- Training zones ----------
