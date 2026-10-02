@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
+	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
@@ -18,6 +19,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
+	"github.com/wncservices/domestique/apps/api/internal/sessions"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/state"
@@ -94,6 +96,9 @@ func openRiderDataEnv(t *testing.T, dsn string) *riderDataEnv {
 	if srv.Training, err = workout.UseDB(conn, dsnUsed); err != nil {
 		t.Fatal(err)
 	}
+	if srv.Sessions, err = sessions.UseDB(conn, dsnUsed, box); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = settings.UseDB(conn, dsnUsed, box); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +136,7 @@ func eachRiderDataEngine(t *testing.T, run func(t *testing.T, env *riderDataEnv)
 // riderColumns are the columns that tie a row to a rider. idColumns tie it to
 // something a rider owns, so the row is theirs by one step removed.
 var (
-	riderColumns = []string{"rider", "created_by", "owner", "uploaded_by", "decided_by", "updated_by", "added_by"}
+	riderColumns = []string{"rider", "created_by", "owner", "uploaded_by", "decided_by", "updated_by", "added_by", "rider_key"}
 	idColumns    = []string{"workout_id", "session_id", "goal_id", "account_id"}
 )
 
@@ -209,6 +214,19 @@ type seed struct {
 	probeColumn string
 	// probe is the value to look for in probeColumn.
 	probe func(rider, id string) string
+}
+
+// envProbes is probe for the tables whose value only the environment can
+// compute (a keyed stand-in for the rider, say); an entry wins over probe.
+var envProbes = map[string]func(e *riderDataEnv, rider string) string{
+	"sessions": func(e *riderDataEnv, rider string) string { return e.srv.Sessions.RiderKey(rider) },
+}
+
+func (s seed) probeValue(e *riderDataEnv, rider, id string) string {
+	if f := envProbes[s.table]; f != nil {
+		return f(e, rider)
+	}
+	return s.probe(rider, id)
 }
 
 func byRider(rider, _ string) string { return rider }
@@ -292,6 +310,15 @@ func riderSeeds() []seed {
 		{"threshold_suggestions", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO threshold_suggestions (id, rider, field, created_at, updated_at) VALUES (?, ?, 'ftp', ?, ?)`, "sugg-"+id, rider, ts, ts)
 		}, "rider", byRider},
+		{"sessions", func(e *riderDataEnv, rider, id string) error {
+			// Two sessions, as a rider on a phone and a laptop has.
+			for range 2 {
+				if _, _, err := e.srv.Sessions.Create(auth.Identity{User: rider, Sub: "auth0|" + rider}, time.Hour); err != nil {
+					return err
+				}
+			}
+			return nil
+		}, "rider_key", nil},
 	}
 }
 
@@ -331,8 +358,10 @@ func TestPurgeRemovesEveryRidersData(t *testing.T) {
 			}
 		}
 
+		staysBefore := map[string]int{}
 		for _, s := range seeds {
-			if n := count(t, env, s.table, s.probeColumn, s.probe(gone, goneID)); n == 0 {
+			staysBefore[s.table] = count(t, env, s.table, s.probeColumn, s.probeValue(env, stays, staysID))
+			if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, gone, goneID)); n == 0 {
 				t.Fatalf("%s: seed for the leaving rider did not land", s.table)
 			}
 		}
@@ -342,11 +371,11 @@ func TestPurgeRemovesEveryRidersData(t *testing.T) {
 		}
 
 		for _, s := range seeds {
-			if n := count(t, env, s.table, s.probeColumn, s.probe(gone, goneID)); n != 0 {
+			if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, gone, goneID)); n != 0 {
 				t.Errorf("%s: %d rows left for the removed rider", s.table, n)
 			}
-			if n := count(t, env, s.table, s.probeColumn, s.probe(stays, staysID)); n != 1 {
-				t.Errorf("%s: %d rows for the rider who stays, want 1", s.table, n)
+			if n := count(t, env, s.table, s.probeColumn, s.probeValue(env, stays, staysID)); n == 0 || n != staysBefore[s.table] {
+				t.Errorf("%s: %d rows for the rider who stays, want %d", s.table, n, staysBefore[s.table])
 			}
 		}
 	})
