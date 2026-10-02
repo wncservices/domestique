@@ -152,19 +152,28 @@ func structuredSlotsFor(phase periodization.Phase, sport model.Sport, n int) []s
 // progression level per zone for sport (zone string -> level); a zone
 // missing from the map falls back to progression.Initial for the profile's
 // experience level, the same starting point a rider who has never had a
-// level saved for this sport gets.
-func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, today time.Time) ([]workout.CreateWorkoutRequest, error) {
+// level saved for this sport gets. Options are passed through to WeekWorkouts.
+func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, today time.Time, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
 	week, ok := currentWeek(plan, today)
 	if !ok {
 		return nil, nil
 	}
-	return WeekWorkouts(week, profile, levels, rider, goalID, sport)
+	return WeekWorkouts(week, profile, levels, rider, goalID, sport, opts...)
 }
 
 // WeekWorkouts builds one week's sessions directly — split out from
 // NextWorkouts so a test (or a future "regenerate week N") can target an
 // exact week without depending on time.Now.
-func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport) ([]workout.CreateWorkoutRequest, error) {
+//
+// WithRouteDemand, when given a demand, nudges a Build or Peak week's
+// structured sessions toward the wanted effort lengths (workoutlib.PickNear)
+// and names its long ride for a climbing route. Without it, or in any other
+// week, the output is exactly what it is without the option.
+func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
+	demand := applyOptions(opts).demand
+	if !biases(week) {
+		demand = nil
+	}
 	days := sortedDays(profile.AvailableDays)
 	n := len(days)
 	if n == 0 || week.TargetHours <= 0 {
@@ -201,7 +210,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 			continue
 		}
 		capSeconds := shares[i] * week.TargetHours * 3600
-		rung, ok := workoutlib.Pick(ladder, targetLevels[i], capSeconds)
+		rung, ok := workoutlib.PickNear(ladder, targetLevels[i], capSeconds, demand.wantFor(zones[i]))
 		if !ok {
 			kinds[i] = slotEndurance
 			continue
@@ -243,6 +252,11 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 				continue
 			}
 			req = BuildEnduranceSession(hours, kinds[i] == slotLong, sport, profile)
+			// The steps and hours stay the plain long ride's: the name is what
+			// tells the rider to find a hilly road.
+			if kinds[i] == slotLong && demand != nil && demand.Climbing && sport == model.SportCycling {
+				req.Name = ClimbingLongRideName
+			}
 		}
 		date := weekStart.AddDate(0, 0, weekdayOffset(day)).Format("2006-01-02")
 		req.Rider = rider

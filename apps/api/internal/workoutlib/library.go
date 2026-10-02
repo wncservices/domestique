@@ -49,6 +49,41 @@ func Pick(l Ladder, targetLevel float64, maxSeconds float64) (Rung, bool) {
 	return best, found
 }
 
+// PickNear is Pick, nudged toward a wanted effort length: among the rungs one
+// level either side of what Pick returns (and Pick's own) that fit
+// maxSeconds, it takes the one whose WorkSeconds is closest to
+// wantWorkSeconds, ties going to Pick's own rung. So the progression level
+// still decides difficulty (never more than one rung above Pick's, never a
+// rung that does not fit the time budget) and the route only chooses which
+// shape of that difficulty: "3 x 12 min" rather than "4 x 8 min". A wanted
+// length of zero or less is Pick exactly.
+func PickNear(l Ladder, targetLevel, maxSeconds float64, wantWorkSeconds int) (Rung, bool) {
+	base, ok := Pick(l, targetLevel, maxSeconds)
+	if !ok || wantWorkSeconds <= 0 {
+		return base, ok
+	}
+	best, bestDist := base, absInt(base.WorkSeconds-wantWorkSeconds)
+	for _, r := range l.Rungs {
+		if r.Level < base.Level-1 || r.Level > base.Level+1 || TotalSeconds(r) > maxSeconds {
+			continue
+		}
+		// Strict less-than: rungs are visited in increasing Level order, so of
+		// two equally near the lower wins, and Pick's own (the incumbent) is
+		// never displaced by an equally near one.
+		if d := absInt(r.WorkSeconds - wantWorkSeconds); d < bestDist {
+			best, bestDist = r, d
+		}
+	}
+	return best, true
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
 // restPercent is the spec's fixed rest intensity between reps: 50% FTP for
 // cycling, 65% threshold speed for running (docs/superpowers/specs's
 // progression-levels design, "Workout ladders"). A single value, not a
