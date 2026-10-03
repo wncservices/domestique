@@ -362,12 +362,28 @@ func (s *Server) identityFromToken(idToken *oidc.IDToken) (auth.Identity, error)
 			"user", user, "configured_claim", groupsClaim, "token_claim_keys", claimKeys(claims))
 	}
 	return auth.Identity{
-		User:   user,
-		Name:   strings.TrimSpace(stringClaim(claims, "name")),
-		Email:  strings.TrimSpace(stringClaim(claims, "email")),
-		Groups: groups,
-		Sub:    strings.TrimSpace(idToken.Subject),
+		User:  user,
+		Name:  strings.TrimSpace(stringClaim(claims, "name")),
+		Email: strings.TrimSpace(stringClaim(claims, "email")),
+		// Only an issuer that says the address is verified makes it one mail may
+		// be sent to: a missing claim is not verified.
+		EmailVerified: boolClaim(claims, "email_verified"),
+		Groups:        groups,
+		Sub:           strings.TrimSpace(idToken.Subject),
 	}, nil
+}
+
+// boolClaim reads a claim that is a JSON boolean, accepting the string "true"
+// too: some issuers (Cognito, Azure AD) send email_verified as a string. Absent
+// or anything else is false, which fails closed.
+func boolClaim(claims map[string]any, key string) bool {
+	switch v := claims[key].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(v, "true")
+	}
+	return false
 }
 
 // claimKeys lists a token's top-level claim names, sorted — never values,
