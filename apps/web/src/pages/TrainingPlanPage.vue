@@ -325,8 +325,25 @@ async function removeRouteFrom(w: Workout) {
 async function sendCourseOf(w: Workout) {
   sendingCourse.value = true
   try {
-    await api.pushWorkoutCourse(w.id)
-    toast.add({ title: 'Route sent to your devices', icon: 'i-lucide-send', color: 'success' })
+    const { course } = await api.pushWorkoutCourse(w.id)
+    switch (course) {
+      case 'pushed':
+        toast.add({ title: 'Route sent to your devices', icon: 'i-lucide-send', color: 'success' })
+        break
+      case 'unchanged':
+        toast.add({ title: 'Your devices already have this route', icon: 'i-lucide-check', color: 'neutral' })
+        break
+      case 'none':
+        toast.add({
+          title: 'Nothing was sent',
+          description: 'There is no connected Garmin or Wahoo account to send it to, or the route is not yours. Connect a device in Settings.',
+          icon: 'i-lucide-info',
+          color: 'warning',
+        })
+        break
+      default:
+        toast.add({ title: 'The route could not be sent', icon: 'i-lucide-triangle-alert', color: 'warning' })
+    }
   } catch (err) {
     toast.add({ title: 'Could not send the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
@@ -337,8 +354,17 @@ async function sendCourseOf(w: Workout) {
 async function pushWorkoutToGarmin(w: Workout) {
   pushingWorkout.value = w.id
   try {
-    await api.pushWorkoutToGarmin(w.id)
+    const res = await api.pushWorkoutToGarmin(w.id)
     toast.add({ title: `Pushed ${w.name} to Garmin`, icon: 'i-lucide-watch', color: 'success' })
+    // The workout went whatever happened to its route; say so if the route did not.
+    if (res.course === 'failed') {
+      toast.add({
+        title: `${w.name} was sent, but its route was not`,
+        description: 'The route could not be sent to your devices. Try "Send to devices" on the day card.',
+        icon: 'i-lucide-triangle-alert',
+        color: 'warning',
+      })
+    }
   } catch (err) {
     toast.add({
       title: `Could not push ${w.name} to Garmin`,
