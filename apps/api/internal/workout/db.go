@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS goals (
     target_distance_m  DOUBLE PRECISION NOT NULL DEFAULT 0,
     target_elevation_m DOUBLE PRECISION NOT NULL DEFAULT 0,
     notes              TEXT NOT NULL DEFAULT '',
+    route_slug         TEXT NOT NULL DEFAULT '',
+    pacing_if          DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL
 );
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS rider_profiles (
     rider                      TEXT PRIMARY KEY,
     ftp_watts                  DOUBLE PRECISION NOT NULL DEFAULT 0,
     ftp_estimated              %[2]s NOT NULL DEFAULT FALSE,
+    weight_kg                  DOUBLE PRECISION NOT NULL DEFAULT 0,
     estimated_fields           TEXT NOT NULL DEFAULT '',
     auto_push_workouts         %[2]s NOT NULL DEFAULT FALSE,
     ftp_levels_calibrated_watts DOUBLE PRECISION NOT NULL DEFAULT 0,
@@ -544,6 +547,11 @@ func (d *DB) addEstimatedColumns() error {
 		`ALTER TABLE rider_profiles ADD COLUMN ftp_verified_at TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE rider_profiles ADD COLUMN ftp_test_snoozed_until TEXT NOT NULL DEFAULT ''`,
 		fmt.Sprintf(`ALTER TABLE rider_profiles ADD COLUMN smart_trainer %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
+		`ALTER TABLE rider_profiles ADD COLUMN weight_kg DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		// A goal's route and pacing override: "" and 0 (derived) are right for
+		// every goal made before them.
+		`ALTER TABLE goals ADD COLUMN route_slug TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE goals ADD COLUMN pacing_if DOUBLE PRECISION NOT NULL DEFAULT 0`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -674,7 +682,7 @@ func (d *DB) query(q string) string { return d.dialect.Rebind(q) }
 func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
         FROM goals WHERE rider = ? ORDER BY event_date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -689,7 +697,7 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 			priority string
 		)
 		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		g.Sport = model.Sport(sport)
@@ -709,7 +717,7 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
         FROM goals ORDER BY (event_date = ''), event_date, name`))
 	if err != nil {
 		return nil, err
@@ -724,7 +732,7 @@ func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 			priority string
 		)
 		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		g.Sport = model.Sport(sport)
@@ -742,10 +750,10 @@ func (d *DB) GetGoal(ctx context.Context, id string) (Goal, error) {
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
         FROM goals WHERE id = ?`), id).Scan(
 		&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-		&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.CreatedAt, &g.UpdatedAt)
+		&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Goal{}, ErrGoalNotFound
 	}
@@ -784,10 +792,10 @@ func (d *DB) CreateGoal(ctx context.Context, req CreateGoalRequest) (Goal, error
 	ts := timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO goals (id, rider, name, sport, event_date, priority,
-                            target_distance_m, target_elevation_m, notes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                            target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		id, rider, name, string(sport), req.EventDate, string(priority),
-		req.TargetDistanceM, req.TargetElevationM, req.Notes, ts, ts)
+		req.TargetDistanceM, req.TargetElevationM, req.Notes, strings.TrimSpace(req.RouteSlug), req.PacingIF, ts, ts)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -821,13 +829,19 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 	if req.Notes != nil {
 		current.Notes = *req.Notes
 	}
+	if req.RouteSlug != nil {
+		current.RouteSlug = strings.TrimSpace(*req.RouteSlug)
+	}
+	if req.PacingIF != nil {
+		current.PacingIF = *req.PacingIF
+	}
 
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE goals SET name=?, sport=?, event_date=?, priority=?,
-               target_distance_m=?, target_elevation_m=?, notes=?, updated_at=?
+               target_distance_m=?, target_elevation_m=?, notes=?, route_slug=?, pacing_if=?, updated_at=?
         WHERE id=?`),
 		current.Name, string(current.Sport), current.EventDate, string(current.Priority),
-		current.TargetDistanceM, current.TargetElevationM, current.Notes, timestamp(), id)
+		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, timestamp(), id)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -866,11 +880,11 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, threshold_hr, resting_hr,
                available_days, hours_per_available_day, experience_level, estimated_fields,
-               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, smart_trainer, updated_at
+               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, smart_trainer, weight_kg, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
 		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.ThresholdHR, &p.RestingHR,
 		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt,
-		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.UpdatedAt)
+		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.WeightKG, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
@@ -967,6 +981,24 @@ func (d *DB) MarkFTPVerified(ctx context.Context, rider, date string) error {
 	_, err := d.db.ExecContext(ctx, d.query(`
         UPDATE rider_profiles SET ftp_verified_at = ? WHERE rider = ? AND ftp_verified_at < ?`),
 		date, normalizeRider(rider), date)
+	return err
+}
+
+// SetWeight records the rider's body weight in kilograms, 0 to clear it. Its
+// own writer, like the calibration marker: SaveProfile is built by the form,
+// a Garmin sync and an accepted threshold, none of which carries a weight
+// they never read, so a whole-row save would zero it. It creates the profile
+// row when there is none, since a rider may give a weight before anything
+// else. The caller validates the range.
+func (d *DB) SetWeight(ctx context.Context, rider string, kg float64) error {
+	rider = normalizeRider(rider)
+	if rider == "" {
+		return errors.New("workout: no rider — whose weight is this?")
+	}
+	_, err := d.db.ExecContext(ctx, d.query(`
+        INSERT INTO rider_profiles (rider, weight_kg, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT (rider) DO UPDATE SET weight_kg = excluded.weight_kg`),
+		rider, kg, timestamp())
 	return err
 }
 

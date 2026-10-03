@@ -496,6 +496,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/goals/{id}/periodization", s.handleGoalPeriodization)
 	mux.HandleFunc("POST /api/training/goals/{id}/schedule", s.handleGoalSchedule)
 	mux.HandleFunc("GET /api/training/goals/{id}/explain", s.handleExplainPlan)
+	mux.HandleFunc("GET /api/training/goals/{id}/route-demands", s.handleRouteDemands)
+	mux.HandleFunc("GET /api/training/goal-routes", s.handleGoalRoutes)
 	mux.HandleFunc("GET /api/training/profile", s.handleGetRiderProfile)
 	mux.HandleFunc("PUT /api/training/profile", s.handleSaveRiderProfile)
 	mux.HandleFunc("POST /api/training/profile/propose", s.handleProposeProfileChange)

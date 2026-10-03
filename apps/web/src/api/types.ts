@@ -765,6 +765,11 @@ export interface Goal {
   targetDistanceM?: number
   targetElevationM?: number
   notes?: string
+  /** The library route this goal is for. Only a slug: no coordinates ride on a goal. */
+  routeSlug?: string
+  /** The rider's override of the pacing plan's intensity factor (0.60 to 1.05);
+   *  absent means derived from the event's duration. */
+  pacingIf?: number
   createdAt: string
   updatedAt: string
 }
@@ -777,6 +782,8 @@ export interface CreateGoalRequest {
   targetDistanceM?: number
   targetElevationM?: number
   notes?: string
+  routeSlug?: string
+  pacingIf?: number
 }
 
 export interface UpdateGoalRequest {
@@ -787,6 +794,10 @@ export interface UpdateGoalRequest {
   targetDistanceM?: number
   targetElevationM?: number
   notes?: string
+  /** Empty clears the link; absent keeps it. */
+  routeSlug?: string
+  /** 0 goes back to derived; absent keeps it. */
+  pacingIf?: number
 }
 
 /** 0 (or absent) means unset for every numeric field here — never inferred
@@ -799,6 +810,9 @@ export interface RiderProfile {
    *  Saving the profile by hand always clears this, whatever value is in
    *  the field at the time — see the API's own comment on why. */
   ftpEstimated?: boolean
+  /** Body weight in kg (30 to 250). Absent on a save keeps the stored value,
+   *  0 clears it; unset, pacing assumes 75 kg and says so. */
+  weightKg?: number
   thresholdPaceSecPerKm?: number
   maxHr?: number
   /** Lactate threshold heart rate (LTHR) — the anchor for HR zones when known. */
@@ -1334,6 +1348,50 @@ export interface ScheduledWorkouts {
  *  internal/narration.ExplainPlan. A plain-language summary of the same
  *  reconciled plan the periodization table already shows; 412 instead of
  *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
+export type RouteDemandsReasonCode =
+  | 'no_route'
+  | 'route_unavailable'
+  | 'no_elevation'
+  | 'not_cycling'
+  | 'no_ftp'
+
+/** One climb of a goal's route. Distances and elevations only: no latitude
+ *  or longitude is ever sent. */
+export interface DemandClimb {
+  index: number
+  startM: number
+  endM: number
+  lengthM: number
+  gainM: number
+  avgGradient: number
+  /** "4" to "1" or "HC"; absent when too small to be rated. */
+  category?: string
+  /** Estimated time to ride it at the race's intensity. */
+  durationSec: number
+  watts: number
+  pctFtp: number
+  kind: 'short' | 'medium' | 'sustained' | 'long'
+  /** The plan's longest sustained effort is at least 80 % of durationSec. */
+  covered: boolean
+}
+
+export interface RouteDemandsUnavailable {
+  available: false
+  reason: string
+  reasonCode: RouteDemandsReasonCode
+}
+
+export interface RouteDemandsAvailable {
+  available: true
+  route: { slug: string; name: string }
+  assumptions: string[]
+  climbs: DemandClimb[]
+  coverage: { longestSustainedSec: number; uncovered: number; message?: string }
+  bias: { active: boolean; phase?: string }
+}
+
+export type RouteDemands = RouteDemandsAvailable | RouteDemandsUnavailable
+
 export interface PlanExplanation {
   text: string
 }

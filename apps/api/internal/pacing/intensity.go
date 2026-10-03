@@ -33,3 +33,38 @@ func ClimbFactor(durationSec float64) float64 {
 		return 1.00
 	}
 }
+
+// ClimbKind names a climb by how long it takes: short under 4 min, medium 4 to
+// 8, sustained 8 to 20, long over 20. The training bias and the demands card
+// both read it, so the words mean the same in both.
+func ClimbKind(durationSec float64) string {
+	switch {
+	case durationSec < 4*60:
+		return "short"
+	case durationSec < 8*60:
+		return "medium"
+	case durationSec <= 20*60:
+		return "sustained"
+	default:
+		return "long"
+	}
+}
+
+// TotalSeconds is how long segs take at a constant watts through the physics.
+func TotalSeconds(segs []Seg, ph Physics, watts float64) float64 {
+	var sec float64
+	for _, s := range segs {
+		sec += (s.EndM - s.StartM) / ph.Speed(watts, s.Grade)
+	}
+	return sec
+}
+
+// DerivedIF is the intensity factor for a route when the rider has not set
+// one. The event's duration is not known until it has been paced, so: pass 1
+// rides the whole route at 0.85 of FTP, takes the band of that duration, and
+// that band's IF is the answer. The band is not re-evaluated after pass 2
+// (the plan built at this IF), so a route near a boundary does not flip
+// between two intensities.
+func DerivedIF(segs []Seg, ph Physics, ftp float64) float64 {
+	return EventIF(TotalSeconds(segs, ph, 0.85*ftp) / 3600)
+}

@@ -64,6 +64,7 @@ import type {
   CreateWorkoutRequest,
   UpdateWorkoutRequest,
   RiderProfile,
+  RouteDemands,
   FitnessResponse,
   GoalProposal,
   LinkSessionRequest,
@@ -714,6 +715,11 @@ export const api = {
    *  ANTHROPIC_API_KEY configured, 502 when the model call itself fails. */
   explainPlan: (id: string) =>
     request<PlanExplanation>(`/api/training/goals/${encodeURIComponent(id)}/explain`),
+
+  /** What the goal's route asks of the rider, against what the plan trains.
+   *  Read-only; `available: false` carries a `reason` with the fix. */
+  routeDemands: (id: string) =>
+    request<RouteDemands>(`/api/training/goals/${encodeURIComponent(id)}/route-demands`),
 
   riderProfile: () => request<RiderProfile>('/api/training/profile'),
   saveRiderProfile: (req: RiderProfile) =>
