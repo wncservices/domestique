@@ -95,6 +95,10 @@ type Server struct {
 	// and before its diff is applied; an error from it stands in for a failed
 	// write, so tests can reach the rollback. Nil in production.
 	AfterLifeEventSaved func() error
+	// AfterCrewRideWrite, when set, runs after each write of joining or leaving
+	// a crew ride; an error from it stands in for a failed write, so tests can
+	// reach the rollback. Nil in production.
+	AfterCrewRideWrite func() error
 	// SeasonFillRetry is how long a background season pass waits before
 	// trying again when the scheduling lock is held elsewhere. Zero means
 	// the default.

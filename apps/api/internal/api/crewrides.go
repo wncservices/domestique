@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -15,7 +13,9 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/crewplan"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -234,101 +234,6 @@ func (s *Server) routesBySlug(ctx context.Context) (map[string]model.Route, erro
 
 // ---------- going ----------
 
-// handleSetGoing is PUT /api/training/crew-rides/{rideId}/going: the one write.
-// An approved member of the ride's crew says they are, or are no longer, going
-// to a ride dated today or later whose route still exists. The rider is the
-// session's. A non-member is told there is no such ride, the answer a ride in
-// somebody else's crew gets everywhere.
-func (s *Server) handleSetGoing(w http.ResponseWriter, r *http.Request) {
-	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
-		return
-	}
-	if !s.crewAvailable(w) || !s.scheduleAvailable(w) {
-		return
-	}
-	ctx := r.Context()
-	rider := auth.FromContext(ctx).User
-
-	var body goingBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGoingBodyBytes)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-		return
-	}
-
-	ride, err := s.Schedule.Get(ctx, r.PathValue("rideId"))
-	if err != nil {
-		s.failScheduleLookup(w, err)
-		return
-	}
-	snap, err := s.Crew.Snapshot(ctx)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if !snap.ApprovedRiders.Has(ride.CrewID, rider) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": schedule.ErrNotFound.Error()})
-		return
-	}
-
-	in := goingInput{ride: ride, rider: rider, want: body.Going, skip: setOf(body.Skip)}
-	if in.crew, err = s.Crew.Get(ctx, ride.CrewID); err != nil {
-		s.failCrewLookup(w, err)
-		return
-	}
-	if body.Going {
-		route, ok, err := s.rideRoute(ctx, ride.Slug)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if !ok {
-			s.logger().Info("going refused: the ride's route no longer exists", "rider", rider, "ride", ride.ID)
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "this ride's route no longer exists"})
-			return
-		}
-		if ride.Date < s.now().Format(dateLayout) {
-			s.logger().Info("going refused: the ride has passed", "rider", rider, "ride", ride.ID)
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "that ride has already passed"})
-			return
-		}
-		in.route = route
-	}
-
-	var out goingOutcome
-	if body.DryRun {
-		out = s.planGoing(ctx, in)
-	} else {
-		ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
-			s.seasonMu.Lock()
-			defer s.seasonMu.Unlock()
-			out = s.doGoing(ctx, in)
-		})
-		if !ran {
-			s.writeReplanLocked(w, rider)
-			return
-		}
-	}
-	if out.err != nil {
-		// A write that should have landed did not.
-		s.logger().Error("crew ride going failed", "rider", rider, "ride", ride.ID, "err", out.err)
-		s.fail(w, out.err)
-		return
-	}
-
-	res := goingResultDTO{Going: out.going, Diff: out.diff, Applied: out.applied}
-	if out.workout != nil {
-		one := []workoutDTO{workoutDTOFrom(*out.workout)}
-		s.attachCrewRides(ctx, rider, one)
-		res.Workout = &one[0]
-	}
-	if out.applied != nil {
-		// The ride and the outcome only: counts, never the rider's plan.
-		s.logger().Info("crew ride going set", "rider", rider, "ride", ride.ID, "going", out.going,
-			"removed", out.applied.Removed, "eased", out.applied.Eased, "shortened", out.applied.Shortened, "added", out.applied.Added)
-	}
-	writeJSON(w, http.StatusOK, res)
-}
-
 // goingInput is one going or leaving request, resolved.
 type goingInput struct {
 	ride  schedule.Ride
@@ -337,6 +242,8 @@ type goingInput struct {
 	rider string
 	want  bool
 	skip  map[string]bool
+	// existing is the rider's fixed session for the ride, nil when they have none.
+	existing *workout.Workout
 }
 
 type goingOutcome struct {
@@ -362,24 +269,6 @@ func (s *Server) rideRoute(ctx context.Context, slug string) (model.Route, bool,
 	return rt, ok, nil
 }
 
-// planGoing is the dry run: the picture of what applying would do, writing
-// nothing.
-func (s *Server) planGoing(_ context.Context, _ goingInput) goingOutcome {
-	return goingOutcome{diff: emptyCrewDiff()}
-}
-
-// doGoing joins or leaves. It runs under the scheduling lock.
-func (s *Server) doGoing(ctx context.Context, in goingInput) goingOutcome {
-	existing, err := s.fixedSessionFor(ctx, in.rider, in.ride.ID)
-	if err != nil {
-		return goingOutcome{err: err}
-	}
-	if !in.want {
-		return s.leaveRide(ctx, in, existing)
-	}
-	return s.joinRide(ctx, in, existing)
-}
-
 // fixedSessionFor is the rider's fixed session for a ride, if they have one.
 func (s *Server) fixedSessionFor(ctx context.Context, rider, rideID string) (*workout.Workout, error) {
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
@@ -392,58 +281,6 @@ func (s *Server) fixedSessionFor(ctx context.Context, rider, rideID string) (*wo
 		}
 	}
 	return nil, nil
-}
-
-// joinRide makes the rider's fixed session and records them as going. Idempotent:
-// a second call finds the session and only makes sure the going row is there.
-func (s *Server) joinRide(ctx context.Context, in goingInput, existing *workout.Workout) goingOutcome {
-	out := goingOutcome{going: true, diff: emptyCrewDiff()}
-	if existing != nil {
-		if err := s.Schedule.Go(ctx, in.ride.ID, in.rider); err != nil {
-			return goingOutcome{err: err}
-		}
-		out.workout = existing
-		return out
-	}
-
-	req, err := s.fixedSessionRequest(ctx, in)
-	if err != nil {
-		return goingOutcome{err: err}
-	}
-	wk, err := s.Training.CreateWorkout(ctx, req)
-	if errors.Is(err, workout.ErrCrewRideExists) {
-		// Raced another request for the same ride; theirs stands.
-		if again, ferr := s.fixedSessionFor(ctx, in.rider, in.ride.ID); ferr == nil && again != nil {
-			wk, err = *again, nil
-		}
-	}
-	if err != nil {
-		return goingOutcome{err: err}
-	}
-	if err := s.Schedule.Go(ctx, in.ride.ID, in.rider); err != nil {
-		if delErr := s.Training.DeleteWorkout(ctx, wk.ID); delErr != nil {
-			s.logger().Error("crew ride: could not take the fixed session back out after a failed join", "rider", in.rider, "ride", in.ride.ID, "err", delErr)
-		}
-		return goingOutcome{err: err}
-	}
-	out.workout = &wk
-	out.applied = &crewAppliedDTO{}
-	return out
-}
-
-// leaveRide deletes the fixed session and the going row.
-func (s *Server) leaveRide(ctx context.Context, in goingInput, existing *workout.Workout) goingOutcome {
-	out := goingOutcome{going: false, diff: emptyCrewDiff(), applied: &crewAppliedDTO{}}
-	if existing != nil {
-		s.removeWorkoutFromGarmin(ctx, *existing)
-		if err := s.Training.DeleteWorkout(ctx, existing.ID); err != nil && !errors.Is(err, workout.ErrWorkoutNotFound) {
-			return goingOutcome{err: err}
-		}
-	}
-	if err := s.Schedule.Leave(ctx, in.ride.ID, in.rider); err != nil {
-		return goingOutcome{err: err}
-	}
-	return out
 }
 
 // fixedSessionRequest is the workout a rider gets for going: the ride's date,
@@ -566,6 +403,21 @@ func (s *Server) attachCrewRides(ctx context.Context, rider string, lists ...[]w
 			}
 		}
 	}
+}
+
+// fixedOption tells scheduler.WeekWorkouts about the rider's fixed crew rides in
+// week: they take their days, reduce the volume and replace the long slot. It
+// reads the stored rows, not the crew's ride, so a ride the crew has since
+// cancelled still counts until the rider confirms an update.
+func fixedOption(existing []workout.Workout, week periodization.Week) scheduler.Option {
+	start, end := weekBounds(week)
+	var fixed []scheduler.Fixed
+	for _, wk := range existing {
+		if wk.CrewRideID != "" && wk.Date >= start && wk.Date <= end {
+			fixed = append(fixed, scheduler.Fixed{Date: wk.Date, Seconds: workout.PlannedSeconds(wk.Steps)})
+		}
+	}
+	return scheduler.WithFixed(fixed)
 }
 
 // isCalendarDate reports whether s is a real YYYY-MM-DD date.

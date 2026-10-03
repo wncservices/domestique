@@ -115,6 +115,14 @@ type crewWorkoutOut struct {
 		Target    string  `json:"target"`
 		Seconds   float64 `json:"seconds"`
 	} `json:"steps"`
+	Why *struct {
+		Rule  string `json:"rule"`
+		Title string `json:"title"`
+		Facts []struct {
+			Label string `json:"label"`
+			Value string `json:"value"`
+		} `json:"facts"`
+	} `json:"why"`
 	CrewRide *struct {
 		RideID       string   `json:"rideId"`
 		CrewID       string   `json:"crewId"`

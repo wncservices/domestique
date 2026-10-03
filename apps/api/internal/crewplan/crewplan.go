@@ -9,6 +9,7 @@ import (
 	"math"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 )
 
 // Kind is what a crew ride is to the week it falls in.
@@ -24,7 +25,7 @@ const (
 )
 
 const (
-	longSeconds      = 2 * 3600
+	longSeconds      = scheduler.CrewLongRideSeconds
 	enduranceSeconds = 3600
 
 	// groupSpeedKph is the pace a group ride averages on the flat, stops not

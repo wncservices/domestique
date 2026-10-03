@@ -36,6 +36,8 @@ const (
 	LevelRecalibration Rule = "level_recalibration"
 	SeasonRefresh      Rule = "season_refresh"
 	IllnessRamp        Rule = "illness_ramp"
+	CrewRideEve        Rule = "crew_ride_eve"
+	CrewRideAfter      Rule = "crew_ride_after"
 )
 
 // Fact is one label/value row in the popover.
@@ -119,6 +121,13 @@ type StruggleStepDownInputs struct {
 	FeltAllOut bool    `json:"feltAllOut,omitempty"`
 }
 
+// CrewRideInputs: the day before, or after, a crew ride the rider is going to.
+// Kind is long, endurance or short. Nothing about any other rider.
+type CrewRideInputs struct {
+	RideDate string `json:"rideDate"`
+	Kind     string `json:"kind"`
+}
+
 // FTPTestEveInputs: the day before a scheduled FTP test.
 type FTPTestEveInputs struct {
 	TestDate string `json:"testDate"`
@@ -188,6 +197,10 @@ func Title(rule Rule) string {
 		return "Stepped down after a hard ride"
 	case FTPTestEve:
 		return "Eased before your FTP test"
+	case CrewRideEve:
+		return "Eased before your crew ride"
+	case CrewRideAfter:
+		return "Eased after your long crew ride"
 	case ThresholdAuto:
 		return "Threshold updated"
 	case LevelRecalibration:
@@ -268,6 +281,12 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 			out = append(out, Fact{"You rated it", "all-out (5 of 5)"})
 		}
 		return append(out, Fact{"Level", arrow(in.LevelFrom, in.LevelTo)})
+	case CrewRideEve, CrewRideAfter:
+		in, ok := decode[CrewRideInputs](inputs)
+		if !ok {
+			return nil
+		}
+		return []Fact{{"Crew ride", dayLabel(in.RideDate) + ", " + in.Kind}}
 	case FTPTestEve:
 		in, ok := decode[FTPTestEveInputs](inputs)
 		if !ok {
