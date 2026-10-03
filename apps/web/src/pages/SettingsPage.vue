@@ -17,6 +17,7 @@ import BasemapSetup from '@/components/BasemapSetup.vue'
 import GarminSetup from '@/components/GarminSetup.vue'
 import KomootConnect from '@/components/KomootConnect.vue'
 import WeatherSettings from '@/components/WeatherSettings.vue'
+import RideStartCard from '@/components/plan/RideStartCard.vue'
 
 const {
   accounts,
@@ -26,6 +27,7 @@ const {
   canManageSettings,
   canImportKomoot,
   canManageTraining,
+  routingConfigured,
   komootEnabled,
   refresh,
 } = useLibrary()
@@ -545,6 +547,7 @@ onMounted(async () => {
     <!-- A rider's own setting, like the profile above. The card hides itself
          when the deployment has weather switched off. -->
     <WeatherSettings v-if="canManageTraining" />
+    <RideStartCard v-if="canManageTraining" :routing-configured="routingConfigured" />
 
     <!-- Deployment plumbing, and only an admin gets it: the same pattern
          the Garmin setup / "This deployment" cards further down follow.
