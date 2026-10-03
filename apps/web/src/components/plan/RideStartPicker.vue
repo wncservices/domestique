@@ -116,8 +116,9 @@ function useMyLocation() {
     <p v-else-if="searched" class="text-sm text-muted">No matching place found.</p>
     <p class="text-xs text-muted">
       Pick a nearby corner or the first junction, not your front door. Only about 110 m of precision and the town name
-      are kept, and neither is ever shown again. Routes made for your rides start here and are only ever yours. Remove it
-      any time in Settings.
+      are kept, and the start point itself is never sent back to the app. Routes made for your rides begin here, so
+      they show where you start: they are visible to you and to admins of this deployment. Remove the start any time in
+      Settings.
     </p>
   </div>
 </template>

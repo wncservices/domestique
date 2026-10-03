@@ -237,6 +237,10 @@ const routeMismatch = computed(() => {
   return `The route takes about ${formatDuration(r.estimatedSeconds)}; ${when} ride is now ${formatDuration(w.plannedSeconds)}.`
 })
 
+// Removing a loop made for this ride deletes it from the library too, so it asks
+// first; unlinking a library route changes nothing else and does not.
+const confirmRemoveRoute = ref(false)
+
 const isRideDay = computed(() => props.day?.date === todayISO())
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
@@ -469,7 +473,13 @@ function onRated(analysis: SessionAnalysis) {
               <UButton v-if="canRoute" color="neutral" variant="outline" size="xs" icon="i-lucide-refresh-cw" @click="emit('route', firstWorkout)">
                 Change
               </UButton>
-              <UButton color="neutral" variant="ghost" size="xs" icon="i-lucide-x" @click="emit('removeRoute', firstWorkout)">
+              <UButton
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                icon="i-lucide-x"
+                @click="activeRoute.generated ? (confirmRemoveRoute = true) : emit('removeRoute', firstWorkout)"
+              >
                 Remove
               </UButton>
               <UButton
@@ -547,6 +557,25 @@ function onRated(analysis: SessionAnalysis) {
         </div>
       </template>
     </UCard>
+
+    <UModal
+      v-model:open="confirmRemoveRoute"
+      title="Remove this route?"
+      description="This route was made for this ride. Removing it deletes it from your library too."
+    >
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" @click="confirmRemoveRoute = false">Keep it</UButton>
+          <UButton
+            color="error"
+            icon="i-lucide-trash-2"
+            @click="() => { confirmRemoveRoute = false; if (firstWorkout) emit('removeRoute', firstWorkout) }"
+          >
+            Remove route
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <StepResultsTable
       v-model:open="resultsOpen"

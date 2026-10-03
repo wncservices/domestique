@@ -83,10 +83,12 @@ import type {
   ProjectionResponse,
   EaseTomorrowResult,
   IndoorPreview,
+  CourseOutcome,
   RideStart,
   RouteCandidates,
   ScheduleResult,
   ScheduleSituation,
+  WorkoutPushResult,
   WeatherPrefs,
   WeatherResponse,
   AlternateKind,
@@ -880,7 +882,7 @@ export const api = {
     request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}/route`, { method: 'DELETE' }),
   /** Sends a routed ride's course to every one of the rider's own devices. */
   pushWorkoutCourse: (id: string) =>
-    request<{ course: string }>(`/api/training/workouts/${encodeURIComponent(id)}/route/push`, { method: 'POST' }),
+    request<{ course: CourseOutcome }>(`/api/training/workouts/${encodeURIComponent(id)}/route/push`, { method: 'POST' }),
   /** What putting this route on a day would offer. Writes nothing. */
   routeSchedule: (slug: string, date: string, today?: string) =>
     request<ScheduleSituation>(
@@ -943,7 +945,7 @@ export const api = {
    *  One-shot: always creates a new Garmin workout rather than updating
    *  one from an earlier push. */
   pushWorkoutToGarmin: (id: string) =>
-    request<{ status: string; garminWorkoutId: string }>(
+    request<WorkoutPushResult>(
       `/api/training/workouts/${encodeURIComponent(id)}/push/garmin`,
       { method: 'POST' },
     ),
