@@ -78,6 +78,16 @@ func newPlanner(in Input) *planner {
 			p.freed[d] = true
 		}
 	}
+	// An event whose kind or option changed is a new rule for its whole range,
+	// not only for the days it newly covers: mild to proper, or no bike to the
+	// hotel gym, must reach the sessions already on those days.
+	for _, e := range in.Events {
+		if rulesChanged(e, in.Previous) {
+			for _, d := range daysOf(e) {
+				p.fresh[d] = true
+			}
+		}
+	}
 	p.noPlace = map[string]bool{}
 	for d := range p.after {
 		p.noPlace[d] = true
@@ -100,6 +110,19 @@ func newPlanner(in Input) *planner {
 	return p
 }
 
+// rulesChanged is whether e exists in previous with a different kind or option.
+func rulesChanged(e Event, previous []Event) bool {
+	if e.ID == "" {
+		return false
+	}
+	for _, o := range previous {
+		if o.ID == e.ID {
+			return o.Kind != e.Kind || Normalize(o).Option != Normalize(e).Option
+		}
+	}
+	return false
+}
+
 // Preview is the diff a set of events implies for a rider's plan. It never
 // writes and never reads the clock: the same inputs give the same diff.
 func Preview(in Input) Diff {
@@ -110,6 +133,17 @@ func Preview(in Input) Diff {
 
 func (p *planner) run() {
 	scope := p.scopeByClass()
+	// An FTP test is not a session to be turned into a short indoor ride: on a
+	// trip it moves like it does with no bike (and is removed with nowhere to go).
+	var gymSessions []scoped
+	for _, s := range scope[classGym] {
+		if s.w.TestProtocol != "" {
+			scope[classMove] = append(scope[classMove], s)
+		} else {
+			gymSessions = append(gymSessions, s)
+		}
+	}
+	scope[classGym] = gymSessions
 	p.forgetLeavingHardDays(scope)
 	p.removeProper(scope[classProper])
 	p.moveSessions(scope[classMove])
@@ -546,7 +580,7 @@ func (p *planner) gym(list []scoped) {
 // indoorSession replaces s with an indoor endurance ride of at most an hour.
 func (p *planner) indoorSession(s scoped) {
 	w := s.w
-	if p.changed[w.ID] {
+	if p.changed[w.ID] || w.TestProtocol != "" {
 		return
 	}
 	outdoorSeconds := workout.PlannedSeconds(w.Steps)
