@@ -1784,3 +1784,19 @@ export interface ProjectionResponse {
   events: ProjectionEvent[]
   assumptions: string[]
 }
+
+/** GET /api/training/calendar: the rider's private calendar link. The link
+ *  itself is never here (only its hash is stored); it exists once, in the
+ *  response that creates it. */
+export interface CalendarFeedStatus {
+  available: boolean
+  active: boolean
+  createdAt?: string
+  lastFetchedAt?: string
+}
+
+/** POST /api/training/calendar: the only time the URL exists. */
+export interface CalendarFeedLink {
+  url: string
+  webcalUrl: string
+}

@@ -838,9 +838,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Shares:    sharesStore,
 		// The hashed calendar-feed tokens; see internal/calendarfeed.
 		CalendarFeeds: calendarFeedStore,
-		Training:      trainingStore,
-		Auth:          authenticator,
-		Log:           log,
+		// A calendar app polls, so a per-token budget; and one global budget
+		// for tokens nothing matches. In memory, per replica, like the rest.
+		CalendarLimiter:     api.NewCalendarLimiter(),
+		CalendarMissLimiter: api.NewCalendarMissLimiter(),
+		Training:            trainingStore,
+		Auth:                authenticator,
+		Log:                 log,
 		// Pure in-memory, no external credential to be missing — wired
 		// unconditionally, the same as Crew. 5 attempts per rider per 15
 		// minutes is enough for someone who mistypes a password twice; see

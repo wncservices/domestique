@@ -277,6 +277,17 @@ type Server struct {
 	// internal/calendarfeed. Nil in a deployment without a database store,
 	// and the feed endpoints answer 404 / 501 then.
 	CalendarFeeds *calendarfeed.Store
+	// CalendarLimiter is the per-token fetch budget and CalendarMissLimiter
+	// the one global budget for tokens nothing matches; see NewCalendarLimiter.
+	// Nil means unlimited, which only a test wants.
+	CalendarLimiter     *ratelimit.Limiter
+	CalendarMissLimiter *ratelimit.Limiter
+	// RideStartHour is the one-method seam to a rider's usual ride hour, which
+	// turns an all-day calendar event into a timed one. Nil means every event
+	// is all-day. Not wired in main: the weather preference's window has a
+	// default a rider never chose, which would silently stamp 09:00 on every
+	// event of everyone who picked a place.
+	RideStartHour func(ctx context.Context, rider string) (int, bool)
 
 	// Blocklist stops a blocked rider's email from creating a new local
 	// identity — see internal/blocklist. Auth0's own SetBlocked only refuses
@@ -529,6 +540,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/training/sync", s.handleSyncTrainingMetrics)
 	mux.HandleFunc("GET /api/training/thresholds", s.handleListThresholds)
 	mux.HandleFunc("POST /api/training/thresholds/{id}", s.handleResolveThreshold)
+	mux.HandleFunc("GET /api/training/calendar", s.handleGetCalendar)
+	mux.HandleFunc("POST /api/training/calendar", s.handleCreateCalendar)
+	mux.HandleFunc("DELETE /api/training/calendar", s.handleRevokeCalendar)
+	// The only path that bypasses authentication: see isCalendarFeedPath.
+	// Go patterns cannot put a suffix on a wildcard, so the handler checks
+	// the segment itself.
+	mux.HandleFunc("GET /api/calendar/{file}", s.handleCalendarFeed)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/progression", s.handleGetProgression)
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)
@@ -577,13 +595,13 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return otelhttp.NewHandler(
-		instrument(logRequests(s.logger(), s.authenticate(compress(mux)))),
+	return hideSecretPaths(otelhttp.NewHandler(
+		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(mux))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-			return r.Method + " " + r.URL.Path
+			return r.Method + " " + redactPath(r.URL.Path)
 		}),
-	)
+	))
 }
 
 // authenticate resolves the identity once per request and puts it on the
@@ -618,6 +636,15 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/health" || r.URL.Path == "/api/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// The calendar feed is reached by a calendar app with no browser and no
+		// cookie, so it cannot sit behind the session; its secret URL is the
+		// credential. Identify is skipped altogether, so a stray or forged
+		// Remote-User header or session cookie changes nothing on this path.
+		// The predicate is the exact path and GET only: see bypassesAuth.
+		if bypassesAuth(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -4082,7 +4109,7 @@ func orEmpty[T any](in []T) []T {
 
 func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Debug("request", "method", r.Method, "path", r.URL.Path)
+		log.Debug("request", "method", r.Method, "path", redactPath(r.URL.Path))
 		next.ServeHTTP(w, r)
 	})
 }
