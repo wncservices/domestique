@@ -48,6 +48,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
+	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
@@ -819,18 +820,26 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Crew: the remote ids of pacing courses
+	// a rider pushed to their own account, in the database every deployment has.
+	pacingPushStore, err := pacingpush.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	srv := &api.Server{
-		Source:    src,
-		Config:    cfg,
-		Store:     store,
-		Accounts:  accountStore,
-		Crew:      crewStore,
-		Schedule:  scheduleStore,
-		Blocklist: blocklistStore,
-		Shares:    sharesStore,
-		Training:  trainingStore,
-		Auth:      authenticator,
-		Log:       log,
+		Source:       src,
+		PacingPushes: pacingPushStore,
+		Config:       cfg,
+		Store:        store,
+		Accounts:     accountStore,
+		Crew:         crewStore,
+		Schedule:     scheduleStore,
+		Blocklist:    blocklistStore,
+		Shares:       sharesStore,
+		Training:     trainingStore,
+		Auth:         authenticator,
+		Log:          log,
 		// Pure in-memory, no external credential to be missing — wired
 		// unconditionally, the same as Crew. 5 attempts per rider per 15
 		// minutes is enough for someone who mistypes a password twice; see

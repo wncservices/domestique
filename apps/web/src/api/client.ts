@@ -504,6 +504,24 @@ export const api = {
     request<PacingPlan>(
       `/api/routes/${encodeSlug(slug)}/pacing${goalId ? `?goal=${encodeURIComponent(goalId)}` : ''}`,
     ),
+  /** Where the pacing course downloads from (a FIT with the climb targets as
+   *  named course points). A plain link, so the browser saves the file. */
+  pacingFitUrl: (slug: string, goalId?: string, target?: 'watts' | 'hr') => {
+    const q = new URLSearchParams()
+    if (goalId) q.set('goal', goalId)
+    if (target === 'hr') q.set('target', 'hr')
+    const qs = q.toString()
+    return `/api/routes/${encodeSlug(slug)}/pacing.fit${qs ? `?${qs}` : ''}`
+  },
+  /** Sends the pacing course to the signed-in rider's own Garmin or Wahoo
+   *  account. A second push replaces the first. 412 when the account is not
+   *  connected. */
+  pushPacing: (slug: string, req: { provider: 'garmin' | 'wahoo'; goal?: string; target?: 'watts' | 'hr' }) =>
+    request<{ provider: string; name: string; replaced: boolean }>(`/api/routes/${encodeSlug(slug)}/pacing/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    }),
   /** Re-runs elevation backfill against the route's own already-stored GPX —
    *  fixes a route uploaded before this deployment had elevation lookup
    *  configured (or while the terrain service was briefly down), without

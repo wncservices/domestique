@@ -97,6 +97,7 @@ func (s *Server) handleGarminCourseList(w http.ResponseWriter, r *http.Request) 
 		})
 		return
 	}
+	courses = s.dropPacingCourses(r.Context(), rider, courses)
 
 	routes, _, err := s.Source.List(r.Context())
 	if err != nil {
@@ -201,7 +202,7 @@ func (s *Server) handleGarminCourseDuplicates(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	writeJSON(w, http.StatusOK, groupDuplicateCourses(courses))
+	writeJSON(w, http.StatusOK, groupDuplicateCourses(s.dropPacingCourses(r.Context(), rider, courses)))
 }
 
 // groupDuplicateCourses groups courses that are very likely repeated copies
@@ -363,6 +364,7 @@ func (s *Server) importGarminCourses(ctx context.Context, uploader, rider string
 	if err != nil {
 		return garminCourseImportResult{}, fmt.Errorf("garmin would not list the courses on this account just now: %w", err)
 	}
+	courses = s.dropPacingCourses(ctx, rider, courses)
 	byID := map[string]garmin.Course{}
 	for _, c := range courses {
 		byID[c.ID] = c
