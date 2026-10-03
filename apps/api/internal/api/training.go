@@ -216,6 +216,13 @@ type workoutDTO struct {
 	// per response; a workout adjusted before reasons were recorded has none
 	// and the client falls back to the note in Description.
 	Why *whyDTO `json:"why,omitempty"`
+	// Route is the library route this ride is to be ridden on, filled by
+	// attachRoutes and left off when the rider cannot see it. Never carries a
+	// coordinate.
+	Route *workoutRouteDTO `json:"route,omitempty"`
+
+	routeSlug    string
+	routeSeconds float64
 }
 
 func workoutDTOFrom(w workout.Workout) workoutDTO {
@@ -226,7 +233,8 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		TestProtocol:   w.TestProtocol,
 		Indoor:         w.Indoor,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
-		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
+		routeSlug:      w.RouteSlug, routeSeconds: w.RouteSeconds,
+		Steps: make([]workoutStepDTO, 0, len(w.Steps)),
 	}
 	for _, s := range w.Steps {
 		dto.Steps = append(dto.Steps, stepDTOFrom(s))
@@ -1209,6 +1217,7 @@ func (s *Server) handleListWorkouts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, workoutDTOFrom(wk))
 	}
 	s.attachWhy(r.Context(), rider, out)
+	s.attachRoutes(r.Context(), rider, out)
 	writeJSON(w, http.StatusOK, out)
 }
 

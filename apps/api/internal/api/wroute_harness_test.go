@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
@@ -21,6 +22,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/source"
+	"github.com/wncservices/domestique/apps/api/internal/state"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -62,6 +64,14 @@ func newWRHarness(t *testing.T, mutate ...func(*wrHarness, *api.Server)) *wrHarn
 	if err != nil {
 		t.Fatal(err)
 	}
+	acc, err := accounts.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := state.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
 	authenticator, err := auth.New(auth.Config{
 		Mode:  auth.ModeProxy,
 		Roles: auth.RoleMapping{Admin: []string{"admins"}, Rider: []string{"cyclists"}, Viewer: []string{"guests"}},
@@ -75,6 +85,8 @@ func newWRHarness(t *testing.T, mutate ...func(*wrHarness, *api.Server)) *wrHarn
 		Source:     db,
 		Auth:       authenticator,
 		Training:   training,
+		Accounts:   acc,
+		Store:      st,
 		RideStarts: starts,
 		Routing:    h.engine,
 		Clock:      h.clock,
