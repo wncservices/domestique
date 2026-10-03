@@ -63,7 +63,7 @@ func IsKeySession(w workout.Workout) bool {
 	if workout.IsStructuredZone(w.Zone) {
 		return true
 	}
-	return keyNames[w.Name]
+	return keyNames[w.Name] || IsLongRideName(w.Name)
 }
 
 // IsHardSession reports whether w is a tempo or interval session — the ones

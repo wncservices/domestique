@@ -1387,7 +1387,8 @@ export interface RouteDemandsAvailable {
   assumptions: string[]
   climbs: DemandClimb[]
   coverage: { longestSustainedSec: number; uncovered: number; message?: string }
-  bias: { active: boolean; phase?: string }
+  /** Build and Peak sessions favour efforts of these lengths (seconds). */
+  bias: { active: boolean; phase?: string; sustainedSec?: number; shortSec?: number }
 }
 
 export type RouteDemands = RouteDemandsAvailable | RouteDemandsUnavailable

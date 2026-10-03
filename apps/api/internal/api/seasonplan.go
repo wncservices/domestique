@@ -87,6 +87,12 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 			}
 			res.weeksMarkedFromOld++
 		case !isRecorded:
+			// A week within reach is recorded as fresh the moment it is filled,
+			// so it must not be filled from a route that could not be read: the
+			// bias would never be applied. A far week is refreshed later anyway.
+			if week.StartDate <= horizon && sc.demandUnreadable() {
+				continue
+			}
 			created, _, err := s.fillWeek(ctx, g, sc, week, existing, "")
 			existing = append(existing, created...)
 			res.sessionsCreated += len(created)
@@ -97,6 +103,9 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 				return res, err
 			}
 		case !refreshed && week.StartDate <= horizon:
+			if sc.demandUnreadable() {
+				continue // try again next pass rather than consume the refresh
+			}
 			n, err := s.refreshWeek(ctx, g, sc, week, existing, today)
 			res.sessionsRefreshed += n
 			res.weeksRefreshed++
@@ -158,7 +167,7 @@ func (s *Server) recordLegacyWeek(ctx context.Context, g workout.Goal, weekStart
 // alone, so only the timestamp shows it). Only days after today are
 // rebuilt, so a session being ridden or already ridden is never touched.
 func (s *Server) refreshWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, today string) (int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
 	if err != nil {
 		return 0, err
 	}

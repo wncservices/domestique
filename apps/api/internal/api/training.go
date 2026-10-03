@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
@@ -703,6 +704,46 @@ type seasonContext struct {
 	plan    periodization.Plan
 	profile workout.RiderProfile
 	levels  map[string]float64
+	// demand is what the goal's route asks of Build and Peak sessions. It is
+	// computed the first time a week is about to be filled or refreshed, and
+	// once per context: a pass over a settled season never reads the route.
+	demand *lazyDemand
+}
+
+// lazyDemand computes a goal's route demand on first use and remembers the
+// answer. A nil demand with a nil error is "no demand": no route, it is not
+// visible, has no elevation, the rider has no FTP: planning then goes on exactly
+// as it does without a route. A non-nil error means the route could not be read
+// right now, which is not the same thing.
+type lazyDemand struct {
+	once   sync.Once
+	fn     func() (*scheduler.RouteDemand, error)
+	demand *scheduler.RouteDemand
+	err    error
+}
+
+func (l *lazyDemand) get() (*scheduler.RouteDemand, error) {
+	if l == nil {
+		return nil, nil
+	}
+	l.once.Do(func() { l.demand, l.err = l.fn() })
+	return l.demand, l.err
+}
+
+// options is what generation reads from the context: only the route demand
+// today. A nil demand, or one that could not be read, adds nothing.
+func (sc seasonContext) options() []scheduler.Option {
+	d, _ := sc.demand.get()
+	return []scheduler.Option{scheduler.WithRouteDemand(d)}
+}
+
+// demandUnreadable reports whether the route demand could not be computed
+// because the route could not be read (a storage error, not "unusable"). The
+// season pass then leaves a week that would be recorded as fresh for the next
+// pass, so a blip does not cost the bias for good.
+func (sc seasonContext) demandUnreadable() bool {
+	_, err := sc.demand.get()
+	return err != nil
 }
 
 func (s *Server) seasonContext(ctx context.Context, g workout.Goal) (seasonContext, error) {
@@ -714,7 +755,7 @@ func (s *Server) seasonContext(ctx context.Context, g workout.Goal) (seasonConte
 	if err != nil {
 		return seasonContext{}, err
 	}
-	return seasonContext{plan: plan, profile: profile, levels: levels}, nil
+	return seasonContext{plan: plan, profile: profile, levels: levels, demand: &lazyDemand{fn: func() (*scheduler.RouteDemand, error) { return s.routeDemandFor(ctx, g, profile) }}}, nil
 }
 
 func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
@@ -740,7 +781,7 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
 	if err != nil {
 		return nil, 0, err
 	}
