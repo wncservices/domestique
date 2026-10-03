@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"strings"
@@ -125,6 +126,61 @@ func (s *candidateStore) Get(rider, id string) (heldCandidate, bool) {
 		}
 	}
 	return heldCandidate{}, false
+}
+
+// Take is Get that also removes the candidate, under one lock: of two
+// concurrent saves of the same candidate, exactly one gets it.
+func (s *candidateStore) Take(rider, id string) (heldCandidate, bool) {
+	key := candidateKey(rider)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(key)
+	held := s.byRider[key]
+	for i, c := range held {
+		if c.ID == id {
+			s.byRider[key] = append(held[:i:i], held[i+1:]...)
+			if len(s.byRider[key]) == 0 {
+				delete(s.byRider, key)
+			}
+			return c, true
+		}
+	}
+	return heldCandidate{}, false
+}
+
+// Sweep drops every expired candidate of every rider and says how many went.
+// Expiry is otherwise only checked when a rider's own candidates are read, so
+// a rider who never comes back would leave their loops in memory.
+func (s *candidateStore) Sweep() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dropped := 0
+	for key := range s.byRider {
+		before := len(s.byRider[key])
+		s.pruneLocked(key)
+		dropped += before - len(s.byRider[key])
+	}
+	return dropped
+}
+
+// candidateSweepEvery is how often RunCandidateJanitor sweeps.
+const candidateSweepEvery = 5 * time.Minute
+
+// RunCandidateJanitor sweeps expired route candidates until ctx ends, so
+// location data held for a rider who walked away does not linger.
+func (s *Server) RunCandidateJanitor(ctx context.Context) {
+	t := time.NewTicker(candidateSweepEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n := s.candidateStore().Sweep(); n > 0 {
+				s.logger().Info("expired route candidates dropped", "count", n)
+			}
+		}
+	}
 }
 
 // Count is how many unexpired candidates the rider has.

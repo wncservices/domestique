@@ -204,7 +204,9 @@ func (s *Server) handleSaveWorkoutRoute(w http.ResponseWriter, r *http.Request) 
 	if s.workoutRouteRefusal(w, r, wk) {
 		return
 	}
-	held, found := s.candidateStore().Get(rider, body.CandidateID)
+	// Take, not Get: of two concurrent saves of one candidate, only one may
+	// make a route. A candidate lost to a failure further down is regenerated.
+	held, found := s.candidateStore().Take(rider, body.CandidateID)
 	if !found || held.WorkoutID != wk.ID {
 		s.logger().Info("workout route candidate gone", "by", rider, "workout", wk.ID)
 		writeJSON(w, http.StatusGone, map[string]string{"error": "that route is no longer available; generate again"})

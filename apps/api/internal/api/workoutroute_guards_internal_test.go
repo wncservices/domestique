@@ -31,14 +31,15 @@ func TestARoutedSessionIsNotUntouched(t *testing.T) {
 	}
 }
 
-// A routed session is still plan-made, for the FTP-test suggester and the
-// apply alike: the freeze is a separate guard, not a change to the definition,
-// so the two definitions stay equal.
-func TestARoutedSessionIsStillPlanMadeInBothDefinitions(t *testing.T) {
+// A routed session is the rider's own choice for its day, so it is not
+// plan-made in either copy of the definition: the FTP-test suggester will not
+// offer to replace it and the apply will not delete it. The two definitions
+// stay equal (planmade_parity_internal_test.go holds the general case).
+func TestARoutedSessionIsNotPlanMadeInEitherDefinition(t *testing.T) {
 	routed := generatedSession()
 	routed.RouteSlug = "a-loop"
-	if !isPlanMade(routed) || !testschedule.IsPlanMade(routed) {
-		t.Errorf("isPlanMade = %v, testschedule.IsPlanMade = %v, want both true", isPlanMade(routed), testschedule.IsPlanMade(routed))
+	if isPlanMade(routed) || testschedule.IsPlanMade(routed) {
+		t.Errorf("isPlanMade = %v, testschedule.IsPlanMade = %v, want both false", isPlanMade(routed), testschedule.IsPlanMade(routed))
 	}
 }
 
