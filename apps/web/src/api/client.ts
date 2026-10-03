@@ -878,6 +878,9 @@ export const api = {
   /** Unlinks the route; a loop made for the ride is deleted with it. */
   removeWorkoutRoute: (id: string) =>
     request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}/route`, { method: 'DELETE' }),
+  /** Sends a routed ride's course to every one of the rider's own devices. */
+  pushWorkoutCourse: (id: string) =>
+    request<{ course: string }>(`/api/training/workouts/${encodeURIComponent(id)}/route/push`, { method: 'POST' }),
   /** What putting this route on a day would offer. Writes nothing. */
   routeSchedule: (slug: string, date: string, today?: string) =>
     request<ScheduleSituation>(
