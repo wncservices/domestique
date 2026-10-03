@@ -11,13 +11,11 @@ import (
 	"io/fs"
 	"log/slog"
 	"math"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +33,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/loops"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
@@ -2438,22 +2437,6 @@ func summarizePath(path routing.Path) pathSummary {
 	}
 }
 
-// suggestSeedBase returns a fresh random base for one suggest request — not
-// a fixed value, so pressing "Generate 9 options" again with the same start
-// and distance shows genuinely different loops instead of the exact same
-// ones every time (ORS's own round_trip algorithm is otherwise
-// deterministic per seed). Individual attempts use base+1, base+2, ... —
-// sequential offsets, not independently random values, so a single request
-// still gets distinct shapes without any collision-checking, and a retry
-// past a seed ORS couldn't route (see maxSuggestAttempts) just continues
-// the same sequence rather than needing separate bookkeeping.
-func suggestSeedBase() int {
-	// #nosec G404 -- picking which loop *shape* a rider sees, not a secret
-	// or anything an attacker gains from predicting; math/rand/v2 is the
-	// right tool for cosmetic variety, crypto/rand's cost buys nothing here.
-	return rand.IntN(1_000_000)
-}
-
 // maxSuggestAttempts bounds how many seeds one suggest request will try —
 // originally purely a retry budget (ORS's own round_trip algorithm can pick
 // a seed that lands its loop on a genuinely unroutable point, found live: a
@@ -2568,7 +2551,6 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 
 	start := routing.LatLng{Lat: body.Start.Lat, Lon: body.Start.Lon}
 	targetM := body.DistanceKm * 1000
-	base := suggestSeedBase()
 
 	// Two rounds, not one flat batch of maxSuggestAttempts — found live
 	// (real ORS API, not assumed): round_trip systematically *overshoots*
@@ -2582,58 +2564,34 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	// rider requested — confirmed live: this raised a real 60km request's
 	// hit rate from 3/15 to 13/15 candidates landing within
 	// maxDistanceDeviation. Both rounds are still fired concurrently
-	// within themselves — see fireRoundTripAttempts — so the two rounds
+	// within themselves — see loops.Generate — so the two rounds
 	// together cost roughly two of PR #236's single-round latencies, not
 	// maxSuggestAttempts sequential ones.
-	calibrationSeeds := make([]int, suggestCalibrationAttempts)
-	for i := range calibrationSeeds {
-		calibrationSeeds[i] = base + i + 1
+	shortlist, stats := loops.Generate(r.Context(), s.Routing, loops.Request{
+		Start:            start,
+		Profile:          body.Profile,
+		Hilliness:        hilliness,
+		SeedBase:         loops.NewSeedBase(),
+		CalibrationSeeds: suggestCalibrationAttempts,
+		RefinementSeeds:  maxSuggestAttempts - suggestCalibrationAttempts,
+		// Filtered against targetM — what the rider actually asked for —
+		// never the refined length only ever sent to ORS.
+		Objective: suggestObjective{targetM: targetM, hilliness: hilliness, n: suggestCandidateCount},
+	})
+	for _, f := range stats.Failures {
+		// One bad seed doesn't sink the request — the same "one bad
+		// route never aborts a run" principle AGENTS.md states for the
+		// library as a whole. Still worth a Warn and the shared error
+		// metric, so an operator sees an engine that is intermittently
+		// flaky even on requests that otherwise succeed.
+		s.logger().Warn("route builder suggestion seed failed", "seed", f.Seed, "cause", loops.FailureClass(f.Err), "by", rider)
+		recordRouteBuilderError(r.Context(), "suggest")
 	}
-	round1 := fireRoundTripAttempts(r.Context(), s.Routing, start, targetM, calibrationSeeds, body.Profile, hilliness)
-
-	refinedM := targetM
-	if ratio := averageOvershootRatio(round1, targetM); ratio > 0 {
-		refinedM = targetM / ratio
+	attempted, lastErr := stats.Attempts, stats.LastErr
+	candidates := make([]routeBuilderCandidate, len(shortlist))
+	for i, l := range shortlist {
+		candidates[i] = candidateOf(l)
 	}
-
-	refinementSeeds := make([]int, maxSuggestAttempts-suggestCalibrationAttempts)
-	for i := range refinementSeeds {
-		refinementSeeds[i] = base + suggestCalibrationAttempts + i + 1
-	}
-	round2 := fireRoundTripAttempts(r.Context(), s.Routing, start, refinedM, refinementSeeds, body.Profile, hilliness)
-
-	allResults := append(round1, round2...)
-
-	var pool []suggestPoolEntry
-	var lastErr error
-	attempted := len(allResults)
-	for _, res := range allResults {
-		if res.err != nil {
-			// One bad seed doesn't sink the request — the same "one bad
-			// route never aborts a run" principle AGENTS.md states for the
-			// library as a whole. Still worth a Warn and the shared error
-			// metric, so an operator sees an engine that is intermittently
-			// flaky even on requests that otherwise succeed.
-			s.logger().Warn("route builder suggestion seed failed", "seed", res.seed, "err", res.err, "by", rider)
-			recordRouteBuilderError(r.Context(), "suggest")
-			lastErr = res.err
-			continue
-		}
-		summary := summarizePath(res.path)
-		pool = append(pool, suggestPoolEntry{
-			candidate: routeBuilderCandidate{
-				Points:    summary.Coords,
-				DistanceM: summary.DistanceM,
-				AscentM:   summary.AscentM,
-				Surface:   summary.Surface,
-				Elevation: summary.Elevation,
-			},
-			ascentPerKm: ascentPerKm(summary.AscentM, summary.DistanceM),
-		})
-	}
-	// Filtered against targetM — what the rider actually asked for — never
-	// refinedM, the internally-adjusted value only ever sent to ORS.
-	candidates := selectSuggestCandidates(pool, targetM, hilliness, suggestCandidateCount)
 	if len(candidates) == 0 {
 		if lastErr != nil {
 			// Unlike a partial failure above, the request itself fails
@@ -2670,157 +2628,64 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates})
 }
 
-// suggestAttemptResult is one RoundTrip outcome, kept with the seed that
-// produced it — fireRoundTripAttempts' own callers need the seed for their
-// failure log line, and results arrive out of order relative to the
-// goroutines that produced them without it.
-type suggestAttemptResult struct {
-	seed int
-	path routing.Path
-	err  error
-}
-
-// fireRoundTripAttempts issues one RoundTrip call per seed, all at the
-// same requestedLengthM, concurrently — same reasoning as PR #236's own
-// fix: bounds the round's wall-clock time by its single slowest call
-// rather than their sum. A round's own size is just len(seeds); the
-// calibration/refinement split lives in the caller.
-func fireRoundTripAttempts(ctx context.Context, client routing.Client, start routing.LatLng, requestedLengthM float64, seeds []int, profile string, hilliness int) []suggestAttemptResult {
-	results := make([]suggestAttemptResult, len(seeds))
-	var wg sync.WaitGroup
-	for i, seed := range seeds {
-		wg.Add(1)
-		go func(i, seed int) {
-			defer wg.Done()
-			path, err := client.RoundTrip(ctx, start, requestedLengthM, seed, profile, hilliness)
-			results[i] = suggestAttemptResult{seed: seed, path: path, err: err}
-		}(i, seed)
-	}
-	wg.Wait()
-	return results
-}
-
-// averageOvershootRatio is the empirical actual-distance/requested-distance
-// ratio across a round's successful attempts — ORS's own round_trip
-// algorithm systematically overshoots a requested length rather than
-// missing it randomly in both directions (confirmed live: a 60km request
-// averaged +13% over 15 seeds, every single one over, never under), and
-// that overshoot scales with distance in a way no single fixed constant
-// captures (a separate live sample at 15km averaged +33%) — hence
-// measuring it fresh per request from a real calibration round, rather
-// than hardcoding a correction. Returns 0 ("nothing to correct by") when
-// requestedLengthM isn't positive or nothing in results succeeded with a
-// positive distance — the caller's own fallback for either is to use the
-// unadjusted target, the same as before this existed.
-func averageOvershootRatio(results []suggestAttemptResult, requestedLengthM float64) float64 {
-	if requestedLengthM <= 0 {
-		return 0
-	}
-	var sum float64
-	var n int
-	for _, res := range results {
-		if res.err != nil {
-			continue
-		}
-		dist := gpx.ComputeStats(res.path.Points).DistanceM
-		if dist <= 0 {
-			continue
-		}
-		sum += dist / requestedLengthM
-		n++
-	}
-	if n == 0 {
-		return 0
-	}
-	return sum / float64(n)
-}
-
-// suggestPoolEntry is one successful RoundTrip result, kept around with its
-// own climbing rate until selectSuggestCandidates/selectByHilliness have
-// picked the final suggestCandidateCount — see those functions' own doc
-// comments for why raw AscentM alone isn't enough to select by.
+// suggestPoolEntry is one loop kept around with its own climbing rate while
+// selectSuggestCandidates/selectByHilliness pick the final
+// suggestCandidateCount — see loops.ByHilliness for why raw AscentM alone
+// isn't enough to select by.
 type suggestPoolEntry struct {
 	candidate   routeBuilderCandidate
 	ascentPerKm float64
 }
 
-// ascentPerKm is the one number a hilliness preference can actually be
-// judged against — see selectByHilliness's own doc comment. Guards a zero
-// distance (never happens for a real successful route, but a stray 0/0
-// reads as "flattest possible" otherwise, which would bias selection
-// toward a result that was never really measured).
-func ascentPerKm(ascentM, distanceM float64) float64 {
-	if distanceM <= 0 {
-		return 0
+// candidateOf is a generated loop in the shape the route builder returns.
+func candidateOf(l loops.Loop) routeBuilderCandidate {
+	summary := summarizePath(l.Path)
+	return routeBuilderCandidate{
+		Points:    summary.Coords,
+		DistanceM: summary.DistanceM,
+		AscentM:   summary.AscentM,
+		Surface:   summary.Surface,
+		Elevation: summary.Elevation,
 	}
-	return ascentM / (distanceM / 1000)
 }
 
-// medianOf returns the median of vals — used only by selectByHilliness's
-// own "Moderate" case, and only ever over the handful of candidates one
-// suggest request generates, so a plain sort is plenty.
-func medianOf(vals []float64) float64 {
-	if len(vals) == 0 {
-		return 0
+// ascentPerKm and medianOf are the generator's own, kept under their old
+// names for the selection tests that pin them.
+func ascentPerKm(ascentM, distanceM float64) float64 { return loops.AscentPerKm(ascentM, distanceM) }
+
+func medianOf(vals []float64) float64 { return loops.Median(vals) }
+
+// backtrackFraction is the generator's own backtrack measure.
+func backtrackFraction(points [][2]float64) float64 { return loops.BacktrackFraction(points) }
+
+// poolLoops wraps a pool in Loops, using Seed as the index back into it, so
+// the pool-level selection can be reused unchanged.
+func poolLoops(pool []suggestPoolEntry) []loops.Loop {
+	out := make([]loops.Loop, len(pool))
+	for i, e := range pool {
+		out[i] = loops.Loop{
+			Seed:        i,
+			Coords:      e.candidate.Points,
+			DistanceM:   e.candidate.DistanceM,
+			AscentM:     e.candidate.AscentM,
+			AscentPerKm: e.ascentPerKm,
+		}
 	}
-	sorted := append([]float64(nil), vals...)
-	sort.Float64s(sorted)
-	mid := len(sorted) / 2
-	if len(sorted)%2 == 1 {
-		return sorted[mid]
+	return out
+}
+
+func candidatesOf(pool []suggestPoolEntry, picked []loops.Loop) []routeBuilderCandidate {
+	out := make([]routeBuilderCandidate, len(picked))
+	for i, l := range picked {
+		out[i] = pool[l.Seed].candidate
 	}
-	return (sorted[mid-1] + sorted[mid]) / 2
+	return out
 }
 
 // selectByHilliness picks the n candidates from pool that best fit
-// hilliness, rather than just however many of the first few seeds happened
-// to succeed.
-//
-// Found live: ORS's own steepness_difficulty weighting (see
-// routing.RoundTrip's own doc comment) does bias climbing rate the right
-// way on average — confirmed against the real API across 5 seeds, "Pro"
-// climbed more per kilometre than "Novice" every single time — but
-// round_trip's own loop length varies by up to 50% from the requested
-// distance independently of that weighting. That variance swamps the
-// signal in *total* ascent: a "Flat" request that happens to land a longer
-// loop can easily show more total climbing than a "Hilly" request that
-// lands a shorter one, even though the Hilly one is climbing faster the
-// whole way — exactly the complaint that motivated this function. Ranking
-// the whole pool by ascent-per-km and keeping the best-fitting n, instead
-// of accepting the first n successes, is what actually makes "Flat" read
-// as flatter than "Hilly" to a rider looking at the result.
-//
-// hilliness here is always a resolved 0-3 value (RoundTrip's own -1
-// "unspecified" sentinel is substituted with routing.DefaultSteepnessDifficulty
-// by the caller before this runs) — 0-1 favours the lowest climbing rates
-// in the pool, 2-3 the highest, and exactly
-// routing.DefaultSteepnessDifficulty picks whichever are closest to the
-// pool's own median, since "Moderate" has no obvious direction to sort by.
+// hilliness — see loops.ByHilliness.
 func selectByHilliness(pool []suggestPoolEntry, hilliness, n int) []routeBuilderCandidate {
-	sorted := append([]suggestPoolEntry(nil), pool...)
-	switch {
-	case hilliness <= 0:
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].ascentPerKm < sorted[j].ascentPerKm })
-	case hilliness >= routing.MaxSteepnessDifficulty-1:
-		sort.Slice(sorted, func(i, j int) bool { return sorted[i].ascentPerKm > sorted[j].ascentPerKm })
-	default:
-		rates := make([]float64, len(sorted))
-		for i, e := range sorted {
-			rates[i] = e.ascentPerKm
-		}
-		median := medianOf(rates)
-		sort.Slice(sorted, func(i, j int) bool {
-			return math.Abs(sorted[i].ascentPerKm-median) < math.Abs(sorted[j].ascentPerKm-median)
-		})
-	}
-	if len(sorted) > n {
-		sorted = sorted[:n]
-	}
-	candidates := make([]routeBuilderCandidate, len(sorted))
-	for i, e := range sorted {
-		candidates[i] = e.candidate
-	}
-	return candidates
+	return candidatesOf(pool, loops.ByHilliness(poolLoops(pool), hilliness, n))
 }
 
 // maxDistanceDeviation is how far a suggested loop's actual distance may
@@ -2852,198 +2717,41 @@ const maxDistanceDeviation = 0.10
 // this function doesn't assume its caller) skips the filter rather than
 // dividing by it.
 func selectSuggestCandidates(pool []suggestPoolEntry, targetDistanceM float64, hilliness, n int) []routeBuilderCandidate {
-	shortlist := pool
-	if targetDistanceM > 0 {
-		withinTolerance := make([]suggestPoolEntry, 0, len(pool))
-		for _, e := range pool {
-			if math.Abs(e.candidate.DistanceM-targetDistanceM) <= targetDistanceM*maxDistanceDeviation {
-				withinTolerance = append(withinTolerance, e)
-			}
-		}
-		shortlist = withinTolerance
-	}
-	// A candidate that mostly rides itself twice — out along a road, back
-	// the same way — is a valid loop by distance and ORS's own path cost,
-	// but a bad suggestion: nobody wants to hear the same road's traffic
-	// twice. Preferred whenever any low-backtrack candidate exists; if
-	// every survivor backtracks (a sparse road network near the start
-	// point, most likely), the shortlist is left alone rather than handing
-	// back nothing — see maxDistanceDeviation's own "fewer honestly close
-	// beats padding the list" reasoning, same trade-off here.
-	if lowBacktrack := filterLowBacktrack(shortlist); len(lowBacktrack) > 0 {
-		shortlist = lowBacktrack
-	}
-	return selectByHilliness(shortlist, hilliness, n)
+	obj := suggestObjective{targetM: targetDistanceM, hilliness: hilliness, n: n}
+	return candidatesOf(pool, loops.Shortlist(obj, poolLoops(pool)))
 }
 
-// maxBacktrackFraction is how much of a loop's own distance may retrace a
-// street it already rode, in the opposite direction, before
-// filterLowBacktrack drops it — round_trip has no lever to ask ORS for a
-// loop that doesn't do this (routing.go's own package doc explains why:
-// there's no avoid_features or profile option that targets "don't reuse a
-// road," only the steps/fords avoidance every request already sets), so
-// this is a post-hoc filter over what came back rather than something the
-// routing-engine request itself can prevent. 0.15: a loop that's more than
-// an eighth-to-a-sixth "there and back" reads as a real out-and-back to a
-// rider looking at the map, not an incidental few dozen metres of overlap
-// near a junction.
-const maxBacktrackFraction = 0.15
-
-// filterLowBacktrack keeps only the pool entries whose backtrackFraction
-// is at or under maxBacktrackFraction — split out from selectSuggestCandidates
-// so the "if nothing survives, don't empty the shortlist" fallback there
-// reads as one decision rather than being buried in a loop.
-//
-// Each entry's backtrackFraction is independent, CPU-only work over a full
-// route geometry — found live to cost tens to a few hundred milliseconds
-// per candidate on a realistic ORS response (a few thousand points; see
-// backtrackFraction's own "trivial next to the network round trips"
-// comment, which held for the short geometries it was tested against but
-// not for a real 60-100km loop's actual point density). A sequential loop
-// here paid that once per shortlisted candidate, synchronously, stacking
-// on top of the network latency selectSuggestCandidates' caller already
-// spends — fanned out the same way fireRoundTripAttempts already
-// parallelizes the network calls themselves, so this filter's own cost is
-// bounded by its slowest single candidate rather than their sum.
-func filterLowBacktrack(pool []suggestPoolEntry) []suggestPoolEntry {
-	fractions := make([]float64, len(pool))
-	var wg sync.WaitGroup
-	for i, e := range pool {
-		wg.Add(1)
-		go func(i int, points [][2]float64) {
-			defer wg.Done()
-			fractions[i] = backtrackFraction(points)
-		}(i, e.candidate.Points)
-	}
-	wg.Wait()
-
-	kept := make([]suggestPoolEntry, 0, len(pool))
-	for i, e := range pool {
-		if fractions[i] <= maxBacktrackFraction {
-			kept = append(kept, e)
-		}
-	}
-	return kept
+// suggestObjective is the route builder's own objective for loops.Generate:
+// a rider asked for about targetM, with a hilliness preference.
+type suggestObjective struct {
+	targetM   float64
+	hilliness int
+	n         int
 }
 
-// backtrackMatchDistanceM is how close two segments of a route's own path
-// must sit before they count as "the same street" rather than two
-// different, merely nearby ones — loose enough to absorb GPS/geometry
-// noise between two decodes of the same road (ORS doesn't return
-// byte-identical vertices for the same tarmac ridden twice), tight enough
-// to stay well under the smallest realistic separation between two
-// distinct parallel streets in a dense grid.
-const backtrackMatchDistanceM = 15.0
+func (o suggestObjective) TargetLength() float64 { return o.targetM }
 
-// backtrackMinArcGapM is how far apart along the route's own cumulative
-// distance two segments must be before they're even compared — an
-// index-based gap would scale wrong across a sparse vs. GPS-dense
-// geometry; an arc-length one doesn't. Without this, a tight hairpin (a
-// real, single visit to one physical curve) would flag itself: two
-// samples a few metres apart along a sharp bend can easily point close to
-// opposite directions despite being the same curve, not a return visit.
-const backtrackMinArcGapM = 150.0
-
-// backtrackOppositeDotThreshold bounds how close to exactly opposite two
-// segments' directions must point to count as retracing rather than
-// merely converging — a normalized 2D dot product, so -1 is exactly
-// opposite and 0 is perpendicular. -0.7 corresponds to roughly 135°+ of
-// difference (allowing up to ~45° of noise from a straight reversal),
-// loose enough that a real road's own gentle curvature along the "out" and
-// "back" legs doesn't slip under a stricter threshold and go undetected.
-const backtrackOppositeDotThreshold = -0.7
-
-// backtrackFraction estimates how much of a route's own distance is spent
-// retracing a street it already rode, in the opposite direction — the
-// geometric signature of an out-and-back spur, as opposed to a loop that
-// merely passes near itself once where it closes back at the start. See
-// the three backtrack* constants above for what "close" and "opposite"
-// mean here, and selectSuggestCandidates for how the result is used.
-//
-// O(n²) in the number of points — n is a single round-trip loop's own
-// geometry, which is not the few hundred vertices this was first written
-// against: ORS's directions response is unsimplified, so a realistic
-// 60-100km loop comes back with several thousand points, and at that size
-// this is measured in the tens to hundreds of milliseconds, not trivial
-// once it's paid once per shortlisted candidate. See filterLowBacktrack's
-// own comment for why that caller fans this out across candidates rather
-// than running it in a sequential loop.
-func backtrackFraction(points [][2]float64) float64 {
-	n := len(points)
-	if n < 4 {
-		return 0
+// Refine corrects the length by the calibration round's measured overshoot.
+func (o suggestObjective) Refine(round1 []loops.Loop) float64 {
+	if ratio := loops.OvershootRatio(round1, o.targetM); ratio > 0 {
+		return o.targetM / ratio
 	}
-
-	segLen := make([]float64, n-1)
-	cum := make([]float64, n)
-	dir := make([][2]float64, n-1)
-	for i := 0; i < n-1; i++ {
-		a := gpx.Point{Lat: points[i][0], Lon: points[i][1]}
-		b := gpx.Point{Lat: points[i+1][0], Lon: points[i+1][1]}
-		segLen[i] = gpx.DistanceM(a, b)
-		cum[i+1] = cum[i] + segLen[i]
-		dir[i] = segmentDirection(points[i], points[i+1])
-	}
-	total := cum[n-1]
-	if total <= 0 {
-		return 0
-	}
-
-	flagged := make([]bool, n-1)
-	for i := 0; i < n-1; i++ {
-		if dir[i] == ([2]float64{}) {
-			continue // zero-length segment (a duplicate vertex) — no direction to compare
-		}
-		for j := i + 1; j < n-1; j++ {
-			if cum[j]-cum[i+1] < backtrackMinArcGapM {
-				continue
-			}
-			if dir[j] == ([2]float64{}) {
-				continue
-			}
-			if dot2(dir[i], dir[j]) > backtrackOppositeDotThreshold {
-				continue
-			}
-			mi := midpoint(points[i], points[i+1])
-			mj := midpoint(points[j], points[j+1])
-			if gpx.DistanceM(gpx.Point{Lat: mi[0], Lon: mi[1]}, gpx.Point{Lat: mj[0], Lon: mj[1]}) <= backtrackMatchDistanceM {
-				flagged[i] = true
-				flagged[j] = true
-			}
-		}
-	}
-
-	var backtrack float64
-	for i, f := range flagged {
-		if f {
-			backtrack += segLen[i]
-		}
-	}
-	return backtrack / total
+	return o.targetM
 }
 
-// segmentDirection is a's-to-b's normalized direction, in a local
-// equirectangular approximation (longitude scaled by cos(latitude)) rather
-// than true lat/lon degrees — needed so a dot product between two
-// segments actually reflects their real-world angle instead of being
-// skewed by longitude lines converging toward the poles. Returns the zero
-// vector for a zero-length segment (two identical points): backtrackFraction
-// treats that as "no direction to compare" rather than an arbitrary one.
-func segmentDirection(a, b [2]float64) [2]float64 {
-	latMid := (a[0] + b[0]) / 2 * math.Pi / 180
-	dLat := b[0] - a[0]
-	dLon := (b[1] - a[1]) * math.Cos(latMid)
-	length := math.Hypot(dLat, dLon)
-	if length == 0 {
-		return [2]float64{}
+// Keep drops a loop that missed the requested distance by more than
+// maxDistanceDeviation. targetM <= 0 (shouldn't happen past the handler's own
+// validation, but this doesn't assume its caller) skips the filter rather
+// than dividing by it.
+func (o suggestObjective) Keep(l loops.Loop) bool {
+	if o.targetM <= 0 {
+		return true
 	}
-	return [2]float64{dLat / length, dLon / length}
+	return math.Abs(l.DistanceM-o.targetM) <= o.targetM*maxDistanceDeviation
 }
 
-func dot2(a, b [2]float64) float64 { return a[0]*b[0] + a[1]*b[1] }
-
-func midpoint(a, b [2]float64) [2]float64 {
-	return [2]float64{(a[0] + b[0]) / 2, (a[1] + b[1]) / 2}
+func (o suggestObjective) Rank(shortlist []loops.Loop) []loops.Loop {
+	return loops.ByHilliness(shortlist, o.hilliness, o.n)
 }
 
 // maxGeocodeQueryLen bounds a location search's own query string — nothing
