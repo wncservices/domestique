@@ -1035,6 +1035,8 @@ export interface ReadinessResponse {
     verdict: ReadinessVerdict
     reasons?: string[]
     wellness?: DailyWellnessDTO
+    /** Today is inside one of the rider's life events: hide the chip. */
+    lifeEvent?: boolean
   }
   days: DailyWellnessDTO[]
   /** Forecast for tomorrow's hard session — absent when tomorrow has no
@@ -1290,6 +1292,111 @@ export interface TrainingWeek {
     plannedSeconds: number
     completedSeconds: number
   }
+  /** The rider's life events overlapping this week, for the bands. */
+  lifeEvents?: LifeEvent[]
+}
+
+export type LifeEventKind = 'travel' | 'illness' | 'busy' | 'other'
+export type LifeEventOption = 'no_bike' | 'gym' | 'mild' | 'proper'
+
+/** Mirrors lifeEventDTO in internal/api/lifeevents.go. */
+export interface LifeEvent {
+  id: string
+  kind: LifeEventKind
+  startDate: string
+  endDate: string
+  option?: LifeEventOption
+  note?: string
+}
+
+export type LifeChangeOp = 'remove' | 'move' | 'ease' | 'shorten' | 'indoor' | 'add' | 'swap'
+
+/** One line of a life-event preview. `id` is deterministic ("<op>:<workoutId>",
+ *  "add:<date>"), which is what the skip and include lists name. */
+export interface LifeChange {
+  id: string
+  op: LifeChangeOp
+  workoutId?: string
+  date: string
+  toDate?: string
+  name: string
+  kind?: LifeEventKind
+  reason: string
+  /** Whether the preview ticks it; the removal of a session the rider built is not. */
+  default: boolean
+}
+
+export interface LifeLeftAlone {
+  workoutId: string
+  date: string
+  name: string
+  reason: string
+}
+
+export interface LifeDiff {
+  changes: LifeChange[]
+  leftAlone: LifeLeftAlone[]
+  advice: string[]
+}
+
+export interface LifeApplied {
+  removed: number
+  moved: number
+  eased: number
+  shortened: number
+  indoor: number
+  added: number
+}
+
+/** Mirrors lifeResultDTO. A dry run has a diff and nothing else. */
+export interface LifeEventResult {
+  event?: LifeEvent
+  diff: LifeDiff
+  applied?: LifeApplied
+}
+
+/** The request of a create or an edit. The client never supplies the diff:
+ *  the server recomputes it, and applies it minus `skip` (plus the opt-in
+ *  changes named in `include`). */
+export interface LifeEventRequest {
+  kind: LifeEventKind
+  startDate: string
+  endDate: string
+  option?: LifeEventOption | ''
+  note?: string
+  dryRun?: boolean
+  skip?: string[]
+  include?: string[]
+}
+
+export type PlanEditIntentType = 'create_life_event' | 'move_workout' | 'swap_alternate' | 'convert_indoor'
+
+/** One validated intent of a natural-language proposal. `workoutId` is the real
+ *  session id the model's opaque handle resolved to, for the apply call. */
+export interface PlanEditIntent {
+  type: PlanEditIntentType
+  kind?: LifeEventKind
+  startDate?: string
+  endDate?: string
+  option?: LifeEventOption
+  workoutId?: string
+  toDate?: string
+  alternate?: 'easier' | 'harder' | 'shorter' | 'longer'
+}
+
+export interface PlanEditItem {
+  intent: PlanEditIntent
+  /** The diff the form would show for it; a move, swap or conversion has one line. */
+  diff: LifeDiff
+}
+
+/** POST /api/training/plan/propose-edit: a preview, never applied. */
+export interface PlanEditResponse {
+  items: PlanEditItem[]
+  /** Intents that failed validation, each with the reason. */
+  dropped: { type: string; reason: string }[]
+  /** What the model could not do, plain text. */
+  unsupported?: string
 }
 
 /** POST /api/training/replan's response — see internal/api/replan.go.
@@ -1461,6 +1568,8 @@ export interface TrainNowResponse {
   minutes: number
   verdict: 'ready' | 'caution' | 'rest'
   suggestions: TrainNowSuggestion[]
+  /** Why there is nothing to suggest: a life event rules riding out today. */
+  notice?: string
 }
 
 export type ProjectionVerdictKey =

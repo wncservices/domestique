@@ -54,6 +54,9 @@ type readinessTodayDTO struct {
 	Verdict  string            `json:"verdict"`
 	Reasons  []string          `json:"reasons,omitempty"`
 	Wellness *dailyWellnessDTO `json:"wellness,omitempty"`
+	// LifeEvent is true when today falls inside one of the rider's life events:
+	// the day card shows the event instead, and the chip is hidden.
+	LifeEvent bool `json:"lifeEvent,omitempty"`
 }
 
 // tomorrowForecastDTO is the look-ahead for tomorrow's hard session — only
@@ -127,10 +130,21 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	blackout, err := s.blackoutFor(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	out.Today.LifeEvent = blackout[today.Format(dateLayout)]
+
 	forecast, target, ok, err := s.tomorrowFor(r.Context(), rider, today, sessions, latest)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	// No advisory for a day the rider is away.
+	if blackout[today.AddDate(0, 0, 1).Format(dateLayout)] {
+		ok = false
 	}
 	if ok && forecast.Verdict != readiness.Ready {
 		out.Tomorrow = &tomorrowForecastDTO{

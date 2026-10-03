@@ -47,6 +47,8 @@ type trainingWeekDTO struct {
 	Focus  *weekFocusDTO `json:"focus,omitempty"`
 	Days   []weekDayDTO  `json:"days"`
 	Totals weekTotalsDTO `json:"totals"`
+	// LifeEvents are the rider's events overlapping this week, for the bands.
+	LifeEvents []lifeEventDTO `json:"lifeEvents,omitempty"`
 }
 
 // handleTrainingWeek is the Plan page's one read: seven days with what was
@@ -154,6 +156,10 @@ func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, 
 		planned = append(planned, d.Planned)
 	}
 	s.attachWhy(ctx, rider, planned...)
+
+	if dto.LifeEvents, err = s.lifeEventsInWeek(ctx, rider, start); err != nil {
+		return trainingWeekDTO{}, err
+	}
 
 	focus, err := s.weekFocus(ctx, rider, start, now)
 	if err != nil {

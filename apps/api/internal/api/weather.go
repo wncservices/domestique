@@ -207,6 +207,10 @@ func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
+		if opts.Blackout, err = s.blackoutFor(r.Context(), rider); err != nil {
+			s.fail(w, err)
+			return
+		}
 	}
 
 	for _, d := range weather.Days(forecast, opts) {

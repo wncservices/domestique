@@ -1,11 +1,13 @@
 package scheduler
 
 import (
+	"math"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/workout"
+	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
 
 // GeneratedDescription is what every workout this package builds carries as
@@ -96,6 +98,29 @@ func EasyVariant(w workout.Workout, profile workout.RiderProfile) workout.Create
 		hours = 1
 	}
 	return BuildEnduranceSession(hours, false, w.Sport, profile)
+}
+
+// OneRungEasier builds the session one rung below w's own on its zone's ladder,
+// the same zone and sport, for the return ramp after a life event. It reports
+// false when there is nothing to step down to: no ladder for the zone (an
+// endurance session, or a legacy zone-less one) or w already at the bottom
+// rung. The caller decides what to do then; the ramp falls back to EasyVariant
+// for a hard session.
+func OneRungEasier(w workout.Workout, profile workout.RiderProfile) (workout.CreateWorkoutRequest, bool) {
+	ladder, ok := workoutlib.LadderFor(w.Sport, string(w.Zone))
+	if !ok {
+		return workout.CreateWorkoutRequest{}, false
+	}
+	target := int(math.Round(w.Level)) - 1
+	if target < 1 {
+		return workout.CreateWorkoutRequest{}, false
+	}
+	for _, r := range ladder.Rungs {
+		if r.Level == target {
+			return workoutlib.Instantiate(ladder, r, profile), true
+		}
+	}
+	return workout.CreateWorkoutRequest{}, false
 }
 
 // EasedBeforeTestReason is the note on a hard session eased because an FTP test

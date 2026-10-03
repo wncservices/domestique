@@ -225,6 +225,11 @@ func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions
 	today := calendarDay(s.now().UTC())
 	todayAssessment := s.assessReadinessForForecast(ctx, rider, sessions, latest, today)
 	forecast, _, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
+	// Nothing to advise on a day the rider is away. A failure reading events
+	// only costs a log line, so it falls through to the usual advisory.
+	if blackout, err := s.blackoutFor(ctx, rider); err == nil && blackout[today.AddDate(0, 0, 1).Format(dateLayout)] {
+		ok = false
+	}
 	if ok && forecast.Verdict != readiness.Ready {
 		s.logger().Info("tomorrow's session may need easing", "rider", rider, "risk", string(forecast.Verdict))
 	}

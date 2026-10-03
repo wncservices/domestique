@@ -35,6 +35,7 @@ const (
 	ThresholdAuto      Rule = "threshold_auto"
 	LevelRecalibration Rule = "level_recalibration"
 	SeasonRefresh      Rule = "season_refresh"
+	IllnessRamp        Rule = "illness_ramp"
 )
 
 // Fact is one label/value row in the popover.
@@ -154,6 +155,20 @@ type SeasonRefreshInputs struct {
 	FTPTo     float64 `json:"ftpTo,omitempty"`
 }
 
+// IllnessRampInputs: a session eased on the way back from an illness, or from a
+// trip of a week or more without a bike. Kind is "illness" or "travel", Option
+// the event's own ("mild", "proper", "no_bike"), Day the session's day of the
+// return (1 is the day after the event ended) out of UntilDay, the last day the
+// ramp reaches; the first EasyDays are easy days.
+type IllnessRampInputs struct {
+	Kind     string `json:"kind"`
+	Option   string `json:"option,omitempty"`
+	EndDate  string `json:"endDate"`
+	Day      int    `json:"day"`
+	EasyDays int    `json:"easyDays"`
+	UntilDay int    `json:"untilDay"`
+}
+
 // Title is the rule's name as a rider reads it. Empty for an unknown rule.
 func Title(rule Rule) string {
 	switch rule {
@@ -179,6 +194,8 @@ func Title(rule Rule) string {
 		return "Level recalibrated"
 	case SeasonRefresh:
 		return "Week rebuilt"
+	case IllnessRamp:
+		return "Eased back in after time off"
 	}
 	return ""
 }
@@ -292,6 +309,21 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 			{"Level", arrow(in.LevelFrom, in.LevelTo)},
 			{"Because", triggerLabel(in.Trigger)},
 		}
+	case IllnessRamp:
+		in, ok := decode[IllnessRampInputs](inputs)
+		if !ok {
+			return nil
+		}
+		stage := "one rung down"
+		if in.Day <= in.EasyDays {
+			stage = "an easy day"
+		}
+		return []Fact{
+			{"After", rampCause(in)},
+			{"Ended", dayLabel(in.EndDate)},
+			{"Return day", fmt.Sprintf("%d of %d", in.Day, in.UntilDay)},
+			{"This stage", stage},
+		}
 	case SeasonRefresh:
 		in, ok := decode[SeasonRefreshInputs](inputs)
 		if !ok {
@@ -367,6 +399,17 @@ func dayLabel(date string) string {
 		return date
 	}
 	return d.Format("Mon 2 Jan")
+}
+
+// rampCause says what the rider is coming back from.
+func rampCause(in IllnessRampInputs) string {
+	switch {
+	case in.Kind == "travel":
+		return "a trip without a bike"
+	case in.Option == "mild":
+		return "a mild illness"
+	}
+	return "an illness"
 }
 
 func zoneLabel(zone string) string { return strings.ReplaceAll(zone, "_", " ") }
