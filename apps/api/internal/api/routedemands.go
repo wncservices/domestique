@@ -49,7 +49,12 @@ type routeRefDTO struct {
 // demandClimbDTO is one climb: where, how big, and how long it takes at the
 // intensity the race is ridden at. Distances only, no position.
 type demandClimbDTO struct {
+	// Index is the climb's number among the training climbs (1 km and 3 % or
+	// more). DeviceIndex is its number among the pacing plan's climbs (found at
+	// the 500 m device bar), which is the C-number the pacing plan, the course
+	// point on a head unit and the chart all use: label climbs with this.
 	Index       int     `json:"index"`
+	DeviceIndex int     `json:"deviceIndex"`
 	StartM      float64 `json:"startM"`
 	EndM        float64 `json:"endM"`
 	LengthM     float64 `json:"lengthM"`
@@ -88,8 +93,10 @@ type routeDemandsDTO struct {
 	Route       routeRefDTO      `json:"route"`
 	Assumptions []string         `json:"assumptions"`
 	Climbs      []demandClimbDTO `json:"climbs"`
-	Coverage    coverageDTO      `json:"coverage"`
-	Bias        biasDTO          `json:"bias"`
+	// Profile is the route's elevation by distance, for the chart.
+	Profile  []profilePointDTO `json:"profile"`
+	Coverage coverageDTO       `json:"coverage"`
+	Bias     biasDTO           `json:"bias"`
 }
 
 type routeDemandsUnavailableDTO struct {
@@ -106,6 +113,40 @@ type routeProfile struct {
 	Route  model.Route
 	Segs   []pacing.Seg
 	Climbs []climbs.Climb
+	// DeviceClimbs are the same route's climbs at the device bar (500 m), which
+	// the pacing plan covers so short ramps get a target too. The training
+	// climbs are a subset of them with identical bounds.
+	DeviceClimbs []climbs.Climb
+	// Profile is the elevation along the route, at most maxProfilePoints
+	// samples of (distance, elevation) so the card can draw it and shade the
+	// climbs. Distances and heights only.
+	Profile []profilePointDTO
+}
+
+// profilePointDTO is one sample of the elevation profile.
+type profilePointDTO struct {
+	DistanceM float64 `json:"distanceM"`
+	EleM      float64 `json:"eleM"`
+}
+
+const maxProfilePoints = 150
+
+// sampleProfile thins points to at most maxProfilePoints (distance, elevation)
+// pairs, rounded to the metre: enough to draw, nothing that places the route.
+func sampleProfile(points []gpx.Point) []profilePointDTO {
+	dist := climbs.Distances(points)
+	step := 1
+	if len(points) > maxProfilePoints {
+		step = (len(points) + maxProfilePoints - 1) / maxProfilePoints
+	}
+	out := make([]profilePointDTO, 0, maxProfilePoints+1)
+	for i := 0; i < len(points); i += step {
+		out = append(out, profilePointDTO{DistanceM: math.Round(dist[i]), EleM: math.Round(points[i].Ele)})
+	}
+	if last := len(points) - 1; last%step != 0 {
+		out = append(out, profilePointDTO{DistanceM: math.Round(dist[last]), EleM: math.Round(points[last].Ele)})
+	}
+	return out
 }
 
 // loadRouteProfile reads a rider's route for training use. The reason is ""
@@ -135,9 +176,11 @@ func (s *Server) loadRouteProfile(ctx context.Context, rider, slug string) (*rou
 		return nil, reasonNoElevation, nil
 	}
 	return &routeProfile{
-		Route:  rt,
-		Segs:   pacing.Segments(points, 100, 500),
-		Climbs: climbs.Detect(points, climbs.TrainingConfig),
+		Route:        rt,
+		Segs:         pacing.Segments(points, 100, 500),
+		Climbs:       climbs.Detect(points, climbs.TrainingConfig),
+		DeviceClimbs: climbs.Detect(points, climbs.DeviceConfig),
+		Profile:      sampleProfile(points),
 	}, "", nil
 }
 
@@ -155,28 +198,32 @@ func hasElevation(points []gpx.Point) bool {
 	return true
 }
 
-// demandClimbs rides each climb at FTP x IF x the climb factor for how long
-// it lasts, through the physics. The factor depends on the duration and the
-// duration on the watts, but there is always a consistent answer, because
-// more power only shortens a climb: if the climb is under 5 minutes at the
-// 1.05 factor it is under 5 minutes at 1.10 too, and so on up. Watts are
-// capped at FTP x the same factor, so an override IF above 1.0 never asks for
-// more than the plan's own climb ceiling.
-func demandClimbs(rp *routeProfile, ftp float64, ph pacing.Physics, ifv float64) []demandClimbDTO {
+// demandClimbs reads each training climb's target and time from the pacing
+// plan, so the goal's card and the pacing plan are one calculation, not two
+// guesses. A training climb is one of the plan's climbs (the same bounds, found
+// at the stricter bar), matched by where it starts on the track.
+func demandClimbs(rp *routeProfile, plan pacing.Plan, ftp float64) []demandClimbDTO {
+	byStart := make(map[int]pacing.ClimbTarget, len(plan.Climbs))
+	for _, dc := range rp.DeviceClimbs {
+		for _, ct := range plan.Climbs {
+			if ct.Index == dc.Index {
+				byStart[dc.StartIdx] = ct
+			}
+		}
+	}
 	out := make([]demandClimbDTO, 0, len(rp.Climbs))
 	for _, c := range rp.Climbs {
-		d1 := pacing.ClimbSeconds(c, rp.Segs, ph, ftp*ifv*1.05)
-		factor := pacing.ClimbFactor(d1)
-		watts := math.Min(ftp*ifv*factor, ftp*factor)
-		dur := pacing.ClimbSeconds(c, rp.Segs, ph, watts)
-
+		ct, ok := byStart[c.StartIdx]
+		if !ok {
+			continue
+		}
 		dto := demandClimbDTO{
-			Index: c.Index, StartM: math.Round(c.StartM), EndM: math.Round(c.EndM),
+			Index: c.Index, DeviceIndex: ct.Index, StartM: math.Round(c.StartM), EndM: math.Round(c.EndM),
 			LengthM: math.Round(c.LengthM), GainM: math.Round(c.GainM),
 			AvgGradient: math.Round(c.AvgGradient*10) / 10,
-			DurationSec: math.Round(dur), Watts: math.Round(watts),
-			PctFTP: math.Round(watts/ftp*1000) / 10,
-			Kind:   pacing.ClimbKind(dur),
+			DurationSec: math.Round(ct.Seconds), Watts: math.Round(ct.Watts),
+			PctFTP: math.Round(ct.Watts/ftp*1000) / 10,
+			Kind:   pacing.ClimbKind(ct.Seconds),
 		}
 		if cat, ok := climbs.Category(c.Score); ok {
 			dto.Category = "HC"
@@ -337,12 +384,7 @@ func (s *Server) routeDemandFor(ctx context.Context, g workout.Goal, profile wor
 		outcome = code
 		return nil, nil
 	}
-	ph := pacing.DefaultPhysics(profile.WeightKG)
-	ifv := g.PacingIF
-	if ifv == 0 {
-		ifv = pacing.DerivedIF(rp.Segs, ph, profile.FTPWatts)
-	}
-	cl := demandClimbs(rp, profile.FTPWatts, ph, ifv)
+	cl := demandClimbs(rp, paceRoute(rp, profile, g.PacingIF).plan, profile.FTPWatts)
 	demand := scheduler.DemandFromClimbs(rp.Climbs, demandDurations(cl), rp.Route.Stats.AscentM, rp.Route.Stats.DistanceM)
 	outcome = "none"
 	if demand != nil {
@@ -430,12 +472,9 @@ func (s *Server) handleRouteDemands(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ph := pacing.DefaultPhysics(profile.WeightKG)
-	ifv, derived := g.PacingIF, false
-	if ifv == 0 {
-		ifv, derived = pacing.DerivedIF(rp.Segs, ph, profile.FTPWatts), true
-	}
-	cl := demandClimbs(rp, profile.FTPWatts, ph, ifv)
+	pr := paceRoute(rp, profile, g.PacingIF)
+	ifv, derived := pr.ifv, pr.derived
+	cl := demandClimbs(rp, pr.plan, profile.FTPWatts)
 
 	workouts, err := s.Training.ListWorkouts(r.Context(), rider)
 	if err != nil {
@@ -453,6 +492,7 @@ func (s *Server) handleRouteDemands(w http.ResponseWriter, r *http.Request) {
 		Route:       routeRefDTO{Slug: rp.Route.Slug, Name: rp.Route.Name},
 		Assumptions: routeAssumptions(profile.WeightKG, ifv, derived),
 		Climbs:      cl,
+		Profile:     rp.Profile,
 		Coverage:    coverageFor(cl, longest, zone),
 		Bias:        s.biasFor(r.Context(), g, rp, cl),
 	})

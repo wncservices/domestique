@@ -31,8 +31,13 @@ type demandsOut struct {
 		Slug string `json:"slug"`
 		Name string `json:"name"`
 	} `json:"route"`
+	Profile []struct {
+		DistanceM float64 `json:"distanceM"`
+		EleM      float64 `json:"eleM"`
+	} `json:"profile"`
 	Climbs []struct {
 		Index       int     `json:"index"`
+		DeviceIndex int     `json:"deviceIndex"`
 		StartM      float64 `json:"startM"`
 		EndM        float64 `json:"endM"`
 		LengthM     float64 `json:"lengthM"`
@@ -132,14 +137,12 @@ func TestRouteDemandsReportClimbsWithTimeAndWatts(t *testing.T) {
 		case c.DurationSec <= 1200:
 			factor = 1.05
 		}
-		found := false
-		for _, ifv := range []float64{0.95, 0.85, 0.75} {
-			if math.Abs(c.Watts-250*ifv*factor) <= 0.6 {
-				found = true
-			}
-		}
-		if !found {
-			t.Errorf("climb %d: %.0f W at %.0f s is not 250 x {0.95,0.85,0.75} x %.2f", i, c.Watts, c.DurationSec, factor)
+		// The plan rides the climb at flat-level power x the factor, never above
+		// FTP x the factor: for an NP of 250 x 0.95 that lands a little under the
+		// cap. (TestRouteDemandsReadTheSameClimbWattsAsThePacingPlan checks the
+		// two endpoints agree exactly.)
+		if c.Watts > 250*factor+0.6 || c.Watts < 0.6*250 {
+			t.Errorf("climb %d: %.0f W at %.0f s is outside 60%% of FTP to FTP x %.2f", i, c.Watts, c.DurationSec, factor)
 		}
 		if math.Abs(c.PctFtp-c.Watts/250*100) > 1 {
 			t.Errorf("climb %d: pctFtp %.1f does not match %.0f W of 250", i, c.PctFtp, c.Watts)
@@ -166,6 +169,12 @@ func TestRouteDemandsReportClimbsWithTimeAndWatts(t *testing.T) {
 	}
 	if out.Climbs[0].Category == "" {
 		t.Errorf("a 2.3 km 6%% climb (score ~13,800) should be categorised 4, got none")
+	}
+	// The elevation profile rides along for the chart: heights by distance.
+	if n := len(out.Profile); n < 20 || n > 151 {
+		t.Errorf("profile has %d samples, want a thinned 20 to 151", n)
+	} else if last := out.Profile[n-1]; last.DistanceM < 8500 || last.DistanceM > 9100 {
+		t.Errorf("profile ends at %.0f m, the fixture is about 8.8 km", last.DistanceM)
 	}
 	// Nothing is planned yet, so nothing is covered, and the message says so.
 	if out.Coverage.Uncovered != 2 || out.Coverage.LongestSustainedSec != 0 || !strings.Contains(out.Coverage.Message, "2 climbs") {

@@ -142,6 +142,22 @@ const experienceItems = computed(() => {
           </p>
           <p v-if="profile.ftpEstimated && provenance('ftp')" class="text-xs text-dimmed mt-1">{{ provenance('ftp') }}</p>
         </UFormField>
+        <UFormField label="Weight (kg)">
+          <!-- Clearing the box sends 0, which clears the stored weight; leaving
+               it untouched sends the loaded value back unchanged. -->
+          <UInput
+            type="number"
+            step="0.5"
+            min="30"
+            max="250"
+            :model-value="profile.weightKg"
+            class="w-full"
+            @update:model-value="(v: string | number) => update({ weightKg: v === '' ? 0 : numberOrUndefined(v) })"
+          />
+          <p v-if="!profile.weightKg" class="text-xs text-muted mt-1">
+            Not set: pacing assumes 75 kg and says so. Add yours for a better climbing time.
+          </p>
+        </UFormField>
         <UFormField>
           <template #label>
             Threshold pace (sec/km)

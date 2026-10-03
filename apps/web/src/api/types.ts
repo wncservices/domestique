@@ -1344,10 +1344,7 @@ export interface ScheduledWorkouts {
   skipped?: number
 }
 
-/** GET /api/training/goals/{id}/explain's response — see
- *  internal/narration.ExplainPlan. A plain-language summary of the same
- *  reconciled plan the periodization table already shows; 412 instead of
- *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
+/** Why a goal's route demands cannot be shown; the UI keys off it. */
 export type RouteDemandsReasonCode =
   | 'no_route'
   | 'route_unavailable'
@@ -1358,7 +1355,12 @@ export type RouteDemandsReasonCode =
 /** One climb of a goal's route. Distances and elevations only: no latitude
  *  or longitude is ever sent. */
 export interface DemandClimb {
+  /** The climb's number among the training climbs (1 km and 3 % or more). */
   index: number
+  /** The climb's number as the pacing plan, the course point on a head unit and
+   *  the elevation chart call it (C1..Cn, found at the 500 m device bar). Use
+   *  this for labels, so every surface agrees. Absent from an older server. */
+  deviceIndex?: number
   startM: number
   endM: number
   lengthM: number
@@ -1386,6 +1388,8 @@ export interface RouteDemandsAvailable {
   route: { slug: string; name: string }
   assumptions: string[]
   climbs: DemandClimb[]
+  /** Elevation by distance, thinned for drawing. */
+  profile: { distanceM: number; eleM: number }[]
   coverage: { longestSustainedSec: number; uncovered: number; message?: string }
   /** Build and Peak sessions favour efforts of these lengths (seconds). */
   bias: { active: boolean; phase?: string; sustainedSec?: number; shortSec?: number }
@@ -1393,6 +1397,82 @@ export interface RouteDemandsAvailable {
 
 export type RouteDemands = RouteDemandsAvailable | RouteDemandsUnavailable
 
+export type PacingReasonCode = 'no_elevation' | 'not_cycling' | 'no_ftp'
+
+export interface PacingUnavailable {
+  available: false
+  reason: string
+  reasonCode: PacingReasonCode
+}
+
+/** One merged line of the pacing plan. Distances, never coordinates. */
+export interface PacingSegment {
+  startM: number
+  endM: number
+  kind: 'climb' | 'flat' | 'descent'
+  /** Which climb a climb segment is (matches PacingClimb.index). */
+  climbIndex?: number
+  gradient: number
+  wattsLow: number
+  wattsHigh: number
+  hrLow?: number
+  hrHigh?: number
+  speedKph: number
+  seconds: number
+}
+
+export interface PacingClimb {
+  index: number
+  startM: number
+  endM: number
+  lengthM: number
+  avgGradient: number
+  category?: string
+  watts: number
+  wattsLow: number
+  wattsHigh: number
+  hrLow?: number
+  hrHigh?: number
+  seconds: number
+}
+
+export interface PacingAvailable {
+  available: true
+  route: { slug: string; name: string }
+  goalId?: string
+  eventDate?: string
+  assumptions: {
+    massKg: number
+    massAssumed: boolean
+    cdA: number
+    crr: number
+    if: number
+    ifSource: 'derived' | 'goal'
+    wind: 'none'
+  }
+  /** "Assumed 75 kg; add your weight for a better time." when no weight is set. */
+  hint?: string
+  /** "Steady-state; HR lags the first minutes of a climb." when HR ranges are present. */
+  hrNote?: string
+  totals: {
+    seconds: number
+    normalizedW: number
+    avgW: number
+    if: number
+    avgKph: number
+    variabilityIndex: number
+  }
+  segments: PacingSegment[]
+  climbs: PacingClimb[]
+  profile: { distanceM: number; eleM: number }[]
+}
+
+export type PacingPlan = PacingAvailable | PacingUnavailable
+
+/** GET /api/training/goals/{id}/explain's response — see
+ *  internal/narration.ExplainPlan. A plain-language summary of the same
+ *  reconciled plan the periodization table already shows; 412 instead of
+ *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
 export interface PlanExplanation {
   text: string
 }

@@ -5,7 +5,7 @@
 // renders them and emits back — see forms.ts for the GoalForm shape.
 import type { GoalPriority, Sport } from '@/api/types'
 import type { GoalForm } from '@/components/plan/forms'
-import { sports } from '@/components/plan/forms'
+import { NO_ROUTE, sports } from '@/components/plan/forms'
 
 const open = defineModel<boolean>('open', { required: true })
 const note = defineModel<string>('note', { required: true })
@@ -17,6 +17,8 @@ const props = defineProps<{
   saving: boolean
   proposing: boolean
   explanation: string
+  /** Cycling routes the rider can see, for the route picker. */
+  routeOptions: { value: string; label: string }[]
 }>()
 
 const emit = defineEmits<{ 'update:form': [GoalForm]; propose: []; save: [] }>()
@@ -94,6 +96,19 @@ const priorities: { value: GoalPriority; label: string }[] = [
             />
           </UFormField>
         </div>
+        <UFormField
+          v-if="form.sport === 'cycling'"
+          label="Route"
+          help="Optional. Build and Peak sessions favour the lengths of this route's climbs, and you get a pacing plan for it."
+        >
+          <USelect
+            :model-value="form.routeSlug"
+            :items="[{ value: NO_ROUTE, label: 'None' }, ...routeOptions]"
+            value-key="value"
+            class="w-full"
+            @update:model-value="(v: string) => set('routeSlug', v)"
+          />
+        </UFormField>
         <UFormField label="Notes">
           <UTextarea :model-value="form.notes" class="w-full" @update:model-value="(v: string) => set('notes', String(v))" />
         </UFormField>
