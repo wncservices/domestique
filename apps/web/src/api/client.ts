@@ -7,6 +7,8 @@ import type {
   BuildFtpTestRequest,
   BasemapUpdate,
   Crew,
+  CrewRideListItem,
+  GoingResult,
   CreateCrewRequest,
   FtpTests,
   GarminConnection,
@@ -761,6 +763,16 @@ export const api = {
     }),
 
   workouts: () => request<Workout[]>('/api/training/workouts'),
+  /** Upcoming rides in the caller's crews, with who is going. */
+  trainingCrewRides: (from: string) =>
+    request<CrewRideListItem[]>(`/api/training/crew-rides?from=${encodeURIComponent(from)}`),
+  /** Says "I'm going" (or not). `dryRun` previews and writes nothing. */
+  setGoing: (rideId: string, body: { going: boolean; dryRun?: boolean; skip?: string[] }) =>
+    request<GoingResult>(`/api/training/crew-rides/${encodeURIComponent(rideId)}/going`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   workout: (id: string) => request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}`),
   createWorkout: (req: CreateWorkoutRequest) =>
     request<Workout>('/api/training/workouts', {
