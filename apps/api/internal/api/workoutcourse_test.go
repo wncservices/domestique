@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -192,19 +193,41 @@ func TestSendToDevicesPutsTheCourseOnEveryOwnAccountButNoOneElses(t *testing.T) 
 	}
 }
 
-func TestPushLogsCarryNoCoordinates(t *testing.T) {
+// A course that ran and failed is a push error: applyPush logs it once at
+// Error (and counts it). The callers add no second line saying the same thing.
+func TestAFailedCoursePushIsLoggedOnceAtErrorWithNoCoordinates(t *testing.T) {
 	h := newCourseHarness(t)
+	buf := &syncBuffer{}
+	h.srv.Log = slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}))
 	h.link(h.today)
 	h.ledger.failOn = "garmin:wilant"
+
 	h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts/"+h.today.ID+"/route/push", "")
+	logs := buf.String()
+	if n := strings.Count(logs, "level=ERROR"); n != 1 || !strings.Contains(logs, "push finished with failures") {
+		t.Errorf("want exactly one Error, from the push itself; logs:\n%s", logs)
+	}
+	if strings.Contains(logs, "level=WARN") {
+		t.Errorf("a failed course also logged a Warn saying the same thing:\n%s", logs)
+	}
+
+	buf2 := buf.String()
 	h.tick()
-	// The connect harness logs to the default logger, so this checks the
-	// handler's own response instead: no coordinate key in what it returns.
-	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/workouts/"+h.today.ID+"/route/push", "")
-	raw := string(readAll(t, resp))
-	for _, leak := range []string{"lat", "lon", "points", "51.234"} {
-		if strings.Contains(raw, leak) {
-			t.Errorf("response leaks %q: %s", leak, raw)
+	after := strings.TrimPrefix(buf.String(), buf2)
+	if strings.Contains(after, "level=WARN") && strings.Contains(after, "course") {
+		t.Errorf("the auto-push pass double-logged a failed course:\n%s", after)
+	}
+	for _, leak := range []string{"lat=", "lon=", "51.234"} {
+		if strings.Contains(buf.String(), leak) {
+			t.Errorf("logs contain %q:\n%s", leak, buf.String())
 		}
 	}
 }

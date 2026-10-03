@@ -102,11 +102,13 @@ func (s *Server) handlePushWorkoutCourse(w http.ResponseWriter, r *http.Request)
 	}
 	outcome, err := s.pushWorkoutCourse(r.Context(), wk, false)
 	if err != nil || outcome == courseFailed {
-		// The rider asked for this one, so it answers 502; the log is a Warn
-		// either way because nothing else about the ride is affected. The
-		// error text is not repeated: an engine or provider message can echo
-		// a coordinate.
-		s.logger().Warn("course not sent to the rider's devices", "workout", wk.ID, "by", wk.Rider)
+		// The rider asked for this one, so it answers 502. A push that ran and
+		// failed was logged at Error (and counted) by applyPush; only one that
+		// could not be attempted needs its own line. The error text is not
+		// repeated: a provider message can echo a coordinate.
+		if err != nil {
+			s.logger().Warn("course could not be attempted for the rider's devices", "workout", wk.ID, "by", wk.Rider)
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the route could not be sent to your devices", "course": courseFailed})
 		return
 	}
