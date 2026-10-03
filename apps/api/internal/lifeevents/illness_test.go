@@ -313,6 +313,47 @@ func TestNoRideReason(t *testing.T) {
 	}
 }
 
+func TestASessionOnlyAnEarlierRampTouchedIsStillThePlansToRemove(t *testing.T) {
+	// An illness over Thursday eased Saturday's session (ramp day 2). Making the
+	// illness longer so it covers Saturday must still remove that session, not
+	// treat it as one the rider touched.
+	ramped := easy("sat", "2026-10-10", 60)
+	ramped.Description += " " + scheduler.AdjustedMarker + " Life event: eased after illness (return to training)."
+	prev := []Event{ill("2026-10-08", "2026-10-08", OptionProper)}
+	now := []Event{ill("2026-10-08", "2026-10-10", OptionProper)}
+	d := preview(now, prev, ramped)
+	c := mustFind(t, d, "remove:sat")
+	if !c.Default {
+		t.Error("removing a ramp-touched session should be ticked")
+	}
+	if len(d.LeftAlone) != 0 {
+		t.Errorf("left alone: %+v", d.LeftAlone)
+	}
+}
+
+func TestSwitchingMildToProperRemovesTheSessionsMildLeftBehind(t *testing.T) {
+	mild := ill("2026-10-08", "2026-10-10", OptionMild)
+	proper := mild
+	proper.Option = OptionProper
+
+	// What applying the mild preview left on Thursday: a 45 minute session
+	// carrying the life event's note.
+	first := preview([]Event{mild}, nil, easy("thu", "2026-10-08", 120), easy("fri", "2026-10-09", 30))
+	cut := mustFind(t, first, "shorten:thu")
+	left := easy("thu", "2026-10-08", 120)
+	left.Name, left.Steps, left.Description = *cut.Update.Name, *cut.Update.Steps, *cut.Update.Description
+
+	d := preview([]Event{proper}, []Event{mild}, left, easy("fri", "2026-10-09", 30))
+	for _, id := range []string{"remove:thu", "remove:fri"} {
+		if c := mustFind(t, d, id); !c.Default {
+			t.Errorf("%s should be ticked: nothing the rider touched is being removed", id)
+		}
+	}
+	if len(d.LeftAlone) != 0 {
+		t.Errorf("left alone: %+v", d.LeftAlone)
+	}
+}
+
 func TestLongIllnessAddsTheClinicianLine(t *testing.T) {
 	short := preview([]Event{ill("2026-10-08", "2026-10-20", OptionProper)}, nil)
 	if len(short.Advice) != 0 {

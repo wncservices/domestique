@@ -198,14 +198,16 @@ func (p *planner) ramp(events []Event) {
 		if e.Kind == KindTravel {
 			what = "travel"
 		}
-		reason := fmt.Sprintf("Life event: eased after %s (return to training).", what)
+		reason := fmt.Sprintf("%s eased after %s (return to training).", rampNotePrefix, what)
 		for n := 1; n <= until; n++ {
 			date := rampDay(e, n)
 			if date < p.today || p.after[date] {
 				continue
 			}
 			for _, w := range p.byDate[date] {
-				if p.changed[w.ID] || w.TestProtocol != "" || p.eligibility(w) != eligible {
+				// Only a session nobody has touched: not one a ramp (or anything
+				// else) already changed, so it is changed once.
+				if p.changed[w.ID] || w.TestProtocol != "" || p.in.Ridden[w.ID] || !scheduler.IsGenerated(w) {
 					continue
 				}
 				// A session the rider unticked in an earlier preview stays as it is.
