@@ -145,8 +145,8 @@ as an estimate wherever shown.
 | That day has | Choices |
 |---|---|
 | nothing, or only indoor, running or ridden sessions | `new`: a rider-built endurance ride sized to the route time |
-| an unridden outdoor cycling session, planned time within 20 % of the route time | `link` (default) |
-| the same, differing by more than 20 % | `link` (ride is as planned, the route just rides longer or shorter) or `adjust` |
+| an unridden outdoor cycling session whose route time is within 20 % of its planned time (the planned time is the base: `abs(route - planned) <= 0.2 x planned`) | `link` (default) |
+| the same, differing by more than 20 % of the planned time | `link` (ride is as planned, the route just rides longer or shorter) or `adjust` |
 | more than one such session | the list, `workoutId` required |
 
 - **`link`**: sets `route_slug` and `route_seconds`. Name, steps and description are untouched.
@@ -155,11 +155,11 @@ as an estimate wherever shown.
   own session from now on (replan and refresh leave it), and the goal id is kept so scheduling counts the day as
   taken, the FTP-test precedent. When the replaced session was a key session
   (`scheduler.IsKeySession`) the modal says "This replaces your threshold session; the plan will not add another
-  this week." Done in place (same id), so an existing Garmin copy is updated by the normal repush rather than
-  duplicated.
+  this week." Done in place (same id), so an existing Garmin copy is updated in place by the normal push (the content hash changes) rather than
+  duplicated; adjust itself pushes nothing.
 - **`new`**: `CreateWorkout`, cycling, endurance, goal id = the focus goal when there is one, description as above.
   Never a second session on a day with an unridden outdoor ride: that is `link` or `adjust`.
-- 409 for a past day or a day whose only matching ride is already ridden; 422 for a non-cycling route.
+- 409 for a past day, for a `link` or `adjust` that names a ride that is already ridden (or otherwise cannot take a route), and for a choice the day does not offer; 422 for a non-cycling route. A ridden ride on the day does **not** block `new`: ridden sessions are ignored when working out the choices, as the table says.
 
 ### What a linked route does to the plan's guarantees
 
@@ -243,7 +243,7 @@ Idempotent add-column in `UseDB`, one new table:
   comes from the session; someone else's workout or route is a 404.
 - `workoutDTO` gains `route {slug, name, distanceM, ascentM, estimatedSeconds, generated}`; no coordinates.
 - Day card and slideover: "Route for this ride" opens `RouteForRideSlideover` (start picker if unset, three
-  candidate cards with a map, distance, ascent, estimated vs planned time, family note and "Use this route").
+  candidate cards with the route builder's inline SVG preview (not a mounted map per card), distance, ascent, estimated vs planned time, family note and "Use this route").
   With a route: name, distance, estimated time, a mismatch note, "Change", "Remove", and on today "Send to devices".
   Settings gets a "Where do your rides start?" card. `RouteDetailModal` and `RouteCard` get "Schedule ride" and
   `ScheduleRideModal` (date, what is on it, choices with the consequences in words).
