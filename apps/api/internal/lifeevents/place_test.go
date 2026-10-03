@@ -469,6 +469,56 @@ func TestPreviewIsDeterministicAndOrdered(t *testing.T) {
 	}
 }
 
+func TestGymNeverTurnsAnFTPTestIntoAnEnduranceRide(t *testing.T) {
+	gym := travel("2026-10-08", "2026-10-09")
+	gym.Option = OptionGym
+	test := workout.Workout{
+		ID: "test", Rider: "r", Sport: model.SportCycling, Name: "FTP test: ramp", GoalID: "g", Date: "2026-10-08",
+		Description: "FTP ramp test.", TestProtocol: "ramp", Steps: steps(40),
+	}
+	d := preview([]Event{gym}, nil, built("wed", "2026-10-07", 30), test)
+	if _, ok := find(d, "indoor:test"); ok {
+		t.Fatal("an FTP test was converted to an indoor endurance ride")
+	}
+	if c := mustFind(t, d, "move:test"); c.ToDate != "2026-10-10" {
+		t.Errorf("the test moved to %s, want the next free day, 2026-10-10", c.ToDate)
+	}
+
+	// With nowhere to go it is removed, never converted.
+	gym.End = "2026-10-11"
+	d = preview([]Event{gym}, nil, built("wed", "2026-10-07", 30), test)
+	mustFind(t, d, "remove:test")
+	if _, ok := find(d, "indoor:test"); ok {
+		t.Fatal("a test with nowhere to go was converted")
+	}
+}
+
+func TestChangingTheOptionOrKindTreatsTheWholeRangeAsFresh(t *testing.T) {
+	// The trip was no_bike and a session is still on one of its days (the plan
+	// was refilled, say). Switching to the hotel gym is a new rule for the whole
+	// range, not only for days that were not covered before.
+	before := travel("2026-10-08", "2026-10-09")
+	after := before
+	after.Option = OptionGym
+	// The long ride is the key session and moves home; the easy ride stays
+	// indoors.
+	d := preview([]Event{after}, []Event{before},
+		gen("long", "2026-10-08", workout.ZoneEndurance, "Long ride", 180), easy("fri", "2026-10-09", 90))
+	mustFind(t, d, "indoor:fri")
+
+	// An edit that changes nothing about the rules touches nothing.
+	same := preview([]Event{before}, []Event{before}, easy("thu", "2026-10-08", 90))
+	if len(same.Changes) != 0 {
+		t.Fatalf("an unchanged event changed the plan: %v", ids(same))
+	}
+
+	// Busy becomes illness: sessions left on the days go.
+	busy := Event{ID: "x", Kind: KindBusy, Start: "2026-10-08", End: "2026-10-09"}
+	ill := Event{ID: "x", Kind: KindIllness, Start: "2026-10-08", End: "2026-10-09", Option: OptionProper}
+	d = preview([]Event{ill}, []Event{busy}, easy("thu", "2026-10-08", 90))
+	mustFind(t, d, "remove:thu")
+}
+
 func TestPreviewReadsTodayInTheClocksOwnZone(t *testing.T) {
 	// 01:00 on Wednesday 7 October in Brussels is 23:00 on Tuesday the 6th in
 	// UTC. Today follows the clock's own zone, never the machine's: Tuesday's

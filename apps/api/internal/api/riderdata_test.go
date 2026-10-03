@@ -311,6 +311,9 @@ func riderSeeds() []seed {
 		{"threshold_suggestions", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO threshold_suggestions (id, rider, field, created_at, updated_at) VALUES (?, ?, 'ftp', ?, ?)`, "sugg-"+id, rider, ts, ts)
 		}, "rider", byRider},
+		{"life_events", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO life_events (id, rider, kind, start_date, end_date, created_at, updated_at) VALUES (?, ?, 'illness', '2026-01-02', '2026-01-04', ?, ?)`, "event-"+id, rider, ts, ts)
+		}, "rider", byRider},
 		{"adjustments", func(e *riderDataEnv, rider, id string) error {
 			rec := why.NewRecord(why.MissedMoved, "moved", why.MissedMovedInputs{})
 			return e.srv.Training.RecordAdjustment(context.Background(), rider, workout.SubjectWorkout, "workout-"+id, rec, "2026-01-02")

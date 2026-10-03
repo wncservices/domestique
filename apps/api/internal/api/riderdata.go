@@ -124,6 +124,8 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"threshold_suggestions": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
+	"life_events": {Purged: true, Note: "Training.DeleteRider: where a rider was ill or away is health data",
+		Rename: renameRule{Columns: []string{"rider"}}},
 	"adjustments": {Purged: true, Note: "Training.DeleteRiderAdjustments",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true,
 			With: []string{"subject_kind", "subject_id", "day", "rule"}}},

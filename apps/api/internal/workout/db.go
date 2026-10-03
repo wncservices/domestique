@@ -319,6 +319,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM workouts WHERE rider = ?`,
 		`DELETE FROM goals WHERE rider = ?`,
 		`DELETE FROM session_links WHERE rider = ?`,
+		`DELETE FROM life_events WHERE rider = ?`,
 		`DELETE FROM session_analyses WHERE rider = ?`,
 		`DELETE FROM completed_sessions WHERE rider = ?`,
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
