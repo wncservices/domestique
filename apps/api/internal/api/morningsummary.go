@@ -293,6 +293,24 @@ func (s *Server) sendMorningSummaries(ctx context.Context, sched syncschedule.Sc
 		if ctx.Err() != nil {
 			break
 		}
+		// Backstop for the block hook in people.go, which cannot always find a
+		// rider (a login long expired, a name that cannot be derived): an address
+		// on the local blocklist is never written to, and the opt-in is switched
+		// off so that unblocking does not silently resume the mail.
+		if s.Blocklist != nil {
+			blocked, err := s.Blocklist.IsBlocked(ctx, p.Email)
+			if err != nil {
+				s.logger().Warn("morning summary: could not check the blocklist, skipping this rider", "rider", p.Rider, "err", err)
+				continue
+			}
+			if blocked {
+				if err := s.MorningSummaries.Disable(ctx, p.Rider, s.now()); err != nil {
+					s.logger().Warn("morning summary: could not switch off a blocked rider", "rider", p.Rider, "err", err)
+				}
+				s.logger().Info("morning summary: rider is blocked, switched off", "rider", p.Rider)
+				continue
+			}
+		}
 		claimed, err := s.MorningSummaries.Claim(ctx, p.Rider, today)
 		if err != nil {
 			s.logger().Warn("morning summary: could not claim the day", "rider", p.Rider, "err", err)

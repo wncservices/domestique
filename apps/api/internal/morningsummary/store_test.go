@@ -199,6 +199,23 @@ func TestStoreEachEngine(t *testing.T) {
 		})
 	})
 
+	t.Run("riders by email", func(t *testing.T) {
+		eachEngine(t, func(t *testing.T, e env) {
+			_ = e.store.Enable(ctx, "a", "Shared@Example.com", when)
+			_ = e.store.Enable(ctx, "b", "shared@example.com", when)
+			_ = e.store.Enable(ctx, "c", "other@example.com", when)
+			_ = e.store.Enable(ctx, "d", "shared@example.com", when)
+			_ = e.store.Disable(ctx, "d", when)
+			got, err := e.store.RidersByEmail(ctx, " SHARED@example.com ")
+			if err != nil || len(got) != 2 || got[0] != "a" || got[1] != "b" {
+				t.Fatalf("RidersByEmail = %v %v, want [a b]", got, err)
+			}
+			if got, _ := e.store.RidersByEmail(ctx, ""); len(got) != 0 {
+				t.Errorf("an empty address matched %v", got)
+			}
+		})
+	})
+
 	t.Run("delete rider", func(t *testing.T) {
 		eachEngine(t, func(t *testing.T, e env) {
 			_ = e.store.Enable(ctx, "gone", "g@example.com", when)

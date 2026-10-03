@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -416,6 +417,52 @@ func (s *Store) DeleteSub(ctx context.Context, sub string) error {
 		return fmt.Errorf("sessions: ending an identity's sessions: %w", err)
 	}
 	return nil
+}
+
+// RidersOfSub is the rider names a live session of one OIDC identity carries.
+// An admin acts on a person by their issuer id, while everything a rider owns
+// here is keyed by the rider name, which only the sealed session records; this
+// is the bridge, and it has to be read before DeleteSub ends the sessions.
+// Distinct and sorted; an unknown or empty sub gives none.
+func (s *Store) RidersOfSub(ctx context.Context, sub string) ([]string, error) {
+	if !s.CanStore() {
+		return nil, nil
+	}
+	key := s.subKey(sub)
+	if key == "" {
+		return nil, nil
+	}
+	// #nosec G701 -- constant statement, bound parameter.
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`SELECT identity FROM sessions WHERE sub_key = ?`), key)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: finding an identity's riders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	seen := map[string]bool{}
+	var out []string
+	for rows.Next() {
+		var sealed []byte
+		if err := rows.Scan(&sealed); err != nil {
+			return nil, fmt.Errorf("sessions: finding an identity's riders: %w", err)
+		}
+		raw, err := s.box.Open(sealed)
+		if err != nil {
+			continue
+		}
+		var stored storedIdentity
+		if json.Unmarshal([]byte(raw), &stored) != nil {
+			continue
+		}
+		if u := normaliseRider(stored.User); u != "" && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessions: finding an identity's riders: %w", err)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // RiderKey is the value DeleteRider matches on, exposed so a test can look for

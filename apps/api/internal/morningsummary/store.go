@@ -154,6 +154,31 @@ func (s *Store) ListEnabled(ctx context.Context) ([]Preference, error) {
 	return out, rows.Err()
 }
 
+// RidersByEmail is the riders opted in to this address, compared without
+// case. It lets an admin action keyed by an email (blocking) find a rider whose
+// name the admin did not give.
+func (s *Store) RidersByEmail(ctx context.Context, email string) ([]string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(
+		`SELECT rider FROM morning_summaries WHERE enabled = ? AND LOWER(email) = ? ORDER BY rider`), true, email)
+	if err != nil {
+		return nil, fmt.Errorf("morningsummary: riders by email: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err != nil {
+			return nil, fmt.Errorf("morningsummary: riders by email: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // DeleteRider removes a rider's row and with it their address, for rider
 // deletion: no mail goes to someone who has left.
 func (s *Store) DeleteRider(ctx context.Context, rider string) error {

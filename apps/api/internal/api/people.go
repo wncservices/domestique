@@ -321,6 +321,12 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Found before the change, while the person still resolves: see ridersOfPerson.
+	var riders []string
+	if !s.keepsTraining(roleNames) {
+		riders = s.ridersOfPerson(r.Context(), id, "")
+	}
+
 	if err := s.People.SetRoles(r.Context(), id, roleNames); err != nil {
 		s.logger().Warn("changing a person's role failed", "id", id, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
@@ -331,6 +337,9 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 	// a live session keeps the old role (a demoted admin stays one) until it
 	// expires. Ending it makes the next sign-in pick the new roles up.
 	s.endSessionsOf(r.Context(), id, "role changed")
+	// A calendar link and a morning email work with no session, so a role
+	// that can no longer train has to take them away explicitly.
+	s.revokeBackgroundAccess(r.Context(), riders, "role changed")
 
 	s.logger().Info("person role changed", "id", id, "role", body.Role, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
@@ -373,10 +382,25 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Found before the change, while the person's sessions still exist.
+	var riders []string
+	if body.Blocked {
+		riders = s.ridersOfPerson(r.Context(), id, body.Email)
+	}
+
 	if err := s.People.SetBlocked(r.Context(), id, body.Blocked); err != nil {
 		s.logger().Warn("changing a person's blocked status failed", "id", id, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
+	}
+
+	if body.Blocked {
+		// Auth0 refuses the next sign-in; a session they already hold, a
+		// calendar link and the morning email would each carry on, so all three
+		// are ended here. Unblocking restores nothing of this: the rider signs in,
+		// makes a new link and opts in again.
+		s.endSessionsOf(r.Context(), id, "person blocked")
+		s.revokeBackgroundAccess(r.Context(), riders, "person blocked")
 	}
 
 	// Blocklist is wired unconditionally in a real deployment (see

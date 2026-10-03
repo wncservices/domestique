@@ -43,3 +43,25 @@ func TestASessionWithoutTheFlagIsUnverified(t *testing.T) {
 		t.Error("an address nobody vouched for read as verified")
 	}
 }
+
+func TestRidersOfSub(t *testing.T) {
+	s := newStore(t, newBox(t))
+	for _, id := range []auth.Identity{
+		{User: "wilant", Sub: "auth0|w"},
+		{User: "wilant", Sub: "auth0|w"}, // a second login, same rider
+		{User: "other", Sub: "auth0|o"},
+	} {
+		if _, _, err := s.Create(id, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.RidersOfSub(t.Context(), "auth0|w")
+	if err != nil || len(got) != 1 || got[0] != "wilant" {
+		t.Fatalf("RidersOfSub = %v %v, want [wilant] once", got, err)
+	}
+	for _, none := range []string{"", "auth0|nobody"} {
+		if got, err := s.RidersOfSub(t.Context(), none); err != nil || len(got) != 0 {
+			t.Errorf("RidersOfSub(%q) = %v %v, want none", none, got, err)
+		}
+	}
+}
