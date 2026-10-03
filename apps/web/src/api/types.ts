@@ -1568,6 +1568,8 @@ export interface TrainNowResponse {
   minutes: number
   verdict: 'ready' | 'caution' | 'rest'
   suggestions: TrainNowSuggestion[]
+  /** Why there is nothing to suggest: a life event rules riding out today. */
+  notice?: string
 }
 
 export type ProjectionVerdictKey =

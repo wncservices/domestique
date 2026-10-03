@@ -187,6 +187,8 @@ function tssLabel(s: TrainNowSuggestion): string {
 
         <UAlert v-else-if="error" color="error" variant="subtle" icon="i-lucide-triangle-alert" :title="error" />
 
+        <UAlert v-else-if="result?.notice" color="info" variant="subtle" icon="i-lucide-calendar-off" :title="result.notice" />
+
         <template v-else-if="result">
           <p class="text-xs text-muted">{{ applyNote }}</p>
           <UCard v-for="s in result.suggestions" :key="s.kind" variant="outline">
