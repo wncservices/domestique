@@ -185,6 +185,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("removing pending Garmin challenges: %w", err)
 		}
 	}
+	if s.CalendarFeeds != nil {
+		if err := s.CalendarFeeds.DeleteRider(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing calendar link: %w", err)
+		}
+	}
 	if s.Shares != nil {
 		n, err := s.Shares.DeleteRider(ctx, rider)
 		if err != nil {

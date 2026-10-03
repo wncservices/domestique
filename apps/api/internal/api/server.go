@@ -28,6 +28,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
+	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
@@ -271,6 +272,11 @@ type Server struct {
 	// place — but the store itself has no opinion about auth mode; the
 	// frontend decides whether to offer the feature from meDTO.AuthMode.
 	Shares *routeshare.Store
+
+	// CalendarFeeds holds each rider's hashed calendar-feed token — see
+	// internal/calendarfeed. Nil in a deployment without a database store,
+	// and the feed endpoints answer 404 / 501 then.
+	CalendarFeeds *calendarfeed.Store
 
 	// Blocklist stops a blocked rider's email from creating a new local
 	// identity — see internal/blocklist. Auth0's own SetBlocked only refuses

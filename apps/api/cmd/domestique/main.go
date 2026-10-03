@@ -35,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
+	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
@@ -811,6 +812,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Shares: the hashed token of a rider's
+	// private calendar link needs only the database every deployment has.
+	calendarFeedStore, err := calendarfeed.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	// Wired unconditionally, the same as Crew and Schedule — a goal, rider
 	// profile or workout needs no external credential, only the database
 	// every deployment already has. See docs/training-plan.md.
@@ -828,9 +836,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Schedule:  scheduleStore,
 		Blocklist: blocklistStore,
 		Shares:    sharesStore,
-		Training:  trainingStore,
-		Auth:      authenticator,
-		Log:       log,
+		// The hashed calendar-feed tokens; see internal/calendarfeed.
+		CalendarFeeds: calendarFeedStore,
+		Training:      trainingStore,
+		Auth:          authenticator,
+		Log:           log,
 		// Pure in-memory, no external credential to be missing — wired
 		// unconditionally, the same as Crew. 5 attempts per rider per 15
 		// minutes is enough for someone who mistypes a password twice; see
