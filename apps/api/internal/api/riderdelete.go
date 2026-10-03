@@ -190,6 +190,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("removing calendar link: %w", err)
 		}
 	}
+	if s.MorningSummaries != nil {
+		if err := s.MorningSummaries.DeleteRider(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing morning summary opt-in: %w", err)
+		}
+	}
 	if s.Shares != nil {
 		n, err := s.Shares.DeleteRider(ctx, rider)
 		if err != nil {
