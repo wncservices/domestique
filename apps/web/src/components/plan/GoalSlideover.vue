@@ -151,6 +151,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
             <div v-if="customIf" class="flex items-center gap-3">
               <USlider
                 class="flex-1"
+                aria-label="Pacing intensity (share of FTP)"
                 :min="MIN_IF"
                 :max="MAX_IF"
                 :step="0.01"
