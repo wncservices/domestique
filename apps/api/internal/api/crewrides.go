@@ -35,6 +35,10 @@ import (
 //   - applying a join or a leave recomputes everything on the server, under the
 //     scheduling advisory lock Replan uses; a preview is only ever a picture.
 
+// crewRideOutdoorMessage is why a crew ride has no trainer version and no
+// alternates: the day and the road are the crew's.
+const crewRideOutdoorMessage = "A crew ride is ridden outdoors with the group, so it has no indoor version or alternates."
+
 // crewRideNamePrefix starts the name of every fixed session.
 const crewRideNamePrefix = "Crew ride: "
 
