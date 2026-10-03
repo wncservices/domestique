@@ -26,7 +26,11 @@ func TestSMTPConfigFullBlock(t *testing.T) {
 func TestSMTPConfigDefaults(t *testing.T) {
 	cases := map[string]int{"starttls": 587, "tls": 465, "none": 25, "": 587}
 	for security, port := range cases {
-		body := smtpBase + "    host: smtp.example.com\n    from: d@example.com\n"
+		host := "smtp.example.com"
+		if security == "none" {
+			host = "localhost" // an unencrypted hop is only allowed to this machine
+		}
+		body := smtpBase + "    host: " + host + "\n    from: d@example.com\n"
 		if security != "" {
 			body += "    security: " + security + "\n"
 		}
@@ -59,6 +63,9 @@ func TestSMTPConfigRejectsAPartialOrBadBlock(t *testing.T) {
 		"host without from":       smtpBase + "    host: smtp.example.com\n",
 		"from not an address":     smtpBase + "    host: smtp.example.com\n    from: not-an-address\n",
 		"unknown security":        smtpBase + "    host: smtp.example.com\n    from: d@example.com\n    security: ssl\n",
+		"none to a remote host":   smtpBase + "    host: smtp.example.com\n    from: d@example.com\n    security: none\n",
+		"none to a lookalike":     smtpBase + "    host: localhost.example.com\n    from: d@example.com\n    security: none\n",
+		"none to a private IP":    smtpBase + "    host: 10.0.0.5\n    from: d@example.com\n    security: none\n",
 		"bad port":                smtpBase + "    host: smtp.example.com\n    from: d@example.com\n    port: 70000\n",
 		"fields without a host":   smtpBase + "    from: d@example.com\n    username: u\n",
 		"smtp without public_url": "notifications:\n  smtp:\n    host: smtp.example.com\n    from: d@example.com\n",
@@ -83,5 +90,16 @@ func TestSMTPConfigHasNoPasswordField(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(strings.Join([]string{cfg.Notifications.SMTP.Username, cfg.Notifications.SMTP.From, cfg.Notifications.SMTP.Host}, " ")), "hunter2") {
 		t.Error("a password in the file was picked up")
+	}
+}
+
+// An unencrypted hop is fine to a relay on this machine, whichever way
+// loopback is spelled.
+func TestSMTPConfigAcceptsSecurityNoneOnLoopback(t *testing.T) {
+	for _, host := range []string{"localhost", "127.0.0.1", "127.0.0.2", `"::1"`} {
+		body := smtpBase + "    host: " + host + "\n    from: d@example.com\n    security: none\n"
+		if _, err := Load(writeConfig(t, body)); err != nil {
+			t.Errorf("%s: %v", host, err)
+		}
 	}
 }

@@ -510,3 +510,40 @@ func TestSendSpanIsAChildOfTheCallers(t *testing.T) {
 		}
 	}
 }
+
+// An unknown or empty security value must never fall through to plaintext, and
+// "none" is only for a relay on this machine. Nothing is dialled in any case.
+func TestSecurityFailsClosed(t *testing.T) {
+	cases := map[string]struct{ security, host string }{
+		"empty":                 {"", "127.0.0.1"},
+		"wrong case":            {"STARTTLS", "smtp.example.com"},
+		"typo":                  {"ssl", "smtp.example.com"},
+		"whitespace":            {" tls", "smtp.example.com"},
+		"none to a remote host": {"none", "smtp.example.com"},
+		"none to a lookalike":   {"none", "localhost.example.com"},
+		"none to a private IP":  {"none", "10.0.0.5"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := New(Config{Host: c.host, Port: 1, Security: c.security, From: "d@example.com"}, "")
+			err := m.Send(t.Context(), "r@example.com", "s", "b")
+			var se *SendError
+			if !errors.As(err, &se) || se.Stage != "security" {
+				t.Fatalf("Send = %v, want a security-stage SendError before any connection", err)
+			}
+		})
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	for _, h := range []string{"localhost", "LOCALHOST", "localhost.", "127.0.0.1", "127.9.9.9", "::1", "[::1]"} {
+		if !IsLoopbackHost(h) {
+			t.Errorf("%q should be loopback", h)
+		}
+	}
+	for _, h := range []string{"", "smtp.example.com", "localhost.example.com", "10.0.0.5", "0.0.0.0", "192.168.1.1"} {
+		if IsLoopbackHost(h) {
+			t.Errorf("%q must not be loopback", h)
+		}
+	}
+}

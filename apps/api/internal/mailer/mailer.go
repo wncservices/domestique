@@ -123,6 +123,19 @@ func (m *Mailer) Send(ctx context.Context, to, subject, body string) (err error)
 	if perr != nil {
 		return &SendError{Stage: "sender"}
 	}
+	// Fail closed. Anything that is not exactly one of the three known
+	// values used to fall through to a plaintext conversation, so a typo'd
+	// "STARTTLS" or "ssl" would have sent mail in the clear. And "none" is for
+	// a relay on this host only: an unencrypted hop to anywhere else is refused.
+	switch m.cfg.Security {
+	case "starttls", "tls":
+	case "none":
+		if !IsLoopbackHost(m.cfg.Host) {
+			return &SendError{Stage: "security"}
+		}
+	default:
+		return &SendError{Stage: "security"}
+	}
 
 	ctx, span := otel.Tracer("github.com/wncservices/domestique/internal/mailer").Start(ctx, "smtp send",
 		trace.WithSpanKind(trace.SpanKindClient),
@@ -297,4 +310,16 @@ func domainOf(addr string) string {
 		return addr[i+1:]
 	}
 	return "localhost"
+}
+
+// IsLoopbackHost is whether host is this machine: "localhost" or a loopback
+// address. It does no DNS lookup, so a name that merely resolves to loopback
+// does not count.
+func IsLoopbackHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }

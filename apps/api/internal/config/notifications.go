@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/mail"
 	"strings"
 )
@@ -78,6 +79,9 @@ func (s SMTPConfig) validate(publicURL string) error {
 	default:
 		return fmt.Errorf("notifications.smtp.security %q is not one of starttls, tls, none", s.Security)
 	}
+	if s.Security == SMTPNone && !isLoopbackHost(s.Host) {
+		return fmt.Errorf("notifications.smtp.security is none but host %q is not loopback: an unencrypted hop is only for a relay on this machine; use starttls or tls", s.Host)
+	}
 	if s.Port < 1 || s.Port > 65535 {
 		return fmt.Errorf("notifications.smtp.port %d is not a valid port", s.Port)
 	}
@@ -85,4 +89,15 @@ func (s SMTPConfig) validate(publicURL string) error {
 		return fmt.Errorf("notifications.smtp is set but public_url is not: the email's links need the address riders reach this deployment at")
 	}
 	return nil
+}
+
+// isLoopbackHost is whether host is this machine: "localhost" or a loopback
+// address, judged by its spelling (no DNS lookup).
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
