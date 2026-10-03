@@ -343,6 +343,12 @@ type Server struct {
 	// resembling abuse.
 	RouteBuilderLimiter *ratelimit.Limiter
 
+	// WorkoutRouteLimiter throttles generating routes for a planned ride, by
+	// rider. Each generate is ten calls against the same shared routing quota
+	// the builder draws on, so it gets its own, much tighter budget: a rider
+	// planning a week asks six times, not sixty.
+	WorkoutRouteLimiter *ratelimit.Limiter
+
 	// GeocodeLimiter throttles the location-search endpoint by rider.
 	// Unlike RouteBuilderLimiter, this is protecting a shared *public*
 	// resource with its own strict usage policy (Nominatim asks for
@@ -3429,6 +3435,17 @@ func (s *Server) rateLimitAuthAction(w http.ResponseWriter, rider string) bool {
 // a separate, more generous budget than rateLimitConnect/rateLimitAuthAction.
 func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.RouteBuilderLimiter, rider, "too many route-builder requests — wait a few minutes and try again")
+}
+
+// rateLimitWorkoutRoute enforces WorkoutRouteLimiter, and logs a Warn when it
+// fires: the routing quota is the scarce thing here, and an operator should be
+// able to see who is spending it without reading a rider's coordinates.
+func (s *Server) rateLimitWorkoutRoute(w http.ResponseWriter, rider string) bool {
+	if rateLimit(w, s.WorkoutRouteLimiter, rider, "you have asked for a lot of routes — wait a few minutes and try again") {
+		return true
+	}
+	s.logger().Warn("workout route generation rate limited", "by", rider)
+	return false
 }
 
 // rateLimitGeocode enforces GeocodeLimiter for a rider's own location

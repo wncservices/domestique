@@ -861,6 +861,9 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// per waypoint placed, dragged or removed) while still bounding a
 		// script that would otherwise hammer the routing engine unchecked.
 		RouteBuilderLimiter: ratelimit.New(60, 5*time.Minute),
+		// Generating a route for a planned ride is ten engine calls a press, from
+		// the same shared quota: 6 per 10 minutes is a week's planning, not a loop.
+		WorkoutRouteLimiter: ratelimit.New(6, 10*time.Minute),
 		// Tighter than RouteBuilderLimiter — see GeocodeLimiter's own doc
 		// comment: this protects Nominatim's own shared public-usage
 		// policy (roughly one request a second across every user of this
@@ -1214,6 +1217,10 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// fixed morning and evening times (config: training.sync_times), whether
 	// or not auto-schedule is on — it only reads, it never changes a workout.
 	go srv.RunMetricsSyncLoop(ctx)
+
+	// Drops generated route loops nobody came back for, so a rider's location
+	// data does not sit in memory past its 30 minutes.
+	go srv.RunCandidateJanitor(ctx)
 
 	log.Info("listening", "addr", addr, "library", src.Describe(),
 		"auth", authenticator.Mode())

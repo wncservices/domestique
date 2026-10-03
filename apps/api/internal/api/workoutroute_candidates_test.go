@@ -39,7 +39,7 @@ type candidateOut struct {
 	Elevation        []any        `json:"elevationProfile"`
 	EstimatedSeconds float64      `json:"estimatedSeconds"`
 	Family           string       `json:"family"`
-	Fit              float64      `json:"fit"`
+	Score            float64      `json:"score"`
 	TerrainFit       float64      `json:"terrainFit"`
 	Note             string       `json:"note"`
 }
@@ -169,8 +169,8 @@ func TestCandidatesReturnAtMostThreeWithinFifteenPercentBestFirst(t *testing.T) 
 		if len(c.ID) < 16 || len(c.Points) < 4 || len(c.Elevation) == 0 || c.DistanceM <= 0 {
 			t.Errorf("candidate %d is missing parts: %+v", i, c)
 		}
-		if i > 0 && c.Fit > out.Candidates[i-1].Fit+1e-9 {
-			t.Errorf("candidate %d fits better (%v) than the one before it (%v): not best first", i, c.Fit, out.Candidates[i-1].Fit)
+		if i > 0 && c.Score > out.Candidates[i-1].Score+1e-9 {
+			t.Errorf("candidate %d scores better (%v) than the one before it (%v): not best first", i, c.Score, out.Candidates[i-1].Score)
 		}
 	}
 }
@@ -436,9 +436,9 @@ func TestCandidatesTheStartComesFromTheStoreNeverTheBody(t *testing.T) {
 	}
 }
 
-func TestCandidatesAreRateLimitedLikeTheRouteBuilder(t *testing.T) {
+func TestCandidatesHaveTheirOwnTighterLimiter(t *testing.T) {
 	h, wk := readyHarness(t, func(_ *wrHarness, srv *api.Server) {
-		srv.RouteBuilderLimiter = ratelimit.New(1, time.Hour)
+		srv.WorkoutRouteLimiter = ratelimit.New(1, time.Hour)
 	})
 	h.decodeCandidates(h.candidatesFor("wilant", wk.ID, "", ""))
 	before := len(h.engine.Calls())
@@ -447,6 +447,44 @@ func TestCandidatesAreRateLimitedLikeTheRouteBuilder(t *testing.T) {
 	}
 	if after := len(h.engine.Calls()); after != before {
 		t.Errorf("a limited request still made %d engine calls", after-before)
+	}
+	if logs := h.logs.String(); !strings.Contains(logs, "level=WARN") || !strings.Contains(logs, "rate limited") {
+		t.Errorf("no Warn when the limiter fired:\n%s", logs)
+	}
+}
+
+// The builder's generous budget is not the ride route's: exhausting one must
+// not spend or block the other.
+func TestTheRouteBuilderLimiterDoesNotGovernCandidates(t *testing.T) {
+	h, wk := readyHarness(t, func(_ *wrHarness, srv *api.Server) {
+		srv.RouteBuilderLimiter = ratelimit.New(1, time.Hour)
+		srv.WorkoutRouteLimiter = ratelimit.New(6, time.Hour)
+	})
+	for i := 0; i < 3; i++ {
+		if resp := h.candidatesFor("wilant", wk.ID, "", ""); resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status %d, want 200: the builder limiter must not apply", i+1, resp.StatusCode)
+		}
+	}
+}
+
+func TestAnEngineThatFailsEveryCalibrationCallCostsOnlyThree(t *testing.T) {
+	h, wk := readyHarness(t)
+	h.engine.behave = func(c wrCall, _ int) (routing.Path, error) {
+		return routing.Path{}, errors.New("routing service returned 429 Too Many Requests: Unable to find a route for point (47.377, 8.542)")
+	}
+	resp := h.candidatesFor("wilant", wk.ID, "", "")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status %d, want 502", resp.StatusCode)
+	}
+	if n := len(h.engine.Calls()); n != 3 {
+		t.Errorf("%d engine calls, want only the 3 calibration calls", n)
+	}
+	logs := h.logs.String()
+	if !strings.Contains(logs, "cause=quota") {
+		t.Errorf("the log does not classify the failure as quota:\n%s", logs)
+	}
+	if strings.Contains(logs, "47.37") || strings.Contains(logs, "Unable to find") {
+		t.Errorf("the engine's words reached the log:\n%s", logs)
 	}
 }
 

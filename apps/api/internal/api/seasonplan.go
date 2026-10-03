@@ -244,9 +244,6 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		// A route link is the rider's own choice, and a rebuilt session would
 		// silently drop it or swap the content under a route chosen for the
 		// old one. It already moves UpdatedAt, but the guarantee is stated here.
-		// A route link is the rider's own choice, and a rebuilt session would
-		// silently drop it or swap the content under a route chosen for the
-		// old one. It already moves UpdatedAt, but the guarantee is stated here.
 		wk.RouteSlug == "" &&
 		// A swap for an alternate is the rider's choice. It already fails the
 		// description and timestamp tests, but the guarantee is stated here

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"math"
 	"net/http"
 
@@ -99,11 +98,12 @@ type routeCandidateDTO struct {
 	Elevation        []elevationPointDTO `json:"elevationProfile"`
 	EstimatedSeconds float64             `json:"estimatedSeconds"`
 	Family           string              `json:"family"`
-	// Fit is the loop's overall score, 0 to 1: half how close its time is to
+	// Score is the loop's overall score, 0 to 1: half how close its time is to
 	// the planned time, half how well its terrain suits the session.
 	// TerrainFit is the second half alone, and Note says in words what is
-	// missing when it is low.
-	Fit        float64 `json:"fit"`
+	// missing when it is low. "Best fit" is a claim about terrain, so a client
+	// shows it from TerrainFit, not from Score.
+	Score      float64 `json:"score"`
 	TerrainFit float64 `json:"terrainFit"`
 	Note       string  `json:"note,omitempty"`
 }
@@ -113,20 +113,6 @@ type routeCandidatesDTO struct {
 	PlannedSeconds float64             `json:"plannedSeconds"`
 	SpeedKph       float64             `json:"speedKph"`
 	SpeedAssumed   bool                `json:"speedAssumed"`
-}
-
-// routingFailure names why an engine call failed without repeating what the
-// engine said: its message can echo the point it could not route, which is
-// the rider's start.
-func routingFailure(err error) string {
-	switch {
-	case errors.Is(err, context.Canceled):
-		return "canceled"
-	case errors.Is(err, context.DeadlineExceeded):
-		return "timeout"
-	default:
-		return "engine"
-	}
 }
 
 // handleWorkoutRouteCandidates generates up to three loops for a planned
@@ -181,7 +167,7 @@ func (s *Server) handleWorkoutRouteCandidates(w http.ResponseWriter, r *http.Req
 
 	// After every refusal that costs nothing, so a refused request does not
 	// spend the rider's route-builder budget.
-	if !s.rateLimitRouteBuilder(w, rider) {
+	if !s.rateLimitWorkoutRoute(w, rider) {
 		return
 	}
 
@@ -193,7 +179,9 @@ func (s *Server) handleWorkoutRouteCandidates(w http.ResponseWriter, r *http.Req
 		SeedBase:         loops.NewSeedBase(),
 		CalibrationSeeds: loops.TimeCalibrationSeeds,
 		RefinementSeeds:  loops.TimeRefinementSeeds,
-		Objective:        obj,
+		// A dead or out-of-quota engine costs the three calibration calls, not ten.
+		StopWhenCalibrationFails: true,
+		Objective:                obj,
 	})
 	if r.Context().Err() != nil {
 		// The rider left; nobody is waiting for an answer, and a cancelled
@@ -210,10 +198,10 @@ func (s *Server) handleWorkoutRouteCandidates(w http.ResponseWriter, r *http.Req
 		// The request still succeeds with what routed.
 		s.logger().Warn("workout route: some seeds failed, using the rest",
 			"by", rider, "workout", wk.ID, "failed", len(stats.Failures), "attempts", stats.Attempts,
-			"cause", routingFailure(stats.LastErr))
+			"cause", loops.FailureClass(stats.LastErr))
 	case len(found) == 0 && len(stats.Failures) == stats.Attempts:
 		s.logger().Error("workout route: the routing engine failed for every seed",
-			"by", rider, "workout", wk.ID, "attempts", stats.Attempts, "cause", routingFailure(stats.LastErr))
+			"by", rider, "workout", wk.ID, "attempts", stats.Attempts, "cause", loops.FailureClass(stats.LastErr))
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": messageEngineDown})
 		return
 	case len(found) == 0:
@@ -236,7 +224,7 @@ func (s *Server) handleWorkoutRouteCandidates(w http.ResponseWriter, r *http.Req
 			Points: summary.Coords, DistanceM: summary.DistanceM, AscentM: summary.AscentM,
 			Surface: summary.Surface, Elevation: summary.Elevation,
 			EstimatedSeconds: d.EstimatedSeconds, Family: string(d.Family),
-			Fit: d.Score, TerrainFit: d.TerrainFit, Note: d.Note,
+			Score: d.Score, TerrainFit: d.TerrainFit, Note: d.Note,
 		}
 	}
 	for i, id := range s.candidateStore().Hold(rider, wk.ID, held) {
