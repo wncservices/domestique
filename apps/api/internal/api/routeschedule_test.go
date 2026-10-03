@@ -354,6 +354,40 @@ func TestSchedulingIsARiderActionSoItWritesNoAdjustmentRows(t *testing.T) {
 	}
 }
 
+// A day inside a life event (travel, illness, a busy spell) is a day the rider is
+// away: nothing may be put on it, a ride made from a route included.
+func TestSchedulingOntoALifeEventDayIsRefused(t *testing.T) {
+	h, rt, route := scheduleHarness(t)
+	if _, err := h.training.CreateLifeEvent(context.Background(), workout.LifeEvent{
+		Rider: "wilant", Kind: "travel", Start: wrFuture, End: "2026-10-05", Option: "no_bike",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ride := h.rideOf("wilant", "2026-10-05", route) // a session on a covered day, to link or adjust
+
+	if _, status := h.situation("wilant", rt.Slug, wrFuture); status != http.StatusConflict {
+		t.Errorf("situation for a blackout day: %d, want 409", status)
+	}
+	for _, body := range []string{
+		`{"date":"` + wrFuture + `","choice":"new"}`,
+		`{"date":"2026-10-05","choice":"link","workoutId":"` + ride.ID + `"}`,
+		`{"date":"2026-10-05","choice":"adjust","workoutId":"` + ride.ID + `"}`,
+	} {
+		resp, raw := h.schedule("wilant", rt.Slug, body)
+		if resp.StatusCode != http.StatusConflict || !strings.Contains(raw, "away") {
+			t.Errorf("POST %s = %d %s, want 409 saying the rider is away", body, resp.StatusCode, raw)
+		}
+	}
+	if got, _ := h.training.GetWorkout(context.Background(), ride.ID); got.RouteSlug != "" || got.Name != "Endurance ride" {
+		t.Errorf("a refused schedule still changed the ride: %+v", got)
+	}
+
+	// The next day is free.
+	if _, status := h.situation("wilant", rt.Slug, "2026-10-06"); status != http.StatusOK {
+		t.Errorf("a day after the event: %d, want 200", status)
+	}
+}
+
 func TestSchedulePermissionIsCheckedBeforeTheBodyIsRead(t *testing.T) {
 	h, rt, _ := scheduleHarness(t)
 	resp := h.asGroup("guest", "guests", http.MethodPost, "/api/routes/"+rt.Slug+"/schedule", "not json")

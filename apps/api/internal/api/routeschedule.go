@@ -120,6 +120,21 @@ func (s *Server) loadSchedule(w http.ResponseWriter, r *http.Request, date strin
 		return sc, false
 	}
 
+	// A day inside a life event is a day the rider is away: nothing goes on it.
+	away, err := s.blackoutFor(r.Context(), sc.rider)
+	if err != nil {
+		s.fail(w, err)
+		return sc, false
+	}
+	if away[sc.date] {
+		s.logger().Info("route not scheduled: that day is inside a life event", "by", sc.rider)
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "You are away that day, so nothing can be scheduled on it. Pick another day.",
+			"code":  "life_event",
+		})
+		return sc, false
+	}
+
 	points, err := s.Source.Track(r.Context(), slug)
 	if err != nil {
 		s.failLookup(w, err)
