@@ -1648,6 +1648,59 @@ export interface RideStart {
   place?: string
 }
 
+/** One generated loop for a planned ride, returned to its owner only. `points`
+ *  are [lat, lon]; they appear nowhere else. `fit` is the overall score 0-1
+ *  (half time, half terrain); `terrainFit` the terrain half, `note` what is
+ *  missing when it is low. */
+export interface RouteCandidate {
+  id: string
+  points: [number, number][]
+  distanceM: number
+  ascentM: number
+  surface: { type: string; distanceM: number; fraction: number }[]
+  elevationProfile: { distanceM: number; eleM: number }[]
+  estimatedSeconds: number
+  family: string
+  fit: number
+  terrainFit: number
+  note?: string
+}
+
+export interface RouteCandidates {
+  candidates: RouteCandidate[]
+  plannedSeconds: number
+  speedKph: number
+  /** True when the speed leans on an assumption (no FTP or no weight). */
+  speedAssumed: boolean
+}
+
+/** What putting a library route on a day would offer. */
+export interface ScheduleSituation {
+  date: string
+  /** An estimate at endurance power. */
+  routeSeconds: number
+  routeAssumed: boolean
+  sessions: {
+    id: string
+    name: string
+    plannedSeconds: number
+    /** Adjusting a key session replaces it. */
+    keySession: boolean
+    routed: boolean
+    /** Planned time within 20 percent of the route's. */
+    close: boolean
+  }[]
+  choices: ('link' | 'adjust' | 'new')[]
+  default?: 'link' | 'adjust' | 'new'
+  needsWorkoutId?: boolean
+}
+
+export interface ScheduleResult {
+  workout: Workout
+  choice: 'link' | 'adjust' | 'new'
+  replacedKeySession?: boolean
+}
+
 /** Which reason is worst on a day or for a session; picks the chip's icon. */
 export type WeatherWorst = 'thunder' | 'wintry' | 'rain' | 'wind' | 'cold' | 'heat'
 
