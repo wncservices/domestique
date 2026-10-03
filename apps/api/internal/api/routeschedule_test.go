@@ -354,6 +354,14 @@ func TestSchedulingIsARiderActionSoItWritesNoAdjustmentRows(t *testing.T) {
 	}
 }
 
+func TestSchedulePermissionIsCheckedBeforeTheBodyIsRead(t *testing.T) {
+	h, rt, _ := scheduleHarness(t)
+	resp := h.asGroup("guest", "guests", http.MethodPost, "/api/routes/"+rt.Slug+"/schedule", "not json")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a viewer posting garbage got %d, want 403 before any parsing", resp.StatusCode)
+	}
+}
+
 func TestSchedulingTodayUsesTheRidersOwnDay(t *testing.T) {
 	h, rt, _ := scheduleHarness(t)
 	// The rider's browser says it is already the 4th: the 3rd is the past.

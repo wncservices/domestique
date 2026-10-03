@@ -124,7 +124,11 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 func hasPlanSessions(existing []workout.Workout, g workout.Goal, week periodization.Week) bool {
 	start, end := weekBounds(week)
 	for _, wk := range existing {
-		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.Date >= start && wk.Date <= end {
+		// Neither is a ride the rider put on the day with a route and no plan
+		// description ("new" in routeschedule.go): it carries the goal id so the
+		// day reads as taken, but it is theirs, not the plan's.
+		riderRouted := wk.RouteSlug != "" && !strings.HasPrefix(wk.Description, scheduler.GeneratedDescription)
+		if wk.GoalID == g.ID && wk.TestProtocol == "" && !riderRouted && wk.Date >= start && wk.Date <= end {
 			return true
 		}
 	}

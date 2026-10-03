@@ -198,6 +198,11 @@ func (s *Server) handleRouteScheduleSituation(w http.ResponseWriter, r *http.Req
 
 // handleRouteSchedule puts the route on the day: link, adjust or new.
 func (s *Server) handleRouteSchedule(w http.ResponseWriter, r *http.Request) {
+	// Before the body is read: a caller who may not schedule gets 403, not a
+	// parse error that confirms what the endpoint expects.
+	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
+		return
+	}
 	var body struct {
 		Date      string `json:"date"`
 		Choice    string `json:"choice"`
