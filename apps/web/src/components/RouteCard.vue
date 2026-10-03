@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Account, Me, Route } from '@/api/types'
+import ScheduleRideModal from './ScheduleRideModal.vue'
 import ShareRouteDialog from './ShareRouteDialog.vue'
 import SyncBadge from './SyncBadge.vue'
 import TrackPreview from './TrackPreview.vue'
@@ -14,6 +15,11 @@ const props = defineProps<{
   me?: Me | null
 }>()
 const emit = defineEmits<{ deleted: []; updated: []; open: [] }>()
+
+const scheduling = ref(false)
+const canSchedule = computed(
+  () => props.route.sport === 'cycling' && !!props.me?.permissions.includes('training:manage'),
+)
 
 const toast = useToast()
 
@@ -394,6 +400,15 @@ async function remove() {
              one; mode: none has no anonymous state to grant a share to in
              the first place. See ShareRouteDialog.vue's own doc comment. -->
         <UButton
+          v-if="canSchedule"
+          icon="i-lucide-calendar-plus"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          aria-label="Schedule ride"
+          @click.stop="scheduling = true"
+        />
+        <UButton
           v-if="canEdit && me?.authMode === 'oidc'"
           icon="i-lucide-share-2"
           color="neutral"
@@ -449,6 +464,8 @@ async function remove() {
         </div>
       </template>
     </UModal>
+
+    <ScheduleRideModal v-model:open="scheduling" :route="route" />
 
     <UModal v-model:open="confirming" title="Delete this route?">
       <template #body>
