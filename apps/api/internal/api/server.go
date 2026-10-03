@@ -564,6 +564,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/training/workouts/{id}/route-candidates", s.handleWorkoutRouteCandidates)
 	mux.HandleFunc("POST /api/training/workouts/{id}/route", s.handleSaveWorkoutRoute)
 	mux.HandleFunc("DELETE /api/training/workouts/{id}/route", s.handleRemoveWorkoutRoute)
+	mux.HandleFunc("POST /api/training/workouts/{id}/route/push", s.handlePushWorkoutCourse)
 	mux.HandleFunc("GET /api/routes/{slug}/schedule", s.handleRouteScheduleSituation)
 	mux.HandleFunc("POST /api/routes/{slug}/schedule", s.handleRouteSchedule)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
