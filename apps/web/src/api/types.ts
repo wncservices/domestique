@@ -1800,3 +1800,15 @@ export interface CalendarFeedLink {
   url: string
   webcalUrl: string
 }
+
+/** GET/PUT /api/training/morning-summary. The address is the signed-in
+ *  identity's (never typed here) and only ever one the sign-in provider
+ *  vouches for. `reason` says why it is unavailable: `not_configured` (the
+ *  deployment has no SMTP), `no_email` (mode none, or no address on the
+ *  account) or `email_unverified`. */
+export interface MorningSummaryStatus {
+  available: boolean
+  reason?: 'not_configured' | 'no_email' | 'email_unverified'
+  enabled: boolean
+  email?: string
+}

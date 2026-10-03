@@ -98,6 +98,11 @@ var riderTables = map[string]riderTable{
 	"calendar_feeds": {Purged: true, Note: "CalendarFeeds.DeleteRider: the rider's calendar link stops working",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
 
+	// internal/morningsummary: the opt-in and the address mail goes to. Purging
+	// it is what stops mail to a rider who has left.
+	"morning_summaries": {Purged: true, Note: "MorningSummaries.DeleteRider: the opt-in and the stored address",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
+
 	// internal/weather
 	"weather_locations": {Purged: true, Note: "WeatherPrefs.Delete",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
