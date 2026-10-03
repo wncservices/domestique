@@ -920,6 +920,22 @@ export interface Workout {
    *  changed, or one adjusted before reasons were recorded (the note in
    *  `description` is then the only explanation). */
   why?: Why
+  /** The library route this ride is to be ridden on; absent when none, or when
+   *  the rider cannot see it. Never carries a coordinate. */
+  route?: WorkoutRoute
+}
+
+/** The route linked to a planned ride. `generated` is a loop made for this
+ *  ride; `inactive` while the ride is indoor (the link is kept). */
+export interface WorkoutRoute {
+  slug: string
+  name: string
+  distanceM: number
+  ascentM: number
+  /** What the route was estimated to take when it was chosen. */
+  estimatedSeconds: number
+  generated: boolean
+  inactive?: boolean
 }
 
 export interface CreateWorkoutRequest {

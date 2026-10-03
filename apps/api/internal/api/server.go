@@ -556,6 +556,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/training/ride-start", s.handleSetRideStart)
 	mux.HandleFunc("DELETE /api/training/ride-start", s.handleDeleteRideStart)
 	mux.HandleFunc("POST /api/training/workouts/{id}/route-candidates", s.handleWorkoutRouteCandidates)
+	mux.HandleFunc("POST /api/training/workouts/{id}/route", s.handleSaveWorkoutRoute)
+	mux.HandleFunc("DELETE /api/training/workouts/{id}/route", s.handleRemoveWorkoutRoute)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
 	mux.HandleFunc("POST /api/training/plan/propose-edit", s.handleProposePlanEdit)
@@ -2995,6 +2997,23 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.Targets != nil && len(*body.Targets) > 0 {
+		// A route generated for a ride starts at the rider's saved start point:
+		// no crew target while it carries its tag. A request that removes the tag
+		// in the same breath is the rider's deliberate choice.
+		tags := body.Tags
+		if tags == nil {
+			current, err := s.routeTags(r.Context(), slug)
+			if err != nil {
+				s.failLookup(w, err)
+				return
+			}
+			tags = &current
+		}
+		if refuseTaggedRoute(w, *tags) {
+			return
+		}
+	}
 	if body.Targets != nil {
 		if err := validateCrewTargets(*body.Targets, ownerForValidation, crews); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -3277,6 +3296,16 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if err := s.Source.Delete(r.Context(), slug); err != nil {
 		s.failLookup(w, err)
 		return
+	}
+	// A rider's planned rides must not keep pointing at a route that is gone:
+	// the slug would read as a route that exists, and a later route created
+	// under it would attach itself to a stranger's ride.
+	if s.Training != nil {
+		if n, err := s.Training.UnlinkRoute(r.Context(), slug); err != nil {
+			s.logger().Warn("could not clear workout links to a deleted route", "slug", slug, "err", err)
+		} else if n > 0 {
+			s.logger().Info("workout links to a deleted route cleared", "slug", slug, "workouts", n)
+		}
 	}
 
 	s.logger().Info("route deleted", "slug", slug)
