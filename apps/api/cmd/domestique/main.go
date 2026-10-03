@@ -51,6 +51,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
@@ -977,6 +978,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 	srv.WeatherPrefs = weatherPrefs
+	// Where a rider's planned rides start: opt-in by row, kept at about 110 m
+	// and never returned by the API.
+	if srv.RideStarts, err = ridestart.UseDB(src.Conn(), src.DSN()); err != nil {
+		return err
+	}
 	if cfg.Weather.On() {
 		srv.Weather = weather.New(cfg.Weather.BaseURL, os.Getenv(weather.EnvAPIKey), nil)
 	}

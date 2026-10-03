@@ -181,6 +181,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("removing weather location: %w", err)
 		}
 	}
+	if s.RideStarts != nil {
+		if err := s.RideStarts.Delete(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing ride start: %w", err)
+		}
+	}
 	if s.GarminMFA != nil {
 		if err := s.GarminMFA.DeleteRider(ctx, rider); err != nil {
 			return sum, fmt.Errorf("removing pending Garmin challenges: %w", err)

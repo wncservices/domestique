@@ -40,6 +40,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
@@ -253,6 +254,9 @@ type Server struct {
 	// rider with no row in WeatherPrefs never causes a request.
 	Weather      *weather.Client
 	WeatherPrefs *weather.Store
+	// RideStarts is where each rider's planned rides start, opt-in by row. Nil
+	// means the feature answers 412; see ridestart.go.
+	RideStarts *ridestart.Store
 
 	// Narration is Phase E of docs/training-plan.md — an LLM layer that
 	// explains a plan and proposes profile edits from free text, strictly
@@ -543,6 +547,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/training/weather/location", s.handleSetWeatherLocation)
 	mux.HandleFunc("PUT /api/training/weather/window", s.handleSetWeatherWindow)
 	mux.HandleFunc("DELETE /api/training/weather/location", s.handleDeleteWeatherLocation)
+	mux.HandleFunc("GET /api/training/ride-start", s.handleGetRideStart)
+	mux.HandleFunc("PUT /api/training/ride-start", s.handleSetRideStart)
+	mux.HandleFunc("DELETE /api/training/ride-start", s.handleDeleteRideStart)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
 	mux.HandleFunc("POST /api/training/plan/propose-edit", s.handleProposePlanEdit)

@@ -239,6 +239,9 @@ func TestRenameRiderRefusesACollisionAndChangesNothing(t *testing.T) {
 		{"weather_locations", func(e *riderDataEnv, a, b string) error {
 			return exec(e, `INSERT INTO weather_locations (rider, place, lat, lon, updated_at) VALUES (?, 'Ghent', 51.05, 3.72, ?)`, b, ts)
 		}},
+		{"ride_start_points", func(e *riderDataEnv, a, b string) error {
+			return exec(e, `INSERT INTO ride_start_points (rider, place, lat, lon, updated_at) VALUES (?, 'Ghent', 51.054, 3.72, ?)`, b, ts)
+		}},
 		{"daily_wellness", func(e *riderDataEnv, a, b string) error {
 			// Same date as the seeded one for the old rider: a real collision.
 			return exec(e, `INSERT INTO daily_wellness (rider, date, updated_at) VALUES (?, '2026-01-02', ?)`, b, ts)

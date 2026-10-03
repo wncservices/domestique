@@ -1624,6 +1624,14 @@ export interface WeatherPrefs {
   attribution: string
 }
 
+/** Where the rider's planned rides start. Deliberately has no coordinate
+ *  fields: the server keeps a point rounded to about 110 m and never returns
+ *  it, only whether one is set and its town. */
+export interface RideStart {
+  set: boolean
+  place?: string
+}
+
 /** Which reason is worst on a day or for a session; picks the chip's icon. */
 export type WeatherWorst = 'thunder' | 'wintry' | 'rain' | 'wind' | 'cold' | 'heat'
 
