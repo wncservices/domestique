@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import type { Account, Me, Poi, Route } from '@/api/types'
 import PacingCard from './PacingCard.vue'
 import RouteMap from './RouteMap.vue'
+import ScheduleRideModal from './ScheduleRideModal.vue'
 
 const router = useRouter()
 
@@ -60,6 +61,11 @@ const canEdit = computed(() => {
   if (!me.permissions.includes('routes:edit-own')) return false
   return !props.route.owner || props.route.owner.toLowerCase() === (me.user ?? '').toLowerCase()
 })
+
+const scheduling = ref(false)
+const canSchedule = computed(
+  () => !!props.route && props.route.sport === 'cycling' && !!props.me?.permissions.includes('training:manage'),
+)
 
 const editingInfo = ref(false)
 const draftName = ref('')
@@ -348,6 +354,9 @@ const mapRoutes = computed(() =>
           >
             Download GPX
           </UButton>
+          <UButton v-if="canSchedule" icon="i-lucide-calendar-plus" color="neutral" variant="subtle" @click="scheduling = true">
+            Schedule ride
+          </UButton>
           <UButton
             v-if="route && me?.permissions.includes('training:manage')"
             icon="i-lucide-flag"
@@ -371,4 +380,5 @@ const mapRoutes = computed(() =>
       </div>
     </template>
   </UModal>
+  <ScheduleRideModal v-model:open="scheduling" :route="route" />
 </template>
