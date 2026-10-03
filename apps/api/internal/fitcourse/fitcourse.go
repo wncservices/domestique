@@ -50,6 +50,7 @@ import (
 	"github.com/muktihari/fit/profile/mesgdef"
 	"github.com/muktihari/fit/profile/typedef"
 
+	"github.com/wncservices/domestique/apps/api/internal/climbs"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 )
 
@@ -564,40 +565,6 @@ type Climb struct {
 	AvgGradient float64
 }
 
-// Climb detection and categorisation thresholds.
-//
-// The category score — length in metres times average gradient in percent —
-// is Strava's own formula, chosen because it is the one most cyclists
-// already read their climbs by, not because it is any more correct than the
-// alternatives: the Tour de France's own categorisation is openly
-// discretionary and cannot be reproduced from a GPX file at all.
-const (
-	// climbSmoothRadiusM denoises the elevation profile before grade is
-	// computed from it. Elevation is far noisier than heading — a single bad
-	// GPS or DEM sample reads as a wall — so this is wider than turn
-	// detection's lookaheadM.
-	climbSmoothRadiusM = 50.0
-	// climbMinGradient is the bar for a single (smoothed) point to count as
-	// "climbing" at all.
-	climbMinGradient = 1.5
-	// climbMergeGapM bridges a short false summit or a dip mid-climb — a
-	// switchback rarely descends for long — without splitting one climb into
-	// several. A gap longer than this ends the climb.
-	climbMergeGapM = 200.0
-	// climbMinLengthM and climbMinAvgGradient mirror Garmin ClimbPro's own
-	// published thresholds for what it will show at all, so a climb this
-	// package marks and a climb the device's own ClimbPro screen shows
-	// should agree.
-	climbMinLengthM     = 500.0
-	climbMinAvgGradient = 3.0
-
-	climbCat4Score = 8_000.0
-	climbCat3Score = 16_000.0
-	climbCat2Score = 32_000.0
-	climbCat1Score = 64_000.0
-	climbHCScore   = 80_000.0
-)
-
 // DeriveClimbs infers climb cues from the track's elevation profile.
 //
 // Like DeriveTurns, this is a heuristic and is off by default for it: the
@@ -614,86 +581,41 @@ func DeriveClimbs(points []gpx.Point, distances []float64) []Climb {
 	if len(points) < 3 || len(distances) != len(points) {
 		return nil
 	}
-	for _, p := range points {
-		if !p.HasEle {
-			return nil
-		}
-	}
-
-	elev := smoothElevation(points, distances, climbSmoothRadiusM)
-
-	ascending := make([]bool, len(points))
-	for i := 1; i < len(points); i++ {
-		run := distances[i] - distances[i-1]
-		if run <= 0 {
+	// The algorithm lives in internal/climbs, shared with training; this
+	// keeps its device bar (DeviceConfig) and adds the category gate: a climb
+	// too small to be categorised gets no cue.
+	var out []Climb
+	for _, c := range climbs.Detect(points, climbs.DeviceConfig) {
+		cat, ok := climbs.Category(c.Score)
+		if !ok {
 			continue
 		}
-		grade := (elev[i] - elev[i-1]) / run * 100
-		ascending[i] = grade >= climbMinGradient
+		tc := climbCategory(cat)
+		out = append(out, Climb{
+			StartIndex:  c.StartIdx,
+			SummitIndex: c.EndIdx,
+			Category:    tc,
+			Name:        climbName(tc),
+			LengthM:     c.LengthM,
+			GainM:       c.GainM,
+			AvgGradient: c.AvgGradient,
+		})
 	}
-
-	var climbs []Climb
-	for i := 1; i < len(points); i++ {
-		if !ascending[i] {
-			continue
-		}
-
-		start := i - 1
-		peak := i
-		lastAscendingAt := distances[i]
-
-		j := i + 1
-		for j < len(points) {
-			if elev[j] > elev[peak] {
-				peak = j
-			}
-			if ascending[j] {
-				lastAscendingAt = distances[j]
-			} else if distances[j]-lastAscendingAt > climbMergeGapM {
-				break
-			}
-			j++
-		}
-
-		length := distances[peak] - distances[start]
-		gain := elev[peak] - elev[start]
-		if length >= climbMinLengthM && gain > 0 {
-			avgGradient := gain / length * 100
-			if avgGradient >= climbMinAvgGradient {
-				if cat, ok := climbCategory(length * avgGradient); ok {
-					climbs = append(climbs, Climb{
-						StartIndex:  start,
-						SummitIndex: peak,
-						Category:    cat,
-						Name:        climbName(cat),
-						LengthM:     length,
-						GainM:       gain,
-						AvgGradient: avgGradient,
-					})
-				}
-			}
-		}
-
-		i = j
-	}
-
-	return climbs
+	return out
 }
 
-func climbCategory(score float64) (typedef.CoursePoint, bool) {
-	switch {
-	case score >= climbHCScore:
-		return typedef.CoursePointHorsCategory, true
-	case score >= climbCat1Score:
-		return typedef.CoursePointFirstCategory, true
-	case score >= climbCat2Score:
-		return typedef.CoursePointSecondCategory, true
-	case score >= climbCat3Score:
-		return typedef.CoursePointThirdCategory, true
-	case score >= climbCat4Score:
-		return typedef.CoursePointFourthCategory, true
+func climbCategory(cat int) typedef.CoursePoint {
+	switch cat {
+	case 0:
+		return typedef.CoursePointHorsCategory
+	case 1:
+		return typedef.CoursePointFirstCategory
+	case 2:
+		return typedef.CoursePointSecondCategory
+	case 3:
+		return typedef.CoursePointThirdCategory
 	default:
-		return typedef.CoursePointInvalid, false
+		return typedef.CoursePointFourthCategory
 	}
 }
 
@@ -710,26 +632,4 @@ func climbName(cat typedef.CoursePoint) string {
 	default:
 		return "Cat 4 climb"
 	}
-}
-
-// smoothElevation averages each point's elevation with its neighbours within
-// radiusM, as a sliding window over cumulative distance. Both window edges
-// move only forward as i increases, so this is one pass over the points
-// rather than one per point.
-func smoothElevation(points []gpx.Point, distances []float64, radiusM float64) []float64 {
-	out := make([]float64, len(points))
-	lo, hi := 0, -1
-	sum := 0.0
-	for i := range points {
-		for hi+1 < len(points) && distances[hi+1]-distances[i] <= radiusM {
-			hi++
-			sum += points[hi].Ele
-		}
-		for distances[i]-distances[lo] > radiusM {
-			sum -= points[lo].Ele
-			lo++
-		}
-		out[i] = sum / float64(hi-lo+1)
-	}
-	return out
 }

@@ -619,7 +619,7 @@ type elevSegment struct{ LengthM, GradePercent float64 }
 // elevationProfile builds a track heading due north at spacingM intervals,
 // its elevation following a sequence of segments back to back from baseEle.
 // Tests bracket the segment under test with flat margins well wider than
-// climbSmoothRadiusM, so smoothing at a segment boundary can't bias the
+// the 50 m smoothing radius, so smoothing at a segment boundary can't bias the
 // measurement taken from the middle of the interesting one.
 func elevationProfile(spacingM, baseEle float64, segments ...elevSegment) []gpx.Point {
 	latStep := spacingM / 111_320.0
@@ -685,7 +685,7 @@ func TestSteadyClimbIsCategorised(t *testing.T) {
 }
 
 func TestShortClimbBelowLengthThresholdIsIgnored(t *testing.T) {
-	// 300 m at 10% is steep, but shorter than climbMinLengthM and its score
+	// 300 m at 10% is steep, but shorter than the 500 m minimum length and its score
 	// (3,000) is well under even a category 4 climb.
 	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{300, 10}, elevSegment{300, 0})
 	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
@@ -696,7 +696,7 @@ func TestShortClimbBelowLengthThresholdIsIgnored(t *testing.T) {
 func TestClimbBelowAvgGradientThresholdIsIgnored(t *testing.T) {
 	// 5000 m at 2.9% is long enough, and its score (14,500) alone would
 	// clear category 4 — but the average gradient sits just under
-	// climbMinAvgGradient, which ClimbPro itself also won't show without.
+	// the 3% minimum average gradient, which ClimbPro itself also won't show without.
 	points := elevationProfile(25, 100, elevSegment{300, 0}, elevSegment{5000, 2.9}, elevSegment{300, 0})
 	if got := DeriveClimbs(points, cumulativeDistances(points)); got != nil {
 		t.Errorf("a shallow climb produced %d climbs: %+v", len(got), got)
