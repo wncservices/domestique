@@ -203,6 +203,15 @@ func (t TrainingConfig) Schedule() (syncschedule.Schedule, error) {
 }
 
 type Config struct {
+	// PublicURL is where riders reach this deployment from outside, with no
+	// trailing slash: https://domestique.example.com. Used for the links in
+	// the calendar feed and in email, where the app cannot know its own
+	// address (it sits behind a proxy). Empty turns those features off.
+	PublicURL string `yaml:"public_url,omitempty"`
+
+	// Notifications is how mail is sent; see NotificationsConfig.
+	Notifications NotificationsConfig `yaml:"notifications,omitempty"`
+
 	Training  TrainingConfig  `yaml:"training"`
 	Source    SourceConfig    `yaml:"source"`
 	Web       WebConfig       `yaml:"web"`
@@ -252,6 +261,9 @@ func Load(path string) (*Config, error) {
 // successful read, which meant DOMESTIQUE_SOURCE_DSN was ignored in a
 // container with no config file — precisely the case it is for.
 func (c *Config) applyDefaults() {
+	c.PublicURL = strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
+	c.Notifications.SMTP.applyDefaults()
+
 	// A PostgreSQL DSN carries a password, so a deployment supplies it through
 	// the environment rather than writing it into a config file that wants to
 	// be readable. Same Vault -> envFrom path as every other credential.
@@ -327,6 +339,17 @@ func (c *Config) applyDefaults() {
 func (c *Config) Validate() error {
 	if strings.TrimSpace(c.Source.DSN) == "" {
 		return fmt.Errorf("source.dsn is empty: nowhere to keep routes")
+	}
+
+	if c.PublicURL != "" {
+		u, err := url.Parse(c.PublicURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("public_url %q is not an absolute http(s) URL", c.PublicURL)
+		}
+	}
+
+	if err := c.Notifications.SMTP.validate(c.PublicURL); err != nil {
+		return err
 	}
 
 	// Surfaces a bad auth config at startup rather than on the first request.

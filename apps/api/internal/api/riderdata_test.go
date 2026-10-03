@@ -12,9 +12,11 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
+	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
@@ -90,6 +92,12 @@ func openRiderDataEnv(t *testing.T, dsn string) *riderDataEnv {
 		t.Fatal(err)
 	}
 	if srv.Shares, err = routeshare.UseDB(conn, dsnUsed); err != nil {
+		t.Fatal(err)
+	}
+	if srv.CalendarFeeds, err = calendarfeed.UseDB(conn, dsnUsed); err != nil {
+		t.Fatal(err)
+	}
+	if srv.MorningSummaries, err = morningsummary.UseDB(conn, dsnUsed); err != nil {
 		t.Fatal(err)
 	}
 	if srv.WeatherPrefs, err = weather.UseDB(conn, dsnUsed); err != nil {
@@ -272,6 +280,12 @@ func riderSeeds() []seed {
 		}, "created_by", byRider},
 		{"route_share_redemptions", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO route_share_redemptions (share_id, rider, redeemed_at) VALUES (?, ?, ?)`, "someone-elses-share-"+id, rider, ts)
+		}, "rider", byRider},
+		{"calendar_feeds", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO calendar_feeds (rider, token_hash, created_at) VALUES (?, ?, ?)`, rider, "hash-"+id, ts)
+		}, "rider", byRider},
+		{"morning_summaries", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO morning_summaries (rider, enabled, email, updated_at) VALUES (?, ?, ?, ?)`, rider, true, rider+"@example.com", ts)
 		}, "rider", byRider},
 		{"pacing_pushes", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO pacing_pushes (rider, provider, key, remote_id, pushed_at) VALUES (?, 'garmin', 'pacing:fondo', 'course-1', ?)`, rider, ts)
