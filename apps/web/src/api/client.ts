@@ -65,6 +65,7 @@ import type {
   UpdateWorkoutRequest,
   RiderProfile,
   RouteDemands,
+  PacingPlan,
   FitnessResponse,
   GoalProposal,
   LinkSessionRequest,
@@ -493,6 +494,12 @@ export const api = {
       body: JSON.stringify({ name, description }),
     }),
 
+  /** The race-day pacing plan for a route: targets per climb and segment and
+   *  the expected time. `goalId` takes that goal's intensity override. */
+  pacing: (slug: string, goalId?: string) =>
+    request<PacingPlan>(
+      `/api/routes/${encodeSlug(slug)}/pacing${goalId ? `?goal=${encodeURIComponent(goalId)}` : ''}`,
+    ),
   /** Re-runs elevation backfill against the route's own already-stored GPX —
    *  fixes a route uploaded before this deployment had elevation lookup
    *  configured (or while the terrain service was briefly down), without

@@ -1397,6 +1397,78 @@ export interface RouteDemandsAvailable {
 
 export type RouteDemands = RouteDemandsAvailable | RouteDemandsUnavailable
 
+export type PacingReasonCode = 'no_elevation' | 'not_cycling' | 'no_ftp'
+
+export interface PacingUnavailable {
+  available: false
+  reason: string
+  reasonCode: PacingReasonCode
+}
+
+/** One merged line of the pacing plan. Distances, never coordinates. */
+export interface PacingSegment {
+  startM: number
+  endM: number
+  kind: 'climb' | 'flat' | 'descent'
+  /** Which climb a climb segment is (matches PacingClimb.index). */
+  climbIndex?: number
+  gradient: number
+  wattsLow: number
+  wattsHigh: number
+  hrLow?: number
+  hrHigh?: number
+  speedKph: number
+  seconds: number
+}
+
+export interface PacingClimb {
+  index: number
+  startM: number
+  endM: number
+  lengthM: number
+  avgGradient: number
+  category?: string
+  watts: number
+  wattsLow: number
+  wattsHigh: number
+  hrLow?: number
+  hrHigh?: number
+  seconds: number
+}
+
+export interface PacingAvailable {
+  available: true
+  route: { slug: string; name: string }
+  goalId?: string
+  eventDate?: string
+  assumptions: {
+    massKg: number
+    massAssumed: boolean
+    cdA: number
+    crr: number
+    if: number
+    ifSource: 'derived' | 'goal'
+    wind: 'none'
+  }
+  /** "Assumed 75 kg; add your weight for a better time." when no weight is set. */
+  hint?: string
+  /** "Steady-state; HR lags the first minutes of a climb." when HR ranges are present. */
+  hrNote?: string
+  totals: {
+    seconds: number
+    normalizedW: number
+    avgW: number
+    if: number
+    avgKph: number
+    variabilityIndex: number
+  }
+  segments: PacingSegment[]
+  climbs: PacingClimb[]
+  profile: { distanceM: number; eleM: number }[]
+}
+
+export type PacingPlan = PacingAvailable | PacingUnavailable
+
 /** GET /api/training/goals/{id}/explain's response — see
  *  internal/narration.ExplainPlan. A plain-language summary of the same
  *  reconciled plan the periodization table already shows; 412 instead of

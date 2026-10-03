@@ -404,6 +404,7 @@ func (s *Server) Handler() http.Handler {
 	// generator in source/db.go), so the plain single-segment form loses
 	// nothing here.
 	mux.HandleFunc("POST /api/routes/{slug}/recalculate-elevation", s.handleRecalculateElevation)
+	mux.HandleFunc("GET /api/routes/{slug}/pacing", s.handlePacing)
 	mux.HandleFunc("PUT /api/routes/{slug}/points", s.handleUpdateRoutePoints)
 	mux.HandleFunc("DELETE /api/routes/{slug...}", s.handleDelete)
 
