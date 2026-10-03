@@ -2,6 +2,7 @@ package lifeevents
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -207,10 +208,21 @@ func (p *planner) ramp(events []Event) {
 				if p.changed[w.ID] || w.TestProtocol != "" || p.eligibility(w) != eligible {
 					continue
 				}
+				// A session the rider unticked in an earlier preview stays as it is.
+				if strings.Contains(w.Description, KeptMarker) {
+					continue
+				}
+				before := len(p.diff.Changes)
 				if n <= easyDays {
 					p.easyDay(w, e, reason)
 				} else if isHard(w) {
 					p.oneRung(w, e, reason)
+				}
+				for i := before; i < len(p.diff.Changes); i++ {
+					p.diff.Changes[i].Ramp = &RampInfo{
+						Kind: e.Kind, Option: Normalize(e).Option, End: e.End,
+						Day: n, EasyDays: easyDays, UntilDay: until,
+					}
 				}
 			}
 		}

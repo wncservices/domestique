@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -95,6 +96,14 @@ func (s *Server) applyReturnRamp(ctx context.Context, rider string, workouts []w
 			continue
 		}
 		applied[c.WorkoutID] = true
-		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "return ramp", "reason", c.Reason)
+		if c.Ramp != nil {
+			rec := why.NewRecord(why.IllnessRamp, c.Reason, why.IllnessRampInputs{
+				Kind: c.Ramp.Kind, Option: c.Ramp.Option, EndDate: c.Ramp.End,
+				Day: c.Ramp.Day, EasyDays: c.Ramp.EasyDays, UntilDay: c.Ramp.UntilDay,
+			})
+			s.recordAdjustment(ctx, rider, wk.ID, rec, wk.Indoor)
+		}
+		// The rule id and the kind of event, never the reason or a date next to a name.
+		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "return ramp", "rule", string(why.IllnessRamp))
 	}
 }

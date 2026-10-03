@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -225,6 +227,139 @@ func TestTheRampSurvivesAReplan(t *testing.T) {
 	}
 	if eased == 0 {
 		t.Error("after a replan no session in the return window carries the ramp")
+	}
+}
+
+func TestASessionTheRiderKeptThroughTheReturnIsNotRampedByAdaptation(t *testing.T) {
+	h := newOnceHarness(t)
+	ctx := context.Background()
+	h.event(t, "illness", "2026-10-04", "2026-10-06", "proper")
+	kept := h.hardSession(t, "2026-10-08", 90)
+	desc := kept.Description + " " + lifeevents.KeptMarker
+	if _, err := h.store.UpdateWorkout(ctx, kept.ID, workout.UpdateWorkoutRequest{Description: &desc}); err != nil {
+		t.Fatal(err)
+	}
+	control := h.hardSession(t, "2026-10-09", 60)
+
+	for range 4 {
+		h.srv.AdaptWorkouts(ctx)
+	}
+	got, _ := h.store.GetWorkout(ctx, kept.ID)
+	if got.Zone != workout.ZoneThreshold || got.Level != 4 || got.Description != desc || workout.PlannedSeconds(got.Steps) != 90*60 {
+		t.Fatalf("a kept session was changed by the ramp: %+v", got)
+	}
+	if c, _ := h.store.GetWorkout(ctx, control.ID); c.Level != 3 {
+		t.Fatalf("the control session was not eased (level %v): the ramp did not run", c.Level)
+	}
+}
+
+func TestReplanLeavesLifeEventMovesAndEasingsWhereTheyAre(t *testing.T) {
+	h := newOnceHarness(t)
+	ctx := context.Background()
+	h.event(t, "travel", "2026-10-08", "2026-10-08", "no_bike")
+	moved := h.hardSession(t, "2026-10-10", 60)
+	movedDesc := scheduler.GeneratedDescription + "\n\nRescheduled by a life event: moved from 2026-10-08. " + scheduler.AdjustedMarker + " Life event: Travelling, no bike: moved to Sat 10 Oct."
+	eased := h.hardSession(t, "2026-10-11", 60)
+	easedDesc := scheduler.GeneratedDescription + " " + scheduler.AdjustedMarker + " Life event: eased after illness (return to training)."
+	for id, d := range map[string]string{moved.ID: movedDesc, eased.ID: easedDesc} {
+		if _, err := h.store.UpdateWorkout(ctx, id, workout.UpdateWorkoutRequest{Description: &d}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/replan", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("replan status %d", resp.StatusCode)
+	}
+	for _, id := range []string{moved.ID, eased.ID} {
+		got, err := h.store.GetWorkout(ctx, id)
+		if err != nil {
+			t.Fatalf("replan deleted a session a life event had changed (%s): %v", id, err)
+		}
+		if !strings.Contains(got.Description, "Life event") {
+			t.Errorf("%s lost its life-event note: %q", id, got.Description)
+		}
+	}
+	for _, w := range h.all(t) {
+		if w.Date == "2026-10-08" {
+			t.Errorf("%q came back on the vacated day", w.Name)
+		}
+	}
+}
+
+func TestTheAutomaticRampIsRecordedAsAnIllnessRamp(t *testing.T) {
+	h := newOnceHarness(t)
+	ctx := context.Background()
+	h.event(t, "illness", "2026-10-04", "2026-10-06", "proper")
+	day2 := h.hardSession(t, "2026-10-08", 90)
+	day4 := h.hardSession(t, "2026-10-10", 60)
+
+	h.srv.AdaptWorkouts(ctx)
+
+	a, ok := adjustmentFor(t, h.store, day2.ID)
+	if !ok || a.Rule != why.IllnessRamp {
+		t.Fatalf("adjustment = %+v, %v; want an illness_ramp row", a, ok)
+	}
+	in := decodeInputs[why.IllnessRampInputs](t, a)
+	if in.Kind != "illness" || in.Option != "proper" || in.EndDate != "2026-10-06" || in.Day != 2 || in.EasyDays != 2 || in.UntilDay != 7 {
+		t.Errorf("inputs = %+v", in)
+	}
+	if a.Text == "" {
+		t.Error("the row has no sentence")
+	}
+	if b, ok := adjustmentFor(t, h.store, day4.ID); !ok || decodeInputs[why.IllnessRampInputs](t, b).Day != 4 {
+		t.Errorf("day four adjustment = %+v, %v", b, ok)
+	}
+
+	// Once is enough: further passes write nothing more.
+	rows := adjustmentRows(t, h.autoScheduleHarness)
+	h.srv.AdaptWorkouts(ctx)
+	if adjustmentRows(t, h.autoScheduleHarness) != rows {
+		t.Error("a second pass recorded another adjustment")
+	}
+}
+
+func TestIHaveNMinutesOnADayYouCannotRideGivesANoticeAndNothingToApply(t *testing.T) {
+	get := func(h *onceHarness) (int, struct {
+		Notice      string `json:"notice"`
+		Suggestions []struct {
+			Name string `json:"name"`
+		} `json:"suggestions"`
+	}) {
+		resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/trainnow?minutes=60&today=2026-10-07", "")
+		var out struct {
+			Notice      string `json:"notice"`
+			Suggestions []struct {
+				Name string `json:"name"`
+			} `json:"suggestions"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+
+	control := newOnceHarness(t)
+	if status, out := get(control); status != http.StatusOK || len(out.Suggestions) == 0 || out.Notice != "" {
+		t.Fatalf("control: status %d %+v, want suggestions and no notice", status, out)
+	}
+	for name, e := range map[string][3]string{
+		"proper illness": {"illness", "proper", ""},
+		"no bike":        {"travel", "no_bike", ""},
+	} {
+		h := newOnceHarness(t)
+		h.event(t, e[0], "2026-10-06", "2026-10-08", e[1])
+		status, out := get(h)
+		if status != http.StatusOK || out.Notice == "" || len(out.Suggestions) != 0 {
+			t.Errorf("%s: status %d %+v, want a notice and no suggestions", name, status, out)
+		}
+		apply := h.as("wilant", "cyclists", http.MethodPost, "/api/training/trainnow/apply?today=2026-10-07",
+			`{"minutes":60,"kind":"easy","zone":"endurance","level":0}`)
+		if apply.StatusCode != http.StatusConflict {
+			t.Errorf("%s: apply status %d, want 409", name, apply.StatusCode)
+		}
+	}
+	gym := newOnceHarness(t)
+	gym.event(t, "travel", "2026-10-06", "2026-10-08", "gym")
+	if status, out := get(gym); status != http.StatusOK || len(out.Suggestions) == 0 || out.Notice != "" {
+		t.Errorf("hotel gym: status %d %+v, want suggestions", status, out)
 	}
 }
 

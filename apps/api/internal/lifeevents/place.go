@@ -567,9 +567,19 @@ func movedDescription(w workout.Workout, from, reason string) string {
 	}
 	d += note
 	if scheduler.IsGenerated(w) {
-		d += " " + scheduler.AdjustedMarker + " " + reason
+		d += " " + scheduler.AdjustedMarker + " " + lifeNote(reason)
 	}
 	return d
+}
+
+// lifeNote is reason as the note a session carries: it always starts "Life
+// event:", which is how Touched and the preview of a later edit recognise a
+// change a life event made.
+func lifeNote(reason string) string {
+	if strings.HasPrefix(reason, rampNotePrefix) {
+		return reason
+	}
+	return rampNotePrefix + " " + reason
 }
 
 // gym keeps cycling sessions on their day as short indoor endurance rides. The
@@ -653,7 +663,7 @@ func replaceMarked(description, note, reason string) string {
 		}
 		d += note
 	}
-	return d + " " + scheduler.AdjustedMarker + " " + reason
+	return d + " " + scheduler.AdjustedMarker + " " + lifeNote(reason)
 }
 
 // refill puts back the plan's own sessions on days a shortened or deleted event

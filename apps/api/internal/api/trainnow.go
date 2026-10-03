@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/alternates"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
@@ -49,6 +50,9 @@ type trainNowDTO struct {
 	Minutes     int                     `json:"minutes"`
 	Verdict     string                  `json:"verdict"`
 	Suggestions []trainNowSuggestionDTO `json:"suggestions"`
+	// Notice is why there are no suggestions: a life event (proper illness, a
+	// trip without a bike) means today is not a day to ride.
+	Notice string `json:"notice,omitempty"`
 }
 
 // trainNowResult is what suggesting read, kept for apply so it does not read it
@@ -60,6 +64,7 @@ type trainNowResult struct {
 	goalID      string
 	workouts    []workout.Workout
 	ridden      map[string]bool
+	notice      string
 }
 
 func parseTrainNowMinutes(raw string) (int, bool) {
@@ -89,7 +94,7 @@ func (s *Server) handleTrainNow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	dto := trainNowDTO{Minutes: minutes, Verdict: string(res.verdict), Suggestions: make([]trainNowSuggestionDTO, 0, len(res.suggestions))}
+	dto := trainNowDTO{Minutes: minutes, Verdict: string(res.verdict), Suggestions: make([]trainNowSuggestionDTO, 0, len(res.suggestions)), Notice: res.notice}
 	for _, sg := range res.suggestions {
 		dto.Suggestions = append(dto.Suggestions, trainNowSuggestionDTO{
 			Kind: string(sg.Kind), Name: sg.Name, Zone: string(sg.Zone), Level: sg.Level,
@@ -174,10 +179,20 @@ func (s *Server) trainNowFor(ctx context.Context, rider string, minutes int, tod
 	}
 	in.DoneZones, in.HardDaysLast7 = doneAndHard(workouts, sessions, todayStr, weekStart.Format(dateLayout), today.AddDate(0, 0, -trainNowLookbackDays).Format(dateLayout))
 
-	return trainNowResult{
+	out := trainNowResult{
 		verdict: assessment.Verdict, suggestions: trainnow.Suggest(in), profile: profile,
 		goalID: goalID, workouts: workouts, ridden: ridden,
-	}, nil
+	}
+	// A day a life event rules riding out of: say so, and offer nothing.
+	events, err := s.lifeEventsFor(ctx, rider)
+	if err != nil {
+		return trainNowResult{}, err
+	}
+	if reason := lifeevents.NoRideReason(events, todayStr); reason != "" {
+		s.logger().Info("trainnow: nothing suggested, the day is inside a life event", "rider", rider)
+		out.notice, out.suggestions = reason, nil
+	}
+	return out, nil
 }
 
 // levelMapReadOnly is the rider's level per zone for sport: what is saved, else

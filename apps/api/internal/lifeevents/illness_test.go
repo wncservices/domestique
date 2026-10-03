@@ -229,6 +229,90 @@ func TestRampNeverRewritesWhatTheRiderOrAnEarlierRuleTouched(t *testing.T) {
 	}
 }
 
+func TestASessionTheRiderKeptThroughTheReturnIsNotRampedAgain(t *testing.T) {
+	kept := hard("kept", "2026-10-12", 90)
+	kept.Description += " " + KeptMarker
+	d := preview([]Event{ill("2026-10-08", "2026-10-11", OptionProper)}, nil, kept, hard("other", "2026-10-13", 90))
+	if _, ok := find(d, "ease:kept"); ok {
+		t.Fatal("the ramp eased a session the rider unticked")
+	}
+	if _, ok := find(d, "ease:other"); !ok {
+		t.Fatal("the control session was not eased")
+	}
+}
+
+func TestRampChangesSayWhichRampTheyBelongTo(t *testing.T) {
+	d := preview([]Event{ill("2026-10-08", "2026-10-11", OptionProper)}, nil,
+		hard("d1", "2026-10-12", 60), hard("d3", "2026-10-14", 60))
+	c := mustFind(t, d, "ease:d3")
+	want := RampInfo{Kind: KindIllness, Option: OptionProper, End: "2026-10-11", Day: 3, EasyDays: 2, UntilDay: 7}
+	if c.Ramp == nil || *c.Ramp != want {
+		t.Fatalf("ramp = %+v, want %+v", c.Ramp, want)
+	}
+	if c := mustFind(t, d, "ease:d1"); c.Ramp == nil || c.Ramp.Day != 1 {
+		t.Errorf("day one ramp = %+v", c.Ramp)
+	}
+}
+
+func TestEveryLifeEventNoteIsRecognisedAsOne(t *testing.T) {
+	// Mild illness shortens, a trip moves, the gym converts: each leaves a
+	// description Touched knows, so Replan and a later edit can tell them from
+	// a readiness easing.
+	cases := map[string]Diff{
+		"shorten": preview([]Event{ill("2026-10-08", "2026-10-09", OptionMild)}, nil, easy("a", "2026-10-08", 120)),
+		"move":    preview([]Event{travel("2026-10-08", "2026-10-08")}, nil, easy("a", "2026-10-08", 60)),
+	}
+	gym := travel("2026-10-08", "2026-10-09")
+	gym.Option = OptionGym
+	cases["indoor"] = preview([]Event{gym}, nil, built("w", "2026-10-07", 30),
+		gen("long", "2026-10-08", workout.ZoneEndurance, "Long ride", 180), easy("a", "2026-10-09", 90))
+	for name, d := range cases {
+		var got bool
+		for _, c := range d.Changes {
+			if c.Update != nil && c.Update.Description != nil && c.Op != OpRemove {
+				got = true
+				if !Touched(*c.Update.Description) {
+					t.Errorf("%s: %q is not recognised as a life event's", name, *c.Update.Description)
+				}
+			}
+		}
+		if !got {
+			t.Errorf("%s: no change to check", name)
+		}
+	}
+	if Touched(scheduler.GeneratedDescription + " " + scheduler.AdjustedMarker + " Eased one level — HRV low") {
+		t.Error("a readiness easing was taken for a life event's")
+	}
+	if !Touched("x " + KeptMarker) {
+		t.Error("a kept session is not Touched")
+	}
+}
+
+func TestNoRideReason(t *testing.T) {
+	proper := ill("2026-10-07", "2026-10-09", OptionProper)
+	mild := ill("2026-10-07", "2026-10-09", OptionMild)
+	gym := travel("2026-10-07", "2026-10-09")
+	gym.Option = OptionGym
+	cases := []struct {
+		name   string
+		events []Event
+		date   string
+		want   bool
+	}{
+		{"proper illness", []Event{proper}, "2026-10-08", true},
+		{"no bike", []Event{travel("2026-10-07", "2026-10-09")}, "2026-10-08", true},
+		{"mild illness", []Event{mild}, "2026-10-08", false},
+		{"hotel gym", []Event{gym}, "2026-10-08", false},
+		{"busy", []Event{{Kind: KindBusy, Start: "2026-10-07", End: "2026-10-09"}}, "2026-10-08", false},
+		{"outside the event", []Event{proper}, "2026-10-10", false},
+	}
+	for _, c := range cases {
+		if got := NoRideReason(c.events, c.date) != ""; got != c.want {
+			t.Errorf("%s: refused = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestLongIllnessAddsTheClinicianLine(t *testing.T) {
 	short := preview([]Event{ill("2026-10-08", "2026-10-20", OptionProper)}, nil)
 	if len(short.Advice) != 0 {

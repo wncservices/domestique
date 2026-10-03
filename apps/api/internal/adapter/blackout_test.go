@@ -54,7 +54,7 @@ func TestWithoutABlackoutNothingChanges(t *testing.T) {
 	ws := planned2("tue", "VO2max intervals", "2026-03-17")
 	a := AdaptSessions(ws, nil, profileAvailable("fri"), thursday, nil, readiness.Assessment{})
 	b := AdaptSessionsAround(ws, nil, profileAvailable("fri"), thursday, nil, readiness.Assessment{}, nil)
-	if len(a) != 1 || len(b) != 1 || a[0] != b[0] {
+	if len(a) != 1 || len(b) != 1 || a[0].WorkoutID != b[0].WorkoutID || a[0].NewDate != b[0].NewDate || a[0].Reason != b[0].Reason {
 		t.Fatalf("AdaptSessions and AdaptSessionsAround(nil) disagree: %+v vs %+v", a, b)
 	}
 }
