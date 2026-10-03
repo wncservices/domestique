@@ -20,16 +20,22 @@ const toast = useToast()
 const plan = ref<PacingPlan | null>(null)
 const loading = ref(false)
 const failed = ref('')
+// A route the viewer cannot see answers 404 (the same as a missing one): the
+// card shows nothing rather than an error line about a route they have no
+// business with.
+const hidden = ref(false)
 const accounts = ref<Account[]>([])
 
 async function load() {
   loading.value = true
   failed.value = ''
+  hidden.value = false
   try {
     plan.value = await api.pacing(props.slug, props.goalId)
   } catch (err) {
     plan.value = null
-    failed.value = err instanceof Error ? err.message : 'Could not load the pacing plan'
+    if (err instanceof ApiError && err.status === 404) hidden.value = true
+    else failed.value = err instanceof Error ? err.message : 'Could not load the pacing plan'
   } finally {
     loading.value = false
   }
@@ -97,7 +103,7 @@ async function send(provider: 'garmin' | 'wahoo') {
 </script>
 
 <template>
-  <UCard :ui="{ body: 'p-4 sm:p-5' }">
+  <UCard v-if="!hidden" :ui="{ body: 'p-4 sm:p-5' }">
     <template #header>
       <div class="flex items-center justify-between gap-2">
         <h3 class="text-sm font-semibold text-highlighted">Pacing plan</h3>
@@ -183,8 +189,8 @@ async function send(provider: 'garmin' | 'wahoo') {
       <div class="flex flex-col gap-3 border-t border-default pt-4">
         <div v-if="hasHr" class="flex items-center gap-2 text-sm">
           <span class="text-muted">Course targets in</span>
-          <UButton size="xs" :variant="target === 'watts' ? 'solid' : 'subtle'" color="neutral" @click="target = 'watts'">Watts</UButton>
-          <UButton size="xs" :variant="target === 'hr' ? 'solid' : 'subtle'" color="neutral" @click="target = 'hr'">Heart rate</UButton>
+          <UButton size="xs" :variant="target === 'watts' ? 'solid' : 'subtle'" color="neutral" :aria-pressed="target === 'watts'" @click="target = 'watts'">Watts</UButton>
+          <UButton size="xs" :variant="target === 'hr' ? 'solid' : 'subtle'" color="neutral" :aria-pressed="target === 'hr'" @click="target = 'hr'">Heart rate</UButton>
         </div>
         <div class="flex flex-wrap gap-2">
           <!-- external: a same-origin /api path would otherwise be read as a
