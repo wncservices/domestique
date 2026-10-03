@@ -170,6 +170,7 @@ func (s *Server) autoImportGarmin(ctx context.Context) int {
 			s.logger().Warn("auto-import: garmin course list failed", "rider", rider, "err", err)
 			continue
 		}
+		courses = s.dropPacingCourses(ctx, rider, courses)
 		routes, _, err := s.Source.List(ctx)
 		if err != nil {
 			s.logger().Warn("auto-import: reading the library failed", "err", err)
@@ -221,6 +222,7 @@ func (s *Server) autoImportWahoo(ctx context.Context) int {
 			s.logger().Warn("auto-import: wahoo route list failed", "rider", rider, "err", err)
 			continue
 		}
+		routes = s.dropPacingRoutes(ctx, rider, routes)
 		library, _, err := s.Source.List(ctx)
 		if err != nil {
 			s.logger().Warn("auto-import: reading the library failed", "err", err)

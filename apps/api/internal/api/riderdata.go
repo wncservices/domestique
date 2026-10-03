@@ -103,6 +103,10 @@ var riderTables = map[string]riderTable{
 	"morning_summaries": {Purged: true, Note: "MorningSummaries.DeleteRider: the opt-in and the stored address",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
 
+	// internal/pacingpush
+	"pacing_pushes": {Purged: true, Note: "PacingPushes.DeleteRider: the record of which course each pacing plan became on the rider's own account",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"provider", "key"}}},
+
 	// internal/weather
 	"weather_locations": {Purged: true, Note: "WeatherPrefs.Delete",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},

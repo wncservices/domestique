@@ -341,6 +341,11 @@ func (c *Client) DeleteRoute(ctx context.Context, accessToken, id string) error 
 	return nil
 }
 
+// ErrNotFound is what a route request wraps when Wahoo answers 404: the route
+// is not on the account (deleted there since). A caller that wants to make it
+// again checks for this and for nothing else.
+var ErrNotFound = errors.New("wahoo: no such route")
+
 // Route is one route already on the rider's Wahoo account — GET /v1/routes'
 // shape, trimmed to what this app needs. Deleted routes never reach here:
 // ListRoutes filters route[deleted]==true out itself, the same reasoning
@@ -606,6 +611,9 @@ func (c *Client) routeRequest(ctx context.Context, method, endpoint, accessToken
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", fmt.Errorf("wahoo: reading route response: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("wahoo: route request returned 404: %s: %w", snippet(body), ErrNotFound)
 	}
 	if resp.StatusCode >= 300 {
 		return "", fmt.Errorf("wahoo: route request returned %d: %s", resp.StatusCode, snippet(body))

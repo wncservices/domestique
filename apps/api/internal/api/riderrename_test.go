@@ -233,6 +233,9 @@ func TestRenameRiderRefusesACollisionAndChangesNothing(t *testing.T) {
 		{"rider_profiles", func(e *riderDataEnv, a, b string) error {
 			return exec(e, `INSERT INTO rider_profiles (rider, updated_at) VALUES (?, ?)`, b, ts)
 		}},
+		{"pacing_pushes", func(e *riderDataEnv, a, b string) error {
+			return exec(e, `INSERT INTO pacing_pushes (rider, provider, key, remote_id, pushed_at) VALUES (?, 'garmin', 'pacing:fondo', 'course-9', ?)`, b, ts)
+		}},
 		{"weather_locations", func(e *riderDataEnv, a, b string) error {
 			return exec(e, `INSERT INTO weather_locations (rider, place, lat, lon, updated_at) VALUES (?, 'Ghent', 51.05, 3.72, ?)`, b, ts)
 		}},

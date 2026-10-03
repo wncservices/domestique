@@ -40,6 +40,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
+	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
@@ -299,6 +300,13 @@ type Server struct {
 	// event of everyone who picked a place.
 	RideStartHour func(ctx context.Context, rider string) (int, bool)
 
+	// PacingPushes remembers which course a rider's pacing plan became on their
+	// own Garmin or Wahoo account, so a second push replaces it. Wired
+	// unconditionally in runServe, like Crew: only the database. Nil in a test
+	// that does not push pacing courses: the push still works, it just cannot
+	// replace the previous one.
+	PacingPushes *pacingpush.Store
+
 	// Blocklist stops a blocked rider's email from creating a new local
 	// identity — see internal/blocklist. Auth0's own SetBlocked only refuses
 	// the identity an admin actually blocked, not a fresh signup with the
@@ -436,6 +444,8 @@ func (s *Server) Handler() http.Handler {
 	// nothing here.
 	mux.HandleFunc("POST /api/routes/{slug}/recalculate-elevation", s.handleRecalculateElevation)
 	mux.HandleFunc("GET /api/routes/{slug}/pacing", s.handlePacing)
+	mux.HandleFunc("GET /api/routes/{slug}/pacing.fit", s.handlePacingFIT)
+	mux.HandleFunc("POST /api/routes/{slug}/pacing/push", s.handlePacingPush)
 	mux.HandleFunc("PUT /api/routes/{slug}/points", s.handleUpdateRoutePoints)
 	mux.HandleFunc("DELETE /api/routes/{slug...}", s.handleDelete)
 
