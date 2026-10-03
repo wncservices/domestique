@@ -175,6 +175,39 @@ func TestFactsForEveryRule(t *testing.T) {
 			},
 		},
 		{
+			"illness ramp, an easy day", why.IllnessRamp,
+			why.IllnessRampInputs{Kind: "illness", Option: "proper", EndDate: "2026-10-11", Day: 2, EasyDays: 2, UntilDay: 7},
+			"Eased back in after time off",
+			[]why.Fact{
+				{Label: "After", Value: "an illness"},
+				{Label: "Ended", Value: "Sun 11 Oct"},
+				{Label: "Return day", Value: "2 of 7"},
+				{Label: "This stage", Value: "an easy day"},
+			},
+		},
+		{
+			"illness ramp, one rung down after a mild one", why.IllnessRamp,
+			why.IllnessRampInputs{Kind: "illness", Option: "mild", EndDate: "2026-10-11", Day: 3, EasyDays: 1, UntilDay: 3},
+			"Eased back in after time off",
+			[]why.Fact{
+				{Label: "After", Value: "a mild illness"},
+				{Label: "Ended", Value: "Sun 11 Oct"},
+				{Label: "Return day", Value: "3 of 3"},
+				{Label: "This stage", Value: "one rung down"},
+			},
+		},
+		{
+			"illness ramp after a trip", why.IllnessRamp,
+			why.IllnessRampInputs{Kind: "travel", Option: "no_bike", EndDate: "2026-10-14", Day: 1, EasyDays: 1, UntilDay: 3},
+			"Eased back in after time off",
+			[]why.Fact{
+				{Label: "After", Value: "a trip without a bike"},
+				{Label: "Ended", Value: "Wed 14 Oct"},
+				{Label: "Return day", Value: "1 of 3"},
+				{Label: "This stage", Value: "an easy day"},
+			},
+		},
+		{
 			"season refresh", why.SeasonRefresh,
 			why.SeasonRefreshInputs{NameFrom: "Threshold 2x15", NameTo: "Threshold 2x20", LevelFrom: 4.2, LevelTo: 4.6, FTPFrom: 250, FTPTo: 262},
 			"Week rebuilt",

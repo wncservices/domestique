@@ -13,6 +13,8 @@ import { phaseChipStyle, phaseLabel } from './phaseStyle'
 import StepResultsTable from './StepResultsTable.vue'
 import WeatherChip from './WeatherChip.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
+import LifeEventBand from './LifeEventBand.vue'
+import { eventsOn } from './lifeEvents'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
 
 const props = defineProps<{
@@ -49,6 +51,8 @@ const emit = defineEmits<{
   trainNow: []
   // Opens the "which planned session was this ride?" modal.
   linkRide: [session: CompletedSession]
+  // Opens the life event form.
+  lifeEvent: []
 }>()
 
 const isCurrentWeek = computed(() => props.week.start <= props.week.today && props.week.today <= props.week.end)
@@ -85,6 +89,7 @@ const statusColor: Record<string, string> = {
 
 function tileClass(day: WeekDay): string {
   if (day.date === props.week.today) return 'border-primary ring-1 ring-primary'
+  if (eventsOn(props.week.lifeEvents, day.date).length > 0) return 'border-default bg-elevated/50'
   if (day.status === 'rest') return 'border-dashed text-dimmed'
   return 'border-default'
 }
@@ -264,6 +269,17 @@ watch(
           color="neutral"
           variant="outline"
           size="sm"
+          icon="i-lucide-calendar-off"
+          class="shrink-0 whitespace-nowrap"
+          aria-label="Add a life event"
+          @click="emit('lifeEvent')"
+        >
+          <span class="hidden sm:inline">Life event</span>
+        </UButton>
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="sm"
           icon="i-lucide-gauge"
           class="shrink-0 whitespace-nowrap"
           aria-label="Schedule an FTP test"
@@ -305,6 +321,8 @@ watch(
           <span class="text-xs font-medium">{{ weekdayShort(day.date) }} {{ dayNumber(day.date) }}</span>
           <UIcon v-if="statusIcon[day.status]" :name="statusIcon[day.status]" :class="statusColor[day.status]" class="size-3.5" />
         </div>
+
+        <LifeEventBand v-for="e in eventsOn(week.lifeEvents, day.date)" :key="e.id" :event="e" compact />
 
         <WeatherChip v-if="weatherOn(day.date)" :day="weatherOn(day.date)!" :attribution="weatherAttribution" compact />
 

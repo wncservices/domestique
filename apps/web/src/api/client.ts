@@ -24,6 +24,10 @@ import type {
   PlanExplanation,
   ProfileChangeProposal,
   ReplanResult,
+  LifeEvent,
+  PlanEditResponse,
+  LifeEventRequest,
+  LifeEventResult,
   ScheduledWorkouts,
   KomootImportResult,
   KomootConnection,
@@ -905,6 +909,40 @@ export const api = {
    *  Owner-only, no body: the rider comes from the session, same as every
    *  other training route. */
   replan: () => request<ReplanResult>('/api/training/replan', { method: 'POST' }),
+  /** Turns one sentence into a validated preview; applies nothing. `today` is
+   *  the browser's own day. 412 means this deployment has no narration key. */
+  proposePlanEdit: (text: string, today: string) =>
+    request<PlanEditResponse>(`/api/training/plan/propose-edit?today=${encodeURIComponent(today)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }),
+  /** The rider's life events from a week ago onward. Owner-only. */
+  lifeEvents: () => request<{ events: LifeEvent[] }>('/api/training/life-events'),
+  /** Previews (`dryRun`) or applies a new life event. The server recomputes
+   *  the diff either way; nothing writes before an apply. */
+  createLifeEvent: (body: LifeEventRequest) =>
+    request<LifeEventResult>('/api/training/life-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  updateLifeEvent: (id: string, body: LifeEventRequest) =>
+    request<LifeEventResult>(`/api/training/life-events/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  /** `dryRun` previews what deleting would refill; without it the event goes. */
+  deleteLifeEvent: (id: string, opts: { dryRun?: boolean; skip?: string[]; include?: string[] } = {}) =>
+    request<LifeEventResult>(
+      `/api/training/life-events/${encodeURIComponent(id)}${opts.dryRun ? '?dryRun=1' : ''}`,
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skip: opts.skip ?? [], include: opts.include ?? [] }),
+      },
+    ),
   /** Builds and persists the classic 20-minute FTP test as an ordinary,
    *  plannable workout — see internal/fitnesstest for why this is the
    *  answer when there isn't enough synced data to estimate FTP from. */

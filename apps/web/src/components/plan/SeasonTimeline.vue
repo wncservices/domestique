@@ -5,8 +5,9 @@
 // HTML table (Task 4/5's redesign), which read one week at a time instead
 // of letting a rider see the whole shape of the season at a glance.
 import { computed, onMounted, ref, useTemplateRef } from 'vue'
-import type { PeriodizationPhase, PeriodizationPlan, PeriodizationWeek, ProjectionEvent } from '@/api/types'
+import type { LifeEvent, PeriodizationPhase, PeriodizationPlan, PeriodizationWeek, ProjectionEvent } from '@/api/types'
 import { eventTone, formatSigned, parseLocalDate } from '@/utils/fitnessMath'
+import { eventLabel, KIND_META, rangeLabel } from './lifeEvents'
 import { phaseBandFill, phaseDotStyle, phaseFill, phaseFillClass, phaseLabel, phaseOrder } from './phaseStyle'
 
 const props = defineProps<{
@@ -17,6 +18,8 @@ const props = defineProps<{
   /** Every future event with its projected form, from the race-day projection.
    *  Each gets a marker coloured by its info-only tone; absent until it loads. */
   events?: ProjectionEvent[]
+  // The rider's life events, drawn as a bar over the weeks they cover.
+  lifeEvents?: LifeEvent[]
 }>()
 
 const emit = defineEmits<{ select: [startDate: string] }>()
@@ -129,6 +132,28 @@ const eventMarkers = computed(() => {
 // The primary dot stays for a deployment whose projection is not there (still
 // loading, or unavailable), so the event week is always marked.
 const showPrimaryDot = computed(() => eventIndex.value >= 0 && !eventMarkers.value.some((m) => m.index === eventIndex.value))
+// An event is a bar along the top over the weeks it touches; one that lies
+// wholly outside the plan draws nothing.
+const eventBars = computed(() => {
+  const last = weeks.value[weeks.value.length - 1]
+  const planEnd = last ? parseLocalDate(last.startDate) : undefined
+  planEnd?.setDate((planEnd?.getDate() ?? 0) + 6)
+  return (props.lifeEvents ?? [])
+    // An event that starts after the last plan week is off the chart.
+    .filter((e) => !planEnd || parseLocalDate(e.startDate) <= planEnd)
+    .map((e) => ({ e, from: weekIndexForDate(e.startDate), to: weekIndexForDate(e.endDate) }))
+    .filter((b) => b.to >= 0 && b.to >= b.from)
+    .map((b) => {
+      const from = Math.max(b.from, 0)
+      return {
+        key: b.e.id,
+        x: colX(from) + 1,
+        width: Math.max((b.to - from + 1) * colWidth.value - 2, 3),
+        fill: KIND_META[b.e.kind].fill,
+        label: `${eventLabel(b.e)}, ${rangeLabel(b.e)}`,
+      }
+    })
+})
 
 function selectWeek(w: PeriodizationWeek) {
   emit('select', w.startDate)
@@ -173,6 +198,21 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       >
         <title>This week</title>
       </line>
+
+      <rect
+        v-for="b in eventBars"
+        :key="b.key"
+        :x="b.x"
+        y="0"
+        :width="b.width"
+        height="4"
+        rx="2"
+        :fill="b.fill"
+        role="img"
+        :aria-label="`Life event: ${b.label}`"
+      >
+        <title>{{ b.label }}</title>
+      </rect>
 
       <circle v-if="showPrimaryDot" :cx="colX(eventIndex) + colWidth / 2" cy="4" r="3" fill="var(--ui-primary)">
         <title>Event week</title>
@@ -234,6 +274,10 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
     </svg>
 
     <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted">
+      <span v-for="b in eventBars" :key="`legend-${b.key}`" class="flex items-center gap-1.5">
+        <span class="h-1 w-3 rounded-full" :style="{ background: b.fill }" aria-hidden="true" />
+        {{ b.label }}
+      </span>
       <span v-for="phase in phaseOrder" :key="phase" class="flex items-center gap-1.5">
         <span class="size-2.5 rounded-full" :class="phaseDotStyle(phase).class" :style="phaseDotStyle(phase).style" />
         {{ phaseLabel(phase) }}

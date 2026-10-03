@@ -16,6 +16,7 @@ import type {
   WeekDay,
   Workout,
   WorkoutStep,
+  LifeEvent,
 } from '@/api/types'
 import { localDate, weekdayAndDay, weekdayDateShort } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
@@ -23,6 +24,8 @@ import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
 import { summariseEfforts, type EffortGrade } from '@/utils/effortSummary'
 import { adjustmentNote, describeTarget, formatDuration, isPlanMadeSession, pickAnalysedSession, swapNote } from '@/utils/workoutMath'
 import AlternatesMenu from './AlternatesMenu.vue'
+import LifeEventBand from './LifeEventBand.vue'
+import { rangeLabel } from './lifeEvents'
 import FeelRating from './FeelRating.vue'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
@@ -57,6 +60,9 @@ const props = defineProps<{
   weatherDay?: WeatherDay
   weatherSuggestions?: WeatherSuggestion[]
   weatherAttribution?: string
+  // The life events covering this day: the card shows them, and hides the
+  // readiness chip, which has nothing to say about a day off.
+  lifeEvents?: LifeEvent[]
 }>()
 
 const emit = defineEmits<{
@@ -77,9 +83,19 @@ const emit = defineEmits<{
   // this card trying to patch props it doesn't own.
   rated: []
   backToToday: []
+  editLifeEvent: [e: LifeEvent]
+  lifeEventBack: [e: LifeEvent]
 }>()
 
 const showingToday = computed(() => props.isToday !== false)
+
+const onEventDay = computed(() => (props.lifeEvents?.length ?? 0) > 0)
+// Something to show besides the event: a session the rider kept, or a ride.
+const hasContent = computed(() => (props.day?.planned.length ?? 0) > 0 || (props.day?.completed.length ?? 0) > 0)
+// "I'm back" is for an event that is going on today.
+function canBeBack(e: LifeEvent): boolean {
+  return showingToday.value && !!props.day && e.startDate <= props.day.date && props.day.date <= e.endDate
+}
 
 // A day with the session ridden, fully or in part, shows what was ridden, not
 // the session still waiting to be done with its Send and Move buttons. A
@@ -279,9 +295,9 @@ function onRated(analysis: SessionAnalysis) {
         <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ eyebrow }}</p>
         <div class="flex items-center gap-2">
           <WeatherChip v-if="weatherDay" :day="weatherDay" :attribution="weatherAttribution" />
-          <ReadinessChip v-if="showingToday && readinessVerdict" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
+          <ReadinessChip v-if="showingToday && readinessVerdict && !onEventDay" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
           <UButton
-            v-else-if="!showingToday"
+            v-if="!showingToday"
             color="neutral"
             variant="ghost"
             size="xs"
@@ -293,7 +309,22 @@ function onRated(analysis: SessionAnalysis) {
         </div>
       </div>
 
-      <template v-if="day">
+      <div v-for="e in lifeEvents ?? []" :key="e.id" class="mt-2 flex flex-col gap-2 rounded-lg border border-default p-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex min-w-0 flex-col gap-1">
+            <LifeEventBand :event="e" />
+            <p class="text-sm text-muted">{{ rangeLabel(e) }}</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-pencil" @click="emit('editLifeEvent', e)">Edit</UButton>
+            <UButton v-if="canBeBack(e)" color="primary" variant="soft" size="sm" icon="i-lucide-undo-2" @click="emit('lifeEventBack', e)">
+              I’m back
+            </UButton>
+          </div>
+        </div>
+      </div>
+
+      <template v-if="day && (!onEventDay || hasContent)">
         <!-- Ridden: done, or partly done -->
         <div v-if="ridden" class="mt-2 flex flex-col gap-1">
           <div class="flex flex-wrap items-center gap-2">

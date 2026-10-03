@@ -18,7 +18,9 @@ import { useLibrary } from '@/composables/useLibrary'
 import type {
   BuildFtpTestRequest,
   FtpTests,
+  LifeEvent,
   Me,
+  PlanEditResponse,
   PeriodizationPlan,
   ProjectionResponse,
   ReadinessResponse,
@@ -35,7 +37,10 @@ import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import GoalsSection from '@/components/plan/GoalsSection.vue'
 import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
+import LifeEventModal from '@/components/plan/LifeEventModal.vue'
+import { eventsOn } from '@/components/plan/lifeEvents'
 import LinkRideModal from '@/components/plan/LinkRideModal.vue'
+import PlanEditBox from '@/components/plan/PlanEditBox.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import RouteDemandsCard from '@/components/plan/RouteDemandsCard.vue'
@@ -615,6 +620,63 @@ function fromRoute() {
   router.push('/')
 }
 
+// --- life events: travel, illness, a busy spell. The modal owns the form, the
+// preview and the apply; the page only opens it (new, edit, "I'm back" or a
+// natural-language proposal) and reloads whatever an apply can change. ---
+
+const lifeEvents = ref<LifeEvent[]>([])
+const lifeModalOpen = ref(false)
+const lifeModalEvent = ref<LifeEvent | undefined>(undefined)
+const lifeModalEndEarly = ref(false)
+const lifeModalProposal = ref<PlanEditResponse | null>(null)
+
+async function loadLifeEvents() {
+  try {
+    lifeEvents.value = (await api.lifeEvents()).events
+  } catch {
+    // Optional, like readiness: without it the page just draws no bars.
+    lifeEvents.value = []
+  }
+}
+
+function openLifeEvent(event?: LifeEvent, endEarly = false) {
+  lifeModalEvent.value = event
+  lifeModalEndEarly.value = endEarly
+  lifeModalProposal.value = null
+  lifeModalOpen.value = true
+}
+
+async function onLifeChanged() {
+  await Promise.all([loadWeek(), loadWorkouts(), loadReadiness(), loadFtpTests(), loadLifeEvents(), loadWeather()])
+}
+
+// The natural-language box. A proposal is shown in the same modal as a
+// preview; a failure or an empty answer stays under the box.
+const proposingEdit = ref(false)
+const planEditMessage = ref('')
+
+async function proposeEdit(text: string) {
+  proposingEdit.value = true
+  planEditMessage.value = ''
+  try {
+    const res = await api.proposePlanEdit(text, todayISO())
+    if (res.items.length === 0 && res.dropped.length === 0 && !res.unsupported) {
+      planEditMessage.value = 'Nothing to change there. Try the Life event form.'
+      return
+    }
+    lifeModalEvent.value = undefined
+    lifeModalEndEarly.value = false
+    lifeModalProposal.value = res
+    lifeModalOpen.value = true
+  } catch (err) {
+    planEditMessage.value = err instanceof ApiError && err.status === 502 ? err.message : `Could not propose that: ${errorMessage(err)}`
+  } finally {
+    proposingEdit.value = false
+  }
+}
+
+const cardLifeEvents = computed(() => eventsOn(lifeEvents.value, cardDay.value?.date))
+
 // --- replan: rebuilds today → Sunday from current levels, availability,
 // goal phase and readiness. Confirmed with a modal first — unlike Fill,
 // which only ever adds workouts to empty days, this one removes plan-made
@@ -709,6 +771,7 @@ onMounted(() => {
   loadReadiness()
   loadFtpTests()
   loadWeather()
+  loadLifeEvents()
   startGoalFromRoute()
 })
 </script>
@@ -752,6 +815,9 @@ onMounted(() => {
           :weather-day="weatherBadDay(cardDay?.date)"
           :weather-suggestions="cardWeatherSuggestions"
           :weather-attribution="weatherAttribution"
+          :life-events="cardLifeEvents"
+          @edit-life-event="(e: LifeEvent) => openLifeEvent(e)"
+          @life-event-back="(e: LifeEvent) => openLifeEvent(e, true)"
           @weather-keep="weatherKeepOutdoors"
           @push="pushWorkoutToGarmin"
           @edit="openEditWorkout"
@@ -783,6 +849,8 @@ onMounted(() => {
         @snooze="snoozeFtpTest"
       />
 
+      <PlanEditBox v-if="me?.narrationEnabled" :loading="proposingEdit" :message="planEditMessage" @submit="proposeEdit" />
+
       <WeekStrip
         v-if="week"
         :week="week"
@@ -803,6 +871,7 @@ onMounted(() => {
         @ftp-test="ftpModalOpen = true"
         @train-now="trainNowOpen = true"
         @link-ride="rideLink.openFor"
+        @life-event="openLifeEvent()"
       />
 
       <SeasonTimeline
@@ -812,6 +881,7 @@ onMounted(() => {
         :today="week.today"
         :selected-start="week.start"
         :events="projection?.events"
+        :life-events="lifeEvents"
         @select="selectSeasonWeek"
       />
 
@@ -880,6 +950,14 @@ onMounted(() => {
       :candidates="rideLink.candidates.value"
       :busy="rideLink.busy.value"
       @link="rideLink.link"
+    />
+
+    <LifeEventModal
+      v-model:open="lifeModalOpen"
+      :event="lifeModalEvent"
+      :end-early="lifeModalEndEarly"
+      :proposal="lifeModalProposal"
+      @changed="onLifeChanged"
     />
 
     <TrainNowSlideover v-model:open="trainNowOpen" :today="today" @applied="reloadAfterSwap" />

@@ -16,9 +16,11 @@ package lifeevents
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -243,6 +245,9 @@ const (
 	OpShort  = "shorten"
 	OpIndoor = "indoor"
 	OpAdd    = "add"
+	// OpSwap is not produced by a life event: it is the display of a single
+	// swap-for-an-alternate the natural-language box proposed.
+	OpSwap = "swap"
 )
 
 // Change is one line of a preview: what would happen to one session, and why.
@@ -273,6 +278,56 @@ type Change struct {
 	// ReKeepIndoor asks apply to run its indoor hook over Update when the
 	// session is indoor, so an eased session stays on the trainer.
 	ReKeepIndoor bool
+	// Ramp says which return ramp an ease or shorten belongs to, for the record
+	// of why an automatic one was made; nil for every other change.
+	Ramp *RampInfo
+}
+
+// RampInfo is what a return-ramp change was decided on: the event, when it
+// ended, and how far into the return the session falls.
+type RampInfo struct {
+	Kind, Option, End string
+	// Day is the ramp day of the session (1 is the day after the event ends);
+	// EasyDays and UntilDay are the event's ramp (see Ramp).
+	Day, EasyDays, UntilDay int
+}
+
+// rampNotePrefix starts every note a life event leaves in a session's
+// description, after the adjusted marker.
+const rampNotePrefix = "Life event:"
+
+// KeptMarker is written into a session whose ease or shortening the rider
+// unticked in a preview. The return ramp reads it and leaves the session alone,
+// so a skip sticks instead of being redone by the next adaptation pass.
+const KeptMarker = "Kept as planned by you through the return to training."
+
+// Touched reports whether a life event has changed this description, or the
+// rider has chosen to keep it through one: a move, an ease, a shortening or a
+// skip. Replan leaves such a session where it is, because the blackout keeps
+// the plan from rebuilding what a life event took away.
+func Touched(description string) bool {
+	return strings.Contains(description, "Rescheduled by a life event") ||
+		strings.Contains(description, "Rescheduled again by a life event") ||
+		strings.Contains(description, scheduler.AdjustedMarker+" "+rampNotePrefix) ||
+		strings.Contains(description, KeptMarker)
+}
+
+// NoRideReason is why the rider cannot ride on date because of a life event,
+// "" when nothing stops them: a proper illness, or a trip with no bike. A hotel
+// gym, a mild illness, a busy day and a day off all leave the choice to them.
+func NoRideReason(events []Event, date string) string {
+	for _, e := range events {
+		if e.Start > date || date > e.End {
+			continue
+		}
+		switch {
+		case e.Kind == KindIllness && Normalize(e).Option == OptionProper:
+			return "You are ill, so there is nothing to suggest today. Rest is the plan."
+		case e.Kind == KindTravel && Normalize(e).Option == OptionNoBike:
+			return "You are travelling without a bike, so there is nothing to suggest today."
+		}
+	}
+	return ""
 }
 
 // Note is a session a preview leaves alone, and why.
@@ -309,6 +364,10 @@ type Input struct {
 	// fall in, built by the caller from scheduler.WeekWorkouts; Preview picks
 	// which of them go back.
 	Refill []workout.CreateWorkoutRequest
+	// RampAll applies the return ramp of every event that has one, not only of
+	// events new or changed in this edit. The automatic pass that ramps weeks
+	// filled after the event was made sets it; a preview does not.
+	RampAll bool
 	// Now carries the rider's zone: today is its calendar date.
 	Now  time.Time
 	Caps Capabilities

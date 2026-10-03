@@ -91,6 +91,10 @@ type Server struct {
 	// season pass. Tests only: it lets one hold the pass back to observe what
 	// the request had done by the time it answered.
 	BeforeSeasonFill func()
+	// AfterLifeEventSaved, when set, runs once a life event has been written
+	// and before its diff is applied; an error from it stands in for a failed
+	// write, so tests can reach the rollback. Nil in production.
+	AfterLifeEventSaved func() error
 	// SeasonFillRetry is how long a background season pass waits before
 	// trying again when the scheduling lock is held elsewhere. Zero means
 	// the default.
@@ -532,6 +536,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/training/weather/location", s.handleDeleteWeatherLocation)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
+	mux.HandleFunc("POST /api/training/plan/propose-edit", s.handleProposePlanEdit)
+	mux.HandleFunc("GET /api/training/life-events", s.handleListLifeEvents)
+	mux.HandleFunc("POST /api/training/life-events", s.handleCreateLifeEvent)
+	mux.HandleFunc("PUT /api/training/life-events/{id}", s.handleUpdateLifeEvent)
+	mux.HandleFunc("DELETE /api/training/life-events/{id}", s.handleDeleteLifeEvent)
 	mux.HandleFunc("GET /api/training/tests", s.handleGetFTPTests)
 	mux.HandleFunc("POST /api/training/tests/ftp/snooze", s.handleSnoozeFTPTest)
 	mux.HandleFunc("POST /api/training/tests/ftp", s.handleBuildFTPTest)

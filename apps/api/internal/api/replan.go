@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -202,6 +203,12 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		// An indoor version is the rider's own choice, made by hand. Rebuilding
 		// the day would put the road session back and lose it silently.
 		if wk.Indoor {
+			continue
+		}
+		// A session a life event moved or eased, or one the rider chose to keep
+		// through it, stays: the blackout would keep the plan from rebuilding
+		// what the event took away, so deleting it here would lose it for good.
+		if lifeevents.Touched(wk.Description) {
 			continue
 		}
 		if wk.Date == today && riddenToday[wk.ID] {
