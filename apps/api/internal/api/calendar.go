@@ -62,41 +62,59 @@ func isCalendarFeedPath(p string) bool {
 }
 
 // bypassesAuth is the whole of the authenticate exemption for the feed: a GET
-// of exactly the feed path. A forged Remote-User or a cookie on such a request
-// is never looked at.
+// or HEAD of exactly the feed path. A forged Remote-User or a cookie on such a
+// request is never looked at. HEAD is the same handler with no body (Go's
+// server drops it), which some calendar apps and link checkers use to see
+// whether the feed changed; it reads nothing a GET does not.
 func bypassesAuth(r *http.Request) bool {
-	return r.Method == http.MethodGet && isCalendarFeedPath(r.URL.Path)
+	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && isCalendarFeedPath(r.URL.Path)
 }
 
-// secretPathPrefixes are the paths whose next segment is a bearer secret: a
-// calendar token or a route-share token. Anything that copies a request path
-// somewhere a third party or an operator reads (the debug log, a span name)
-// goes through redactPath first.
-var secretPathPrefixes = []string{calendarPrefix, "/api/shares/"}
-
-// redactPath replaces the secret segment of a path with [redacted]. A calendar
-// token keeps its .ics suffix so the shape stays recognisable; whatever
-// follows the segment (a share's /track) is kept.
+// redactPath replaces every secret segment of a path with [redacted], for
+// anything that copies a request path somewhere a third party or an operator
+// reads (the debug log, a span name, the url.path attribute).
+//
+// A segment is secret when it has the shape of a token (43 base64url
+// characters, optionally with .ics in any case), wherever it sits, or when it
+// is the segment right after api/calendar or api/shares. Matching is by
+// segment, ignoring empty and "." / ".." segments for the "after" rule and
+// folding case, so non-canonical spellings of the same URL (//api/calendar/x,
+// /./, /API/...) cannot carry a token past it. The shape of everything else,
+// the .ics suffix and a share's /track, is kept.
 func redactPath(p string) string {
-	for _, prefix := range secretPathPrefixes {
-		rest, ok := strings.CutPrefix(p, prefix)
-		if !ok || rest == "" {
+	segs := strings.Split(p, "/")
+	var sig []string // the meaningful segments seen so far
+	for i, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." {
 			continue
 		}
-		seg, tail := rest, ""
-		if i := strings.IndexByte(rest, '/'); i >= 0 {
-			seg, tail = rest[:i], rest[i:]
+		body, suffix := seg, ""
+		if len(seg) >= len(calendarSuffix) && strings.EqualFold(seg[len(seg)-len(calendarSuffix):], calendarSuffix) {
+			body, suffix = seg[:len(seg)-len(calendarSuffix)], seg[len(seg)-len(calendarSuffix):]
 		}
-		if seg == "" {
-			continue
+		follows := len(sig) >= 2 && strings.EqualFold(sig[len(sig)-2], "api") &&
+			(strings.EqualFold(sig[len(sig)-1], "calendar") || strings.EqualFold(sig[len(sig)-1], "shares"))
+		if follows || isTokenShaped(body) {
+			segs[i] = "[redacted]" + suffix
 		}
-		suffix := ""
-		if prefix == calendarPrefix && strings.HasSuffix(seg, calendarSuffix) {
-			suffix = calendarSuffix
-		}
-		return prefix + "[redacted]" + suffix + tail
+		sig = append(sig, seg)
 	}
-	return p
+	return strings.Join(segs, "/")
+}
+
+// isTokenShaped is 43 base64url characters: what a calendar or share token
+// looks like, whatever path it turns up in.
+func isTokenShaped(s string) bool {
+	if len(s) != calendarTokenLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 type realPathKey struct{}
@@ -158,6 +176,13 @@ func (s *Server) handleCalendarFeed(w http.ResponseWriter, r *http.Request) {
 		h.Set("Retry-After", "60")
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many requests"})
 	}
+	// TODO: check the miss bucket (without spending it) before the Lookup, so a
+	// flood of random well-formed tokens is shed before it reaches the
+	// database. Left out on purpose: the bucket is global, so once a flood
+	// empties it the shed would also 429 the real tokens that are still
+	// fetching fine today, turning a database-load nuisance into a way to lock
+	// every rider's calendar out. Per-client keying (needs a trustworthy client
+	// address behind the proxy) is what would make it safe.
 	miss := func() {
 		if s.CalendarMissLimiter != nil && !s.CalendarMissLimiter.Allow("miss") {
 			tooMany()

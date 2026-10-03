@@ -507,6 +507,22 @@ func TestTokensNeverReachLogsOrSpans(t *testing.T) {
 			h.as("wilant", http.MethodGet, "/api/shares/"+shareTok)
 			h.as("wilant", http.MethodGet, "/api/shares/"+shareTok+"/track")
 
+			// Non-canonical spellings of the same URLs: the mux would clean or
+			// redirect them, but the log and the spans see them first.
+			for _, odd := range []string{
+				"//api/calendar/" + tok + ".ics",
+				"/./api/calendar/" + tok + ".ics",
+				"/api/./calendar//" + tok + ".ics",
+				"/API/Calendar/" + tok + ".ICS",
+				"/api/calendar/../calendar/" + tok + ".ics",
+				"/api/calendar/%2e%2e/" + tok + ".ics",
+				"/x/" + tok + ".ics",
+				"//api//shares//" + shareTok + "/track",
+				"/API/SHARES/" + shareTok,
+			} {
+				h.do(http.MethodGet, odd, nil)
+			}
+
 			logs := h.logs.String()
 			if !strings.Contains(logs, "/api/calendar/[redacted].ics") || !strings.Contains(logs, "/api/shares/[redacted]") {
 				t.Errorf("the debug request log should show the redacted path:\n%s", logs)
@@ -657,5 +673,39 @@ func TestCalendarGenerateIs412WithoutAPublicURL(t *testing.T) {
 				t.Error("a feed was created despite the 412")
 			}
 		})
+	}
+}
+
+// HEAD is the same handler as GET with no body, and exempt from the gate on
+// the exact feed path only.
+func TestCalendarFeedAnswersHEADWithoutASession(t *testing.T) {
+	for engine, dsn := range calendarEngines(t) {
+		for _, mode := range []auth.Mode{auth.ModeProxy, auth.ModeOIDC} {
+			t.Run(engine+"/"+string(mode), func(t *testing.T) {
+				h := newCalHarness(t, mode, dsn, calendarPublicURL)
+				path := h.generate("wilant")
+				get := h.do(http.MethodGet, path, nil)
+				head := h.do(http.MethodHead, path, nil)
+				if head.code != http.StatusOK || head.body != "" {
+					t.Fatalf("anonymous HEAD = %d with %d body bytes, want 200 and none", head.code, len(head.body))
+				}
+				if head.header.Get("ETag") == "" || head.header.Get("ETag") != get.header.Get("ETag") {
+					t.Errorf("HEAD ETag %q, GET ETag %q", head.header.Get("ETag"), get.header.Get("ETag"))
+				}
+				if head.header.Get("Content-Type") != get.header.Get("Content-Type") {
+					t.Errorf("HEAD Content-Type %q differs from GET's", head.header.Get("Content-Type"))
+				}
+				tok := strings.TrimSuffix(strings.TrimPrefix(path, "/api/calendar/"), ".ics")
+				for _, p := range []string{"/api/calendar/", "/api/calendar/x/y.ics", path + "/", "/api/calendar/" + tok} {
+					if r := h.do(http.MethodHead, p, nil); r.code != http.StatusUnauthorized {
+						t.Errorf("anonymous HEAD %s = %d, want the gate's 401", p, r.code)
+					}
+				}
+				// An unknown token over HEAD is the same 404 as over GET.
+				if r := h.do(http.MethodHead, "/api/calendar/"+strings.Repeat("U", 43)+".ics", nil); r.code != http.StatusNotFound {
+					t.Errorf("HEAD of an unknown token = %d, want 404", r.code)
+				}
+			})
+		}
 	}
 }

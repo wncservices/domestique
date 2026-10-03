@@ -53,6 +53,18 @@ func TestRedactPath(t *testing.T) {
 		"/api/health":                      "/api/health",
 		"/":                                "/",
 		"/api/calendar/":                   "/api/calendar/",
+		// Non-canonical spellings of the same URLs.
+		"//api/calendar/" + tok43 + ".ics":            "//api/calendar/[redacted].ics",
+		"/./api/calendar/" + tok43 + ".ics":           "/./api/calendar/[redacted].ics",
+		"/api/./calendar//" + tok43 + ".ics":          "/api/./calendar//[redacted].ics",
+		"/API/Calendar/" + tok43 + ".ICS":             "/API/Calendar/[redacted].ICS",
+		"/api/calendar/../calendar/" + tok43 + ".ics": "/api/calendar/../[redacted]/[redacted].ics",
+		"/api/calendar/x/../" + tok43 + ".ics":        "/api/calendar/[redacted]/../[redacted].ics",
+		"/anywhere/" + tok43 + ".ics":                 "/anywhere/[redacted].ics",
+		"/anywhere/" + tok43:                          "/anywhere/[redacted]",
+		"//API//Shares//" + tok43 + "/track":          "//API//Shares//[redacted]/track",
+		"/api/calendar/" + tok43 + "a.ics":            "/api/calendar/[redacted].ics",
+		"/api/routes/" + tok43[:42]:                   "/api/routes/" + tok43[:42],
 	}
 	for in, want := range cases {
 		if got := redactPath(in); got != want {
