@@ -296,6 +296,7 @@ const canRouteEditing = computed(() => {
     !w.testProtocol &&
     w.plannedSeconds > 0 &&
     !!w.date &&
+    eventsOn(lifeEvents.value, w.date).length === 0 &&
     w.date >= todayISO()
   )
 })

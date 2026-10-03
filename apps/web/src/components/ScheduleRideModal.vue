@@ -10,7 +10,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
-import { api, ApiError } from '@/api/client'
+import { api } from '@/api/client'
 import type { Route, ScheduleSituation } from '@/api/types'
 import { formatDuration } from '@/utils/workoutMath'
 import { todayISO } from '@/utils/rideDates'
@@ -46,7 +46,8 @@ async function load() {
     workoutId.value = s.sessions.length === 1 ? s.sessions[0]!.id : ''
   } catch (err) {
     if (mine !== ticket) return
-    error.value = err instanceof ApiError && err.status === 409 ? 'That day has already passed.' : err instanceof Error ? err.message : String(err)
+    // 409 carries its own plain words: the day has passed, or you are away (a life event covers it).
+    error.value = err instanceof Error ? err.message : String(err)
   } finally {
     if (mine === ticket) loading.value = false
   }
