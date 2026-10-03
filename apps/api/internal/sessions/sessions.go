@@ -223,11 +223,14 @@ func (s *Store) CanStore() bool { return s != nil && s.box != nil }
 // auth.Authenticator.identifyFromSession, never trusted from storage, so it
 // has no business being in the ciphertext in the first place.
 type storedIdentity struct {
-	User   string   `json:"user"`
-	Name   string   `json:"name,omitempty"`
-	Email  string   `json:"email,omitempty"`
-	Groups []string `json:"groups,omitempty"`
-	Sub    string   `json:"sub,omitempty"`
+	User  string `json:"user"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+	// EmailVerified is the issuer's email_verified claim. A session sealed
+	// before this field existed has none and reads as unverified.
+	EmailVerified bool     `json:"emailVerified,omitempty"`
+	Groups        []string `json:"groups,omitempty"`
+	Sub           string   `json:"sub,omitempty"`
 }
 
 // Create issues a session for id and returns the opaque cookie value.
@@ -248,7 +251,7 @@ func (s *Store) Create(id auth.Identity, ttl time.Duration) (token string, expir
 	expiresAt = now.Add(ttl)
 
 	raw, err := json.Marshal(storedIdentity{
-		User: id.User, Name: id.Name, Email: id.Email, Groups: id.Groups, Sub: id.Sub,
+		User: id.User, Name: id.Name, Email: id.Email, EmailVerified: id.EmailVerified, Groups: id.Groups, Sub: id.Sub,
 	})
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sessions: encoding identity: %w", err)
@@ -319,7 +322,7 @@ func (s *Store) Lookup(token string) (auth.Identity, bool) {
 		return auth.Identity{}, false
 	}
 	return auth.Identity{
-		User: stored.User, Name: stored.Name, Email: stored.Email, Groups: stored.Groups, Sub: stored.Sub,
+		User: stored.User, Name: stored.Name, Email: stored.Email, EmailVerified: stored.EmailVerified, Groups: stored.Groups, Sub: stored.Sub,
 	}, true
 }
 
@@ -340,7 +343,7 @@ func (s *Store) UpdateName(token, name string) error {
 	}
 
 	raw, err := json.Marshal(storedIdentity{
-		User: id.User, Name: name, Email: id.Email, Groups: id.Groups, Sub: id.Sub,
+		User: id.User, Name: name, Email: id.Email, EmailVerified: id.EmailVerified, Groups: id.Groups, Sub: id.Sub,
 	})
 	if err != nil {
 		return fmt.Errorf("sessions: encoding identity: %w", err)

@@ -68,33 +68,45 @@ type calHarness struct {
 
 var calendarNow = time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC)
 
-// calendarEngines yields a DSN per engine; PostgreSQL gets a schema of its own
-// so a parallel package's tables never see these rows.
+// calendarEngines yields the engines to run against: a marker for SQLite and
+// the base DSN for PostgreSQL. Each harness gets its own database from
+// freshDSN, so one test's rows never leak into the next.
 func calendarEngines(t *testing.T) map[string]string {
 	t.Helper()
-	out := map[string]string{"sqlite": filepath.Join(t.TempDir(), "cal.db")}
+	out := map[string]string{"sqlite": ""}
 	if dsn := os.Getenv("DOMESTIQUE_TEST_POSTGRES"); dsn != "" {
-		name := fmt.Sprintf("cal_%d", time.Now().UnixNano())
-		admin, err := sql.Open("pgx", dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := admin.Exec(`CREATE SCHEMA ` + name); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			_, _ = admin.Exec(`DROP SCHEMA ` + name + ` CASCADE`)
-			_ = admin.Close()
-		})
-		out["postgres"] = dsn + "&search_path=" + name
+		out["postgres"] = dsn
 	}
 	return out
+}
+
+// freshDSN is a database nobody else has used: a new file for SQLite, a new
+// schema (dropped afterwards) for PostgreSQL, so a parallel package's tables
+// never see these rows either.
+func freshDSN(t *testing.T, base string) string {
+	t.Helper()
+	if base == "" {
+		return filepath.Join(t.TempDir(), "cal.db")
+	}
+	name := fmt.Sprintf("cal_%d", time.Now().UnixNano())
+	admin, err := sql.Open("pgx", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(`CREATE SCHEMA ` + name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(`DROP SCHEMA ` + name + ` CASCADE`)
+		_ = admin.Close()
+	})
+	return base + "&search_path=" + name
 }
 
 func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *calHarness {
 	t.Helper()
 
-	db, err := source.OpenDB(dsn)
+	db, err := source.OpenDB(freshDSN(t, dsn))
 	if err != nil {
 		t.Fatal(err)
 	}
