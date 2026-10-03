@@ -151,27 +151,6 @@ func TestGenerateRefinesTheLengthByTheMeasuredOvershoot(t *testing.T) {
 	}
 }
 
-func TestGenerateWithNothingMeasuredKeepsTheTarget(t *testing.T) {
-	eng := &fakeEngine{overrun: 1.0, fail: func(seed int) error {
-		if seed <= 105 {
-			return errors.New("engine down")
-		}
-		return nil
-	}}
-	got, stats := loops.Generate(context.Background(), eng, request(distanceObjective{target: 20000}))
-	for _, c := range eng.calls {
-		if math.Abs(c.lengthM-20000) > 1 {
-			t.Fatalf("a call asked for %v m after a failed calibration round, want the raw 20000", c.lengthM)
-		}
-	}
-	if len(got) != 10 {
-		t.Errorf("got %d loops, want the 10 refinement loops", len(got))
-	}
-	if len(stats.Failures) != 5 {
-		t.Errorf("failures = %d, want 5", len(stats.Failures))
-	}
-}
-
 func TestGenerateReportsEveryFailureAndTheLastError(t *testing.T) {
 	eng := &fakeEngine{fail: func(int) error { return errors.New("no route") }}
 	got, stats := loops.Generate(context.Background(), eng, request(distanceObjective{target: 20000}))

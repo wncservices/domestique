@@ -102,7 +102,12 @@ type Request struct {
 	// together they are the most engine calls the request can spend.
 	CalibrationSeeds int
 	RefinementSeeds  int
-	Objective        Objective
+	// StopWhenCalibrationFails skips the second round when every calibration
+	// call failed. The route builder's suggest keeps its old behaviour (it
+	// always spends the whole budget, and a test pins that); a ride's route,
+	// which shares a tighter quota, sets this.
+	StopWhenCalibrationFails bool
+	Objective                Objective
 }
 
 // NewSeedBase returns a fresh random base for one request — not a fixed
@@ -130,14 +135,19 @@ func Generate(ctx context.Context, client routing.Client, req Request) ([]Loop, 
 	}
 	round1 := fireRound(ctx, client, req.Start, target, calibration, req.Profile, req.Hilliness)
 
-	refined := obj.Refine(successes(round1))
-	refinement := make([]int, req.RefinementSeeds)
-	for i := range refinement {
-		refinement[i] = req.SeedBase + req.CalibrationSeeds + i + 1
+	all := round1
+	// With StopWhenCalibrationFails, no second round when every calibration
+	// call failed: an engine that is down, out of quota or refusing the key will fail the seven again, and
+	// each one is a call against a shared quota.
+	if !req.StopWhenCalibrationFails || len(successes(round1)) > 0 {
+		refined := obj.Refine(successes(round1))
+		refinement := make([]int, req.RefinementSeeds)
+		for i := range refinement {
+			refinement[i] = req.SeedBase + req.CalibrationSeeds + i + 1
+		}
+		round2 := fireRound(ctx, client, req.Start, refined, refinement, req.Profile, req.Hilliness)
+		all = append(round1, round2...)
 	}
-	round2 := fireRound(ctx, client, req.Start, refined, refinement, req.Profile, req.Hilliness)
-
-	all := append(round1, round2...)
 	stats := Stats{Attempts: len(all)}
 	for _, a := range all {
 		if a.err != nil {

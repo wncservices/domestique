@@ -2584,7 +2584,7 @@ func (s *Server) handleRouteBuilderSuggest(w http.ResponseWriter, r *http.Reques
 		// library as a whole. Still worth a Warn and the shared error
 		// metric, so an operator sees an engine that is intermittently
 		// flaky even on requests that otherwise succeed.
-		s.logger().Warn("route builder suggestion seed failed", "seed", f.Seed, "err", f.Err, "by", rider)
+		s.logger().Warn("route builder suggestion seed failed", "seed", f.Seed, "cause", loops.FailureClass(f.Err), "by", rider)
 		recordRouteBuilderError(r.Context(), "suggest")
 	}
 	attempted, lastErr := stats.Attempts, stats.LastErr
