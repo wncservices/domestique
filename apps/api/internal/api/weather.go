@@ -107,6 +107,8 @@ type weatherSuggestionDTO struct {
 	Worst     string   `json:"worst,omitempty"`
 	CanSwitch bool     `json:"canSwitch"`
 	AltDate   string   `json:"altDate,omitempty"`
+	// CrewRide is set for a fixed crew ride: information only, never a switch.
+	CrewRide bool `json:"crewRide,omitempty"`
 }
 
 // weatherDTO is the rider's opt-in plus, when they have one, what the forecast
@@ -223,7 +225,7 @@ func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 	for _, sg := range weather.Suggest(forecast, workouts, ridden, opts) {
 		out.Suggestions = append(out.Suggestions, weatherSuggestionDTO{
 			WorkoutID: sg.WorkoutID, Date: sg.Date, Reasons: nonNilStrings(sg.Reasons),
-			Worst: weather.WorstCode(sg.Codes), CanSwitch: sg.CanSwitch, AltDate: sg.AltDate,
+			Worst: weather.WorstCode(sg.Codes), CanSwitch: sg.CanSwitch, AltDate: sg.AltDate, CrewRide: sg.CrewRide,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

@@ -1105,6 +1105,17 @@ export interface ReadinessResponse {
   /** Forecast for tomorrow's hard session — absent when tomorrow has no
    *  eligible workout or the forecast is ready. Mirrors tomorrowForecastDTO. */
   tomorrow?: TomorrowForecast
+  /** Advice for a crew ride today, or tomorrow from the forecast, when the
+   *  rider is not ready. Advice only: the ride is never changed. */
+  crewRide?: CrewRideAdvice
+}
+
+/** Mirrors crewAdviceDTO in internal/api/crewadvice.go. */
+export interface CrewRideAdvice {
+  date: string
+  routeName: string
+  severity: 'caution' | 'rest'
+  advice: string
 }
 
 /** A forecast, not a verdict: tomorrow morning's own readiness check still
@@ -1695,6 +1706,8 @@ export interface WeatherSuggestion {
   canSwitch: boolean
   /** A later dry, free, available day, for riders who cannot switch. */
   altDate?: string
+  /** A fixed crew ride: information only, never a switch or another day. */
+  crewRide?: boolean
 }
 
 /** GET /api/training/weather. `days` and `suggestions` are always arrays, empty

@@ -75,6 +75,9 @@ type readinessResponseDTO struct {
 	Today    readinessTodayDTO    `json:"today"`
 	Days     []dailyWellnessDTO   `json:"days"`
 	Tomorrow *tomorrowForecastDTO `json:"tomorrow,omitempty"`
+	// CrewRide is advice for a crew ride today, or tomorrow from the forecast,
+	// when the rider is not ready. It never changes the ride.
+	CrewRide *crewAdviceDTO `json:"crewRide,omitempty"`
 }
 
 // readinessDisplayDays is how many of the most recent daily_wellness rows
@@ -152,6 +155,17 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 			Reasons: forecast.Reasons, WorkoutID: target.ID, WorkoutName: target.Name,
 		}
 	}
+	workouts, err := s.Training.ListWorkouts(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	profile, _, err := s.Training.GetProfile(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	out.CrewRide = s.crewRideAdvice(r.Context(), rider, today, assessment.Verdict, workouts, sessions, latest, profile, blackout)
 	writeJSON(w, http.StatusOK, out)
 }
 
