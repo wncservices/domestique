@@ -179,6 +179,13 @@ async function showPreview() {
   }
 }
 
+// Back from a preview. After "Delete event" the mode is delete; the form is the
+// edit form again, and Preview and Apply must edit, not delete.
+function backToForm() {
+  if (mode.value === 'delete') mode.value = 'edit'
+  step.value = 'form'
+}
+
 function startDelete() {
   mode.value = 'delete'
   void showPreview()
@@ -395,7 +402,7 @@ async function applyProposal() {
             @cancel="open = false"
           />
           <div class="-mt-2">
-            <UButton v-if="!props.endEarly" color="neutral" variant="link" size="sm" icon="i-lucide-arrow-left" :disabled="busy" @click="step = 'form'">
+            <UButton v-if="!props.endEarly" color="neutral" variant="link" size="sm" icon="i-lucide-arrow-left" :disabled="busy" @click="backToForm">
               Back to the form
             </UButton>
           </div>
