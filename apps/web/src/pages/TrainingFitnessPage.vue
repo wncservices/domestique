@@ -13,6 +13,7 @@ import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, Progress
 import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
+import MorningSummaryCard from '@/components/fitness/MorningSummaryCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RaceDayCard from '@/components/fitness/RaceDayCard.vue'
@@ -421,6 +422,8 @@ onMounted(() => {
     />
 
     <CalendarFeedCard />
+
+    <MorningSummaryCard />
 
     <UCard variant="outline">
       <template #header>
