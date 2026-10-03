@@ -63,6 +63,10 @@ const props = defineProps<{
   // The life events covering this day: the card shows them, and hides the
   // readiness chip, which has nothing to say about a day off.
   lifeEvents?: LifeEvent[]
+  // "Route for this ride" needs a routing engine; false (or absent) hides it.
+  routingConfigured?: boolean
+  // True while the course is being sent to the rider's devices.
+  sendingCourse?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -85,6 +89,11 @@ const emit = defineEmits<{
   backToToday: []
   editLifeEvent: [e: LifeEvent]
   lifeEventBack: [e: LifeEvent]
+  // Open "Route for this ride", remove the linked route, or send its course
+  // to the rider's devices. The page owns the calls.
+  route: [w: Workout]
+  removeRoute: [w: Workout]
+  sendCourse: [w: Workout]
 }>()
 
 const showingToday = computed(() => props.isToday !== false)
@@ -194,8 +203,41 @@ const alternatesWorkout = computed(() => props.day?.planned.find(isPlanMadeSessi
 const canOfferAlternates = computed(() => {
   const day = props.day
   if (!alternatesWorkout.value || !day) return false
+  // A swap changes what a route was chosen for; remove the route first.
+  if (alternatesWorkout.value.route) return false
   return day.completed.length === 0 && day.date >= todayISO()
 })
+
+// A route can be made for an outdoor cycling ride that is still ahead of the
+// rider: not indoor (an indoor ride needs none), not an FTP test, not ridden,
+// not past. The API is the judge and answers 409 for anything else.
+const canRoute = computed(() => {
+  const w = firstWorkout.value
+  const day = props.day
+  if (!props.routingConfigured || !w || !day || w.sport !== 'cycling') return false
+  if (w.indoor || w.testProtocol || w.plannedSeconds <= 0) return false
+  return day.completed.length === 0 && day.date >= todayISO()
+})
+
+// The route as the ride's own card shows it. While the ride is indoor the link
+// is kept but not used, so nothing is shown.
+const activeRoute = computed(() => {
+  const r = firstWorkout.value?.route
+  return r && !r.inactive ? r : undefined
+})
+
+// The route was chosen for the ride as planned; readiness easing can shorten
+// the ride afterwards. Say so when they differ by more than a fifth.
+const routeMismatch = computed(() => {
+  const w = firstWorkout.value
+  const r = activeRoute.value
+  if (!w || !r || w.plannedSeconds <= 0 || r.estimatedSeconds <= 0) return ''
+  if (Math.abs(r.estimatedSeconds - w.plannedSeconds) <= 0.2 * w.plannedSeconds) return ''
+  const when = props.day?.date === todayISO() ? "today's" : 'the'
+  return `The route takes about ${formatDuration(r.estimatedSeconds)}; ${when} ride is now ${formatDuration(w.plannedSeconds)}.`
+})
+
+const isRideDay = computed(() => props.day?.date === todayISO())
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
 
@@ -412,6 +454,37 @@ function onRated(analysis: SessionAnalysis) {
             title="Testing tired under-reads your FTP"
             description="Your readiness is low today. A test on fresher legs gives a number you can trust."
           />
+          <div v-if="activeRoute" class="flex flex-col gap-1 rounded-lg border border-default bg-elevated/50 p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <UIcon name="i-lucide-route" class="size-4 text-primary" />
+              <span class="text-sm font-medium text-highlighted">{{ activeRoute.name }}</span>
+              <UBadge v-if="activeRoute.generated" color="neutral" variant="subtle">Made for this ride</UBadge>
+            </div>
+            <p class="font-mono tabular-nums text-xs text-muted">
+              {{ (activeRoute.distanceM / 1000).toFixed(1) }} km · {{ Math.round(activeRoute.ascentM) }} m up · about
+              {{ formatDuration(activeRoute.estimatedSeconds) }}
+            </p>
+            <p v-if="routeMismatch" class="text-xs text-warning">{{ routeMismatch }}</p>
+            <div class="mt-1 flex flex-wrap items-center gap-2">
+              <UButton v-if="canRoute" color="neutral" variant="outline" size="xs" icon="i-lucide-refresh-cw" @click="emit('route', firstWorkout)">
+                Change
+              </UButton>
+              <UButton color="neutral" variant="ghost" size="xs" icon="i-lucide-x" @click="emit('removeRoute', firstWorkout)">
+                Remove
+              </UButton>
+              <UButton
+                v-if="isRideDay && canSyncGarmin"
+                color="neutral"
+                variant="outline"
+                size="xs"
+                icon="i-lucide-send"
+                :loading="sendingCourse"
+                @click="emit('sendCourse', firstWorkout)"
+              >
+                Send to devices
+              </UButton>
+            </div>
+          </div>
           <p v-if="extraCount > 0" class="text-xs text-dimmed">+{{ extraCount }} more this day</p>
           <div class="flex flex-wrap items-center gap-2">
             <UButton
@@ -433,6 +506,9 @@ function onRated(analysis: SessionAnalysis) {
               :can-offer="canOfferAlternates"
               @changed="emit('swapped')"
             />
+            <UButton v-if="canRoute && !activeRoute" color="neutral" variant="outline" icon="i-lucide-route" @click="emit('route', firstWorkout)">
+              Route for this ride
+            </UButton>
             <UButton v-if="canConvertIndoor" color="neutral" variant="outline" icon="i-lucide-house" @click="emit('indoor', firstWorkout)">
               Indoor version
             </UButton>

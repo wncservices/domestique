@@ -5,7 +5,7 @@
 // doc's "Workout builder" section. The page still owns workoutForm/saveWorkout;
 // this only renders it and emits back — see forms.ts for the WorkoutForm shape.
 import { computed } from 'vue'
-import type { RiderProfile, Sport, Why, WorkoutStep } from '@/api/types'
+import type { RiderProfile, Sport, Why, WorkoutRoute, WorkoutStep } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { sports } from '@/components/plan/forms'
@@ -25,9 +25,14 @@ const props = defineProps<{
   saving: boolean
   /** Why the workout being edited was last changed automatically, if it was. */
   why?: Why
+  /** The route linked to the workout being edited, if any. */
+  route?: WorkoutRoute
+  /** Whether "Route for this ride" applies: routing is on and the ride is an
+   *  outdoor cycling ride still ahead. The page decides. */
+  canRoute?: boolean
 }>()
 
-const emit = defineEmits<{ 'update:form': [WorkoutForm]; save: [] }>()
+const emit = defineEmits<{ 'update:form': [WorkoutForm]; save: []; route: [] }>()
 
 function set<K extends keyof WorkoutForm>(field: K, value: WorkoutForm[K]) {
   emit('update:form', { ...props.form, [field]: value })
@@ -76,6 +81,14 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
           <UFormField label="Goal (optional)">
             <USelect :model-value="form.goalId" :items="goalOptions" value-key="value" class="w-full" @update:model-value="(v: string) => set('goalId', String(v))" />
           </UFormField>
+        </div>
+
+        <div v-if="editing && (route || canRoute)" class="flex flex-wrap items-center gap-2 rounded-lg border border-default p-3">
+          <UIcon name="i-lucide-route" class="size-4 text-primary" />
+          <span class="text-sm text-highlighted">{{ route ? route.name : 'No route yet' }}</span>
+          <UButton v-if="canRoute" type="button" color="neutral" variant="outline" size="xs" @click="emit('route')">
+            {{ route ? 'Change route' : 'Route for this ride' }}
+          </UButton>
         </div>
 
         <UFormField label="Steps">

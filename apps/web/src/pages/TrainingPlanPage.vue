@@ -47,6 +47,7 @@ import PacingCard from '@/components/PacingCard.vue'
 import RouteDemandsCard from '@/components/plan/RouteDemandsCard.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
+import RouteForRideSlideover from '@/components/plan/RouteForRideSlideover.vue'
 import TrainNowSlideover from '@/components/plan/TrainNowSlideover.vue'
 import TomorrowForecastBanner from '@/components/plan/TomorrowForecastBanner.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
@@ -64,7 +65,7 @@ import { todayISO } from '@/utils/rideDates'
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const { canSyncGarmin } = useLibrary()
+const { canSyncGarmin, routingConfigured } = useLibrary()
 
 // --- me: only fetched here for narrationEnabled, so "Explain this plan"
 // can avoid offering a button that would 412 — see meDTO's own doc comment
@@ -276,6 +277,62 @@ async function reloadAfterSwap() {
 }
 
 const pushingWorkout = ref('')
+
+// --- a route for a planned ride: generate, link, remove, and send the course
+// to the rider's devices. Every one re-reads the week and the list. ---
+
+const routeSlideoverOpen = ref(false)
+const routeTarget = ref<Workout | null>(null)
+const sendingCourse = ref(false)
+
+const editingWorkout = computed(() => workouts.value.find((w) => w.id === editingWorkoutId.value))
+const canRouteEditing = computed(() => {
+  const w = editingWorkout.value
+  return (
+    routingConfigured.value &&
+    !!w &&
+    w.sport === 'cycling' &&
+    !w.indoor &&
+    !w.testProtocol &&
+    w.plannedSeconds > 0 &&
+    !!w.date &&
+    w.date >= todayISO()
+  )
+})
+
+function openRouteForEditing() {
+  const w = editingWorkout.value
+  if (!w) return
+  workoutModalOpen.value = false
+  openRouteFor(w)
+}
+
+function openRouteFor(w: Workout) {
+  routeTarget.value = w
+  routeSlideoverOpen.value = true
+}
+
+async function removeRouteFrom(w: Workout) {
+  try {
+    await api.removeWorkoutRoute(w.id)
+    toast.add({ title: 'Route removed from your ride', icon: 'i-lucide-route', color: 'success' })
+    await Promise.all([loadWeek(), loadWorkouts()])
+  } catch (err) {
+    toast.add({ title: 'Could not remove the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  }
+}
+
+async function sendCourseOf(w: Workout) {
+  sendingCourse.value = true
+  try {
+    await api.pushWorkoutCourse(w.id)
+    toast.add({ title: 'Route sent to your devices', icon: 'i-lucide-send', color: 'success' })
+  } catch (err) {
+    toast.add({ title: 'Could not send the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    sendingCourse.value = false
+  }
+}
 
 async function pushWorkoutToGarmin(w: Workout) {
   pushingWorkout.value = w.id
@@ -828,6 +885,11 @@ onMounted(() => {
           @swapped="reloadAfterSwap"
           @rated="loadWeek"
           @back-to-today="backToToday"
+          :routing-configured="routingConfigured"
+          :sending-course="sendingCourse"
+          @route="openRouteFor"
+          @remove-route="removeRouteFrom"
+          @send-course="sendCourseOf"
         />
       </div>
 
@@ -937,8 +999,11 @@ onMounted(() => {
       :profile="profile"
       :saving="savingWorkout"
       :why="editingWhy"
+      :route="editingWorkout?.route"
+      :can-route="canRouteEditing"
       @update:form="(f) => (workoutForm = f)"
       @save="saveWorkout"
+      @route="openRouteForEditing"
     />
 
     <IndoorConvertModal
@@ -967,6 +1032,7 @@ onMounted(() => {
       :proposal="lifeModalProposal"
       @changed="onLifeChanged"
     />
+    <RouteForRideSlideover v-model:open="routeSlideoverOpen" :workout="routeTarget" @saved="reloadAfterSwap" />
 
     <TrainNowSlideover v-model:open="trainNowOpen" :today="today" @applied="reloadAfterSwap" />
 
