@@ -787,7 +787,7 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.options(), fixedOption(existing, week))...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -812,7 +812,10 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		alreadyScheduled[d] = true
 	}
 	for _, wk := range existing {
-		if wk.GoalID != "" {
+		// A crew ride takes its day whether or not it is linked to a goal: a
+		// goal-less one (joined before any goal existed) would otherwise block
+		// nothing.
+		if wk.GoalID != "" || wk.CrewRideID != "" {
 			alreadyScheduled[wk.Date] = true
 			// A workout moved to another day by an automatic adjustment
 			// leaves its original day empty. That day is not free: it is
@@ -897,7 +900,7 @@ func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekS
 		// is not a plan-made session: a rider who scheduled a test into a week
 		// the tick has not reached yet has not had that week filled, and
 		// counting the test as "filled" would leave it holding the test alone.
-		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.Date >= startStr && wk.Date <= endStr {
+		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.CrewRideID == "" && wk.Date >= startStr && wk.Date <= endStr {
 			return nil, 0, s.recordLegacyWeek(ctx, g, startStr)
 		}
 	}
