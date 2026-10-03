@@ -185,9 +185,10 @@ with no browser and no cookie, so **this is the one path that bypasses `authenti
 secret URL is the only credential.** What keeps that safe, all of it tested over real HTTP in
 every auth mode (`calendar_test.go`):
 
-- **One predicate, one verb.** `isCalendarFeedPath` (exactly `/api/calendar/<43 base64url>.ics`)
-  and `GET` decide the bypass (`bypassesAuth`), and the mux handler uses the same predicate. Never
-  widen it to a prefix: `/api/calendar/anything-else` and every write verb stay behind the gate.
+- **One predicate, two read verbs.** `isCalendarFeedPath` (exactly `/api/calendar/<43 base64url>.ics`)
+  and `GET` or `HEAD` decide the bypass (`bypassesAuth`; HEAD is the same handler with no body, and
+  reads nothing GET does not), and the mux handler uses the same predicate. Never widen it to a
+  prefix: `/api/calendar/anything-else` and every write verb stay behind the gate.
   `Identify` is skipped, so a forged `Remote-User` or a session cookie changes nothing: the rider
   is whoever owns the token's hash. Rider-facing management is `/api/training/calendar`, behind the
   ordinary gate.
@@ -199,11 +200,26 @@ every auth mode (`calendar_test.go`):
   `none`), the gate's 401 where there is.
 - **Rate limited**: 30 an hour per token, and one global budget of 60 misses a minute (no client
   address to key on behind the proxy). In memory per replica: abuse throttling, not a guarantee.
-- **The token never leaves through our side.** `redactPath` rewrites `/api/calendar/<x>.ics` and
-  `/api/shares/<x>` before the debug log line, the span name **and** the `url.path` span attribute
-  (`hideSecretPaths` swaps the path outside `otelhttp` and `restoreSecretPaths` puts it back just
-  inside). A new path that carries a secret goes in `secretPathPrefixes`. Traefik's own access log
-  is outside the app: if a URL leaks that way, regenerate it.
+- **The token never leaves through our side.** `redactPath` works by segment, not by prefix: any
+  segment shaped like a token (43 base64url characters, with or without `.ics` in any case) is
+  replaced wherever it sits, and so is the segment right after `api/calendar` or `api/shares`,
+  case-insensitively and ignoring empty and `.`/`..` segments, so `//api/calendar/<t>`, `/./`,
+  `/API/...` and `%2e%2e` spellings cannot carry one past it. It runs before the debug log line, the
+  span name **and** the `url.path` span attribute (`hideSecretPaths` swaps the path outside
+  `otelhttp` and `restoreSecretPaths` puts it back just inside). A new path whose secret is not
+  token-shaped needs its prefix added to the "after" rule. Traefik's own access log is outside the
+  app: if a URL leaks that way, regenerate it.
+- **A feed and a summary outlive a sign-in, so blocking has to reach them.** Neither needs a
+  session, so "the next sign-in fails" does not stop them. `handleSetPersonBlocked` (block, not
+  unblock) and `handlePeopleSetRole` (a role that can no longer `training:manage`; the gate role
+  itself cannot be removed through that endpoint) call `ridersOfPerson` *before* the change, then
+  `revokeBackgroundAccess`: the feed is revoked, the summary switched off and its address cleared.
+  Blocking also ends the person's live sessions. The rider name is found from the identity's own
+  sessions (`Sessions.RidersOfSub`), the address the summary was opted in under, and the People
+  page's own guess, because the admin names a person by issuer id. Nothing is re-enabled on
+  unblock or on a role coming back: the rider makes a new link and opts in again. The morning pass
+  is the backstop: a rider whose stored address is on the blocklist is skipped and switched off.
+  Removing the gate role directly in Auth0 is not visible to the app; revoke the link there too.
 - **Planned sessions only.** `calendarfeed.Events` takes workouts and nothing else, so no HRV,
   sleep, readiness, FTP, fitness, route, place or weather can reach a file a third-party calendar
   server keeps. Do not add a parameter to it that is not a workout field.
@@ -251,7 +267,9 @@ table; `internal/mailer` sends.
   one thing worth alerting on.
 - **Config**: `public_url` and `notifications.smtp` (host, port, security `starttls`|`tls`|`none`,
   username, from). No host means the feature is off; a partial block, or smtp without `public_url`,
-  fails `domestique validate`.
+  fails `domestique validate`. The mailer fails closed on its own: any security value other than
+  those three is refused before a connection is made, and `none` is only for a loopback host
+  (`mailer.IsLoopbackHost`), in the mailer and in validation alike.
 
 ## Komoot
 
