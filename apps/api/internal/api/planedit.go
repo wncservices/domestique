@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -17,19 +18,25 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
+	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
 
 // Natural-language plan edits: one typed sentence becomes a preview.
 //
 // The model proposes and this file disposes. Every field of every intent it
-// returns is validated here, by the same rules as the form (lifeevents.Validate
-// and Preview for an event, lifeevents.CheckMove for a move, the alternates and
-// indoor rules for a swap or a conversion); an intent that fails is dropped
-// with a visible reason, never repaired. Nothing is written: the response is a
-// diff for the rider to confirm, and confirming is the ordinary apply call of
-// each kind, which validates again. There is no path from model output to a
-// stored change.
+// returns is validated here (lifeevents.Validate and Preview for an event,
+// lifeevents.CheckMove for a move, the alternates and indoor rules for a swap or
+// a conversion); an intent that fails is dropped with a visible reason, never
+// repaired. Nothing is written: the response is a diff for the rider to confirm,
+// and confirming is the ordinary call for each kind. An event, a swap and a
+// conversion are re-validated by their own endpoint when applied. A move is
+// not: it is applied as the plain date edit a rider could make by dragging the
+// session, which does not re-run CheckMove's day rules (available day, event
+// day, back-to-back hard sessions). Those were checked here, at preview time,
+// against the plan as it then stood. There is no path from model output to a
+// stored change without the rider's confirmation.
 //
 // The typed sentence is never logged or stored: the log lines here carry the
 // rider, an outcome word and counts.
@@ -212,10 +219,15 @@ func (s *Server) buildPlanView(ctx context.Context, rider string, today time.Tim
 			Handle: handle, Sport: string(wk.Sport), Zone: string(wk.Zone),
 			Minutes: int(workout.PlannedSeconds(wk.Steps)/60 + 0.5),
 			FTPTest: wk.TestProtocol != "", Indoor: wk.Indoor, Ridden: ridden[wk.ID],
-			RiderBuilt: !isPlanMade(wk) && wk.TestProtocol == "",
+			// A plan-made session the rider renamed is described, not named: the
+			// description stays the generated one, so the name is the only thing
+			// that says it is theirs.
+			RiderBuilt: wk.TestProtocol == "" && (!isPlanMade(wk) || !generatedName(wk)),
 		}
-		if !vs.RiderBuilt {
-			// The generated name; a name the rider typed is theirs.
+		switch {
+		case wk.TestProtocol != "":
+			vs.Name = "FTP test"
+		case !vs.RiderBuilt:
 			vs.Name = wk.Name
 		}
 		byDate[wk.Date] = append(byDate[wk.Date], vs)
@@ -225,6 +237,35 @@ func (s *Server) buildPlanView(ctx context.Context, rider string, today time.Tim
 		pv.view.Days = append(pv.view.Days, narration.ViewDay{Date: d, Sessions: byDate[d]})
 	}
 	return pv, nil
+}
+
+var (
+	generatedNamesOnce sync.Once
+	generatedNames     map[string]bool
+)
+
+// generatedName is whether wk's name is one the plan itself gives a session: a
+// ladder rung ("Threshold 3×12") or an endurance name ("Long ride"). Anything
+// else was typed by the rider, so it is theirs and never leaves the server.
+func generatedName(wk workout.Workout) bool {
+	generatedNamesOnce.Do(func() {
+		generatedNames = map[string]bool{}
+		for _, sport := range []model.Sport{model.SportCycling, model.SportRunning} {
+			for zone := range workout.StructuredZones {
+				ladder, ok := workoutlib.LadderFor(sport, string(zone))
+				if !ok {
+					continue
+				}
+				for _, rung := range ladder.Rungs {
+					generatedNames[workoutlib.Instantiate(ladder, rung, workout.RiderProfile{}).Name] = true
+				}
+			}
+			for _, long := range []bool{false, true} {
+				generatedNames[scheduler.BuildEnduranceSession(1, long, sport, workout.RiderProfile{}).Name] = true
+			}
+		}
+	})
+	return generatedNames[wk.Name]
 }
 
 // validatePlanEdits re-checks every intent, never trusting the model, and turns

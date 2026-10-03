@@ -174,6 +174,21 @@ func TestARequestCarriesTheMinimumAndNothingPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.srv.AutoScheduleTick(ctx)
+	// A plan-made session the rider renamed: the generated description is
+	// untouched, so only the name gives it away, and the name is theirs.
+	renamed := false
+	for _, w := range h.all(t) {
+		if w.GoalID != "" && w.Date >= "2026-10-07" && w.Date <= "2026-10-20" && !renamed {
+			name := "Pieter's club tempo with Marthe"
+			if _, err := h.store.UpdateWorkout(ctx, w.ID, workout.UpdateWorkoutRequest{Name: &name}); err != nil {
+				t.Fatal(err)
+			}
+			renamed = true
+		}
+	}
+	if !renamed {
+		t.Fatal("no plan-made session to rename")
+	}
 	f := h.withNarration(t, tool(intents()))
 
 	if status, _ := h.propose(t, "wilant", "I am travelling Thursday to Sunday "+secretSession); status != http.StatusOK {
@@ -187,7 +202,7 @@ func TestARequestCarriesTheMinimumAndNothingPrivate(t *testing.T) {
 	for _, secret := range []string{
 		secretRider, "Wilant", "287", "191", "173", "247", "44,", // name, FTP, heart rates, pace
 		secretGoal, "Zoersel", // goal
-		"Pieter", "Oudenaarde", // a name the rider typed
+		"Pieter", "Oudenaarde", "Marthe", "club tempo", // a name the rider typed, or renamed a plan session to
 		"Sam's", "sam", // another rider
 		"watts", "heart", "readiness", "wellness",
 	} {
