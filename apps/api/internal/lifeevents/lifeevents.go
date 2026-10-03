@@ -245,6 +245,9 @@ const (
 	OpShort  = "shorten"
 	OpIndoor = "indoor"
 	OpAdd    = "add"
+	// OpSwap is not produced by a life event: it is the display of a single
+	// swap-for-an-alternate the natural-language box proposed.
+	OpSwap = "swap"
 )
 
 // Change is one line of a preview: what would happen to one session, and why.

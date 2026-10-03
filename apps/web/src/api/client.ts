@@ -25,6 +25,7 @@ import type {
   ProfileChangeProposal,
   ReplanResult,
   LifeEvent,
+  PlanEditResponse,
   LifeEventRequest,
   LifeEventResult,
   ScheduledWorkouts,
@@ -891,6 +892,14 @@ export const api = {
    *  Owner-only, no body: the rider comes from the session, same as every
    *  other training route. */
   replan: () => request<ReplanResult>('/api/training/replan', { method: 'POST' }),
+  /** Turns one sentence into a validated preview; applies nothing. `today` is
+   *  the browser's own day. 412 means this deployment has no narration key. */
+  proposePlanEdit: (text: string, today: string) =>
+    request<PlanEditResponse>(`/api/training/plan/propose-edit?today=${encodeURIComponent(today)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }),
   /** The rider's life events from a week ago onward. Owner-only. */
   lifeEvents: () => request<{ events: LifeEvent[] }>('/api/training/life-events'),
   /** Previews (`dryRun`) or applies a new life event. The server recomputes

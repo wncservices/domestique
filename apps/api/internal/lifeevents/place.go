@@ -804,3 +804,43 @@ func capitalize(s string) string {
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
 }
+
+// CheckMove reports why moving w to date to is not allowed, nil when it is. It
+// is the same rule a life event's placement uses for one session, applied to a
+// move the rider asked for: today or later, one of their available days, not
+// inside any event, holding nothing, not the day an earlier move left empty,
+// and not putting two hard sessions on consecutive days.
+func CheckMove(in Input, w workout.Workout, to string) error {
+	p := newPlanner(in)
+	if _, ok := parseDate(to); !ok {
+		return fmt.Errorf("that date is not valid")
+	}
+	switch {
+	case to == w.Date:
+		return fmt.Errorf("that is the day it is already on")
+	case to < p.today:
+		return fmt.Errorf("that day has already gone")
+	case p.after[to]:
+		return fmt.Errorf("that day is inside a life event")
+	case !p.available(to):
+		return fmt.Errorf("that is not one of your available days")
+	case p.occupied[to]:
+		return fmt.Errorf("that day already has a session")
+	case p.vacated[to]:
+		return fmt.Errorf("that day was left empty by an earlier move")
+	}
+	if isHard(w) {
+		// The session itself is leaving its day, so it does not count as a
+		// neighbour of where it lands.
+		p.hardOn = map[string]bool{}
+		for _, o := range in.Workouts {
+			if o.ID != w.ID && o.Date != "" && isHard(o) {
+				p.hardOn[o.Date] = true
+			}
+		}
+		if p.neighbourHard(to) {
+			return fmt.Errorf("that would put two hard sessions on consecutive days")
+		}
+	}
+	return nil
+}

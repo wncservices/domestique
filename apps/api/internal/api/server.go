@@ -533,6 +533,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/training/weather/location", s.handleDeleteWeatherLocation)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
+	mux.HandleFunc("POST /api/training/plan/propose-edit", s.handleProposePlanEdit)
 	mux.HandleFunc("GET /api/training/life-events", s.handleListLifeEvents)
 	mux.HandleFunc("POST /api/training/life-events", s.handleCreateLifeEvent)
 	mux.HandleFunc("PUT /api/training/life-events/{id}", s.handleUpdateLifeEvent)

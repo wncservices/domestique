@@ -1309,7 +1309,7 @@ export interface LifeEvent {
   note?: string
 }
 
-export type LifeChangeOp = 'remove' | 'move' | 'ease' | 'shorten' | 'indoor' | 'add'
+export type LifeChangeOp = 'remove' | 'move' | 'ease' | 'shorten' | 'indoor' | 'add' | 'swap'
 
 /** One line of a life-event preview. `id` is deterministic ("<op>:<workoutId>",
  *  "add:<date>"), which is what the skip and include lists name. */
@@ -1367,6 +1367,36 @@ export interface LifeEventRequest {
   dryRun?: boolean
   skip?: string[]
   include?: string[]
+}
+
+export type PlanEditIntentType = 'create_life_event' | 'move_workout' | 'swap_alternate' | 'convert_indoor'
+
+/** One validated intent of a natural-language proposal. `workoutId` is the real
+ *  session id the model's opaque handle resolved to, for the apply call. */
+export interface PlanEditIntent {
+  type: PlanEditIntentType
+  kind?: LifeEventKind
+  startDate?: string
+  endDate?: string
+  option?: LifeEventOption
+  workoutId?: string
+  toDate?: string
+  alternate?: 'easier' | 'harder' | 'shorter' | 'longer'
+}
+
+export interface PlanEditItem {
+  intent: PlanEditIntent
+  /** The diff the form would show for it; a move, swap or conversion has one line. */
+  diff: LifeDiff
+}
+
+/** POST /api/training/plan/propose-edit: a preview, never applied. */
+export interface PlanEditResponse {
+  items: PlanEditItem[]
+  /** Intents that failed validation, each with the reason. */
+  dropped: { type: string; reason: string }[]
+  /** What the model could not do, plain text. */
+  unsupported?: string
 }
 
 /** POST /api/training/replan's response — see internal/api/replan.go.
@@ -1538,6 +1568,8 @@ export interface TrainNowResponse {
   minutes: number
   verdict: 'ready' | 'caution' | 'rest'
   suggestions: TrainNowSuggestion[]
+  /** Why there is nothing to suggest: a life event rules riding out today. */
+  notice?: string
 }
 
 export type ProjectionVerdictKey =
