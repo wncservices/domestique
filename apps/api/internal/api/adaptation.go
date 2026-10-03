@@ -208,6 +208,12 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 	// sessions on one day.
 	if c.ReplaceWorkoutID != "" {
 		gone := byID[c.ReplaceWorkoutID]
+		if gone.RouteSlug != "" {
+			// The adapter never offers a routed day; this keeps a stale or
+			// hand-built change from deleting one.
+			s.logger().Warn("adapt: refusing to remove a routed easy day", "workout", gone.ID, "rider", rider)
+			return "", fmt.Errorf("easy day %s has a route", gone.ID)
+		}
 		s.removeWorkoutFromGarmin(ctx, gone)
 		if err := s.Training.DeleteWorkout(ctx, gone.ID); err != nil {
 			s.logger().Warn("adapt: could not remove the easy day being replaced", "workout", gone.ID, "rider", rider, "err", err)

@@ -64,6 +64,7 @@ func whyIsCurrent(adjustmentCreated, subjectUpdated string) bool {
 func (s *Server) workoutDTOWithWhy(ctx context.Context, w workout.Workout) workoutDTO {
 	one := []workoutDTO{workoutDTOFrom(w)}
 	s.attachWhy(ctx, w.Rider, one)
+	s.attachRoutes(ctx, w.Rider, one)
 	return one[0]
 }
 

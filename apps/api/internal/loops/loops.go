@@ -136,10 +136,13 @@ func Generate(ctx context.Context, client routing.Client, req Request) ([]Loop, 
 	round1 := fireRound(ctx, client, req.Start, target, calibration, req.Profile, req.Hilliness)
 
 	all := round1
-	// With StopWhenCalibrationFails, no second round when every calibration
-	// call failed: an engine that is down, out of quota or refusing the key will fail the seven again, and
-	// each one is a call against a shared quota.
-	if !req.StopWhenCalibrationFails || len(successes(round1)) > 0 {
+	// A request that was cancelled during the first round (the rider closed
+	// the page) does not spend a second round of engine calls that nobody
+	// will read. With StopWhenCalibrationFails, nor does one where every
+	// calibration call failed: an engine that is down, out of quota or
+	// refusing the key will fail the seven again, and each is a call against
+	// a shared quota.
+	if ctx.Err() == nil && (!req.StopWhenCalibrationFails || len(successes(round1)) > 0) {
 		refined := obj.Refine(successes(round1))
 		refinement := make([]int, req.RefinementSeeds)
 		for i := range refinement {

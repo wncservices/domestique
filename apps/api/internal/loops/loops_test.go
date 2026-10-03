@@ -179,6 +179,9 @@ func TestGenerateStopsWhenTheRequestIsCancelled(t *testing.T) {
 	if len(got) != 0 || stats.LastErr == nil {
 		t.Errorf("got %d loops, lastErr %v from a cancelled context, want none and the context error", len(got), stats.LastErr)
 	}
+	if len(eng.calls) != 5 {
+		t.Errorf("%d engine calls for a cancelled request, want only the 5 of the first round", len(eng.calls))
+	}
 }
 
 func TestShortlistPrefersLowBacktrackButNeverEmptiesTheList(t *testing.T) {

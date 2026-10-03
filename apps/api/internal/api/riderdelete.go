@@ -70,6 +70,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 		return sum, errors.New("purge: no rider")
 	}
 
+	// Generated route loops held in memory for the rider to choose from: their
+	// location data, which must not outlive them even for the minutes it would
+	// take to expire. Nothing here can fail.
+	s.candidateStore().Forget(rider)
+
 	// First, so the rider cannot sign in again, or keep a page open that writes
 	// data, while the rest of this is being removed. A removed rider's cookie
 	// would otherwise stay valid until it expires: the session is a row of its
@@ -179,6 +184,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 	if s.WeatherPrefs != nil {
 		if err := s.WeatherPrefs.Delete(ctx, rider); err != nil {
 			return sum, fmt.Errorf("removing weather location: %w", err)
+		}
+	}
+	if s.RideStarts != nil {
+		if err := s.RideStarts.Delete(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing ride start: %w", err)
 		}
 	}
 	if s.GarminMFA != nil {

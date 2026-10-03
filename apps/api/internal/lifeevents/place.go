@@ -379,10 +379,18 @@ func (p *planner) remove(w workout.Workout, ev Event, reason string) {
 		return
 	}
 	p.changed[w.ID] = true
-	p.diff.Changes = append(p.diff.Changes, Change{
+	c := Change{
 		ID: OpRemove + ":" + w.ID, Op: OpRemove, WorkoutID: w.ID, Date: w.Date, Name: w.Name, Kind: ev.Kind,
 		Reason: reason, Default: true,
-	})
+	}
+	// A session with a route was chosen for its day (a loop was made or picked
+	// for it): removing it deletes the ride and strands the loop. It is offered,
+	// not ticked, so only the rider's own tick can do it.
+	if w.RouteSlug != "" {
+		c.Default = false
+		c.Reason = reason + " It has a route, so this is not ticked."
+	}
+	p.diff.Changes = append(p.diff.Changes, c)
 }
 
 func (p *planner) removeProper(list []scoped) {

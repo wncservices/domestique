@@ -241,6 +241,10 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		// a session touched (the note changes its description), but that must
 		// not be the only thing keeping the refresh off it.
 		!wk.Indoor &&
+		// A route link is the rider's own choice, and a rebuilt session would
+		// silently drop it or swap the content under a route chosen for the
+		// old one. It already moves UpdatedAt, but the guarantee is stated here.
+		wk.RouteSlug == "" &&
 		// A swap for an alternate is the rider's choice. It already fails the
 		// description and timestamp tests, but the guarantee is stated here
 		// rather than left to those.

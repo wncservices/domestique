@@ -83,6 +83,7 @@ import type {
   ProjectionResponse,
   EaseTomorrowResult,
   IndoorPreview,
+  RideStart,
   WeatherPrefs,
   WeatherResponse,
   AlternateKind,
@@ -840,6 +841,19 @@ export const api = {
   /** "Stop using weather": removes the stored town. */
   removeWeatherLocation: () =>
     request<WeatherPrefs>('/api/training/weather/location', { method: 'DELETE' }),
+  /** Whether a start point for planned rides is set, and its town. Never the
+   *  coordinates. A 412 means this deployment cannot store one. */
+  rideStart: () => request<RideStart>('/api/training/ride-start'),
+  /** Saves where planned rides start, from the route builder's location
+   *  chooser. The server keeps it to about 110 m and never sends it back. */
+  setRideStart: (place: string, lat: number, lon: number) =>
+    request<void>('/api/training/ride-start', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place, lat, lon }),
+    }),
+  /** Forgets the start point. Idempotent. */
+  removeRideStart: () => request<void>('/api/training/ride-start', { method: 'DELETE' }),
   /** The easier, harder, shorter and longer versions of a plan-made session.
    *  Writes nothing; `today` is the browser's own day. */
   workoutAlternates: (id: string, today?: string) =>
