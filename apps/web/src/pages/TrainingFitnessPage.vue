@@ -10,6 +10,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, ProgressionLevel,
   ProgressionPoint, ProjectionResponse, RiderProfile, ThresholdSuggestion } from '@/api/types'
+import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
@@ -418,6 +419,8 @@ onMounted(() => {
       @build-ftp-test="buildFTPTest"
       @build-max-hr-test="buildMaxHRTest"
     />
+
+    <CalendarFeedCard />
 
     <UCard variant="outline">
       <template #header>
