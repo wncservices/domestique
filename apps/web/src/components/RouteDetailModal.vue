@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Account, Me, Poi, Route } from '@/api/types'
+import PacingCard from './PacingCard.vue'
 import RouteMap from './RouteMap.vue'
 
 const router = useRouter()
@@ -311,6 +312,12 @@ const mapRoutes = computed(() =>
             </UBadge>
           </div>
         </div>
+
+        <PacingCard
+          v-if="route.sport === 'cycling' && me?.permissions.includes('training:manage')"
+          :key="route.slug"
+          :slug="route.slug"
+        />
 
         <div v-if="syncRows.length">
           <h4 class="mb-1 text-[0.7rem] uppercase tracking-wide text-dimmed">Sync status</h4>

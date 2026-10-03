@@ -432,6 +432,55 @@ header and CRC checked against the FIT spec with an independent implementation,
 so a bug in the library cannot pass unnoticed. **Neither proves a real device
 accepts the file** — `domestique fit <slug>` writes one out for exactly that.
 
+## Route-aware training and pacing
+
+A goal can name its route (`goals.route_slug`), and the app trains for that
+route's climbs and works out a race-day pacing plan for it. Design:
+`docs/superpowers/specs/2026-09-29-route-training-and-pacing-design.md`. A route
+is personal location data: **no response or log line carries a latitude or
+longitude**, and tests scan response bodies for the synthetic fixture's
+coordinates. Coordinates leave the app only inside the pacing FIT, to the
+rider's own Garmin or Wahoo account.
+
+- **`internal/climbs`** is the one climb detector, pure, with two bars over one
+  algorithm: `DeviceConfig` (500 m and 3 %, ClimbPro's own, what
+  `fitcourse.DeriveClimbs` wraps, pinned by a test so device cues never move) and
+  `TrainingConfig` (1 km and 3 %, what a workout can rehearse). Training climbs
+  are a subset of device climbs with identical bounds. A climb carries distances
+  and indexes, never a coordinate.
+- **`internal/pacing`** is the physics (steady-state power balance; defaults: rider
+  weight or an assumed 75 kg, 8 kg bike, CdA 0.32, Crr 0.005, 60 km/h descent cap,
+  no wind), `EventIF` (0.95 under 2 h, 0.85 to 4 h, 0.75 beyond: **the one copy**;
+  the race-day projection must import it, not keep its own), the climb factors
+  (1.10 / 1.05 / 1.00 by duration), and `Build`, whose flat-level power is solved
+  so the plan's normalised power equals FTP x IF. `api.paceRoute` is where the
+  demands card, the training bias and the pacing endpoint all get climb watts, so
+  they cannot disagree.
+- **The C-numbers are the device index** (`pacing.ClimbTarget.Index`, found at the
+  500 m bar). The pacing table, the FIT cue (`C2 250-265W`, `Top C2`, at most 15
+  ASCII characters) and the demands card (`deviceIndex`) all use it. Do not label
+  by the training index: a short ramp before a big climb would renumber it.
+- **Linking** a goal to a route needs `config.VisibleTo` (no admin bypass), but an
+  existing link is not re-checked on edit, so un-sharing a route does not make the
+  goal uneditable. Pacing, the FIT and the push all refuse (422) a goal that is not
+  linked to the route being paced, and answer 404 for anything not the rider's.
+- **The bias** (`scheduler.WithRouteDemand`, `workoutlib.PickNear`) applies only to
+  Build and Peak weeks that are not recovery weeks, only when a session is
+  generated (fill or refresh, only untouched sessions), only to which rung of the
+  rider's own level is picked (never more than one above it), never to zones.
+  Anaerobic slots are not biased. The route is read lazily, once per season pass;
+  if it cannot be read (an error, not "unusable") a week that would be recorded as
+  fresh waits for the next pass. The long ride of a climbing route is named
+  `Long ride, with climbing`: use `scheduler.IsLongRideName`, not the literals.
+- **Pacing courses** are separate FIT courses named "<route> pacing", pushed on
+  request (`POST /api/routes/{slug}/pacing/push`; `GET .../pacing.fit` downloads
+  the same file). `internal/pacingpush` keeps `pacing_pushes (rider, provider, key,
+  remote_id)` so a second push replaces the first (Garmin: import then delete the
+  old; Wahoo: update in place, creating anew only on a 404). Those courses are
+  filtered out of Garmin and Wahoo sync-back (lists, duplicates, imports,
+  auto-import). `pacing_pushes` is rider-keyed: it is removed with the rider, and
+  belongs in the `riderTables` registry once that exists.
+
 ## The Helm chart lives elsewhere
 
 The chart is **not in this repo** — it's [wncservices/Domestique-chart](https://github.com/wncservices/Domestique-chart),
