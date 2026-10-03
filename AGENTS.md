@@ -174,6 +174,30 @@ permission-role merge already relies on. Getting this wrong silently shows
 "never signed in" for everyone, active riders included, with no error to
 notice.
 
+## Routes for workouts
+
+A route can be made for a planned ride (`internal/loops` generates loops, `internal/routefit` times and
+judges them, `api/workoutroute*.go` serves them) and a library route can be put on a day as a ride
+(`api/routeschedule.go`). Both end in `workouts.route_slug`. Rules that must hold:
+
+- **A route's time is one function**, `routefit.EstimateSeconds`: generation, scheduling and the stored
+  `route_seconds` all use it.
+- **The start point is the closest thing to a home address the app holds.** `ride_start_points` is opt-in
+  by row, stored at three decimals, registered in `riderTables` for purge and rename, and **the start-point
+  API never returns it** (`GET` answers `{set, place}`). Only candidate generation reads it. The loops it
+  makes begin there, so they reveal it: a generated route is visible to its owner and to admins (who may
+  edit any route), not to crews or share links.
+- **Candidates are held in memory** (30 minutes, 12 per rider, dropped on purge), and saving builds the
+  GPX from the server's own path, never posted coordinates. Nothing logs a coordinate, the town, FTP,
+  watts or weight; an engine error is never logged or returned verbatim, since it can echo the start.
+- **A generated route is owner-only** (admins excepted, as for every route): created through `Source.Create` with no targets, tagged
+  `wroute:<workoutId>`, and while tagged a share link or crew target on it is a 409.
+- **A routed session is frozen** against refresh, trim and replan (`untouchedPlanSession`,
+  `removePlanMadeWorkouts`), hidden from alternates, but still eased by readiness. Linking or scheduling is
+  a rider action, so it writes no adjustment rows.
+- **Today's push** sends the course to the rider's own Garmin accounts only, through `applyPush`, idempotent
+  and never deleting. A course failure is a Warn and never fails the workout push.
+
 ## Komoot
 
 `internal/komoot` speaks Komoot's undocumented v006/v007 API: there is no
