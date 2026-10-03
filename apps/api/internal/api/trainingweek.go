@@ -156,6 +156,7 @@ func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, 
 		planned = append(planned, d.Planned)
 	}
 	s.attachWhy(ctx, rider, planned...)
+	s.attachCrewRides(ctx, rider, planned...)
 
 	if dto.LifeEvents, err = s.lifeEventsInWeek(ctx, rider, start); err != nil {
 		return trainingWeekDTO{}, err

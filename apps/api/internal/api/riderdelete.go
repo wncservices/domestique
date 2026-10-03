@@ -158,6 +158,9 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("clearing ride authorship: %w", err)
 		}
 		sum.RidesOrphaned = n
+		if err := s.Schedule.DeleteRider(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing crew ride rows: %w", err)
+		}
 	}
 
 	// Health and location data. Every store is its own table set and some are

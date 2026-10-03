@@ -216,6 +216,9 @@ type workoutDTO struct {
 	// per response; a workout adjusted before reasons were recorded has none
 	// and the client falls back to the note in Description.
 	Why *whyDTO `json:"why,omitempty"`
+	// CrewRide is set on the fixed session of a crew ride the rider is going
+	// to. Filled in by attachCrewRides, like Why.
+	CrewRide *crewRideRefDTO `json:"crewRide,omitempty"`
 }
 
 func workoutDTOFrom(w workout.Workout) workoutDTO {
@@ -240,6 +243,9 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		dto.OutdoorPlannedSeconds = workout.PlannedSeconds(*w.OutdoorSteps)
 	}
 	dto.CanRevertIndoor = w.Indoor && w.OutdoorSteps != nil
+	if w.CrewRideID != "" {
+		dto.CrewRide = crewRideStub(w)
+	}
 	dto.Swapped = strings.Contains(w.Description, scheduler.SwappedMarker)
 	dto.HasPlannedSnapshot = w.PlannedSnapshot != nil
 	return dto
@@ -1209,6 +1215,7 @@ func (s *Server) handleListWorkouts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, workoutDTOFrom(wk))
 	}
 	s.attachWhy(r.Context(), rider, out)
+	s.attachCrewRides(r.Context(), rider, out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1389,6 +1396,13 @@ func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {
 	if err := s.Training.DeleteWorkout(r.Context(), id); err != nil {
 		s.failTrainingLookup(w, err)
 		return
+	}
+	// A rider who deletes their crew ride session is no longer going: the crew
+	// should not keep showing them, and "I'm going" has to be able to start again.
+	if wk.CrewRideID != "" && s.Schedule != nil {
+		if err := s.Schedule.Leave(r.Context(), wk.CrewRideID, wk.Rider); err != nil {
+			s.logger().Warn("could not drop the going row of a deleted crew ride session", "rider", wk.Rider, "ride", wk.CrewRideID, "err", err)
+		}
 	}
 
 	s.logger().Info("workout deleted", "id", id, "by", identity.User)

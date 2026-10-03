@@ -920,6 +920,55 @@ export interface Workout {
    *  changed, or one adjusted before reasons were recorded (the note in
    *  `description` is then the only explanation). */
   why?: Why
+  /** Set on the fixed session of a crew ride the rider is going to. */
+  crewRide?: CrewRideRef
+}
+
+/** Mirrors crewRideRefDTO in internal/api/crewrides.go. */
+export interface CrewRideRef {
+  rideId: string
+  crewId?: string
+  crewName?: string
+  routeName: string
+  going: boolean
+  estimatedTss: number
+  kind: 'long' | 'endurance' | 'short'
+  goingNames?: string[]
+  /** The ride was deleted, or the rider left the crew. The session stays. */
+  orphaned?: 'cancelled' | 'left'
+}
+
+/** Mirrors crewRideListDTO: one upcoming ride in the caller's crews. */
+export interface CrewRideListItem {
+  id: string
+  crewId: string
+  crewName: string
+  slug: string
+  routeName: string
+  date: string
+  time?: string
+  going: string[]
+  mine: boolean
+  km: number
+  ascentM: number
+  minutes: number
+  tss: number
+  kind: '' | 'long' | 'endurance' | 'short'
+}
+
+/** Mirrors crewDiffDTO: what joining or leaving does around the ride. */
+export interface CrewDiff {
+  changes: { id: string; op: string; workoutId?: string; date: string; name: string; reason: string }[]
+  leftAlone: { workoutId: string; date: string; name: string; reason: string }[]
+  warnings: string[]
+}
+
+/** Mirrors goingResultDTO. */
+export interface GoingResult {
+  going: boolean
+  workout?: Workout
+  diff: CrewDiff
+  applied?: { removed: number; eased: number; shortened: number; added: number }
 }
 
 export interface CreateWorkoutRequest {

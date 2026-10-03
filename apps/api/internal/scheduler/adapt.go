@@ -32,12 +32,20 @@ const SwappedMarker = "Swapped by you:"
 
 // IsGenerated reports whether w was made by the scheduler and has not
 // already been adjusted or swapped, the only workouts adaptation may change.
+//
+// A crew ride row is never generated, whatever its description says: it is the
+// rider's own commitment to a ride the crew set, linked to a goal only so its
+// day reads as taken. Nothing automatic may move, ease, replace or delete it.
 func IsGenerated(w workout.Workout) bool {
-	return w.GoalID != "" &&
+	return w.GoalID != "" && w.CrewRideID == "" &&
 		strings.HasPrefix(w.Description, GeneratedDescription) &&
 		!strings.Contains(w.Description, AdjustedMarker) &&
 		!strings.Contains(w.Description, SwappedMarker)
 }
+
+// CrewLongRideSeconds is how long a crew ride has to be to count as the week's
+// long ride: two hours. internal/crewplan classifies by the same threshold.
+const CrewLongRideSeconds = 2 * 3600
 
 // keyNames are the legacy session names IsKeySession/IsHardSession fall back
 // to for a workout with no zone — a row made before the zone column
@@ -61,9 +69,15 @@ var hardNames = map[string]bool{
 // with no zone — ZoneEndurance or "" — falls back to keyNames, which covers
 // both a legacy row made before the zone column existed and a long/easy day
 // that is key by being the week's volume, not its intensity.
+//
+// A crew ride of at least CrewLongRideSeconds is the week's long ride, so it is
+// key; a shorter one is fixed but not key.
 func IsKeySession(w workout.Workout) bool {
 	if workout.IsStructuredZone(w.Zone) {
 		return true
+	}
+	if w.CrewRideID != "" {
+		return workout.PlannedSeconds(w.Steps) >= CrewLongRideSeconds
 	}
 	return keyNames[w.Name] || IsLongRideName(w.Name)
 }

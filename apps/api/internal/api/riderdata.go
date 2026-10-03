@@ -87,6 +87,11 @@ var riderTables = map[string]riderTable{
 	"ride_series": {Note: "the series is the crew's plan; Schedule.ClearCreatedBy blanks the author",
 		Rename: renameRule{Columns: []string{"created_by"}}},
 
+	// What a rider said about the crew's rides: it is theirs, so a purge deletes
+	// it. A rider's own fixed sessions are workouts and go with Training.
+	"crew_ride_going": {Purged: true, Note: "Schedule.DeleteRider: which crew rides the rider said they were going to",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"ride_id"}}},
+
 	// internal/routeshare
 	"route_shares": {Purged: true, Note: "Shares.DeleteRider: links the rider created",
 		Rename: renameRule{Columns: []string{"created_by"}}},

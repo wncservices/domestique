@@ -170,6 +170,9 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_crew_rides_series ON crew_rides (series_id)`); err != nil {
 		return nil, fmt.Errorf("migrate crew_rides table: %w", err)
 	}
+	if _, err := db.Exec(goingSchema); err != nil {
+		return nil, fmt.Errorf("migrate crew_ride_going table: %w", err)
+	}
 	return store, nil
 }
 
@@ -379,6 +382,13 @@ func (s *Store) CreateSeries(ctx context.Context, crewID, slug string, intervalW
 // delete (every future occurrence was already cancelled one at a time) is
 // a valid outcome, not an error.
 func (s *Store) DeleteSeries(ctx context.Context, seriesID, fromDate string) (int, error) {
+	// The going rows go with the rides they name: they are crew data, and a
+	// row for a ride that no longer exists would only mislead.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM crew_ride_going WHERE ride_id IN
+        (SELECT id FROM crew_rides WHERE series_id = ? AND date >= ?)`), seriesID, fromDate); err != nil {
+		return 0, fmt.Errorf("delete going rows of a ride series: %w", err)
+	}
 	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(
 		`DELETE FROM crew_rides WHERE series_id = ? AND date >= ?`), seriesID, fromDate)
 	if err != nil {
@@ -458,6 +468,11 @@ func (s *Store) Get(ctx context.Context, id string) (Ride, error) {
 // sharing itself, so deleting one changes nothing about who a route
 // reaches.
 func (s *Store) Delete(ctx context.Context, id string) error {
+	// Who was going is crew data and goes with the ride. The fixed session in
+	// a rider's own plan does not: it is theirs, and reads mark it cancelled.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_ride_going WHERE ride_id = ?`), id); err != nil {
+		return fmt.Errorf("delete going rows of a ride: %w", err)
+	}
 	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_rides WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -478,6 +493,10 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 // since-reused id. Zero rides to delete is the ordinary case (most crews
 // never schedule one), not an error.
 func (s *Store) DeleteForCrew(ctx context.Context, crewID string) error {
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM crew_ride_going WHERE ride_id IN (SELECT id FROM crew_rides WHERE crew_id = ?)`), crewID); err != nil {
+		return fmt.Errorf("delete going rows of a crew's rides: %w", err)
+	}
 	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_rides WHERE crew_id = ?`), crewID)
 	return err
 }
