@@ -108,22 +108,48 @@ func (s *Store) GoingFrom(ctx context.Context, from string) (map[string][]string
 // RemoveRider drops rider's going rows for every ride of one crew: called when
 // the crew removes them. Their own plan is not touched: the fixed session they
 // hold stays, and reads mark it orphaned until the rider confirms an update.
+//
+// It also drops their ride-together flag for the crew and ends every proposal of
+// the crew they were in (see leaveProposals): what a rider said about a crew goes
+// with their membership of it.
 func (s *Store) RemoveRider(ctx context.Context, crewID, rider string) error {
+	rider = normalizeRider(rider)
 	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
         DELETE FROM crew_ride_going WHERE rider = ?
-        AND ride_id IN (SELECT id FROM crew_rides WHERE crew_id = ?)`), normalizeRider(rider), crewID)
+        AND ride_id IN (SELECT id FROM crew_rides WHERE crew_id = ?)`), rider, crewID)
 	if err != nil {
 		return fmt.Errorf("remove rider from crew rides: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM crew_ride_together WHERE crew_id = ? AND rider = ?`), crewID, rider); err != nil {
+		return fmt.Errorf("remove rider's together days: %w", err)
+	}
+	if err := s.leaveProposals(ctx, crewID, rider); err != nil {
+		return fmt.Errorf("end the rider's proposals: %w", err)
 	}
 	return nil
 }
 
-// DeleteRider drops every going row the rider has: part of purging a rider.
+// DeleteRider drops everything the rider said about crew rides: every going row
+// and ride-together flag, and takes them off every proposal they are in, ending
+// it (see leaveProposals). Part of purging a rider.
 func (s *Store) DeleteRider(ctx context.Context, rider string) error {
-	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(
-		`DELETE FROM crew_ride_going WHERE rider = ?`), normalizeRider(rider))
-	if err != nil {
+	rider = normalizeRider(rider)
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM crew_ride_going WHERE rider = ?`), rider); err != nil {
 		return fmt.Errorf("delete going rows: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM crew_ride_together WHERE rider = ?`), rider); err != nil {
+		return fmt.Errorf("delete together days: %w", err)
+	}
+	if err := s.leaveProposals(ctx, "", rider); err != nil {
+		return fmt.Errorf("end the rider's proposals: %w", err)
+	}
+	// Whatever member rows are left (a proposal row already gone) are the rider's too.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM ride_together_members WHERE rider = ?`), rider); err != nil {
+		return fmt.Errorf("delete proposal memberships: %w", err)
 	}
 	return nil
 }

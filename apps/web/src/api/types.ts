@@ -124,6 +124,9 @@ export interface CrewMember {
 export interface Crew {
   id: string
   name: string
+  /** Who in the crew is open to a shared ride, and on which weekdays. Shown to
+   *  the crew's approved members only. */
+  together?: { rider: string; days: WeekdayCode[] }[]
   /** Who currently holds an owner grant — may delete the crew, change
    *  auto-share, add/remove members, and promote/demote other owners.
    *  Replaces a former single `owner` string: a crew now survives one
@@ -1845,4 +1848,22 @@ export interface ProjectionResponse {
   suggestion: ProjectionSuggestion | null
   events: ProjectionEvent[]
   assumptions: string[]
+}
+
+/** Weekday codes the ride-together flag uses. */
+export type WeekdayCode = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+/** Mirrors rideTogetherDTO in internal/api/together.go: one shared ride
+ *  proposed to the crew. Only the week, day, route and who is in it cross. */
+export interface RideTogether {
+  id: string
+  crewId: string
+  crewName: string
+  weekStart: string
+  day: string
+  routeSlug: string
+  routeName: string
+  status: 'open' | 'agreed'
+  yourStatus: 'pending' | 'accepted' | 'declined'
+  members: { rider: string; status: 'pending' | 'accepted' | 'declined' }[]
 }

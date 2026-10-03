@@ -266,6 +266,12 @@ func riderSeeds() []seed {
 		{"crew_ride_going", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO crew_ride_going (ride_id, rider, created_at) VALUES (?, ?, ?)`, "ride-"+id, rider, ts)
 		}, "rider", byRider},
+		{"crew_ride_together", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO crew_ride_together (crew_id, rider, days, updated_at) VALUES (?, ?, 'sat', ?)`, "crew-"+id, rider, ts)
+		}, "rider", byRider},
+		{"ride_together_members", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO ride_together_members (proposal_id, rider) VALUES (?, ?)`, "proposal-"+id, rider)
+		}, "rider", byRider},
 		{"route_shares", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO route_shares (id, route_slug, created_by, created_at, expires_at) VALUES (?, 'a-route', ?, ?, ?)`, "share-"+id, rider, ts, ts)
 		}, "created_by", byRider},

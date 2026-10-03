@@ -173,6 +173,11 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 	if _, err := db.Exec(goingSchema); err != nil {
 		return nil, fmt.Errorf("migrate crew_ride_going table: %w", err)
 	}
+	for _, stmt := range strings.Split(togetherSchema, ";\n") {
+		if _, err := db.Exec(stmt); err != nil {
+			return nil, fmt.Errorf("migrate ride-together tables: %w", err)
+		}
+	}
 	return store, nil
 }
 
