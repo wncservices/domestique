@@ -559,6 +559,13 @@ export const api = {
     }),
   /** Your open and agreed ride-together proposals for this week and next. */
   rideTogether: () => request<{ proposals: RideTogether[] }>('/api/training/ride-together'),
+  /** Accepts for your own plan only: your session moves to the shared day. A
+   *  409 carries the fresh proposals when it no longer holds. */
+  acceptRideTogether: (id: string) =>
+    request<{ proposals: RideTogether[] }>(`/api/training/ride-together/${encodeURIComponent(id)}/accept`, { method: 'POST' }),
+  /** Declines, which ends the proposal for the week. Moves nothing. */
+  declineRideTogether: (id: string) =>
+    request<{ proposals: RideTogether[] }>(`/api/training/ride-together/${encodeURIComponent(id)}/decline`, { method: 'POST' }),
   createCrew: (req: CreateCrewRequest) =>
     request<Crew>('/api/crews', {
       method: 'POST',

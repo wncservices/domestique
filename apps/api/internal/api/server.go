@@ -508,6 +508,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/rides/upcoming", s.handleUpcomingRides)
 	mux.HandleFunc("PUT /api/crews/{id}/together", s.handleSetTogether)
 	mux.HandleFunc("GET /api/training/ride-together", s.handleRideTogether)
+	mux.HandleFunc("POST /api/training/ride-together/{id}/accept", s.handleAcceptRideTogether)
+	mux.HandleFunc("POST /api/training/ride-together/{id}/decline", s.handleDeclineRideTogether)
 	mux.HandleFunc("GET /api/training/crew-rides", s.handleCrewRides)
 	mux.HandleFunc("PUT /api/training/crew-rides/{rideId}/going", s.handleSetGoing)
 

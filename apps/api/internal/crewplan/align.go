@@ -202,6 +202,12 @@ func qualifying(c Candidate, weekStart string, now time.Time) (workout.Workout, 
 	return best, found
 }
 
+// QualifyingSession is the one session of the candidate's that a shared ride
+// could move: the same rule Align applies, for the rider's own accept.
+func QualifyingSession(c Candidate, weekStart string, now time.Time) (workout.Workout, bool) {
+	return qualifying(c, weekStart, now)
+}
+
 // dayFree is whether date is free for the rider by the plan's own rules: from
 // tomorrow, nothing of any kind on it (their own qualifying session, which is the
 // one that moves, excepted), not a day an earlier move left empty on purpose, not
