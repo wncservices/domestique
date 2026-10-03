@@ -8,6 +8,8 @@ import type {
   BasemapUpdate,
   Crew,
   CrewRideListItem,
+  RideTogether,
+  WeekdayCode,
   GoingResult,
   CreateCrewRequest,
   FtpTests,
@@ -547,6 +549,16 @@ export const api = {
   routeDuplicates: () => request<RouteDuplicateGroup[]>('/api/routes/duplicates'),
 
   crews: () => request<Crew[]>('/api/crews'),
+  /** Says which weekdays you are open to a shared ride with this crew; an empty
+   *  list opts out. Writes your own row only. */
+  setTogetherDays: (crewId: string, days: WeekdayCode[]) =>
+    request<{ rider: string; days: WeekdayCode[] }>(`/api/crews/${encodeURIComponent(crewId)}/together`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days }),
+    }),
+  /** Your open and agreed ride-together proposals for this week and next. */
+  rideTogether: () => request<{ proposals: RideTogether[] }>('/api/training/ride-together'),
   createCrew: (req: CreateCrewRequest) =>
     request<Crew>('/api/crews', {
       method: 'POST',
