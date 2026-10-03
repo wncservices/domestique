@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
@@ -431,6 +433,96 @@ func TestEndingEarlySetsTheEndToYesterdayAndAnEndBeforeTheStartDeletes(t *testin
 	}
 	if _, err := h.store.GetLifeEvent(ctx, "wilant", id); err == nil {
 		t.Error("an end before the start must delete the event")
+	}
+}
+
+func TestUntickingAnEaseSticksThroughEveryAdaptationPass(t *testing.T) {
+	h := newOnceHarness(t)
+	ctx := context.Background()
+	// Ill 4 to 6 October: ramp days are the 7th to the 13th, two of them easy.
+	skipped := h.hardSession(t, "2026-10-08", 90)
+	ticked := h.hardSession(t, "2026-10-09", 60)
+	body := `{"kind":"illness","startDate":"2026-10-04","endDate":"2026-10-06","option":"proper","skip":["ease:` + skipped.ID + `"]}`
+	status, res := h.life(t, "wilant", http.MethodPost, "/api/training/life-events", body)
+	if status >= 300 {
+		t.Fatalf("status %d: %s", status, res.Error)
+	}
+	if _, ok := res.change("ease:" + skipped.ID); !ok {
+		t.Fatalf("the control is wrong: the preview had no ease for the skipped session: %+v", res.Diff.Changes)
+	}
+
+	check := func(when string) {
+		t.Helper()
+		got, _ := h.store.GetWorkout(ctx, skipped.ID)
+		if got.Zone != workout.ZoneThreshold || got.Level != 4 || workout.PlannedSeconds(got.Steps) != 90*60 {
+			t.Fatalf("%s: the session the rider kept was eased anyway: zone %s level %v %v s", when, got.Zone, got.Level, workout.PlannedSeconds(got.Steps))
+		}
+		if !strings.Contains(got.Description, lifeevents.KeptMarker) {
+			t.Errorf("%s: the kept session is not marked: %q", when, got.Description)
+		}
+	}
+	check("right after apply")
+	for i := range 3 {
+		h.srv.AdaptWorkouts(ctx)
+		check(fmt.Sprintf("after adaptation pass %d", i+1))
+	}
+	if got, _ := h.store.GetWorkout(ctx, ticked.ID); got.Level != 3 {
+		t.Errorf("the ticked session was not eased (level %v)", got.Level)
+	}
+}
+
+func TestAFailedApplyDoesNotLeaveTheEventBehind(t *testing.T) {
+	h := newOnceHarness(t)
+	ctx := context.Background()
+	h.tickedWithFreeSaturday(t)
+	h.srv.AfterLifeEventSaved = func() error { return fmt.Errorf("boom") }
+
+	if status, _ := h.life(t, "wilant", http.MethodPost, "/api/training/life-events", strings.Replace(tripBody, "%s", "", 1)); status < 500 {
+		t.Fatalf("create: status %d, want a server error", status)
+	}
+	if events, _ := h.store.ListLifeEvents(ctx, "wilant", ""); len(events) != 0 {
+		t.Fatalf("a failed create left %d events: a retry would then see them as already applied", len(events))
+	}
+
+	h.srv.AfterLifeEventSaved = nil
+	status, res := h.life(t, "wilant", http.MethodPost, "/api/training/life-events", `{"kind":"busy","startDate":"2026-10-20","endDate":"2026-10-21"}`)
+	if status >= 300 {
+		t.Fatalf("setup: %d %s", status, res.Error)
+	}
+	id := res.Event.ID
+	h.srv.AfterLifeEventSaved = func() error { return fmt.Errorf("boom") }
+
+	if status, _ := h.life(t, "wilant", http.MethodPut, "/api/training/life-events/"+id, `{"kind":"busy","startDate":"2026-10-20","endDate":"2026-10-30"}`); status < 500 {
+		t.Fatalf("update: status %d", status)
+	}
+	if got, _ := h.store.GetLifeEvent(ctx, "wilant", id); got.End != "2026-10-21" {
+		t.Errorf("a failed edit left end %s, want the old 2026-10-21", got.End)
+	}
+	if status, _ := h.life(t, "wilant", http.MethodDelete, "/api/training/life-events/"+id, ""); status < 500 {
+		t.Fatalf("delete: status %d", status)
+	}
+	if _, err := h.store.GetLifeEvent(ctx, "wilant", id); err != nil {
+		t.Errorf("a failed delete removed the event: %v", err)
+	}
+}
+
+func TestADeleteWithAnEmptyBodyOfUnknownLengthIsNotABadRequest(t *testing.T) {
+	h := newOnceHarness(t)
+	status, res := h.life(t, "wilant", http.MethodPost, "/api/training/life-events", `{"kind":"busy","startDate":"2026-10-20","endDate":"2026-10-21"}`)
+	if status >= 300 {
+		t.Fatalf("setup: %d", status)
+	}
+	req, _ := http.NewRequest(http.MethodDelete, h.base+"/api/training/life-events/"+res.Event.ID, io.NopCloser(strings.NewReader("")))
+	req.ContentLength = -1 // chunked: the length is not known up front
+	req.Header.Set("Remote-User", "wilant")
+	req.Header.Set("Remote-Groups", "cyclists")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
 }
 

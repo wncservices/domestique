@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -275,7 +277,8 @@ func (s *Server) doLifeOp(ctx context.Context, rider string, op lifeOp) lifeOutc
 	}
 
 	// The event first: the blackout is what keeps a removal removed, so it must
-	// exist before anything is removed.
+	// exist before anything is removed. A delete goes the other way round (see
+	// below): its diff only adds, and adding does not need the blackout.
 	var saved *lifeevents.Event
 	switch op.verb {
 	case lifeCreate:
@@ -290,14 +293,25 @@ func (s *Server) doLifeOp(ctx context.Context, rider string, op lifeOp) lifeOutc
 			return lifeOutcome{err: err}
 		}
 		saved = &e
-	case lifeDelete:
+	}
+	var applied lifeAppliedDTO
+	err = s.afterLifeEventSaved()
+	if err == nil {
+		applied, err = s.applyLifeDiff(ctx, rider, plan, op.skip, op.include)
+	}
+	if err != nil {
+		// The workout writes made so far stay (they are the diff, and a retry
+		// recomputes it and skips what is already done), but the event row is put
+		// back as it was, so a retry sees the same preview the rider confirmed
+		// instead of an event that already exists. The stores take no shared
+		// transaction, so this compensates; it does not commit atomically.
+		s.rollBackLifeEvent(ctx, rider, op, old, saved)
+		return lifeOutcome{err: err}
+	}
+	if op.verb == lifeDelete {
 		if err := s.Training.DeleteLifeEvent(ctx, rider, old.ID); err != nil {
 			return lifeOutcome{err: err}
 		}
-	}
-	applied, err := s.applyLifeDiff(ctx, rider, plan, op.skip, op.include)
-	if err != nil {
-		return lifeOutcome{err: err, event: saved, diff: plan.diff}
 	}
 	// What follows a plan change: the day-before-a-test easing follows a test
 	// to its new day, and the return ramp reaches sessions this diff did not.
@@ -403,6 +417,14 @@ func (s *Server) applyLifeDiff(ctx context.Context, rider string, plan lifePlan,
 	for _, c := range plan.diff.Changes {
 		wanted := (c.Default && !skip[c.ID]) || (!c.Default && include[c.ID])
 		if !wanted {
+			// A skipped ease or shortening is the rider keeping the session as it
+			// is. Mark it, or the return ramp (which runs after every plan change,
+			// and on every tick) would simply do it again.
+			if c.Default && skip[c.ID] && (c.Op == lifeevents.OpEase || c.Op == lifeevents.OpShort) {
+				if err := s.keepThroughReturn(ctx, plan.byID[c.WorkoutID]); err != nil {
+					return n, err
+				}
+			}
 			continue
 		}
 		wk := plan.byID[c.WorkoutID]
@@ -414,8 +436,9 @@ func (s *Server) applyLifeDiff(ctx context.Context, rider string, plan lifePlan,
 			}
 			n.Removed++
 		case lifeevents.OpMove:
-			// Its copy on the account is for the old day.
-			s.removeWorkoutFromGarmin(ctx, wk)
+			// Its Garmin copy stays: a moved session is the same session, and the
+			// next push moves its calendar entry like any date change. A life
+			// event sends nothing to an account itself.
 			if err := s.applyLifeUpdate(ctx, wk, plan.profile, c); err != nil {
 				return n, err
 			}
@@ -443,6 +466,41 @@ func (s *Server) applyLifeDiff(ctx context.Context, rider string, plan lifePlan,
 		}
 	}
 	return n, nil
+}
+
+func (s *Server) afterLifeEventSaved() error {
+	if s.AfterLifeEventSaved != nil {
+		return s.AfterLifeEventSaved()
+	}
+	return nil
+}
+
+// rollBackLifeEvent undoes the event write of a failed apply: a created event is
+// deleted, an edited one restored. A delete never wrote before applying.
+func (s *Server) rollBackLifeEvent(ctx context.Context, rider string, op lifeOp, old lifeevents.Event, saved *lifeevents.Event) {
+	var err error
+	switch op.verb {
+	case lifeCreate:
+		if saved != nil {
+			err = s.Training.DeleteLifeEvent(ctx, rider, saved.ID)
+		}
+	case lifeUpdate:
+		_, err = s.Training.UpdateLifeEvent(ctx, rider, old.ID, old)
+	}
+	if err != nil {
+		s.logger().Error("could not put a life event back after a failed apply", "rider", rider, "err", err)
+	}
+}
+
+// keepThroughReturn writes the kept marker into a session whose ease or
+// shortening the rider unticked, once.
+func (s *Server) keepThroughReturn(ctx context.Context, wk workout.Workout) error {
+	if wk.ID == "" || strings.Contains(wk.Description, lifeevents.KeptMarker) {
+		return nil
+	}
+	description := strings.TrimRight(wk.Description, " \n") + " " + lifeevents.KeptMarker
+	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &description})
+	return err
 }
 
 // ---------- handlers ----------
@@ -491,7 +549,7 @@ func (s *Server) handleDeleteLifeEvent(w http.ResponseWriter, r *http.Request) {
 	var body lifeEventBody
 	// The body is optional on a delete: only the skip and include lists use it.
 	if r.ContentLength != 0 {
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxLifeEventBodyBytes)).Decode(&body); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxLifeEventBodyBytes)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 			return
 		}

@@ -331,6 +331,29 @@ func TestASessionOnlyAnEarlierRampTouchedIsStillThePlansToRemove(t *testing.T) {
 	}
 }
 
+func TestSwitchingMildToProperRemovesTheSessionsMildLeftBehind(t *testing.T) {
+	mild := ill("2026-10-08", "2026-10-10", OptionMild)
+	proper := mild
+	proper.Option = OptionProper
+
+	// What applying the mild preview left on Thursday: a 45 minute session
+	// carrying the life event's note.
+	first := preview([]Event{mild}, nil, easy("thu", "2026-10-08", 120), easy("fri", "2026-10-09", 30))
+	cut := mustFind(t, first, "shorten:thu")
+	left := easy("thu", "2026-10-08", 120)
+	left.Name, left.Steps, left.Description = *cut.Update.Name, *cut.Update.Steps, *cut.Update.Description
+
+	d := preview([]Event{proper}, []Event{mild}, left, easy("fri", "2026-10-09", 30))
+	for _, id := range []string{"remove:thu", "remove:fri"} {
+		if c := mustFind(t, d, id); !c.Default {
+			t.Errorf("%s should be ticked: nothing the rider touched is being removed", id)
+		}
+	}
+	if len(d.LeftAlone) != 0 {
+		t.Errorf("left alone: %+v", d.LeftAlone)
+	}
+}
+
 func TestLongIllnessAddsTheClinicianLine(t *testing.T) {
 	short := preview([]Event{ill("2026-10-08", "2026-10-20", OptionProper)}, nil)
 	if len(short.Advice) != 0 {

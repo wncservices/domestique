@@ -91,6 +91,10 @@ type Server struct {
 	// season pass. Tests only: it lets one hold the pass back to observe what
 	// the request had done by the time it answered.
 	BeforeSeasonFill func()
+	// AfterLifeEventSaved, when set, runs once a life event has been written
+	// and before its diff is applied; an error from it stands in for a failed
+	// write, so tests can reach the rollback. Nil in production.
+	AfterLifeEventSaved func() error
 	// SeasonFillRetry is how long a background season pass waits before
 	// trying again when the scheduling lock is held elsewhere. Zero means
 	// the default.
