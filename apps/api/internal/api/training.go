@@ -1488,9 +1488,11 @@ func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Reques
 	// A routed ride sends its course with it. A failed course is a Warn and
 	// never fails the workout that has just gone.
 	course, cerr := s.pushWorkoutCourse(r.Context(), wk, true)
-	if cerr != nil || course == courseFailed {
+	if cerr != nil {
 		course = courseFailed
-		s.logger().Warn("course not sent with the workout", "workout", id, "rider", identity.User)
+		// A push that ran and failed is logged at Error by applyPush; this is
+		// only for one that could not be attempted.
+		s.logger().Warn("course could not be attempted with the workout", "workout", id, "rider", identity.User)
 	}
 
 	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", res.RemoteID, "outcome", res.Outcome, "course", course, "rider", identity.User)

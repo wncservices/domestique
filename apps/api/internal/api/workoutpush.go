@@ -322,9 +322,12 @@ func (s *Server) pushWorkoutsForRider(ctx context.Context, rider string) int {
 		// and never undoes or stops the workout that has just gone.
 		if wk.RouteSlug != "" && !wk.Indoor {
 			outcome, err := s.pushWorkoutCourse(ctx, wk, true)
-			if err != nil || outcome == courseFailed {
-				s.logger().Warn("auto-push: today's course was not sent", "rider", rider, "workout", wk.ID)
-			} else if outcome == coursePushed {
+			switch {
+			case err != nil:
+				// Never reached the push: applyPush logs a push that ran and
+				// failed (at Error, and counts it), so only this case needs a line.
+				s.logger().Warn("auto-push: today's course could not be attempted", "rider", rider, "workout", wk.ID)
+			case outcome == coursePushed:
 				changed++
 			}
 		}
