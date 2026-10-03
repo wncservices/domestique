@@ -62,6 +62,7 @@ async function generate() {
   result.value = null
   try {
     result.value = await api.workoutRouteCandidates(w.id, todayISO())
+    held = { workoutId: w.id, at: Date.now(), result: result.value }
     state.value = 'ready'
   } catch (err) {
     if (err instanceof ApiError && err.status === 409 && err.body.code === 'no_start_point') {
@@ -73,9 +74,27 @@ async function generate() {
   }
 }
 
+// The server holds a workout's loops for 30 minutes. Reopening the panel for the
+// same ride inside that time shows what is already held instead of spending ten
+// more engine calls from a shared quota; "Show others" and saving a start point
+// are the only explicit generates.
+const HELD_FOR_MS = 25 * 60 * 1000
+let held: { workoutId: string; at: number; result: RouteCandidates } | null = null
+
+function showHeld(): boolean {
+  const w = props.workout
+  if (!w || !held || held.workoutId !== w.id || Date.now() - held.at > HELD_FOR_MS) return false
+  result.value = held.result
+  state.value = 'ready'
+  return true
+}
+
 watch(open, (isOpen: boolean) => {
-  if (isOpen) void generate()
-  else state.value = 'idle'
+  if (!isOpen) {
+    state.value = 'idle'
+    return
+  }
+  if (!showHeld()) void generate()
 })
 
 async function choose(c: RouteCandidate) {
@@ -84,6 +103,7 @@ async function choose(c: RouteCandidate) {
   choosing.value = c.id
   try {
     await api.saveWorkoutRoute(w.id, c.id, todayISO())
+    held = null // the server drops this ride's other loops once one is chosen
     toast.add({ title: 'Route added to your ride', icon: 'i-lucide-route', color: 'success' })
     open.value = false
     emit('saved')
@@ -147,7 +167,7 @@ function suited(c: RouteCandidate): string {
                 <div class="flex flex-col gap-3">
                   <RouteCandidatePreview :points="c.points" />
                   <div class="flex flex-wrap items-center gap-2">
-                    <UBadge v-if="i === 0" color="primary" variant="subtle" icon="i-lucide-star">Best fit</UBadge>
+                    <UBadge v-if="i === 0 && c.terrainFit >= 0.5" color="primary" variant="subtle" icon="i-lucide-star">Best fit</UBadge>
                     <span class="font-mono tabular-nums text-sm text-highlighted">{{ (c.distanceM / 1000).toFixed(1) }} km</span>
                     <span class="font-mono tabular-nums text-sm text-muted">{{ Math.round(c.ascentM) }} m up</span>
                     <span class="font-mono tabular-nums text-sm text-muted">

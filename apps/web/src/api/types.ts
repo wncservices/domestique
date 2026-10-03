@@ -1648,6 +1648,19 @@ export interface RideStart {
   place?: string
 }
 
+/** What sending a routed ride's course did. `none` means there was nothing to
+ *  send it to (no connected device for this rider, or the route is not theirs). */
+export type CourseOutcome = 'none' | 'pushed' | 'unchanged' | 'failed'
+
+/** The answer to "Send to Garmin" for a workout. `course` is how its route went
+ *  with it; a failed course never fails the workout. */
+export interface WorkoutPushResult {
+  status: string
+  outcome: 'created' | 'updated' | 'scheduled' | 'unchanged'
+  garminWorkoutId: string
+  course: CourseOutcome
+}
+
 /** One generated loop for a planned ride, returned to its owner only. `points`
  *  are [lat, lon]; they appear nowhere else. `fit` is the overall score 0-1
  *  (half time, half terrain); `terrainFit` the terrain half, `note` what is
@@ -1661,7 +1674,9 @@ export interface RouteCandidate {
   elevationProfile: { distanceM: number; eleM: number }[]
   estimatedSeconds: number
   family: string
-  fit: number
+  /** Overall score 0-1: half time, half terrain. */
+  score: number
+  /** The terrain half alone; "Best fit" is a claim about this one. */
   terrainFit: number
   note?: string
 }
