@@ -258,6 +258,11 @@ type Server struct {
 	// means the feature answers 412; see ridestart.go.
 	RideStarts *ridestart.Store
 
+	// candidates holds generated route loops in memory until their rider
+	// picks one; see candidates.go. Created on first use.
+	candidates     *candidateStore
+	candidatesOnce sync.Once
+
 	// Narration is Phase E of docs/training-plan.md — an LLM layer that
 	// explains a plan and proposes profile edits from free text, strictly
 	// on top of the deterministic engine, never in place of it (see
@@ -550,6 +555,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/ride-start", s.handleGetRideStart)
 	mux.HandleFunc("PUT /api/training/ride-start", s.handleSetRideStart)
 	mux.HandleFunc("DELETE /api/training/ride-start", s.handleDeleteRideStart)
+	mux.HandleFunc("POST /api/training/workouts/{id}/route-candidates", s.handleWorkoutRouteCandidates)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
 	mux.HandleFunc("POST /api/training/plan/propose-edit", s.handleProposePlanEdit)
