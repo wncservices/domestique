@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -473,5 +474,128 @@ func TestDefaultLimitsAreTheSpecs(t *testing.T) {
 	d := DefaultLimits
 	if d.MaxEntryBytes != 64<<20 || d.MaxTotalBytes != 6<<30 || d.MaxEntries != 20000 || d.MaxDepth != 2 || d.MaxRatio != 200 {
 		t.Errorf("DefaultLimits = %+v, want 64 MiB, 6 GiB, 20000, depth 2, 200x", d)
+	}
+}
+
+// craftedZip64 is a one-entry zip whose end record says "one entry" and "the
+// directory offset is in the zip64 record", where a zip64 record declares
+// `declared` entries: the shape that sent archive/zip to the zip64 record
+// without the old guard looking there.
+func craftedZip64(t *testing.T, declared uint64) []byte {
+	t.Helper()
+	base := buildZip(t, entry{"a.fit", fakeFIT("x")})
+	eocd := append([]byte(nil), base[len(base)-22:]...)
+	body := append([]byte(nil), base[:len(base)-22]...)
+	cdSize := binary.LittleEndian.Uint32(eocd[12:])
+	cdOff := binary.LittleEndian.Uint32(eocd[16:])
+
+	rec := make([]byte, 56)
+	binary.LittleEndian.PutUint32(rec[0:], 0x06064b50)
+	binary.LittleEndian.PutUint64(rec[4:], 44)
+	binary.LittleEndian.PutUint16(rec[12:], 45)
+	binary.LittleEndian.PutUint16(rec[14:], 45)
+	binary.LittleEndian.PutUint64(rec[24:], declared)
+	binary.LittleEndian.PutUint64(rec[32:], declared)
+	binary.LittleEndian.PutUint64(rec[40:], uint64(cdSize))
+	binary.LittleEndian.PutUint64(rec[48:], uint64(cdOff))
+	loc := make([]byte, 20)
+	binary.LittleEndian.PutUint32(loc[0:], 0x07064b50)
+	binary.LittleEndian.PutUint64(loc[8:], uint64(len(body)))
+	binary.LittleEndian.PutUint32(loc[16:], 1)
+
+	binary.LittleEndian.PutUint32(eocd[16:], 0xFFFFFFFF) // offset: "look in the zip64 record"
+	out := append(body, rec...)
+	out = append(out, loc...)
+	return append(out, eocd...)
+}
+
+func TestZip64RecordIsReadWhenOnlyTheOffsetPointsThere(t *testing.T) {
+	rep, got := read(t, craftedZip64(t, 1_000_000), testLimits())
+	if !errors.Is(rep.Err, ErrTooManyEntries) {
+		t.Fatalf("err = %v, want ErrTooManyEntries before the archive is listed", rep.Err)
+	}
+	if len(got) != 0 {
+		t.Errorf("emitted %d files from an archive declaring a million entries", len(got))
+	}
+}
+
+func TestEntryCountThatLiesLowIsStillBoundedByTheDirectoryLength(t *testing.T) {
+	// archive/zip reads entries until the directory ends, whatever the end
+	// record says, so a count patched down to 1 must not let 40 long-named
+	// entries through a cap of 1.
+	var entries []entry
+	for i := 0; i < 40; i++ {
+		entries = append(entries, entry{fmt.Sprintf("%s/%d.csv", strings.Repeat("d", 100), i), nil})
+	}
+	raw := buildZip(t, entries...)
+	binary.LittleEndian.PutUint16(raw[len(raw)-22+8:], 1)
+	binary.LittleEndian.PutUint16(raw[len(raw)-22+10:], 1)
+	l := testLimits()
+	l.MaxEntries = 1
+	rep, _ := read(t, raw, l)
+	if !errors.Is(rep.Err, ErrTooManyEntries) {
+		t.Errorf("err = %v, want ErrTooManyEntries from the directory's byte length", rep.Err)
+	}
+}
+
+func TestZip64ArchiveWithMoreThan65535Entries(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i := 0; i < 70000; i++ {
+		if _, err := zw.CreateHeader(&zip.FileHeader{Name: fmt.Sprintf("e/%d.csv", i), Method: zip.Store}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f, size := spool(t, buf.Bytes())
+	n, _, ok := zipDirectory(f, size)
+	if !ok || n != 70000 {
+		t.Fatalf("declared entries = %d (ok %v), want 70000 from the zip64 record", n, ok)
+	}
+	l := testLimits()
+	l.MaxEntries = 20000
+	if rep := Read(f, size, l, func([]byte) error { return nil }); !errors.Is(rep.Err, ErrTooManyEntries) {
+		t.Errorf("cap 20000: err = %v, want ErrTooManyEntries", rep.Err)
+	}
+	l.MaxEntries = 100000
+	if rep := Read(f, size, l, func([]byte) error { return nil }); rep.Err != nil {
+		t.Errorf("cap 100000: err = %v, want the whole archive read", rep.Err)
+	}
+}
+
+func TestTheBudgetIsForTheWholeUploadNotEachPart(t *testing.T) {
+	part := func(n int) []byte {
+		var es []entry
+		for i := 0; i < n; i++ {
+			es = append(es, entry{fmt.Sprintf("%d.fit", i), fakeFIT(noise(100 << 10))})
+		}
+		return buildZip(t, es...)
+	}
+	open := func(raw []byte) Part { f, size := spool(t, raw); return Part{File: f, Size: size} }
+	emit := func([]byte) error { return nil }
+
+	// Each part is 600 KiB, under a 1 MiB cap; together they are not.
+	l := testLimits()
+	l.MaxTotalBytes = 1 << 20
+	rep := ReadAll([]Part{open(part(6)), open(part(6))}, l, emit)
+	if !errors.Is(rep.Err, ErrTotalSize) {
+		t.Errorf("total cap: err = %v, want ErrTotalSize across parts", rep.Err)
+	}
+
+	// Each part holds 60 entries, under a cap of 100; together they hold 120.
+	l = testLimits()
+	l.MaxEntries = 100
+	small := func() []byte {
+		var es []entry
+		for i := 0; i < 60; i++ {
+			es = append(es, entry{fmt.Sprintf("%d.csv", i), nil})
+		}
+		return buildZip(t, es...)
+	}
+	rep = ReadAll([]Part{open(small()), open(small())}, l, emit)
+	if !errors.Is(rep.Err, ErrTooManyEntries) {
+		t.Errorf("entry cap: err = %v, want ErrTooManyEntries across parts", rep.Err)
 	}
 }

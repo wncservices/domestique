@@ -79,11 +79,23 @@ type Report struct {
 	Err error
 }
 
-// zipEntryCount reads the entry count a zip declares in its end-of-central-
-// directory record, so an archive that claims millions of entries is refused
-// before archive/zip tries to hold them all in memory. ok is false when no
-// record is found (the caller then lets archive/zip produce the error).
-func zipEntryCount(ra io.ReaderAt, size int64) (n uint64, ok bool) {
+// zipDirectory reads what a zip declares about its central directory from the
+// end-of-central-directory records, so an archive that would make archive/zip
+// hold millions of entries in memory is refused before it is listed.
+//
+// entries is the largest count the records declare. region is the number of
+// bytes the central directory actually occupies on disk, which matters
+// because archive/zip does not stop at the declared count: it reads entries
+// until the directory ends, so a count that lies low bounds nothing, and the
+// byte length is the only honest limit.
+//
+// archive/zip switches to the zip64 records when the count is 0xFFFF, the
+// directory size is 0xFFFF or the offset is 0xFFFFFFFF. The same three
+// conditions are mirrored here, and the zip64 locator is also read whenever it
+// is present, taking the larger of the two answers: an attacker only gains by
+// the two disagreeing. ok is false when no record is found (the caller then
+// lets archive/zip produce the error).
+func zipDirectory(ra io.ReaderAt, size int64) (entries, region uint64, ok bool) {
 	const eocdLen, maxComment = 22, 1 << 16
 	tail := int64(eocdLen + maxComment)
 	if tail > size {
@@ -91,7 +103,7 @@ func zipEntryCount(ra io.ReaderAt, size int64) (n uint64, ok bool) {
 	}
 	buf := make([]byte, tail)
 	if _, err := ra.ReadAt(buf, size-tail); err != nil && !errors.Is(err, io.EOF) {
-		return 0, false
+		return 0, 0, false
 	}
 	at := -1
 	for i := len(buf) - eocdLen; i >= 0; i-- {
@@ -101,29 +113,39 @@ func zipEntryCount(ra io.ReaderAt, size int64) (n uint64, ok bool) {
 		}
 	}
 	if at < 0 {
-		return 0, false
+		return 0, 0, false
 	}
-	n = uint64(binary.LittleEndian.Uint16(buf[at+10:]))
-	if n != 0xFFFF {
-		return n, true
-	}
-	// Zip64: the real count is in the zip64 end record, which a locator just
-	// before the EOCD points to.
+	eocdPos := uint64(size-tail) + uint64(at) // #nosec G115 -- both are non-negative file offsets.
+	entries = uint64(binary.LittleEndian.Uint16(buf[at+10:]))
+	dirSize := uint64(binary.LittleEndian.Uint32(buf[at+12:]))
+	dirOff := uint64(binary.LittleEndian.Uint32(buf[at+16:]))
+	dirEnd := eocdPos
+
+	// The locator sits directly before the EOCD and points at the zip64 record.
 	const locLen = 20
-	if at < locLen || binary.LittleEndian.Uint32(buf[at-locLen:]) != 0x07064b50 {
-		return n, true
+	sentinel := entries == 0xFFFF || dirSize == 0xFFFF || dirOff == 0xFFFFFFFF
+	if at >= locLen && binary.LittleEndian.Uint32(buf[at-locLen:]) == 0x07064b50 {
+		rawOff := binary.LittleEndian.Uint64(buf[at-locLen+8:])
+		rec := make([]byte, 56)
+		if rawOff <= uint64(size) && rawOff+uint64(len(rec)) <= uint64(size) { // #nosec G115 -- size is a file length.
+			if _, err := ra.ReadAt(rec, int64(rawOff)); err == nil && binary.LittleEndian.Uint32(rec) == 0x06064b50 { // #nosec G115 -- bounded just above.
+				if n := binary.LittleEndian.Uint64(rec[32:]); n > entries {
+					entries = n
+				}
+				dirEnd = rawOff
+				if sentinel || dirOff == 0xFFFFFFFF {
+					dirOff = binary.LittleEndian.Uint64(rec[48:])
+				}
+			}
+		}
 	}
-	rawOff := binary.LittleEndian.Uint64(buf[at-locLen+8:])
-	rec := make([]byte, 56)
-	if rawOff > uint64(size) { // #nosec G115 -- size is a file length, never negative.
-		return n, true
+	if dirOff < dirEnd {
+		region = dirEnd - dirOff
 	}
-	off := int64(rawOff) // #nosec G115 -- checked against size just above.
-	if off+int64(len(rec)) > size {
-		return n, true
-	}
-	if _, err := ra.ReadAt(rec, off); err != nil || binary.LittleEndian.Uint32(rec) != 0x06064b50 {
-		return n, true
-	}
-	return binary.LittleEndian.Uint64(rec[32:]), true
+	return entries, region, true
 }
+
+// maxDirectoryBytesPerEntry bounds the central directory by what a real entry
+// needs: 46 bytes of header plus a name, comfortably under a kilobyte. A
+// directory longer than the entry cap allows at this size is not a ride export.
+const maxDirectoryBytesPerEntry = 1024
