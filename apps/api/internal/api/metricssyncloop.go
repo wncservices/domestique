@@ -108,6 +108,12 @@ func (s *Server) runMetricsPassWith(ctx context.Context, sched *syncschedule.Sch
 	}
 
 	s.markMetricsSynced(s.now())
+	// After the run is recorded, so nothing about mail can make a sync look
+	// failed or delay its recording; the morning email is sent only from the
+	// first slot of the local day. See sendMorningSummaries.
+	if morning, err := s.syncSchedule(); err == nil {
+		s.sendMorningSummaries(ctx, morning)
+	}
 	if riders > 0 {
 		s.logger().Info("metrics sync finished", "riders", riders, "failed", failed)
 	}

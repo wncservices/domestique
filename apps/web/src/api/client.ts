@@ -6,6 +6,8 @@ import type {
   AutoSyncSetting,
   BuildFtpTestRequest,
   BasemapUpdate,
+  CalendarFeedLink,
+  CalendarFeedStatus,
   Crew,
   CreateCrewRequest,
   FtpTests,
@@ -17,6 +19,7 @@ import type {
   GarminDuplicateGroup,
   GarminDevice,
   GeocodeResult,
+  MorningSummaryStatus,
   Goal,
   CreateGoalRequest,
   UpdateGoalRequest,
@@ -973,6 +976,26 @@ export const api = {
    *  was computed from — read-only, reflects whatever syncTrainingMetrics
    *  last recorded. */
   fitness: () => request<FitnessResponse>('/api/training/fitness'),
+  /** Whether the rider has a calendar link and when a calendar app last
+   *  fetched it. `available` is false without a public_url on the server. */
+  calendarFeed: () => request<CalendarFeedStatus>('/api/training/calendar'),
+  /** Generates, or regenerates, the link; the old one stops working at once.
+   *  The only call that returns the URL. */
+  createCalendarFeed: () => request<CalendarFeedLink>('/api/training/calendar', { method: 'POST' }),
+  /** The morning email: whether it can be used, whether it is on, and the
+   *  address it goes to. */
+  morningSummary: () => request<MorningSummaryStatus>('/api/training/morning-summary'),
+  /** Turns it on or off. The body is only `enabled`: the address comes from
+   *  the account, never from here. A 412 means it cannot be used. */
+  setMorningSummary: (enabled: boolean) =>
+    request<MorningSummaryStatus>('/api/training/morning-summary', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
+  /** Sends one test message to the rider's own address (5 per 15 minutes). */
+  testMorningSummary: () => request<void>('/api/training/morning-summary/test', { method: 'POST' }),
+  revokeCalendarFeed: () => request<void>('/api/training/calendar', { method: 'DELETE' }),
   /** One Monday–Sunday week of planned vs completed training — see
    *  internal/api/trainingweek.go. start snaps to its Monday server-side. */
   trainingWeek: (start?: string) =>

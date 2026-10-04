@@ -100,6 +100,9 @@ only place the client secret lives, and `DOMESTIQUE_ENCRYPTION_KEY` must be
 set, or there is nowhere safe to hold the session or the short-lived sign-in
 state and `/sso/login` refuses outright.
 
+`Remote-Email` is treated as a **verified** address under this mode (it comes from Authelia's own
+user directory, which an administrator controls): see **Morning summary**.
+
 Roles come from groups — Authelia's or the OIDC issuer's `groups_claim` — most-privileged match wins:
 
 | Role | Can |
@@ -198,6 +201,99 @@ judges them, `api/workoutroute*.go` serves them) and a library route can be put 
 - **Today's push** sends the course to the rider's own Garmin accounts only, through `applyPush`, idempotent
   and never deleting. A course failure never fails the workout push; it is logged once at Error and counted
   in `domestique_push_errors_total`, since a route that did not reach the head unit is a real push failure.
+## Calendar feed
+
+`GET /api/calendar/<token>.ics` serves a rider's planned sessions as an iCalendar file
+(`internal/ics`, stdlib, `internal/calendarfeed`). A calendar app subscribes from its own servers
+with no browser and no cookie, so **this is the one path that bypasses `authenticate`, and the
+secret URL is the only credential.** What keeps that safe, all of it tested over real HTTP in
+every auth mode (`calendar_test.go`):
+
+- **One predicate, two read verbs.** `isCalendarFeedPath` (exactly `/api/calendar/<43 base64url>.ics`)
+  and `GET` or `HEAD` decide the bypass (`bypassesAuth`; HEAD is the same handler with no body, and
+  reads nothing GET does not), and the mux handler uses the same predicate. Never widen it to a
+  prefix: `/api/calendar/anything-else` and every write verb stay behind the gate.
+  `Identify` is skipped, so a forged `Remote-User` or a session cookie changes nothing: the rider
+  is whoever owns the token's hash. Rider-facing management is `/api/training/calendar`, behind the
+  ordinary gate.
+- **Hashed, shown once.** `calendar_feeds` holds `sha256(token)`; the URL exists only in the
+  response that creates it. A lost URL is regenerated (one upsert, the old URL dies at once), a
+  leaked one is revoked. `last_fetched_at` is written at most hourly.
+- **Same 404.** Unknown, replaced and revoked tokens give one identical response. A malformed one
+  is not the feed path, so it is not exempt from the gate: 404 where there is no gate (mode
+  `none`), the gate's 401 where there is.
+- **Rate limited**: 30 an hour per token, and one global budget of 60 misses a minute (no client
+  address to key on behind the proxy). In memory per replica: abuse throttling, not a guarantee.
+- **The token never leaves through our side.** `redactPath` works by segment, not by prefix: any
+  segment shaped like a token (43 base64url characters, with or without `.ics` in any case) is
+  replaced wherever it sits, and so is the segment right after `api/calendar` or `api/shares`,
+  case-insensitively and ignoring empty and `.`/`..` segments, so `//api/calendar/<t>`, `/./`,
+  `/API/...` and `%2e%2e` spellings cannot carry one past it. It runs before the debug log line, the
+  span name **and** the `url.path` span attribute (`hideSecretPaths` swaps the path outside
+  `otelhttp` and `restoreSecretPaths` puts it back just inside). A new path whose secret is not
+  token-shaped needs its prefix added to the "after" rule. Traefik's own access log is outside the
+  app: if a URL leaks that way, regenerate it.
+- **A feed and a summary outlive a sign-in, so blocking has to reach them.** Neither needs a
+  session, so "the next sign-in fails" does not stop them. `handleSetPersonBlocked` (block, not
+  unblock) and `handlePeopleSetRole` (a role that can no longer `training:manage`; the gate role
+  itself cannot be removed through that endpoint) call `ridersOfPerson` *before* the change, then
+  `revokeBackgroundAccess`: the feed is revoked, the summary switched off and its address cleared.
+  Blocking also ends the person's live sessions. The rider name is found from the identity's own
+  sessions (`Sessions.RidersOfSub`), the address the summary was opted in under, and the People
+  page's own guess, because the admin names a person by issuer id. Nothing is re-enabled on
+  unblock or on a role coming back: the rider makes a new link and opts in again. The morning pass
+  is the backstop: a rider whose stored address is on the blocklist is skipped and switched off.
+  Removing the gate role directly in Auth0 is not visible to the app; revoke the link there too.
+- **Planned sessions only.** `calendarfeed.Events` takes workouts and nothing else, so no HRV,
+  sleep, readiness, FTP, fitness, route, place or weather can reach a file a third-party calendar
+  server keeps. Do not add a parameter to it that is not a workout field.
+- **mode: proxy needs an Authelia bypass rule.** Authelia rejects the calendar app before the
+  request reaches us, so the deployment must add an `access_control` rule with policy `bypass` for
+  the resource `^/api/calendar/[A-Za-z0-9_-]+\.ics$` (the chart repo's `AGENTS.md` carries the
+  deployment side). The app-side exemption does not weaken proxy mode's "unreachable except through
+  the proxy" rule: a request through the proxy still carries no `Remote-User` and the feed handler
+  never reads it. `mode: oidc` faces the public already; `mode: none` serves it as is.
+- **Timed events** need a ride hour. `Server.RideStartHour` is the seam (nil: every event is
+  all-day). It is not wired: the weather preference's window has a default a rider never chose,
+  so wiring it would stamp 09:00 on every event of everyone who picked a place.
+- RFC 5545 details live in `internal/ics`: CRLF everywhere, 75-**octet** folding that never splits a
+  UTF-8 sequence, TEXT escaping, control characters dropped (a rider-typed name cannot add a
+  property), all-day `VALUE=DATE` with an exclusive end, UTC instants for timed events (no
+  hand-written `VTIMEZONE`). `ETag` is a hash of the deterministic body, so a polling calendar app
+  costs a query and a hash.
+
+## Morning summary
+
+An opted-in rider gets a short plain-text email after the first sync slot of the local day
+(`sendMorningSummaries`, called from `runMetricsPassWith` after the run is recorded, so mail can
+never make a sync look failed). `internal/morningsummary` holds the pure composer and the opt-in
+table; `internal/mailer` sends.
+
+- **The address is the identity's, never the request's, and it must be verified.** `PUT` takes only
+  `{enabled}`. Under `mode: oidc` the session carries the ID token's `email_verified` claim
+  (`Identity.EmailVerified`; a missing or non-true claim is unverified, and a session from before
+  the claim existed reads as unverified, so that rider signs in again). Under `mode: proxy`,
+  `Remote-Email` is **trusted as verified**: it comes from Authelia's own user directory, which an
+  administrator controls, and is only honoured from a trusted proxy. Under `mode: none` there is no
+  address and the feature reports `no_email`. An unverified address cannot opt in or get a test, and
+  reading the status switches off a summary whose address is no longer verified.
+- **At most one per rider per day, across replicas and restarts**: `Claim` is a compare-and-set
+  made *before* the send, so a crash or a failed send never double-sends. One attempt, no retry;
+  the next day's slot is the next try. Only the day's first slot sends (the 21:00 pass never does),
+  and a late pass still sends until 12:00 local, then skips. "Today" is the schedule's zone.
+- **No readiness reasons, no numbers.** `Compose`'s `Input` carries the verdict as one word and not
+  the reasons, so sleep, HRV, resting heart rate and load cannot reach a mailbox on a relay we do
+  not control. The email points at the Fitness page for the why. The weather line is the same rule
+  the Plan page uses; the FTP-test line only fires for a suggestion dated today.
+- **Logs**: a rider's name, and for a failure the stage and the numeric code. Never the address,
+  the subject, the verdict or a reason. The password is `DOMESTIQUE_SMTP_PASSWORD`, read in `main`
+  and held by the mailer alone. `domestique_morning_summary_total{result="sent|failed"}` is the
+  one thing worth alerting on.
+- **Config**: `public_url` and `notifications.smtp` (host, port, security `starttls`|`tls`|`none`,
+  username, from). No host means the feature is off; a partial block, or smtp without `public_url`,
+  fails `domestique validate`. The mailer fails closed on its own: any security value other than
+  those three is refused before a connection is made, and `none` is only for a loopback host
+  (`mailer.IsLoopbackHost`), in the mailer and in validation alike.
 
 ## Komoot
 
@@ -705,6 +801,12 @@ in `elevation.Client`, per their own comments:
    `auth0mgmt.Client`, `wahoo.Client`, `basemap`'s pmtiles client, `elevation.Client`) does this
    today — a new eighth one is the thing to get right on the way in, not fix reactively once a
    trace turns up a mysteriously untraced gap in the middle of it.
+1a. **A new outbound client that is not HTTP** has no `otelhttp` to wrap. `internal/mailer` (SMTP)
+   is the first: it opens one manual span, `smtp send`, from the caller's `ctx`, with `smtp.host`
+   and `smtp.port` as its only attributes (never the recipient, the subject or the body), puts a
+   deadline on the whole conversation, closes the socket when `ctx` is cancelled, and reports a
+   failure as a stage and a numeric code only, because servers echo the recipient in their errors.
+   A new non-HTTP client follows that shape.
 2. **A new "this deployment doesn't have X configured" guard** (mirroring `crewAvailable`,
    `peopleAvailable`, `ElevationConfigured`, `Links.CanStore()`, …) must log when it fires, not
    just `writeJSON` the 412/501 and return. A silent one already shipped once — `recalculate

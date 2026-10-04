@@ -105,3 +105,17 @@ func (s Schedule) Last(now time.Time) time.Time {
 func (s Schedule) Missed(lastRun, now time.Time) bool {
 	return lastRun.Before(s.Last(now))
 }
+
+// FirstOfDay reports whether slot is the earliest slot of its local date: the
+// pass that follows the night, and so the one that may send a morning summary.
+// A time that is not a slot at all is not the first of anything. Compared by
+// building the day's first slot the same way around() does, so a slot moved
+// forward out of a daylight-saving gap still matches.
+func (s Schedule) FirstOfDay(slot time.Time) bool {
+	if slot.IsZero() || len(s.slots) == 0 {
+		return false
+	}
+	local := slot.In(s.loc)
+	first := s.slots[0]
+	return slot.Equal(time.Date(local.Year(), local.Month(), local.Day(), first.hour, first.minute, 0, 0, s.loc))
+}

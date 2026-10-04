@@ -35,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
+	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/elevation"
@@ -45,7 +46,9 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
+	"github.com/wncservices/domestique/apps/api/internal/mailer"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
@@ -813,6 +816,29 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// Wired unconditionally, the same as Shares: the hashed token of a rider's
+	// private calendar link needs only the database every deployment has.
+	calendarFeedStore, err := calendarfeed.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
+	// Who has opted in to the morning email. The table is wired
+	// unconditionally; whether anything can be sent is decided by whether
+	// notifications.smtp is configured (below).
+	morningStore, err := morningsummary.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+	var notifier api.Notifier
+	if smtp := cfg.Notifications.SMTP; smtp.Enabled() {
+		// The password comes from the environment only and is handed to the
+		// mailer, which holds it and logs it nowhere.
+		notifier = mailer.New(mailer.Config{
+			Host: smtp.Host, Port: smtp.Port, Security: smtp.Security, Username: smtp.Username, From: smtp.From,
+		}, os.Getenv(mailer.EnvPassword))
+	}
+
 	// Wired unconditionally, the same as Crew and Schedule — a goal, rider
 	// profile or workout needs no external credential, only the database
 	// every deployment already has. See docs/training-plan.md.
@@ -838,9 +864,20 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Schedule:     scheduleStore,
 		Blocklist:    blocklistStore,
 		Shares:       sharesStore,
-		Training:     trainingStore,
-		Auth:         authenticator,
-		Log:          log,
+		// The hashed calendar-feed tokens; see internal/calendarfeed.
+		CalendarFeeds: calendarFeedStore,
+		// The morning email: who opted in, how it is sent, and the budget for
+		// "send me a test" (five per rider per fifteen minutes).
+		MorningSummaries: morningStore,
+		Mailer:           notifier,
+		TestMailLimiter:  api.NewTestMailLimiter(),
+		// A calendar app polls, so a per-token budget; and one global budget
+		// for tokens nothing matches. In memory, per replica, like the rest.
+		CalendarLimiter:     api.NewCalendarLimiter(),
+		CalendarMissLimiter: api.NewCalendarMissLimiter(),
+		Training:            trainingStore,
+		Auth:                authenticator,
+		Log:                 log,
 		// Pure in-memory, no external credential to be missing — wired
 		// unconditionally, the same as Crew. 5 attempts per rider per 15
 		// minutes is enough for someone who mistypes a password twice; see

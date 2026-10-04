@@ -1876,3 +1876,31 @@ export interface ProjectionResponse {
   events: ProjectionEvent[]
   assumptions: string[]
 }
+
+/** GET /api/training/calendar: the rider's private calendar link. The link
+ *  itself is never here (only its hash is stored); it exists once, in the
+ *  response that creates it. */
+export interface CalendarFeedStatus {
+  available: boolean
+  active: boolean
+  createdAt?: string
+  lastFetchedAt?: string
+}
+
+/** POST /api/training/calendar: the only time the URL exists. */
+export interface CalendarFeedLink {
+  url: string
+  webcalUrl: string
+}
+
+/** GET/PUT /api/training/morning-summary. The address is the signed-in
+ *  identity's (never typed here) and only ever one the sign-in provider
+ *  vouches for. `reason` says why it is unavailable: `not_configured` (the
+ *  deployment has no SMTP), `no_email` (mode none, or no address on the
+ *  account) or `email_unverified`. */
+export interface MorningSummaryStatus {
+  available: boolean
+  reason?: 'not_configured' | 'no_email' | 'email_unverified'
+  enabled: boolean
+  email?: string
+}
