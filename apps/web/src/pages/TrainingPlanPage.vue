@@ -49,6 +49,7 @@ import RideTogetherCard from '@/components/plan/RideTogetherCard.vue'
 import RouteDemandsCard from '@/components/plan/RouteDemandsCard.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
+import RouteForRideSlideover from '@/components/plan/RouteForRideSlideover.vue'
 import TrainNowSlideover from '@/components/plan/TrainNowSlideover.vue'
 import TomorrowForecastBanner from '@/components/plan/TomorrowForecastBanner.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
@@ -66,7 +67,7 @@ import { todayISO } from '@/utils/rideDates'
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const { canSyncGarmin } = useLibrary()
+const { canSyncGarmin, routingConfigured } = useLibrary()
 
 // --- me: only fetched here for narrationEnabled, so "Explain this plan"
 // can avoid offering a button that would 412 — see meDTO's own doc comment
@@ -279,11 +280,94 @@ async function reloadAfterSwap() {
 
 const pushingWorkout = ref('')
 
+// --- a route for a planned ride: generate, link, remove, and send the course
+// to the rider's devices. Every one re-reads the week and the list. ---
+
+const routeSlideoverOpen = ref(false)
+const routeTarget = ref<Workout | null>(null)
+const sendingCourse = ref(false)
+
+const editingWorkout = computed(() => workouts.value.find((w) => w.id === editingWorkoutId.value))
+const canRouteEditing = computed(() => {
+  const w = editingWorkout.value
+  return (
+    routingConfigured.value &&
+    !!w &&
+    w.sport === 'cycling' &&
+    !w.indoor &&
+    !w.testProtocol &&
+    w.plannedSeconds > 0 &&
+    !!w.date &&
+    eventsOn(lifeEvents.value, w.date).length === 0 &&
+    w.date >= todayISO()
+  )
+})
+
+function openRouteForEditing() {
+  const w = editingWorkout.value
+  if (!w) return
+  workoutModalOpen.value = false
+  openRouteFor(w)
+}
+
+function openRouteFor(w: Workout) {
+  routeTarget.value = w
+  routeSlideoverOpen.value = true
+}
+
+async function removeRouteFrom(w: Workout) {
+  try {
+    await api.removeWorkoutRoute(w.id)
+    toast.add({ title: 'Route removed from your ride', icon: 'i-lucide-route', color: 'success' })
+    await Promise.all([loadWeek(), loadWorkouts()])
+  } catch (err) {
+    toast.add({ title: 'Could not remove the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  }
+}
+
+async function sendCourseOf(w: Workout) {
+  sendingCourse.value = true
+  try {
+    const { course } = await api.pushWorkoutCourse(w.id)
+    switch (course) {
+      case 'pushed':
+        toast.add({ title: 'Route sent to your devices', icon: 'i-lucide-send', color: 'success' })
+        break
+      case 'unchanged':
+        toast.add({ title: 'Your devices already have this route', icon: 'i-lucide-check', color: 'neutral' })
+        break
+      case 'none':
+        toast.add({
+          title: 'Nothing was sent',
+          description: 'There is no connected Garmin or Wahoo account to send it to, or the route is not yours. Connect a device in Settings.',
+          icon: 'i-lucide-info',
+          color: 'warning',
+        })
+        break
+      default:
+        toast.add({ title: 'The route could not be sent', icon: 'i-lucide-triangle-alert', color: 'warning' })
+    }
+  } catch (err) {
+    toast.add({ title: 'Could not send the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    sendingCourse.value = false
+  }
+}
+
 async function pushWorkoutToGarmin(w: Workout) {
   pushingWorkout.value = w.id
   try {
-    await api.pushWorkoutToGarmin(w.id)
+    const res = await api.pushWorkoutToGarmin(w.id)
     toast.add({ title: `Pushed ${w.name} to Garmin`, icon: 'i-lucide-watch', color: 'success' })
+    // The workout went whatever happened to its route; say so if the route did not.
+    if (res.course === 'failed') {
+      toast.add({
+        title: `${w.name} was sent, but its route was not`,
+        description: 'The route could not be sent to your devices. Try "Send to devices" on the day card.',
+        icon: 'i-lucide-triangle-alert',
+        color: 'warning',
+      })
+    }
   } catch (err) {
     toast.add({
       title: `Could not push ${w.name} to Garmin`,
@@ -880,6 +964,11 @@ onMounted(() => {
           @swapped="reloadAfterSwap"
           @rated="loadWeek"
           @back-to-today="backToToday"
+          :routing-configured="routingConfigured"
+          :sending-course="sendingCourse"
+          @route="openRouteFor"
+          @remove-route="removeRouteFrom"
+          @send-course="sendCourseOf"
         />
       </div>
 
@@ -999,8 +1088,11 @@ onMounted(() => {
       :profile="profile"
       :saving="savingWorkout"
       :why="editingWhy"
+      :route="editingWorkout?.route"
+      :can-route="canRouteEditing"
       @update:form="(f) => (workoutForm = f)"
       @save="saveWorkout"
+      @route="openRouteForEditing"
     />
 
     <IndoorConvertModal
@@ -1029,6 +1121,7 @@ onMounted(() => {
       :proposal="lifeModalProposal"
       @changed="onLifeChanged"
     />
+    <RouteForRideSlideover v-model:open="routeSlideoverOpen" :workout="routeTarget" @saved="reloadAfterSwap" />
 
     <TrainNowSlideover v-model:open="trainNowOpen" :today="today" @applied="reloadAfterSwap" />
 

@@ -130,6 +130,11 @@ var riderTables = map[string]riderTable{
 	"weather_locations": {Purged: true, Note: "WeatherPrefs.Delete",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
 
+	// internal/ridestart: where the rider's planned rides start, kept at about
+	// 110 m. Location data, so it goes with the rider and follows a rename.
+	"ride_start_points": {Purged: true, Note: "RideStarts.Delete",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
+
 	// internal/workout, all of it through Training.DeleteRider
 	"goals": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},

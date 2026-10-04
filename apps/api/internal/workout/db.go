@@ -493,6 +493,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addZoneLevelColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addRouteLinkColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.addAnalysisFeelColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
@@ -642,6 +645,46 @@ func (d *DB) addZoneLevelColumns() error {
 		return err
 	}
 	return nil
+}
+
+// addRouteLinkColumns adds route_slug and route_seconds to a workouts table
+// that predates them. "" and 0 are right for every existing row: no ride was
+// tied to a route before.
+func (d *DB) addRouteLinkColumns() error {
+	for _, stmt := range []string{
+		`ALTER TABLE workouts ADD COLUMN route_slug TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN route_seconds DOUBLE PRECISION NOT NULL DEFAULT 0`,
+	} {
+		_, err := d.db.Exec(stmt)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+// UnlinkRoute clears the route link of every workout, of any rider, that
+// links slug, and says how many. A deleted library route must not leave a
+// dangling slug behind: it would read as a route that exists, and a later
+// route created under the same slug would attach itself to a stranger's ride.
+// updated_at is left alone: this is clean-up after a deletion, not an edit
+// the rider made. An empty slug matches nothing.
+func (d *DB) UnlinkRoute(ctx context.Context, slug string) (int, error) {
+	if slug == "" {
+		return 0, nil
+	}
+	res, err := d.db.ExecContext(ctx, d.query(
+		`UPDATE workouts SET route_slug = '', route_seconds = 0 WHERE route_slug = ?`), slug)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 // addAnalysisFeelColumns adds feel/level_delta to a session_analyses table
@@ -1079,7 +1122,7 @@ func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64)
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -1099,7 +1142,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1124,7 +1167,7 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		planned sql.NullString
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.Indoor, &outdoor, &planned, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
@@ -1246,6 +1289,13 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 		}
 	}
 
+	if req.RouteSlug != nil {
+		current.RouteSlug = *req.RouteSlug
+	}
+	if req.RouteSeconds != nil {
+		current.RouteSeconds = *req.RouteSeconds
+	}
+
 	switch {
 	case req.ClearPlannedSnapshot:
 		current.PlannedSnapshot = nil
@@ -1279,10 +1329,11 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?,
-               indoor=?, outdoor_steps=?, planned_snapshot=?, updated_at=?
+               indoor=?, outdoor_steps=?, planned_snapshot=?, route_slug=?, route_seconds=?, updated_at=?
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
-		steps, string(current.Zone), current.Level, current.Indoor, outdoor, planned, timestamp(), id)
+		steps, string(current.Zone), current.Level, current.Indoor, outdoor, planned,
+		current.RouteSlug, current.RouteSeconds, timestamp(), id)
 	if err != nil {
 		return Workout{}, err
 	}

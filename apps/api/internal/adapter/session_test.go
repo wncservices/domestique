@@ -91,6 +91,28 @@ func TestAMissedKeySessionTakesOverTheNextEasyDay(t *testing.T) {
 	}
 }
 
+// A routed ride is the rider's own choice for its day: a missed key session
+// never takes its slot, because taking it deletes the ride and strands the
+// loop made for it.
+func TestAMissedKeySessionNeverTakesARoutedEasyDay(t *testing.T) {
+	routed := planned("thu", "Endurance ride", "2026-03-19") // Thursday, today
+	routed.RouteSlug = "thursday-loop"
+	ws := []workout.Workout{planned("tue", "VO2max intervals", "2026-03-17"), routed}
+	got := AdaptSessions(ws, nil, profileAvailable("tue"), thursday, nil, readiness.Assessment{})
+	for _, c := range got {
+		if c.ReplaceWorkoutID == "thu" {
+			t.Fatalf("changes = %+v: the routed Thursday ride was taken over", got)
+		}
+	}
+
+	// Control: the same week without the route does give the slot up.
+	plain := planned("thu", "Endurance ride", "2026-03-19")
+	got = AdaptSessions([]workout.Workout{planned("tue", "VO2max intervals", "2026-03-17"), plain}, nil, profileAvailable("tue"), thursday, nil, readiness.Assessment{})
+	if len(got) != 1 || got[0].ReplaceWorkoutID != "thu" {
+		t.Fatalf("control changes = %+v, want the plain easy day taken", got)
+	}
+}
+
 func TestAMissedKeySessionWithNowhereToGoIsLetGo(t *testing.T) {
 	ws := []workout.Workout{
 		planned("tue", "Tempo ride", "2026-03-17"),

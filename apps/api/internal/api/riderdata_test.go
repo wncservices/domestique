@@ -19,6 +19,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
+	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
@@ -101,6 +102,9 @@ func openRiderDataEnv(t *testing.T, dsn string) *riderDataEnv {
 		t.Fatal(err)
 	}
 	if srv.WeatherPrefs, err = weather.UseDB(conn, dsnUsed); err != nil {
+		t.Fatal(err)
+	}
+	if srv.RideStarts, err = ridestart.UseDB(conn, dsnUsed); err != nil {
 		t.Fatal(err)
 	}
 	if srv.PacingPushes, err = pacingpush.UseDB(conn, dsnUsed); err != nil {
@@ -301,6 +305,9 @@ func riderSeeds() []seed {
 		}, "rider", byRider},
 		{"weather_locations", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO weather_locations (rider, place, lat, lon, updated_at) VALUES (?, 'Ghent', 51.05, 3.72, ?)`, rider, ts)
+		}, "rider", byRider},
+		{"ride_start_points", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO ride_start_points (rider, place, lat, lon, updated_at) VALUES (?, 'Ghent', 51.054, 3.72, ?)`, rider, ts)
 		}, "rider", byRider},
 		{"goals", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO goals (id, rider, name, created_at, updated_at) VALUES (?, ?, 'Goal', ?, ?)`, "goal-"+id, rider, ts, ts)

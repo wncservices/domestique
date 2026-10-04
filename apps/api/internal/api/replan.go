@@ -169,11 +169,11 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 // replaces its own prefix). A session the rider swapped for an alternate
 // (scheduler.SwappedMarker) is not plan-made any more: the rider chose it, so
 // "Re-plan this week" must not delete it. It still counts for scheduling,
-// because its GoalID is kept.
+// because its GoalID is kept. Likewise a session with a route (RouteSlug).
 func isPlanMade(wk workout.Workout) bool {
 	// A crew ride carries the goal too and never counts as plan-made, whatever
 	// its description says.
-	return wk.GoalID != "" && wk.CrewRideID == "" &&
+	return wk.GoalID != "" && wk.CrewRideID == "" && wk.RouteSlug == "" &&
 		strings.HasPrefix(wk.Description, scheduler.GeneratedDescription) &&
 		!strings.Contains(wk.Description, scheduler.SwappedMarker)
 }
@@ -211,6 +211,11 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		// through it, stays: the blackout would keep the plan from rebuilding
 		// what the event took away, so deleting it here would lose it for good.
 		if lifeevents.Touched(wk.Description) {
+			continue
+		}
+		// A routed session is the rider's own too: rebuilding the day would
+		// drop the link and strand the loop.
+		if wk.RouteSlug != "" {
 			continue
 		}
 		if wk.Date == today && riddenToday[wk.ID] {

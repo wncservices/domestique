@@ -104,6 +104,10 @@ func Plannable(w workout.Workout) bool {
 	if w.TestProtocol != "" {
 		return false
 	}
+	// A swap changes what a route was chosen for; remove the route first.
+	if w.RouteSlug != "" {
+		return false
+	}
 	return workout.IsStructuredZone(w.Zone) || w.Zone == workout.ZoneEndurance
 }
 
