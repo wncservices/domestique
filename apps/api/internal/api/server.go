@@ -28,6 +28,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
+	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/fitcourse"
@@ -36,6 +37,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
@@ -276,6 +278,31 @@ type Server struct {
 	// place — but the store itself has no opinion about auth mode; the
 	// frontend decides whether to offer the feature from meDTO.AuthMode.
 	Shares *routeshare.Store
+
+	// CalendarFeeds holds each rider's hashed calendar-feed token — see
+	// internal/calendarfeed. Nil in a deployment without a database store,
+	// and the feed endpoints answer 404 / 501 then.
+	CalendarFeeds *calendarfeed.Store
+	// CalendarLimiter is the per-token fetch budget and CalendarMissLimiter
+	// the one global budget for tokens nothing matches; see NewCalendarLimiter.
+	// Nil means unlimited, which only a test wants.
+	CalendarLimiter     *ratelimit.Limiter
+	CalendarMissLimiter *ratelimit.Limiter
+
+	// MorningSummaries holds who has opted in to the morning email, and Mailer
+	// is how it leaves; see morningsummary.go. A nil Mailer, or no
+	// notifications.smtp.host in Config, means the feature is off: the endpoints
+	// answer 412 with a Warn and nothing is sent. TestMailLimiter is the budget
+	// for "send me a test".
+	MorningSummaries *morningsummary.Store
+	Mailer           Notifier
+	TestMailLimiter  *ratelimit.Limiter
+	// RideStartHour is the one-method seam to a rider's usual ride hour, which
+	// turns an all-day calendar event into a timed one. Nil means every event
+	// is all-day. Not wired in main: the weather preference's window has a
+	// default a rider never chose, which would silently stamp 09:00 on every
+	// event of everyone who picked a place.
+	RideStartHour func(ctx context.Context, rider string) (int, bool)
 
 	// PacingPushes remembers which course a rider's pacing plan became on their
 	// own Garmin or Wahoo account, so a second push replaces it. Wired
@@ -543,6 +570,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/training/sync", s.handleSyncTrainingMetrics)
 	mux.HandleFunc("GET /api/training/thresholds", s.handleListThresholds)
 	mux.HandleFunc("POST /api/training/thresholds/{id}", s.handleResolveThreshold)
+	mux.HandleFunc("GET /api/training/calendar", s.handleGetCalendar)
+	mux.HandleFunc("POST /api/training/calendar", s.handleCreateCalendar)
+	mux.HandleFunc("DELETE /api/training/calendar", s.handleRevokeCalendar)
+	// The only path that bypasses authentication: see isCalendarFeedPath.
+	// Go patterns cannot put a suffix on a wildcard, so the handler checks
+	// the segment itself.
+	mux.HandleFunc("GET /api/calendar/{file}", s.handleCalendarFeed)
+	mux.HandleFunc("GET /api/training/morning-summary", s.handleGetMorningSummary)
+	mux.HandleFunc("PUT /api/training/morning-summary", s.handlePutMorningSummary)
+	mux.HandleFunc("POST /api/training/morning-summary/test", s.handleTestMorningSummary)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/progression", s.handleGetProgression)
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)
@@ -591,13 +628,13 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return otelhttp.NewHandler(
-		instrument(logRequests(s.logger(), s.authenticate(compress(mux)))),
+	return hideSecretPaths(otelhttp.NewHandler(
+		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(mux))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-			return r.Method + " " + r.URL.Path
+			return r.Method + " " + redactPath(r.URL.Path)
 		}),
-	)
+	))
 }
 
 // authenticate resolves the identity once per request and puts it on the
@@ -632,6 +669,15 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/health" || r.URL.Path == "/api/metrics" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// The calendar feed is reached by a calendar app with no browser and no
+		// cookie, so it cannot sit behind the session; its secret URL is the
+		// credential. Identify is skipped altogether, so a stray or forged
+		// Remote-User header or session cookie changes nothing on this path.
+		// The predicate is the exact path and GET only: see bypassesAuth.
+		if bypassesAuth(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -4096,7 +4142,7 @@ func orEmpty[T any](in []T) []T {
 
 func logRequests(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Debug("request", "method", r.Method, "path", r.URL.Path)
+		log.Debug("request", "method", r.Method, "path", redactPath(r.URL.Path))
 		next.ServeHTTP(w, r)
 	})
 }
