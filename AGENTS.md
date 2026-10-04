@@ -195,6 +195,8 @@ judges them, `api/workoutroute*.go` serves them) and a library route can be put 
   watts or weight; an engine error is never logged or returned verbatim, since it can echo the start.
 - **A generated route is owner-only** (admins excepted, as for every route): created through `Source.Create` with no targets, tagged
   `wroute:<workoutId>`, and while tagged a share link or crew target on it is a 409.
+- **A crew ride takes no route of the rider's own**: generating one for it, or scheduling a library route
+  onto its day (link, adjust or new), is a 409 `crew_ride`. The crew already chose where it goes.
 - **A routed session is frozen** against refresh, trim and replan (`untouchedPlanSession`,
   `removePlanMadeWorkouts`), hidden from alternates, but still eased by readiness. Linking or scheduling is
   a rider action, so it writes no adjustment rows.
