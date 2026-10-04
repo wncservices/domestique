@@ -19,6 +19,7 @@ import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RaceDayCard from '@/components/fitness/RaceDayCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
+import RideImportCard from '@/components/fitness/RideImportCard.vue'
 import SaveBar from '@/components/fitness/SaveBar.vue'
 import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
@@ -367,6 +368,14 @@ async function loadReadiness() {
   }
 }
 
+// An import changes the history the chart draws and can change what detection
+// finds, so everything those read is fetched again. The profile is taken only
+// when it has no unsaved edits, the same rule a resolved suggestion follows.
+async function onImported() {
+  await Promise.all([loadFitness(), loadProjection(), loadProgression(), loadThresholdSuggestions()])
+  if (!dirty.value) await loadProfile()
+}
+
 onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
   loadProfile()
@@ -412,6 +421,8 @@ onMounted(() => {
       </template>
       <RecentRides :sessions="fitness.sessions" />
     </UCard>
+
+    <RideImportCard @done="onImported" />
 
     <TrainingZones
       :profile="profile"
