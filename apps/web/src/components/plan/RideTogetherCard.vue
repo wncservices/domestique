@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// "You and Sam both have a long ride this week. Saturday on Medium Loop works
-// for everyone." One shared day and route, proposed to crew mates who opted in.
+// "You and Sam each have a long ride, or an endurance ride of an hour or more,
+// planned this week. Saturday on Medium Loop works for everyone." One shared day and route, proposed to crew mates who opted in.
 // Each rider answers for their own plan only: "Move mine to Saturday" moves this
 // rider's own session, "No thanks" ends the proposal for the week. Nobody can
 // answer for somebody else, and nobody has to wait for anybody to accept. Only
@@ -38,7 +38,7 @@ const agreed = computed(() => props.proposal.status === 'agreed')
         <UIcon name="i-lucide-users" class="mt-0.5 size-5 shrink-0 text-primary" />
         <div class="flex min-w-0 flex-col gap-1">
           <p v-if="!agreed" class="text-sm font-medium text-highlighted">
-            You and {{ otherNames }} both have a long ride this week. {{ dayLabel }} on {{ proposal.routeName }} works for everyone.
+            You and {{ otherNames }} each have a long ride, or an endurance ride of an hour or more, planned this week. {{ dayLabel }} on {{ proposal.routeName }} works for everyone.
           </p>
           <p v-else class="text-sm font-medium text-highlighted">
             Agreed: you and {{ otherNames }} are riding {{ proposal.routeName }} on {{ dayLabel }}.
