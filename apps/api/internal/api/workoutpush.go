@@ -316,6 +316,21 @@ func (s *Server) pushWorkoutsForRider(ctx context.Context, rider string) int {
 		if res.Outcome != pushUnchanged {
 			changed++
 		}
+		// The ride's route goes with it, to the rider's own Garmin accounts
+		// only (the standing permission names Garmin; Wahoo gets the course
+		// through the library push or the manual button). A failure is a Warn
+		// and never undoes or stops the workout that has just gone.
+		if wk.RouteSlug != "" && !wk.Indoor {
+			outcome, err := s.pushWorkoutCourse(ctx, wk, true)
+			switch {
+			case err != nil:
+				// Never reached the push: applyPush logs a push that ran and
+				// failed (at Error, and counts it), so only this case needs a line.
+				s.logger().Warn("auto-push: today's course could not be attempted", "rider", rider, "workout", wk.ID)
+			case outcome == coursePushed:
+				changed++
+			}
+		}
 	}
 	return changed
 }

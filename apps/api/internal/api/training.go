@@ -1485,8 +1485,18 @@ func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", res.RemoteID, "outcome", res.Outcome, "rider", identity.User)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "outcome": res.Outcome, "garminWorkoutId": res.RemoteID})
+	// A routed ride sends its course with it. A failed course is a Warn and
+	// never fails the workout that has just gone.
+	course, cerr := s.pushWorkoutCourse(r.Context(), wk, true)
+	if cerr != nil {
+		course = courseFailed
+		// A push that ran and failed is logged at Error by applyPush; this is
+		// only for one that could not be attempted.
+		s.logger().Warn("course could not be attempted with the workout", "workout", id, "rider", identity.User)
+	}
+
+	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", res.RemoteID, "outcome", res.Outcome, "course", course, "rider", identity.User)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "outcome": res.Outcome, "garminWorkoutId": res.RemoteID, "course": course})
 }
 
 // ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------
