@@ -7,6 +7,7 @@ import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { AnalysisStep, CompletedSession, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import CrewRideBadge from './CrewRideBadge.vue'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
@@ -108,8 +109,9 @@ function moveMenuItems(w: Workout, fromDate: string) {
   }))
 }
 
-function canDrag(date: string): boolean {
-  return date >= props.week.today
+// A crew ride is the crew's day: it is not dragged or moved, only left.
+function canDrag(date: string, w: Workout): boolean {
+  return date >= props.week.today && !w.crewRide
 }
 
 const dragOverDate = ref<string | null>(null)
@@ -334,8 +336,8 @@ watch(
           role="button"
           tabindex="0"
           :aria-pressed="w.id === selectedWorkoutId"
-          :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
-          :draggable="canDrag(day.date)"
+          :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
+          :draggable="canDrag(day.date, w)"
           @dragstart="onDragStart($event, w)"
           @click="emit('select', w, day.date)"
           @keydown.enter.prevent="emit('select', w, day.date)"
@@ -343,7 +345,7 @@ watch(
         >
           <div class="flex items-center justify-between gap-1">
             <span class="truncate text-xs font-medium">{{ w.name }}</span>
-            <UDropdownMenu :items="moveMenuItems(w, day.date)">
+            <UDropdownMenu v-if="!w.crewRide" :items="moveMenuItems(w, day.date)">
               <UButton
                 color="neutral"
                 variant="ghost"
@@ -358,6 +360,7 @@ watch(
           <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
           <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
           <IndoorBadge v-if="w.indoor" :description="w.description" compact />
+          <CrewRideBadge v-if="w.crewRide" :crew-ride="w.crewRide" compact />
           <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
             {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
           </UBadge>
