@@ -84,6 +84,7 @@ import type {
   SessionAnalysis,
   ReadinessResponse,
   ProjectionResponse,
+  RideImport,
   EaseTomorrowResult,
   IndoorPreview,
   CourseOutcome,
@@ -992,6 +993,41 @@ export const api = {
    *  provider failing (not connected, a stale token) is reported in
    *  `warnings` rather than failing the whole call. */
   syncTrainingMetrics: () => request<SyncMetricsResult>('/api/training/sync', { method: 'POST' }),
+  /** The rider's latest ride-history import, or undefined when they have never
+   *  imported (204). A running job not touched for two minutes reads
+   *  `interrupted`. */
+  rideImportStatus: () => request<RideImport | undefined>('/api/training/import/status'),
+  /** Uploads an export (a Strava or Garmin zip) or loose .fit/.fit.gz files and
+   *  starts the import in the background; resolves when the server has the whole
+   *  upload (202). fetch has no upload progress, hence XMLHttpRequest. The rider
+   *  is the session's: nothing in the body says who it is. */
+  uploadRideImport: (files: File[], onProgress: (fraction: number) => void) =>
+    new Promise<RideImport>((resolve, reject) => {
+      const form = new FormData()
+      for (const file of files) form.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/training/import')
+      xhr.setRequestHeader('Accept', 'application/json')
+      xhr.upload.onprogress = (e: ProgressEvent) => {
+        if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total)
+      }
+      xhr.onerror = () => reject(new ApiError('The upload could not be sent. Check your connection and try again.', 0))
+      xhr.onload = () => {
+        let body: Record<string, unknown> = {}
+        try {
+          body = JSON.parse(xhr.responseText) as Record<string, unknown>
+        } catch {
+          /* not JSON: keep the status text */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as unknown as RideImport)
+          return
+        }
+        const message = typeof body.error === 'string' ? body.error : xhr.statusText || 'The upload failed.'
+        reject(new ApiError(message, xhr.status, { ...body, retryAfter: xhr.getResponseHeader('Retry-After') }))
+      }
+      xhr.send(form)
+    }),
   /** A rider's own pending threshold suggestions — a detected FTP/max-HR/
    *  threshold-pace change for a field they typed in themselves, which a
    *  sync never overwrites on its own. */

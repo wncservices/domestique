@@ -321,6 +321,9 @@ func riderSeeds() []seed {
 		{"session_analyses", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO session_analyses (session_id, rider, analysed_at) VALUES (?, ?, ?)`, "session-"+id, rider, ts)
 		}, "rider", byRider},
+		{"ride_imports", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO ride_imports (id, rider, state, started_at, updated_at) VALUES (?, ?, 'done', ?, ?)`, "import-"+id, rider, ts, ts)
+		}, "rider", byRider},
 		{"session_links", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO session_links (session_id, rider, created_at) VALUES (?, ?, ?)`, "session-"+id, rider, ts)
 		}, "rider", byRider},

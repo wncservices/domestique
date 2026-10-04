@@ -131,6 +131,8 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"session_analyses": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
+	"ride_imports": {Purged: true, Note: "Training.DeleteRider: the counts of the rider's own history imports",
+		Rename: renameRule{Columns: []string{"rider"}}},
 	"session_links": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"fitness_snapshots": {Purged: true, Note: "Training.DeleteRider",

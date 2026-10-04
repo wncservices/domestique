@@ -42,6 +42,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/rideimport"
 	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
@@ -94,6 +95,15 @@ type Server struct {
 	// season pass. Tests only: it lets one hold the pass back to observe what
 	// the request had done by the time it answered.
 	BeforeSeasonFill func()
+	// BeforeImportJob, when set, runs at the start of every ride-history import
+	// job. Tests only: a panic from it is how they reach the job's recovery.
+	BeforeImportJob func()
+	// ImportMaxUploadBytes caps one import upload's request body; zero means
+	// the spec's 1 GiB. ImportLimits bounds what is read out of it; the zero
+	// value means rideimport.DefaultLimits. Tests lower both rather than send a
+	// gigabyte.
+	ImportMaxUploadBytes int64
+	ImportLimits         rideimport.Limits
 	// AfterLifeEventSaved, when set, runs once a life event has been written
 	// and before its diff is applied; an error from it stands in for a failed
 	// write, so tests can reach the rollback. Nil in production.
@@ -564,6 +574,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/training/workouts/{id}", s.handleDeleteWorkout)
 	mux.HandleFunc("GET /api/training/workouts/{id}/fit", s.handleDownloadWorkoutFIT)
 	mux.HandleFunc("GET /api/training/workouts/{id}/export", s.handleExportWorkout)
+	mux.HandleFunc("POST /api/training/import", s.handleImportUpload)
+	mux.HandleFunc("GET /api/training/import/status", s.handleImportStatus)
 	mux.HandleFunc("GET /api/training/weeks/{monday}/export", s.handleExportWeek)
 	mux.HandleFunc("GET /api/training/workouts/{id}/alternates", s.handleAlternates)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates", s.handleAlternateApply)

@@ -283,7 +283,29 @@ CREATE TABLE IF NOT EXISTS life_events (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS life_events_rider_idx ON life_events (rider, start_date);`, d.Blob, d.Boolean)
+CREATE INDEX IF NOT EXISTS life_events_rider_idx ON life_events (rider, start_date);
+
+-- ride_imports is the progress of one ride-history import (internal/rideimport),
+-- kept in a table so any replica can answer the status request. Counts and a
+-- short error class only: never a file name, a date from inside a file, or
+-- anything else the upload said. The partial unique index is what makes "one
+-- active import per rider" hold across replicas.
+CREATE TABLE IF NOT EXISTS ride_imports (
+    id            TEXT PRIMARY KEY,
+    rider         TEXT NOT NULL,
+    state         TEXT NOT NULL,
+    phase         TEXT NOT NULL DEFAULT 'reading',
+    added         INTEGER NOT NULL DEFAULT 0,
+    duplicate     INTEGER NOT NULL DEFAULT 0,
+    skipped_sport INTEGER NOT NULL DEFAULT 0,
+    unsupported   INTEGER NOT NULL DEFAULT 0,
+    unreadable    INTEGER NOT NULL DEFAULT 0,
+    error         TEXT NOT NULL DEFAULT '',
+    started_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ride_imports_rider_idx ON ride_imports (rider, started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ride_imports_one_running_idx ON ride_imports (rider) WHERE state = 'running';`, d.Blob, d.Boolean)
 }
 
 // DeleteRider removes everything this package holds about rider, in one
@@ -331,6 +353,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM progression_levels WHERE rider = ?`,
 		`DELETE FROM threshold_suggestions WHERE rider = ?`,
 		`DELETE FROM rider_profiles WHERE rider = ?`,
+		`DELETE FROM ride_imports WHERE rider = ?`,
 	}
 	total := 0
 	for _, stmt := range stmts {

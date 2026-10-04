@@ -1904,3 +1904,30 @@ export interface MorningSummaryStatus {
   enabled: boolean
   email?: string
 }
+
+/** Where a ride-history import is. `interrupted` is what a running job reads
+ *  as once nothing has touched it for two minutes: a restart killed it, and
+ *  uploading again finishes the job. */
+export type RideImportState = 'running' | 'done' | 'failed' | 'interrupted'
+
+/** GET /api/training/import/status and the 202 of POST /api/training/import:
+ *  counts only, never a name or a value from inside the upload. Mirrors
+ *  rideImportDTO in internal/api/rideimport.go. */
+export interface RideImport {
+  id: string
+  state: RideImportState
+  phase: 'reading' | 'analysing' | 'recomputing'
+  added: number
+  duplicate: number
+  skippedSport: number
+  unsupported: number
+  unreadable: number
+  /** A short class on a failure ("too large", "too many files", ...). */
+  error?: string
+  startedAt: string
+  updatedAt: string
+  /** How far back the rider's history now goes; set once the job is done. */
+  earliestDate?: string
+  /** When the next import may start, while one is held back. */
+  cooldownUntil?: string
+}
