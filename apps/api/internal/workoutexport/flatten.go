@@ -133,7 +133,7 @@ func unroll(steps []workout.WorkoutStep, out *[]seg) error {
 	return nil
 }
 
-// Unrolled is the whole workout as one flat run of segments, the shape the
+// unrolled is the whole workout as one flat run of segments, the shape the
 // .mrc and .erg course formats need.
 func unrolled(steps []workout.WorkoutStep) ([]seg, error) {
 	var out []seg
