@@ -308,3 +308,13 @@ func (d *DB) SetSessionLoad(ctx context.Context, sessionID string, load float64)
 	}
 	return nil
 }
+
+// HasAnalysis reports whether a session has a saved analysis.
+func (d *DB) HasAnalysis(ctx context.Context, sessionID string) (bool, error) {
+	var one int
+	err := d.db.QueryRowContext(ctx, d.query(`SELECT 1 FROM session_analyses WHERE session_id = ?`), sessionID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}

@@ -1,6 +1,8 @@
 package rideimport
 
 import (
+	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -78,7 +81,7 @@ func TestSaveWritesTheSessionAndItsAnalysis(t *testing.T) {
 		// window sync analyses, and the whole point of importing.
 		old := parsed(t, rideSpec{start: at(2025, 12, 8, 9, 0), seconds: 2400, watts: 210, hr: 145, distanceM: 20000})
 
-		out, err := Save(ctx, db, rider, old)
+		out, err := Save(ctx, db, nil, rider, old)
 		if err != nil || out != Added {
 			t.Fatalf("Save = %v, %v, want Added", out, err)
 		}
@@ -92,8 +95,8 @@ func TestSaveWritesTheSessionAndItsAnalysis(t *testing.T) {
 			s.AvgPowerWatts != 210 || s.AvgHR != 145 || s.DistanceM != 20000 {
 			t.Errorf("session = %+v", s)
 		}
-		if s.ExternalID != ExternalID(rider, old.StartUnix) {
-			t.Errorf("external id = %q, want %q", s.ExternalID, ExternalID(rider, old.StartUnix))
+		if s.ExternalID != ExternalID(nil, rider, old.StartUnix) {
+			t.Errorf("external id = %q, want %q", s.ExternalID, ExternalID(nil, rider, old.StartUnix))
 		}
 		if s.TrainingLoad <= 0 || s.TrainingLoad != old.Analysis.Load {
 			t.Errorf("training load = %v, want the analysis's %v: the same final load a synced ride ends with", s.TrainingLoad, old.Analysis.Load)
@@ -115,10 +118,10 @@ func TestSaveTwiceIsANoOp(t *testing.T) {
 		ctx := t.Context()
 		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
 
-		if out, err := Save(ctx, db, rider, r); err != nil || out != Added {
+		if out, err := Save(ctx, db, nil, rider, r); err != nil || out != Added {
 			t.Fatalf("first = %v, %v", out, err)
 		}
-		if out, err := Save(ctx, db, rider, r); err != nil || out != AlreadyHere {
+		if out, err := Save(ctx, db, nil, rider, r); err != nil || out != AlreadyHere {
 			t.Fatalf("second = %v, %v, want AlreadyHere", out, err)
 		}
 		if sessions, _ := db.ListSessions(ctx, rider); len(sessions) != 1 {
@@ -144,7 +147,7 @@ func TestSaveSkipsARideAlreadySyncedFromAProviderAndLeavesItsRowAlone(t *testing
 		}
 		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
 
-		out, err := Save(ctx, db, rider, r)
+		out, err := Save(ctx, db, nil, rider, r)
 		if err != nil || out != AlreadyHere {
 			t.Fatalf("Save = %v, %v, want AlreadyHere", out, err)
 		}
@@ -173,7 +176,7 @@ func TestSaveFindsTheProviderRideOnTheNeighbouringDay(t *testing.T) {
 		if r.Date != "2026-07-02" {
 			t.Fatalf("fixture date = %s", r.Date)
 		}
-		if out, err := Save(ctx, db, rider, r); err != nil || out != AlreadyHere {
+		if out, err := Save(ctx, db, nil, rider, r); err != nil || out != AlreadyHere {
 			t.Errorf("Save = %v, %v, want AlreadyHere across the day boundary", out, err)
 		}
 	})
@@ -187,10 +190,10 @@ func TestSaveKeepsRidersApart(t *testing.T) {
 		// other's row.
 		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
 		other := rider + "-b"
-		if out, err := Save(ctx, db, rider, r); err != nil || out != Added {
+		if out, err := Save(ctx, db, nil, rider, r); err != nil || out != Added {
 			t.Fatalf("first rider = %v, %v", out, err)
 		}
-		if out, err := Save(ctx, db, other, r); err != nil || out != Added {
+		if out, err := Save(ctx, db, nil, other, r); err != nil || out != Added {
 			t.Fatalf("second rider = %v, %v, want their own Added", out, err)
 		}
 		for _, who := range []string{rider, other} {
@@ -215,7 +218,7 @@ func TestSaveNeverMatchesAPlanOrMovesALevel(t *testing.T) {
 			t.Fatal(err)
 		}
 		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
-		if _, err := Save(ctx, db, rider, r); err != nil {
+		if _, err := Save(ctx, db, nil, rider, r); err != nil {
 			t.Fatal(err)
 		}
 		analyses, _ := db.ListAnalyses(ctx, rider, "2000-01-01")
@@ -229,18 +232,77 @@ func TestSaveNeverMatchesAPlanOrMovesALevel(t *testing.T) {
 	})
 }
 
+func testBox(t *testing.T, seed byte) *secrets.Box {
+	t.Helper()
+	key := bytes.Repeat([]byte{seed}, 32)
+	b, err := secrets.New(base64.StdEncoding.EncodeToString(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestExternalIDIsStableAndPerRider(t *testing.T) {
-	a := ExternalID("wilant", 1700000000)
-	if a != ExternalID("wilant", 1700000000) {
-		t.Error("not deterministic")
+	for name, m := range map[string]MACer{"keyed": testBox(t, 7), "no key": nil, "nil box": (*secrets.Box)(nil)} {
+		t.Run(name, func(t *testing.T) {
+			a := ExternalID(m, "wilant", 1700000000)
+			if a != ExternalID(m, "wilant", 1700000000) {
+				t.Error("not deterministic")
+			}
+			if a == ExternalID(m, "other", 1700000000) || a == ExternalID(m, "wilant", 1700000001) {
+				t.Error("must differ by rider and by start")
+			}
+			if strings.Contains(a, "wilant") {
+				t.Errorf("the id %q carries the rider's name", a)
+			}
+			if ExternalID(m, "Wilant", 1) != ExternalID(m, " wilant ", 1) {
+				t.Error("the rider is normalised the way the store normalises it")
+			}
+		})
 	}
-	if a == ExternalID("other", 1700000000) || a == ExternalID("wilant", 1700000001) {
-		t.Error("must differ by rider and by start")
+}
+
+func TestExternalIDTagIsKeyedAndPurposeBound(t *testing.T) {
+	a, b := testBox(t, 1), testBox(t, 2)
+	if ExternalID(a, "wilant", 5) == ExternalID(b, "wilant", 5) {
+		t.Error("two keys gave one tag: it is not keyed")
 	}
-	if strings.Contains(a, "wilant") {
-		t.Errorf("the id %q carries the rider's name", a)
+	if ExternalID(a, "wilant", 5) == ExternalID(nil, "wilant", 5) {
+		t.Error("the keyed tag equals a plain hash of the name, which anyone can compute")
 	}
-	if ExternalID("Wilant", 1) != ExternalID(" wilant ", 1) {
-		t.Error("the rider is normalised the way the store normalises it")
+	// The sessions table's rider_key uses the same box under its own purpose; the
+	// two must not be joinable.
+	if strings.Contains(ExternalID(a, "wilant", 5), a.MAC("rider", "wilant")[:16]) {
+		t.Error("the import tag equals another purpose's MAC")
 	}
+}
+
+func TestSaveRepairsASessionThatLostItsAnalysis(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *workout.DB, rider string) {
+		ctx := t.Context()
+		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
+		// What a crash between the two writes leaves: the session, no analysis.
+		if _, err := db.UpsertSession(ctx, workout.UpsertSessionRequest{
+			Rider: rider, Provider: Provider, ExternalID: ExternalID(nil, rider, r.StartUnix), Sport: r.Sport, Date: r.Date,
+			DurationSeconds: r.Duration, AvgPowerWatts: r.AvgPower,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if analyses, _ := db.ListAnalyses(ctx, rider, "2000-01-01"); len(analyses) != 0 {
+			t.Fatal("fixture already has an analysis")
+		}
+		out, err := Save(ctx, db, nil, rider, r)
+		if err != nil || out != Added {
+			t.Fatalf("Save = %v, %v, want Added: the missing analysis was written", out, err)
+		}
+		if analyses, _ := db.ListAnalyses(ctx, rider, "2000-01-01"); len(analyses) != 1 {
+			t.Errorf("analyses = %d, want the repaired one", len(analyses))
+		}
+		if sessions, _ := db.ListSessions(ctx, rider); len(sessions) != 1 {
+			t.Errorf("%d sessions, want the one that was already there", len(sessions))
+		}
+		if out, _ := Save(ctx, db, nil, rider, r); out != AlreadyHere {
+			t.Errorf("after the repair Save = %v, want AlreadyHere", out)
+		}
+	})
 }

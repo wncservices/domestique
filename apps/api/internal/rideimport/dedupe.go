@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -94,15 +95,43 @@ func NearbyDates(date string) []string {
 // under, and so the "source = import" marker: no new column needed.
 const Provider = "import"
 
-// ExternalID is a ride's key under Provider: its UTC start in seconds, which
-// makes re-uploading the same file idempotent through the table's existing
-// UNIQUE (provider, external_id). The rider is folded in because that key is
-// global: two riders on one group ride whose head units started in the same
-// second would otherwise be one row, and the second would take the first's.
-// A short hash rather than the name, so an id says nothing about who rode.
-func ExternalID(rider string, startUnix int64) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(rider))))
-	return fmt.Sprintf("%d-%s", startUnix, hex.EncodeToString(sum[:4]))
+// MACer is the keyed one-way function ExternalID folds the rider in with:
+// *secrets.Box, the same one the sessions table uses for its rider_key.
+type MACer interface {
+	MAC(purpose, value string) string
+}
+
+const idPurpose = "import-external-id"
+
+// ExternalID is a ride's key under Provider: its UTC start in seconds plus a
+// per-rider tag, which makes re-uploading the same file idempotent through the
+// table's existing UNIQUE (provider, external_id).
+//
+// The rider is folded in because that key is global: two riders on one group
+// ride whose head units started in the same second would otherwise be one row,
+// and the second would take the first's. The tag is a keyed MAC (purpose
+// "import-external-id"), the same construction as the sessions table's
+// rider_key, so it is not a plain hash of a low-entropy name. It is a
+// uniqueness tag, not a privacy measure: the row beside it carries the rider's
+// name in the clear, and the tag is stable per rider, so it links one rider's
+// imports to each other, which is its job. With no key configured (nil, or a
+// MACer that answers "") it falls back to a plain hash, which is the same tag
+// for the same rider and equally not private.
+//
+// A rider rename or a key rotation changes the tag, so a re-upload afterwards
+// no longer matches on the exact key; it is caught by the tolerance dedupe
+// (same sport, day, duration and power) against the rows already there.
+func ExternalID(m MACer, rider string, startUnix int64) string {
+	name := strings.ToLower(strings.TrimSpace(rider))
+	tag := ""
+	if m != nil {
+		tag = m.MAC(idPurpose, name)
+	}
+	if tag == "" {
+		sum := sha256.Sum256([]byte(name))
+		tag = hex.EncodeToString(sum[:])
+	}
+	return fmt.Sprintf("%d-%s", startUnix, tag[:16])
 }
 
 // Store is what saving needs of the training store.
@@ -110,6 +139,7 @@ type Store interface {
 	FindSimilarSession(ctx context.Context, rider, sport string, dates []string) ([]workout.CompletedSession, error)
 	UpsertSession(ctx context.Context, req workout.UpsertSessionRequest) (workout.CompletedSession, error)
 	SaveAnalysis(ctx context.Context, a workout.SessionAnalysis) error
+	HasAnalysis(ctx context.Context, sessionID string) (bool, error)
 }
 
 // Save files one ride for rider: a completed session and its analysis, the
@@ -122,17 +152,27 @@ type Store interface {
 // sessions against this year's plan. The analysis is saved for every ride, not
 // only the recent ones sync analyses, because threshold detection's history
 // rule reads older power curves, which is most of why anyone imports.
-func Save(ctx context.Context, st Store, rider string, r Ride) (Outcome, error) {
+func Save(ctx context.Context, st Store, ids MACer, rider string, r Ride) (Outcome, error) {
 	similar, err := st.FindSimilarSession(ctx, rider, r.Sport, NearbyDates(r.Date))
 	if err != nil {
 		return 0, err
 	}
 	// The exact key first: the same file again, or the same ride from another
 	// export, is the same row whatever the tolerances say.
-	id := ExternalID(rider, r.StartUnix)
+	id := ExternalID(ids, rider, r.StartUnix)
 	for _, c := range similar {
 		if c.Provider == Provider && c.ExternalID == id {
-			return AlreadyHere, nil
+			// The session is there. Its analysis may not be: the session is
+			// written first, so a failure between the two leaves one without the
+			// other, and a re-upload is how it heals.
+			has, err := st.HasAnalysis(ctx, c.ID)
+			if err != nil {
+				return 0, err
+			}
+			if has {
+				return AlreadyHere, nil
+			}
+			return Added, saveAnalysis(ctx, st, rider, c.ID, r.Analysis)
 		}
 	}
 	if Duplicate(r, similar) {
@@ -150,18 +190,21 @@ func Save(ctx context.Context, st Store, rider string, r Ride) (Outcome, error) 
 		return 0, err
 	}
 
-	a := r.Analysis
-	if err := st.SaveAnalysis(ctx, workout.SessionAnalysis{
-		SessionID: sess.ID, Rider: rider,
+	if err := saveAnalysis(ctx, st, rider, sess.ID, r.Analysis); err != nil {
+		return 0, err
+	}
+	return Added, nil
+}
+
+func saveAnalysis(ctx context.Context, st Store, rider, sessionID string, a rideanalysis.Analysis) error {
+	return st.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sessionID, Rider: rider,
 		Outcome: string(a.Outcome), LoadSource: string(a.LoadSource),
 		NormalizedPower: a.NormalizedPower, IntensityFactor: a.IntensityFactor, TSS: a.TSS, DurationRatio: a.DurationRatio,
 		MaxHR: a.MaxHR, BestHR1200: a.BestHR1200, BestSpeed1200: a.BestSpeed1200, BestSpeed1800: a.BestSpeed1800,
 		PowerZoneSeconds: a.PowerZoneSeconds[:], HRZoneSeconds: a.HRZoneSeconds[:],
 		PowerCurve: powerCurve(a.PowerCurve),
-	}); err != nil {
-		return 0, err
-	}
-	return Added, nil
+	})
 }
 
 // powerCurve converts Analyze's int-keyed curve to the string-keyed shape the
