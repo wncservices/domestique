@@ -30,7 +30,7 @@ type rideSpec struct {
 	pause int
 }
 
-func (r rideSpec) build(t *testing.T) []byte {
+func (r rideSpec) build(t testing.TB) []byte {
 	t.Helper()
 	if r.sport == 0 {
 		r.sport = typedef.SportCycling

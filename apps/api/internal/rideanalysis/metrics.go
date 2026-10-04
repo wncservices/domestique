@@ -12,6 +12,7 @@ package rideanalysis
 
 import (
 	"math"
+	"time"
 
 	"github.com/muktihari/fit/profile/basetype"
 	"github.com/muktihari/fit/profile/mesgdef"
@@ -30,6 +31,10 @@ type Sample struct {
 	HasHR     bool
 	HasSpeed  bool
 }
+
+// MaxRideSeconds is the longest span of records Resample will lay out: three
+// days, past any real ride and still only about 250k one-second samples.
+const MaxRideSeconds = 72 * 3600
 
 // gapRepeatThresholdSeconds is the longest gap between two FIT records that
 // Resample treats as a sensor hiccup worth papering over by repeating the
@@ -53,12 +58,28 @@ func Resample(records []*mesgdef.Record) []Sample {
 		return nil
 	}
 
-	start := records[0].Timestamp
+	// The earliest and latest record, not the first and last: a file may list
+	// them out of order, and indexing from the first would put a record before
+	// the start of the slice. A span longer than any real ride is refused with
+	// no samples rather than allocated, since a corrupt timestamp 20 years out
+	// would otherwise ask for hundreds of millions of them.
+	start, end := records[0].Timestamp, records[0].Timestamp
+	for _, r := range records {
+		if r.Timestamp.Before(start) {
+			start = r.Timestamp
+		}
+		if r.Timestamp.After(end) {
+			end = r.Timestamp
+		}
+	}
 	secOf := func(r *mesgdef.Record) int {
 		return int(r.Timestamp.Sub(start).Round(1_000_000_000).Seconds())
 	}
+	if end.Sub(start) > MaxRideSeconds*time.Second {
+		return nil
+	}
 
-	total := secOf(records[len(records)-1])
+	total := int(end.Sub(start).Round(1_000_000_000).Seconds())
 	samples := make([]Sample, total+1)
 
 	// Place every actual record at its own second first. A later record
