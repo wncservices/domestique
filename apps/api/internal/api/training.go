@@ -812,10 +812,11 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		alreadyScheduled[d] = true
 	}
 	for _, wk := range existing {
-		// A crew ride takes its day whether or not it is linked to a goal: a
-		// goal-less one (joined before any goal existed) would otherwise block
-		// nothing.
-		if wk.GoalID != "" || wk.CrewRideID != "" {
+		// A crew ride takes its day whether or not it is linked to a goal, but not
+		// here: fixedOption hands it to scheduler.WeekWorkouts, which drops the slot
+		// on its day (applyFixed), so no session is ever made there to be skipped.
+		// A check on CrewRideID in this condition was redundant and untested.
+		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
 			// A workout moved to another day by an automatic adjustment
 			// leaves its original day empty. That day is not free: it is
