@@ -4,6 +4,38 @@
 # credential comes from the environment (in a cluster: Vault -> ExternalSecret
 # -> envFrom).
 
+# The address riders reach this deployment at from outside, no trailing slash.
+# Used for the links in the calendar feed and in email, where the app cannot
+# know its own address behind a proxy. Without it calendar links and email are
+# switched off.
+#
+# mode: proxy needs one more thing for the calendar feed: Authelia stops a
+# calendar app before it reaches this app, so add an access_control rule with
+# policy `bypass` for the resource
+#   ^/api/calendar/[A-Za-z0-9_-]+\.ics$
+# The URL itself is the credential (a random token, shown once, revocable from
+# the Fitness page). Nothing else under /api/calendar/ is exempt.
+# public_url: https://domestique.example.com
+
+# Email: the morning summary a rider can opt in to. Off unless smtp.host is
+# set. The password is never written here: DOMESTIQUE_SMTP_PASSWORD, from the
+# environment (in a cluster: Vault -> ExternalSecret -> envFrom).
+#
+#   security: starttls   (default, port 587) | tls (implicit TLS, port 465)
+#                        | none (a relay on loopback only)
+#
+# Mail goes only to the address on a rider's own account, and only one the
+# sign-in provider vouches for: under mode: oidc the ID token's email_verified
+# claim must be true; under mode: proxy Authelia's Remote-Email is trusted as
+# verified; under mode: none there is no address, so there is no email.
+# notifications:
+#   smtp:
+#     host: smtp.example.com
+#     port: 587
+#     security: starttls
+#     username: domestique
+#     from: "Domestique <domestique@example.com>"
+
 # Where the route library lives.
 #
 # Routes are rows in a database, with the GPX as a blob. The DSN picks the

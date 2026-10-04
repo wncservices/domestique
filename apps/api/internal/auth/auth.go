@@ -160,11 +160,18 @@ type OIDCConfig struct {
 
 // Identity is who is making a request, and what they may do.
 type Identity struct {
-	User   string   `json:"user"`
-	Name   string   `json:"name,omitempty"`
-	Email  string   `json:"email,omitempty"`
-	Groups []string `json:"groups,omitempty"`
-	Role   Role     `json:"role"`
+	User  string `json:"user"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+	// EmailVerified is whether the identity provider vouches for Email: the ID
+	// token's email_verified claim under ModeOIDC, and under ModeProxy simply
+	// whether Remote-Email is present, because it comes from Authelia's own
+	// user directory, which an administrator controls. Mail is only ever sent
+	// to an address for which this is true. Never serialised: nothing in the UI
+	// needs it, and the wire shape of /api/me stays as it was.
+	EmailVerified bool     `json:"-"`
+	Groups        []string `json:"groups,omitempty"`
+	Role          Role     `json:"role"`
 	// Sub is the OIDC subject claim, verbatim — for Auth0 this is the
 	// issuer's own user id ("auth0|64f2a1b2c3d4e5f6"), the only thing that
 	// unambiguously names one account when a rider might hold two identities
@@ -392,12 +399,16 @@ func (a *Authenticator) identifyFromProxy(r *http.Request) Identity {
 	}
 
 	groups := splitGroups(r.Header.Get(HeaderGroups))
+	email := strings.TrimSpace(r.Header.Get(HeaderEmail))
 	return Identity{
-		User:   user,
-		Name:   strings.TrimSpace(r.Header.Get(HeaderName)),
-		Email:  strings.TrimSpace(r.Header.Get(HeaderEmail)),
-		Groups: groups,
-		Role:   a.resolveRole(groups),
+		User:  user,
+		Name:  strings.TrimSpace(r.Header.Get(HeaderName)),
+		Email: email,
+		// Authelia's directory is the administrator's, and the header is only
+		// honoured from a trusted proxy: see EmailVerified.
+		EmailVerified: email != "",
+		Groups:        groups,
+		Role:          a.resolveRole(groups),
 	}
 }
 
