@@ -177,7 +177,7 @@ async function apiErrorFrom(response: Response, path: string): Promise<ApiError>
  * arrives as an ApiError carrying the server's own message instead of the
  * browser navigating to a JSON error page.
  */
-export async function fetchFile(path: string): Promise<{ blob: Blob; filename: string }> {
+export async function fetchFile(path: string): Promise<{ blob: Blob; filename: string; skippedAll: boolean }> {
   let response: Response
   try {
     response = await fetch(path)
@@ -187,7 +187,12 @@ export async function fetchFile(path: string): Promise<{ blob: Blob; filename: s
   if (!response.ok) throw await apiErrorFrom(response, path)
   const disposition = response.headers.get('Content-Disposition') ?? ''
   const match = /filename="?([^";]+)"?/.exec(disposition)
-  return { blob: await response.blob(), filename: match?.[1] ?? 'download' }
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] ?? 'download',
+    // A week zip with nothing in it but SKIPPED.txt: not worth saving.
+    skippedAll: response.headers.get('X-Domestique-Skipped') === 'all',
+  }
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
