@@ -170,7 +170,8 @@ func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels 
 // and names its long ride for a climbing route. Without it, or in any other
 // week, the output is exactly what it is without the option.
 func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
-	demand := applyOptions(opts).demand
+	o := applyOptions(opts)
+	demand := o.demand
 	if !biases(week) {
 		demand = nil
 	}
@@ -186,6 +187,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 	}
 
 	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days)
+	dropped, targetHours := applyFixed(o.fixed, week, weekStart, days, kinds)
 
 	// Cap every structured slot's time budget at the share it would have
 	// gotten under slotWeight before any rung is picked, then let
@@ -194,14 +196,16 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 	// force a session the week has no room for.
 	weights := make([]float64, n)
 	for i, k := range kinds {
-		weights[i] = slotWeight(k)
+		if !dropped[i] {
+			weights[i] = slotWeight(k)
+		}
 	}
 	shares := normalizeWeights(weights)
 
 	ladders := make(map[int]workoutlib.Ladder, len(zones))
 	rungs := make(map[int]workoutlib.Rung, len(zones))
 	for i, k := range kinds {
-		if k != slotStructured {
+		if k != slotStructured || dropped[i] {
 			continue
 		}
 		ladder, ok := workoutlib.LadderFor(sport, zones[i])
@@ -209,7 +213,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 			kinds[i] = slotEndurance
 			continue
 		}
-		capSeconds := shares[i] * week.TargetHours * 3600
+		capSeconds := shares[i] * targetHours * 3600
 		rung, ok := workoutlib.PickNear(ladder, targetLevels[i], capSeconds, demand.wantFor(zones[i]))
 		if !ok {
 			kinds[i] = slotEndurance
@@ -223,7 +227,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 	// and long slots split — the same mechanism that used to make the whole
 	// week's shares sum to 1, now applied only to what structured sessions
 	// left behind.
-	remainingHours := week.TargetHours
+	remainingHours := targetHours
 	for i := range rungs {
 		remainingHours -= workoutlib.TotalSeconds(rungs[i]) / 3600
 	}
@@ -232,7 +236,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 	}
 	restWeights := make([]float64, n)
 	for i, k := range kinds {
-		if k == slotStructured {
+		if k == slotStructured || dropped[i] {
 			continue
 		}
 		restWeights[i] = slotWeight(k)
@@ -241,6 +245,9 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 
 	out := make([]workout.CreateWorkoutRequest, 0, n)
 	for i, day := range days {
+		if dropped[i] {
+			continue
+		}
 		var req workout.CreateWorkoutRequest
 		switch kinds[i] {
 		case slotStructured:
@@ -265,6 +272,58 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 		out = append(out, req)
 	}
 	return out, nil
+}
+
+// applyFixed works out what fixed sessions do to one week: which slots they
+// take (by index into days) and the week's hours once their own are set aside.
+// kinds is the week's slot kinds, as assignSlots made them.
+//
+// A ride takes the slot on its own date; a long one (see CrewLongRideSeconds)
+// also takes the long slot, and one of an hour or more takes one endurance slot
+// if its own day was not already one. The target is reduced by the rides' hours
+// but never below half of it, and a recovery week keeps its own lower target.
+func applyFixed(fixed []Fixed, week periodization.Week, weekStart time.Time, days []string, kinds []slotKind) (map[int]bool, float64) {
+	dropped := map[int]bool{}
+	target := week.TargetHours
+	var rideHours float64
+	for _, f := range fixed {
+		date, err := time.Parse("2006-01-02", f.Date)
+		if err != nil || date.Before(weekStart) || !date.Before(weekStart.AddDate(0, 0, 7)) {
+			continue
+		}
+		rideHours += f.Seconds / 3600
+		own := -1
+		for i, d := range days {
+			if weekStart.AddDate(0, 0, weekdayOffset(d)).Equal(date) {
+				own = i
+			}
+		}
+		if own >= 0 {
+			dropped[own] = true
+		}
+		switch {
+		case f.Seconds >= CrewLongRideSeconds:
+			for i, k := range kinds {
+				if k == slotLong {
+					dropped[i] = true
+				}
+			}
+		case f.Seconds >= 3600:
+			if own >= 0 && kinds[own] == slotEndurance {
+				break
+			}
+			for i := len(kinds) - 1; i >= 0; i-- {
+				if kinds[i] == slotEndurance && !dropped[i] {
+					dropped[i] = true
+					break
+				}
+			}
+		}
+	}
+	if rideHours > 0 && !week.Recovery {
+		target = math.Max(target-rideHours, 0.5*target)
+	}
+	return dropped, target
 }
 
 // assignSlots decides every available day's slotKind, and for a structured

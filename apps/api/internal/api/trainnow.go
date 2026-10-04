@@ -175,7 +175,7 @@ func (s *Server) trainNowFor(ctx context.Context, rider string, minutes int, tod
 	}
 
 	if plan != nil && goal != nil {
-		in.WeekZones = weekZones(plan, weekStart, profile, levels, rider, goal)
+		in.WeekZones = weekZones(plan, weekStart, profile, levels, rider, goal, workouts)
 	}
 	in.DoneZones, in.HardDaysLast7 = doneAndHard(workouts, sessions, todayStr, weekStart.Format(dateLayout), today.AddDate(0, 0, -trainNowLookbackDays).Format(dateLayout))
 
@@ -216,13 +216,13 @@ func (s *Server) levelMapReadOnly(ctx context.Context, rider string, profile wor
 
 // weekZones is the structured zones the plan puts in the week starting on
 // weekStart, in plan (date) order: what scheduler.WeekWorkouts would build.
-func weekZones(plan *periodization.Plan, weekStart time.Time, profile workout.RiderProfile, levels map[string]float64, rider string, goal *workout.Goal) []string {
+func weekZones(plan *periodization.Plan, weekStart time.Time, profile workout.RiderProfile, levels map[string]float64, rider string, goal *workout.Goal, workouts []workout.Workout) []string {
 	start := weekStart.Format(dateLayout)
 	for _, week := range plan.Weeks {
 		if week.StartDate != start {
 			continue
 		}
-		reqs, err := scheduler.WeekWorkouts(week, profile, levels, rider, goal.ID, goal.Sport)
+		reqs, err := scheduler.WeekWorkouts(week, profile, levels, rider, goal.ID, goal.Sport, fixedOption(workouts, week))
 		if err != nil {
 			return nil
 		}

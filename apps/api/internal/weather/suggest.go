@@ -48,6 +48,9 @@ type Suggestion struct {
 	// AltDate is a later dry, free, available day, offered only to riders who
 	// cannot switch.
 	AltDate string
+	// CrewRide marks a fixed crew ride: the weather is information for it and
+	// nothing more, because the day and the road are the crew's, not the rider's.
+	CrewRide bool
 }
 
 func horizon(today string) []string {
@@ -132,9 +135,10 @@ func Suggest(f Forecast, workouts []workout.Workout, ridden map[string]bool, o O
 		s := Suggestion{
 			WorkoutID: wk.ID, Date: wk.Date,
 			Reasons: v.Reasons, Codes: v.Codes,
-			CanSwitch: o.SmartTrainer,
+			CanSwitch: o.SmartTrainer && wk.CrewRideID == "",
+			CrewRide:  wk.CrewRideID != "",
 		}
-		if !o.SmartTrainer {
+		if !o.SmartTrainer && wk.CrewRideID == "" {
 			s.AltDate = altDate(days, wk.Date, occupied, o.AvailableDays)
 		}
 		out = append(out, s)

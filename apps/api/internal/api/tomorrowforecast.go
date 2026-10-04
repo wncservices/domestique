@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
+	"github.com/wncservices/domestique/apps/api/internal/crewplan"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -44,7 +45,6 @@ const maxConsecutiveHardDays = 7
 // others.
 func forecastTomorrow(today time.Time, workouts []workout.Workout, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, todayAssessment readiness.Assessment, profile workout.RiderProfile) (readiness.Assessment, workout.Workout, bool) {
 	today = calendarDay(today)
-	todayStr := today.Format(dateFormat)
 	tomorrowStr := today.AddDate(0, 0, 1).Format(dateFormat)
 
 	var target workout.Workout
@@ -58,6 +58,30 @@ func forecastTomorrow(today time.Time, workouts []workout.Workout, sessions []wo
 	if !found {
 		return readiness.Assessment{}, workout.Workout{}, false
 	}
+
+	forecast := outlookTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
+
+	// A caution is applied as a step-down, which needs a ladder for the
+	// workout's sport and zone and a rung below its level; a legacy
+	// zone-less workout, or a zone with no ladder for its sport, has none,
+	// and offering to ease something the click could only fail on would be
+	// a banner that turns into a 500.
+	if forecast.Verdict == readiness.Caution {
+		if _, _, err := stepDownRung(target); err != nil {
+			return readiness.Assessment{}, workout.Workout{}, false
+		}
+	}
+	return forecast, target, true
+}
+
+// outlookTomorrow is the forecast itself, for tomorrow whatever is planned on
+// it: forecastTomorrow asks it for a hard session it may ease, and the crew
+// ride advice asks it about a ride it never changes. Each input degrades to "no
+// reason" on its own (no FTP, no or stale snapshot, thin load history) without
+// touching the others.
+func outlookTomorrow(today time.Time, workouts []workout.Workout, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, todayAssessment readiness.Assessment, profile workout.RiderProfile) readiness.Assessment {
+	today = calendarDay(today)
+	todayStr := today.Format(dateFormat)
 
 	in := readiness.TomorrowInput{
 		TodayVerdict:        todayAssessment.Verdict,
@@ -75,23 +99,11 @@ func forecastTomorrow(today time.Time, workouts []workout.Workout, sessions []wo
 	}
 	// An unknown load for today (a hard session planned and no FTP to size
 	// it) cannot be counted, but that only weakens the ratio to "as of the
-	// sessions on file" — no session has synced yet in that case, so 0 is
+	// sessions on file" - no session has synced yet in that case, so 0 is
 	// what is on file.
 	in.ACWR, in.HaveACWR = acwrThroughToday(dailyLoadsForReadiness(sessions), todayLoad, today)
 
-	forecast := readiness.ForecastTomorrow(in)
-
-	// A caution is applied as a step-down, which needs a ladder for the
-	// workout's sport and zone and a rung below its level; a legacy
-	// zone-less workout, or a zone with no ladder for its sport, has none,
-	// and offering to ease something the click could only fail on would be
-	// a banner that turns into a 500.
-	if forecast.Verdict == readiness.Caution {
-		if _, _, err := stepDownRung(target); err != nil {
-			return readiness.Assessment{}, workout.Workout{}, false
-		}
-	}
-	return forecast, target, true
+	return readiness.ForecastTomorrow(in)
 }
 
 // projectedTSB rolls latest's CTL/ATL forward to the start of tomorrow and
@@ -147,6 +159,13 @@ func todayTrainingLoad(workouts []workout.Workout, sessions []workout.CompletedS
 	var estimate float64
 	plannedHard := false
 	for _, w := range workouts {
+		// A crew ride today is priced by its own estimate (hours x 0.65^2 x 100),
+		// which needs no FTP, and not by the flat default an open step would
+		// get: it is the biggest load many riders have all week.
+		if w.Date == todayStr && w.CrewRideID != "" && !adapter.WorkoutDone(w, sessions) {
+			estimate += crewplan.TSSForSeconds(workout.PlannedSeconds(w.Steps))
+			continue
+		}
 		if w.Date != todayStr || !scheduler.IsHardSession(w) {
 			continue
 		}

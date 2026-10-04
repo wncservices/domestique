@@ -173,6 +173,11 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 	if _, err := db.Exec(goingSchema); err != nil {
 		return nil, fmt.Errorf("migrate crew_ride_going table: %w", err)
 	}
+	for _, stmt := range strings.Split(togetherSchema, ";\n") {
+		if _, err := db.Exec(stmt); err != nil {
+			return nil, fmt.Errorf("migrate ride-together tables: %w", err)
+		}
+	}
 	return store, nil
 }
 
@@ -496,6 +501,20 @@ func (s *Store) DeleteForCrew(ctx context.Context, crewID string) error {
 	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
         DELETE FROM crew_ride_going WHERE ride_id IN (SELECT id FROM crew_rides WHERE crew_id = ?)`), crewID); err != nil {
 		return fmt.Errorf("delete going rows of a crew's rides: %w", err)
+	}
+	// Everything said about the crew goes with it: the ride-together flags and the
+	// proposals (members first), or a crew recreated under the same id would start
+	// with its predecessor's opted-in members and open proposal.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM ride_together_members WHERE proposal_id IN
+        (SELECT id FROM ride_together_proposals WHERE crew_id = ?)`), crewID); err != nil {
+		return fmt.Errorf("delete a crew's proposal members: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM ride_together_proposals WHERE crew_id = ?`), crewID); err != nil {
+		return fmt.Errorf("delete a crew's proposals: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_ride_together WHERE crew_id = ?`), crewID); err != nil {
+		return fmt.Errorf("delete a crew's together flags: %w", err)
 	}
 	_, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_rides WHERE crew_id = ?`), crewID)
 	return err
