@@ -57,6 +57,11 @@ const (
 // converter's note goes into the description, so a rider sees why three hours
 // became two.
 func renderExport(wk workout.Workout, profile workout.RiderProfile, f exportFormat) ([]byte, *exportRefusal) {
+	// A crew ride is ridden outside with other people; its one open step is a
+	// time estimate, not a session a trainer can run, so no format carries it.
+	if wk.CrewRideID != "" {
+		return nil, &exportRefusal{http.StatusUnprocessableEntity, "crew_ride", "A crew ride is ridden outside with your crew, so it has no trainer file."}
+	}
 	res, err := indoor.Convert(wk, profile)
 	if err != nil {
 		return nil, &exportRefusal{http.StatusUnprocessableEntity, "not_cycling", exportNotCyclingMessage}

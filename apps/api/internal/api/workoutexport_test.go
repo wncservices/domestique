@@ -330,6 +330,45 @@ func TestExportWeekWithNothingExportableSaysSoInAHeader(t *testing.T) {
 	}
 }
 
+// A crew ride is a fixed session ridden outside with other people: one open
+// time step with no target. It has no trainer file in any format (.zwo would
+// otherwise carry it as a free ride of the route's estimated time), and the
+// week zip names it in SKIPPED.txt like any other refusal.
+func TestExportRefusesACrewRideInEveryFormat(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.setFTP("wilant", 250)
+	crew := exportRide("Crew ride: Sunday loop", "2026-03-04")
+	crew.Zone = workout.ZoneEndurance
+	crew.CrewRideID = "ride-1"
+	crew.Steps = []workout.WorkoutStep{{Name: "Crew ride", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
+		Seconds: 9000, Target: workout.TargetOpen}}
+	id := h.seedExport(crew)
+	h.seedExport(exportRide("Over unders", "2026-03-03"))
+
+	for _, f := range []string{"zwo", "mrc", "erg"} {
+		resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts/"+id+"/export?format="+f, "")
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status = %d, want 422", f, resp.StatusCode)
+			continue
+		}
+		if msg := errorBody(t, resp); !strings.Contains(msg, "crew ride") {
+			t.Errorf("%s: message = %q, want it to say why", f, msg)
+		}
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/weeks/2026-03-02/export?format=zwo", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("week zip: %d", resp.StatusCode)
+	}
+	got := zipEntries(t, readAll(t, resp))
+	if len(got) != 2 || got["2026-03-03-over-unders.zwo"] == "" {
+		t.Errorf("entries = %v, want the power workout and SKIPPED.txt", keys(got))
+	}
+	if !strings.Contains(got["SKIPPED.txt"], "2026-03-04-crew-ride-sunday-loop") {
+		t.Errorf("SKIPPED.txt = %q, want the crew ride listed", got["SKIPPED.txt"])
+	}
+}
+
 func TestExportWeekZipErrors(t *testing.T) {
 	h := newTrainingHarness(t)
 	h.setFTP("wilant", 250)
