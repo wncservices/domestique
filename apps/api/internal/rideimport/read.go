@@ -22,8 +22,26 @@ import (
 // large for archive/zip to list, or one that inflates absurdly, stops the
 // read with a typed error in Report.Err; rides emitted before it stay.
 func Read(spool *os.File, size int64, l Limits, emit func(fit []byte) error) Report {
+	return ReadAll([]Part{{File: spool, Size: size}}, l, emit)
+}
+
+// Part is one uploaded file: a zip, or a loose .fit or .fit.gz.
+type Part struct {
+	File *os.File
+	Size int64
+}
+
+// ReadAll reads every part under one budget: the total-bytes and entry-count
+// caps are for the whole upload, not for each file, so a rider cannot get past
+// them by splitting a large export across many parts. The first breach stops
+// the read and later parts are not looked at.
+func ReadAll(parts []Part, l Limits, emit func(fit []byte) error) Report {
 	r := &reader{l: l, emit: emit}
-	r.rep.Err = r.top(spool, size)
+	for _, p := range parts {
+		if r.rep.Err = r.top(p.File, p.Size); r.rep.Err != nil {
+			break
+		}
+	}
 	return r.rep
 }
 
@@ -65,8 +83,11 @@ func (r *reader) top(spool *os.File, size int64) error {
 // supported, and the rest go on.
 func (r *reader) archive(ra io.ReaderAt, size int64, depth int, topLevel bool) error {
 	// #nosec G115 -- r.entries never exceeds MaxEntries here, so this is not negative.
-	if n, ok := zipEntryCount(ra, size); ok && n > uint64(r.l.MaxEntries-r.entries) {
-		return ErrTooManyEntries
+	if n, region, ok := zipDirectory(ra, size); ok {
+		left := uint64(r.l.MaxEntries - r.entries)
+		if n > left || region > (left+1)*maxDirectoryBytesPerEntry {
+			return ErrTooManyEntries
+		}
 	}
 	zr, err := zip.NewReader(ra, size)
 	// Entry names are never used as paths, so an insecure one is harmless:
