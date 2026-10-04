@@ -24,6 +24,7 @@ import type {
   PeriodizationPlan,
   ProjectionResponse,
   ReadinessResponse,
+  RideTogether,
   RiderProfile,
   TrainingWeek,
   WeatherSuggestion,
@@ -44,6 +45,7 @@ import PlanEditBox from '@/components/plan/PlanEditBox.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
 import PlanGoalHeader from '@/components/plan/PlanGoalHeader.vue'
 import PacingCard from '@/components/PacingCard.vue'
+import RideTogetherCard from '@/components/plan/RideTogetherCard.vue'
 import RouteDemandsCard from '@/components/plan/RouteDemandsCard.vue'
 import SeasonTimeline from '@/components/plan/SeasonTimeline.vue'
 import TodayCard from '@/components/plan/TodayCard.vue'
@@ -406,6 +408,53 @@ async function loadReadiness() {
   } catch {
     if (requestId === readinessRequest) readiness.value = null
   }
+}
+
+// --- ride together: a proposal above the week strip when two crew mates both
+// have a long ride and a shared day and route work for everyone. Optional like
+// readiness: a failure just hides the card. Answering is the rider's own: it
+// moves their own session (accept) or ends the proposal (decline), and a 409
+// carries the fresh proposals when it no longer holds. ---
+
+const rideTogether = ref<RideTogether[]>([])
+const answeringTogether = ref('')
+
+async function loadRideTogether() {
+  try {
+    rideTogether.value = (await api.rideTogether()).proposals
+  } catch {
+    rideTogether.value = []
+  }
+}
+
+async function answerRideTogether(id: string, accept: boolean) {
+  answeringTogether.value = id
+  try {
+    const result = accept ? await api.acceptRideTogether(id) : await api.declineRideTogether(id)
+    rideTogether.value = result.proposals
+    toast.add({
+      title: accept ? 'Your session is on the shared day' : 'No problem, nothing was moved',
+      icon: accept ? 'i-lucide-calendar-check' : 'i-lucide-check',
+      color: 'success',
+    })
+    if (accept) await Promise.all([loadWeek(), loadWorkouts()])
+  } catch (err) {
+    if (err instanceof ApiError) await loadRideTogether()
+    toast.add({
+      title: 'Nothing was moved',
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'warning',
+    })
+  } finally {
+    answeringTogether.value = ''
+  }
+}
+
+// The caller's plan changed around a crew ride (they left it): everything that
+// reads the week is stale.
+async function onCrewChanged() {
+  await Promise.all([loadWeek(), loadWorkouts(), loadReadiness(), loadRideTogether()])
 }
 
 // --- tomorrow's forecast: a banner with an "Ease tomorrow" button. The
@@ -854,6 +903,7 @@ onMounted(() => {
   loadWorkouts()
   loadWeek()
   loadReadiness()
+  loadRideTogether()
   loadFtpTests()
   loadWeather()
   loadLifeEvents()
@@ -901,6 +951,8 @@ onMounted(() => {
           :weather-suggestions="cardWeatherSuggestions"
           :weather-attribution="weatherAttribution"
           :life-events="cardLifeEvents"
+          :crew-advice="readiness?.crewRide"
+          @crew-changed="onCrewChanged"
           @edit-life-event="(e: LifeEvent) => openLifeEvent(e)"
           @life-event-back="(e: LifeEvent) => openLifeEvent(e, true)"
           @weather-keep="weatherKeepOutdoors"
@@ -937,6 +989,16 @@ onMounted(() => {
         :snoozing="snoozingFtpTest"
         @schedule="scheduleFtpTest"
         @snooze="snoozeFtpTest"
+      />
+
+      <RideTogetherCard
+        v-for="proposal in rideTogether"
+        :key="proposal.id"
+        :proposal="proposal"
+        :me="me?.user ?? ''"
+        :busy="answeringTogether === proposal.id"
+        @accept="(id: string) => answerRideTogether(id, true)"
+        @decline="(id: string) => answerRideTogether(id, false)"
       />
 
       <PlanEditBox v-if="me?.narrationEnabled" :loading="proposingEdit" :message="planEditMessage" @submit="proposeEdit" />

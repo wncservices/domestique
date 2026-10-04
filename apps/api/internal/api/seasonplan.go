@@ -118,9 +118,10 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 }
 
 // hasPlanSessions reports whether g already has a plan-made session in week.
-// An FTP test is linked to the goal so its day reads as taken, but it is not a
-// plan-made session: a rider who scheduled a test into a week that has not
-// been filled yet has not had that week filled.
+// An FTP test, or a crew ride the rider is going to, is linked to the goal so
+// its day reads as taken, but it is not a plan-made session: a rider who
+// scheduled a test or joined a ride in a week that has not been filled yet has
+// not had that week filled.
 func hasPlanSessions(existing []workout.Workout, g workout.Goal, week periodization.Week) bool {
 	start, end := weekBounds(week)
 	for _, wk := range existing {
@@ -128,7 +129,7 @@ func hasPlanSessions(existing []workout.Workout, g workout.Goal, week periodizat
 		// description ("new" in routeschedule.go): it carries the goal id so the
 		// day reads as taken, but it is theirs, not the plan's.
 		riderRouted := wk.RouteSlug != "" && !strings.HasPrefix(wk.Description, scheduler.GeneratedDescription)
-		if wk.GoalID == g.ID && wk.TestProtocol == "" && !riderRouted && wk.Date >= start && wk.Date <= end {
+		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.CrewRideID == "" && !riderRouted && wk.Date >= start && wk.Date <= end {
 			return true
 		}
 	}
@@ -171,7 +172,7 @@ func (s *Server) recordLegacyWeek(ctx context.Context, g workout.Goal, weekStart
 // alone, so only the timestamp shows it). Only days after today are
 // rebuilt, so a session being ridden or already ridden is never touched.
 func (s *Server) refreshWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, today string) (int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.options(), fixedOption(existing, week))...)
 	if err != nil {
 		return 0, err
 	}

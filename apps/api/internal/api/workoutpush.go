@@ -281,6 +281,11 @@ func (s *Server) pushWorkoutsForRider(ctx context.Context, rider string) int {
 	today := s.localToday()
 	changed := 0
 	for _, wk := range workouts {
+		// A crew ride is not a structured workout to put on a watch: the route
+		// reaches the head unit through the crew's own sync.
+		if wk.CrewRideID != "" {
+			continue
+		}
 		if wk.Date > today {
 			// Withdraw before anything is sent, so today's session goes on a
 			// calendar that is already clear of the days ahead.
@@ -296,7 +301,7 @@ func (s *Server) pushWorkoutsForRider(ctx context.Context, rider string) int {
 		}
 	}
 	for _, wk := range workouts {
-		if wk.Date != today {
+		if wk.Date != today || wk.CrewRideID != "" {
 			continue
 		}
 		_, have := pushes[wk.ID]

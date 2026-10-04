@@ -60,7 +60,28 @@ func (d *RouteDemand) wantFor(zone string) int {
 // Option adjusts how a week is generated.
 type Option func(*options)
 
-type options struct{ demand *RouteDemand }
+type options struct {
+	demand *RouteDemand
+	fixed  []Fixed
+}
+
+// Fixed is a session the rider has committed to that the week is built around:
+// a crew ride they said they are going to. Only its date and its length are
+// read: the scheduler knows nothing about crews.
+type Fixed struct {
+	Date    string
+	Seconds float64
+}
+
+// WithFixed builds the week around fixed sessions. Each takes its day; the
+// week's volume is reduced by its hours, never below half the target (a recovery
+// week keeps its own lower target and is not reduced); a ride of at least two
+// hours replaces the week's long slot and one of an hour or more replaces one
+// endurance slot. Rides dated outside the week are ignored, and none given
+// leaves the week exactly as it is without the option.
+func WithFixed(rides []Fixed) Option {
+	return func(o *options) { o.fixed = rides }
+}
 
 // WithRouteDemand biases the Build and Peak weeks toward the demand. A nil
 // demand, or one that says nothing, leaves generation exactly as it is without

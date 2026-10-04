@@ -37,6 +37,10 @@ var ErrGoalNotFound = errors.New("no such goal")
 // ErrWorkoutNotFound is returned for a workout id nothing matches.
 var ErrWorkoutNotFound = errors.New("no such workout")
 
+// ErrCrewRideExists is returned when a rider already holds the fixed session
+// for a crew ride: there is one per rider and ride.
+var ErrCrewRideExists = errors.New("this crew ride is already in the plan")
+
 // Priority is how much a goal matters relative to a rider's other goals —
 // TrainingPeaks' own A/B/C vocabulary (see docs/training-plan.md), kept
 // because it is already the shared language a rider coming from that tool
@@ -346,6 +350,12 @@ type Workout struct {
 	// has been captured. Written once: it is what stops a second sync from
 	// toasting or suggesting the same result again.
 	TestResultWatts float64
+	// CrewRideID is the crew ride this session is the rider's fixed commitment
+	// to (internal/schedule.Ride.ID), "" for every other workout. A row with
+	// one is never scheduler.IsGenerated: nothing automatic moves, eases,
+	// replaces or deletes it. It points at the ride and carries nothing of the
+	// ride's own, so a ride that is deleted leaves the session as it was.
+	CrewRideID string
 	// Indoor marks a workout that has been converted to its trainer version
 	// (internal/indoor): time-based steps, power targets where FTP is known.
 	// Conversion is idempotent on this flag, so a second click shortens
@@ -447,6 +457,9 @@ type CreateWorkoutRequest struct {
 	Level float64
 	// TestProtocol marks the workout as an FTP test; see Workout.TestProtocol.
 	TestProtocol string
+	// CrewRideID marks the workout as the fixed session for a crew ride; see
+	// Workout.CrewRideID.
+	CrewRideID string
 }
 
 // UpdateWorkoutRequest edits a workout. Nil fields are left alone.

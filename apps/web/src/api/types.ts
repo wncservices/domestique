@@ -124,6 +124,9 @@ export interface CrewMember {
 export interface Crew {
   id: string
   name: string
+  /** Who in the crew is open to a shared ride, and on which weekdays. Shown to
+   *  the crew's approved members only. */
+  together?: { rider: string; days: WeekdayCode[] }[]
   /** Who currently holds an owner grant — may delete the crew, change
    *  auto-share, add/remove members, and promote/demote other owners.
    *  Replaces a former single `owner` string: a crew now survives one
@@ -920,9 +923,58 @@ export interface Workout {
    *  changed, or one adjusted before reasons were recorded (the note in
    *  `description` is then the only explanation). */
   why?: Why
+  /** Set on the fixed session of a crew ride the rider is going to. */
+  crewRide?: CrewRideRef
   /** The library route this ride is to be ridden on; absent when none, or when
    *  the rider cannot see it. Never carries a coordinate. */
   route?: WorkoutRoute
+}
+
+/** Mirrors crewRideRefDTO in internal/api/crewrides.go. */
+export interface CrewRideRef {
+  rideId: string
+  crewId?: string
+  crewName?: string
+  routeName: string
+  going: boolean
+  estimatedTss: number
+  kind: 'long' | 'endurance' | 'short'
+  goingNames?: string[]
+  /** The ride was deleted, or the rider left the crew. The session stays. */
+  orphaned?: 'cancelled' | 'left'
+}
+
+/** Mirrors crewRideListDTO: one upcoming ride in the caller's crews. */
+export interface CrewRideListItem {
+  id: string
+  crewId: string
+  crewName: string
+  slug: string
+  routeName: string
+  date: string
+  time?: string
+  going: string[]
+  mine: boolean
+  km: number
+  ascentM: number
+  minutes: number
+  tss: number
+  kind: '' | 'long' | 'endurance' | 'short'
+}
+
+/** Mirrors crewDiffDTO: what joining or leaving does around the ride. */
+export interface CrewDiff {
+  changes: { id: string; op: string; workoutId?: string; date: string; name: string; reason: string }[]
+  leftAlone: { workoutId: string; date: string; name: string; reason: string }[]
+  warnings: string[]
+}
+
+/** Mirrors goingResultDTO. */
+export interface GoingResult {
+  going: boolean
+  workout?: Workout
+  diff: CrewDiff
+  applied?: { removed: number; eased: number; shortened: number; added: number }
 }
 
 /** The route linked to a planned ride. `generated` is a loop made for this
@@ -1072,6 +1124,17 @@ export interface ReadinessResponse {
   /** Forecast for tomorrow's hard session — absent when tomorrow has no
    *  eligible workout or the forecast is ready. Mirrors tomorrowForecastDTO. */
   tomorrow?: TomorrowForecast
+  /** Advice for a crew ride today, or tomorrow from the forecast, when the
+   *  rider is not ready. Advice only: the ride is never changed. */
+  crewRide?: CrewRideAdvice
+}
+
+/** Mirrors crewAdviceDTO in internal/api/crewadvice.go. */
+export interface CrewRideAdvice {
+  date: string
+  routeName: string
+  severity: 'caution' | 'rest'
+  advice: string
 }
 
 /** A forecast, not a verdict: tomorrow morning's own readiness check still
@@ -1738,6 +1801,8 @@ export interface WeatherSuggestion {
   canSwitch: boolean
   /** A later dry, free, available day, for riders who cannot switch. */
   altDate?: string
+  /** A fixed crew ride: information only, never a switch or another day. */
+  crewRide?: boolean
 }
 
 /** GET /api/training/weather. `days` and `suggestions` are always arrays, empty
@@ -1875,6 +1940,24 @@ export interface ProjectionResponse {
   suggestion: ProjectionSuggestion | null
   events: ProjectionEvent[]
   assumptions: string[]
+}
+
+/** Weekday codes the ride-together flag uses. */
+export type WeekdayCode = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
+/** Mirrors rideTogetherDTO in internal/api/together.go: one shared ride
+ *  proposed to the crew. Only the week, day, route and who is in it cross. */
+export interface RideTogether {
+  id: string
+  crewId: string
+  crewName: string
+  weekStart: string
+  day: string
+  routeSlug: string
+  routeName: string
+  status: 'open' | 'agreed'
+  yourStatus: 'pending' | 'accepted' | 'declined'
+  members: { rider: string; status: 'pending' | 'accepted' | 'declined' }[]
 }
 
 /** GET /api/training/calendar: the rider's private calendar link. The link

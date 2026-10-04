@@ -511,6 +511,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addPushOriginColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addCrewRideColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.backfillProgressionHistory(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
@@ -521,6 +524,31 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
+}
+
+// addCrewRideColumn adds crew_ride_id to a workouts table that predates it, and
+// the unique partial index that keeps a rider to one fixed session per crew
+// ride. The index is created here and not in schema(): on a table that
+// predates the column, CREATE TABLE IF NOT EXISTS does nothing and an index on
+// the missing column would abort the migration (the same trap
+// internal/schedule's UseDB documents). Idempotent on both engines.
+func (d *DB) addCrewRideColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE workouts ADD COLUMN crew_ride_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
+			return err
+		}
+	}
+	_, err = d.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS workouts_crew_ride_idx ON workouts (rider, crew_ride_id) WHERE crew_ride_id <> ''`)
+	return err
+}
+
+// isUniqueViolation reports whether err is a unique-constraint failure on
+// either engine.
+func isUniqueViolation(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") || strings.Contains(msg, "duplicate key")
 }
 
 // rescoreFTPTestAnalyses brings rides analysed against an FTP test before the
@@ -1094,7 +1122,7 @@ func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64)
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -1114,7 +1142,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1139,7 +1167,7 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		planned sql.NullString
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
@@ -1199,10 +1227,15 @@ func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Worko
 
 	ts := timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
-        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, ts, ts)
+        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, req.CrewRideID, ts, ts)
 	if err != nil {
+		// The partial unique index is what makes "one row per rider and ride"
+		// true even for two requests that raced past the caller's own check.
+		if req.CrewRideID != "" && isUniqueViolation(err) {
+			return Workout{}, ErrCrewRideExists
+		}
 		return Workout{}, err
 	}
 	return d.GetWorkout(ctx, id)

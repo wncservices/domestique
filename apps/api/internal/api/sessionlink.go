@@ -85,6 +85,12 @@ func (s *Server) handleLinkSession(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "That session is " + string(target.Sport) + " and this ride is " + sess.Sport + "."})
 			return
 		}
+		// Linking moves the session to the day it was ridden; a crew ride's day is
+		// the crew's, so it is not moved by the back door either.
+		if target.CrewRideID != "" && target.Date != sess.Date {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": crewRideMoveMessage})
+			return
+		}
 		if target.TestProtocol != "" && target.TestResultWatts != 0 {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "That FTP test already has its result, from another ride."})
 			return

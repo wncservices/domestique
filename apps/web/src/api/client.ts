@@ -9,6 +9,10 @@ import type {
   CalendarFeedLink,
   CalendarFeedStatus,
   Crew,
+  CrewRideListItem,
+  RideTogether,
+  WeekdayCode,
+  GoingResult,
   CreateCrewRequest,
   FtpTests,
   GarminConnection,
@@ -554,6 +558,23 @@ export const api = {
   routeDuplicates: () => request<RouteDuplicateGroup[]>('/api/routes/duplicates'),
 
   crews: () => request<Crew[]>('/api/crews'),
+  /** Says which weekdays you are open to a shared ride with this crew; an empty
+   *  list opts out. Writes your own row only. */
+  setTogetherDays: (crewId: string, days: WeekdayCode[]) =>
+    request<{ rider: string; days: WeekdayCode[] }>(`/api/crews/${encodeURIComponent(crewId)}/together`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days }),
+    }),
+  /** Your open and agreed ride-together proposals for this week and next. */
+  rideTogether: () => request<{ proposals: RideTogether[] }>('/api/training/ride-together'),
+  /** Accepts for your own plan only: your session moves to the shared day. A
+   *  409 carries the fresh proposals when it no longer holds. */
+  acceptRideTogether: (id: string) =>
+    request<{ proposals: RideTogether[] }>(`/api/training/ride-together/${encodeURIComponent(id)}/accept`, { method: 'POST' }),
+  /** Declines, which ends the proposal for the week. Moves nothing. */
+  declineRideTogether: (id: string) =>
+    request<{ proposals: RideTogether[] }>(`/api/training/ride-together/${encodeURIComponent(id)}/decline`, { method: 'POST' }),
   createCrew: (req: CreateCrewRequest) =>
     request<Crew>('/api/crews', {
       method: 'POST',
@@ -788,6 +809,16 @@ export const api = {
     }),
 
   workouts: () => request<Workout[]>('/api/training/workouts'),
+  /** Upcoming rides in the caller's crews, with who is going. */
+  trainingCrewRides: (from: string) =>
+    request<CrewRideListItem[]>(`/api/training/crew-rides?from=${encodeURIComponent(from)}`),
+  /** Says "I'm going" (or not). `dryRun` previews and writes nothing. */
+  setGoing: (rideId: string, body: { going: boolean; dryRun?: boolean; skip?: string[] }) =>
+    request<GoingResult>(`/api/training/crew-rides/${encodeURIComponent(rideId)}/going`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   workout: (id: string) => request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}`),
   createWorkout: (req: CreateWorkoutRequest) =>
     request<Workout>('/api/training/workouts', {

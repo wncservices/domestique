@@ -319,6 +319,18 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "You are away that day."})
 			return
 		}
+		held, err := s.Training.ListWorkouts(ctx, rider)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		for _, wk := range held {
+			if wk.Date == body.Date && wk.CrewRideID != "" {
+				s.logger().Info("ftp test not scheduled: that day is a crew ride", "rider", rider)
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "That day is your crew ride."})
+				return
+			}
+		}
 		ridden, err := s.riddenOn(ctx, rider, body.Date)
 		if err != nil {
 			s.fail(w, err)

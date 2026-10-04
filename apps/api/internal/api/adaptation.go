@@ -155,6 +155,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 	}
 
 	s.easeBeforeFTPTests(ctx, rider, workouts, profile, appliedFor)
+	s.easeAroundCrewRides(ctx, rider, workouts, profile, appliedFor)
 	s.logTomorrowAdvisory(ctx, rider, sessions, latest, profile)
 }
 

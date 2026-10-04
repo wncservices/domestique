@@ -377,6 +377,12 @@ func (s *Server) refillRequests(ctx context.Context, rider string, freed []strin
 	if err != nil {
 		return nil, err
 	}
+	// The rider's crew rides are fixed in their weeks: a refill built without
+	// them would put a second long ride into a week a crew ride already holds.
+	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
 	var out []workout.CreateWorkoutRequest
 	for _, g := range goals {
 		if g.Rider != rider {
@@ -399,7 +405,7 @@ func (s *Server) refillRequests(ctx context.Context, rider string, freed []strin
 			if !ok {
 				continue
 			}
-			reqs, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, rider, g.ID, g.Sport)
+			reqs, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, rider, g.ID, g.Sport, fixedOption(workouts, week))
 			if err != nil {
 				return nil, err
 			}

@@ -29,6 +29,8 @@ func TestTheTwoDefinitionsOfPlanMadeAgree(t *testing.T) {
 		// A test carries the goal so its day reads as taken, but not the
 		// generated description, so it is never replaced.
 		"test": {workout.Workout{GoalID: "g", Description: "A test.", TestProtocol: "ramp"}, false},
+		// A crew ride carries the goal too, and is never plan-made, whatever its text.
+		"crew ride": {workout.Workout{GoalID: "g", Description: gen, CrewRideID: "ride-1"}, false},
 		// A route link is the rider's own choice for the day: neither copy may
 		// offer to replace it, or the apply deletes the ride and strands its loop.
 		"routed": {workout.Workout{GoalID: "g", Description: gen, RouteSlug: "a-loop"}, false},

@@ -171,10 +171,9 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 // "Re-plan this week" must not delete it. It still counts for scheduling,
 // because its GoalID is kept. Likewise a session with a route (RouteSlug).
 func isPlanMade(wk workout.Workout) bool {
-	// A routed ride is the rider's own choice for its day, whatever made it:
-	// replacing the day for an FTP test would delete it and strand its loop.
-	return wk.RouteSlug == "" &&
-		wk.GoalID != "" &&
+	// A crew ride carries the goal too and never counts as plan-made, whatever
+	// its description says.
+	return wk.GoalID != "" && wk.CrewRideID == "" && wk.RouteSlug == "" &&
 		strings.HasPrefix(wk.Description, scheduler.GeneratedDescription) &&
 		!strings.Contains(wk.Description, scheduler.SwappedMarker)
 }

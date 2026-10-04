@@ -86,6 +86,10 @@ type crewDTO struct {
 	// else has a reason to see who else asked to join, or manage the
 	// per-member schedule grant.
 	Members []crewMemberDTO `json:"members,omitempty"`
+	// Together is who in the crew is open to a shared ride, and on which weekdays:
+	// the offer itself, shown to the crew's approved members and nobody else.
+	// Filled by attachTogether.
+	Together []togetherDaysDTO `json:"together,omitempty"`
 }
 
 // crewDTOFor builds the DTO for one crew from its full membership list —
@@ -249,7 +253,9 @@ func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
-		out = append(out, s.crewDTOFor(identity, c, members))
+		dto := s.crewDTOFor(identity, c, members)
+		s.attachTogether(r.Context(), &dto)
+		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -669,6 +675,14 @@ func (s *Server) handleRemoveCrewMember(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
+	}
+	// What the member said about the crew's rides goes with their membership.
+	// Their own plan is not touched: a fixed session stays and reads as having
+	// been left, until they confirm an update themselves.
+	if s.Schedule != nil {
+		if err := s.Schedule.RemoveRider(r.Context(), id, rider); err != nil {
+			s.logger().Error("could not clear a removed member's crew ride rows", "crew", id, "rider", rider, "err", err)
+		}
 	}
 
 	s.logger().Info("crew member removed", "crew", id, "rider", rider, "by", identity.User)

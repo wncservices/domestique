@@ -87,6 +87,25 @@ var riderTables = map[string]riderTable{
 	"ride_series": {Note: "the series is the crew's plan; Schedule.ClearCreatedBy blanks the author",
 		Rename: renameRule{Columns: []string{"created_by"}}},
 
+	// What a rider said about the crew's rides: it is theirs, so a purge deletes
+	// it. A rider's own fixed sessions are workouts and go with Training.
+	"crew_ride_going": {Purged: true, Note: "Schedule.DeleteRider: which crew rides the rider said they were going to",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"ride_id"}}},
+
+	// Ride together. A purge removes the rider's flag and takes them off every
+	// proposal they are in, and a proposal a rider leaves is ended, not left open
+	// for the others to accept: Schedule.DeleteRider does both. The same happens
+	// when a crew removes a member (Schedule.RemoveRider), for that crew.
+	//
+	// ride_together_proposals is deliberately not listed: it is the crew's, has no
+	// rider column and no id a rider owns, so the guard that holds this registry
+	// to rider-keyed tables would reject it. It holds a week, a day and a route
+	// slug and nothing about anyone's plan; its members are the rows below.
+	"crew_ride_together": {Purged: true, Note: "Schedule.DeleteRider: the weekdays the rider is open to a shared ride",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"crew_id"}}},
+	"ride_together_members": {Purged: true, Note: "Schedule.DeleteRider: the rider's answer on a proposal; the proposal is ended",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"proposal_id"}}},
+
 	// internal/routeshare
 	"route_shares": {Purged: true, Note: "Shares.DeleteRider: links the rider created",
 		Rename: renameRule{Columns: []string{"created_by"}}},

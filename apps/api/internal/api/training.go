@@ -216,6 +216,9 @@ type workoutDTO struct {
 	// per response; a workout adjusted before reasons were recorded has none
 	// and the client falls back to the note in Description.
 	Why *whyDTO `json:"why,omitempty"`
+	// CrewRide is set on the fixed session of a crew ride the rider is going
+	// to. Filled in by attachCrewRides, like Why.
+	CrewRide *crewRideRefDTO `json:"crewRide,omitempty"`
 	// Route is the library route this ride is to be ridden on, filled by
 	// attachRoutes and left off when the rider cannot see it. Never carries a
 	// coordinate.
@@ -248,6 +251,9 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		dto.OutdoorPlannedSeconds = workout.PlannedSeconds(*w.OutdoorSteps)
 	}
 	dto.CanRevertIndoor = w.Indoor && w.OutdoorSteps != nil
+	if w.CrewRideID != "" {
+		dto.CrewRide = crewRideStub(w)
+	}
 	dto.Swapped = strings.Contains(w.Description, scheduler.SwappedMarker)
 	dto.HasPlannedSnapshot = w.PlannedSnapshot != nil
 	return dto
@@ -789,7 +795,7 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, sc.options()...)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.options(), fixedOption(existing, week))...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -814,6 +820,10 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		alreadyScheduled[d] = true
 	}
 	for _, wk := range existing {
+		// A crew ride takes its day whether or not it is linked to a goal, but not
+		// here: fixedOption hands it to scheduler.WeekWorkouts, which drops the slot
+		// on its day (applyFixed), so no session is ever made there to be skipped.
+		// A check on CrewRideID in this condition was redundant and untested.
 		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
 			// A workout moved to another day by an automatic adjustment
@@ -899,7 +909,7 @@ func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekS
 		// is not a plan-made session: a rider who scheduled a test into a week
 		// the tick has not reached yet has not had that week filled, and
 		// counting the test as "filled" would leave it holding the test alone.
-		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.Date >= startStr && wk.Date <= endStr {
+		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.CrewRideID == "" && wk.Date >= startStr && wk.Date <= endStr {
 			return nil, 0, s.recordLegacyWeek(ctx, g, startStr)
 		}
 	}
@@ -1217,6 +1227,7 @@ func (s *Server) handleListWorkouts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, workoutDTOFrom(wk))
 	}
 	s.attachWhy(r.Context(), rider, out)
+	s.attachCrewRides(r.Context(), rider, out)
 	s.attachRoutes(r.Context(), rider, out)
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1314,6 +1325,13 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A crew ride's day is the crew's: moving the session would desync it from
+	// the ride. Name and step edits stay allowed.
+	if wk.CrewRideID != "" && body.Date != nil && *body.Date != wk.Date {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": crewRideMoveMessage})
+		return
+	}
+
 	req := workout.UpdateWorkoutRequest{
 		Name: body.Name, GoalID: body.GoalID, Date: body.Date, Description: body.Description,
 		Level: body.Level,
@@ -1398,6 +1416,13 @@ func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {
 	if err := s.Training.DeleteWorkout(r.Context(), id); err != nil {
 		s.failTrainingLookup(w, err)
 		return
+	}
+	// A rider who deletes their crew ride session is no longer going: the crew
+	// should not keep showing them, and "I'm going" has to be able to start again.
+	if wk.CrewRideID != "" && s.Schedule != nil {
+		if err := s.Schedule.Leave(r.Context(), wk.CrewRideID, wk.Rider); err != nil {
+			s.logger().Warn("could not drop the going row of a deleted crew ride session", "rider", wk.Rider, "ride", wk.CrewRideID, "err", err)
+		}
 	}
 
 	s.logger().Info("workout deleted", "id", id, "by", identity.User)

@@ -98,6 +98,10 @@ type Server struct {
 	// and before its diff is applied; an error from it stands in for a failed
 	// write, so tests can reach the rollback. Nil in production.
 	AfterLifeEventSaved func() error
+	// AfterCrewRideWrite, when set, runs after each write of joining or leaving
+	// a crew ride; an error from it stands in for a failed write, so tests can
+	// reach the rollback. Nil in production.
+	AfterCrewRideWrite func() error
 	// SeasonFillRetry is how long a background season pass waits before
 	// trying again when the scheduling lock is held elsewhere. Zero means
 	// the default.
@@ -543,6 +547,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/crews/{id}/rides/{rideId}", s.handleDeleteRide)
 	mux.HandleFunc("POST /api/crews/{id}/rides/{rideId}/sync", s.handleSyncRide)
 	mux.HandleFunc("GET /api/rides/upcoming", s.handleUpcomingRides)
+	mux.HandleFunc("PUT /api/crews/{id}/together", s.handleSetTogether)
+	mux.HandleFunc("GET /api/training/ride-together", s.handleRideTogether)
+	mux.HandleFunc("POST /api/training/ride-together/{id}/accept", s.handleAcceptRideTogether)
+	mux.HandleFunc("POST /api/training/ride-together/{id}/decline", s.handleDeclineRideTogether)
+	mux.HandleFunc("GET /api/training/crew-rides", s.handleCrewRides)
+	mux.HandleFunc("PUT /api/training/crew-rides/{rideId}/going", s.handleSetGoing)
 
 	mux.HandleFunc("GET /api/training/goals", s.handleListGoals)
 	mux.HandleFunc("POST /api/training/goals", s.handleCreateGoal)

@@ -602,6 +602,42 @@ rider's own Garmin or Wahoo account.
   auto-import). `pacing_pushes` is rider-keyed: it is removed with the rider, and
   belongs in the `riderTables` registry once that exists.
 
+## Crew planning
+
+Crew rides and ride together plan around a rider's crew without ever editing their
+plan behind their back. Design: `docs/superpowers/specs/2026-09-29-crew-planning-design.md`.
+
+- **"I'm going"** (`PUT /api/training/crew-rides/{rideId}/going`) writes the caller's
+  own `crew_ride_going` row and one fixed workout in their own plan (`crew_ride_id`,
+  never `IsGenerated`, never auto-pushed). The rider comes from the session, never the
+  body. Joining and leaving are a preview (`dryRun`) the rider confirms; the apply
+  **recomputes the diff on the server**, honours `skip`, and runs under the scheduling
+  advisory lock (`withDBLock`, 409 with Replan's wording when the tick holds it). A
+  failed apply compensates (`rollBackGoing`); the stores share no transaction.
+- **The preview and the fill must agree.** `crewplan.Preview` and
+  `scheduler.WithFixed` drop the same slots; `TestThePreviewRemovesExactlyTheDaysTheFillDrops`
+  holds them together. Change one, change the other.
+- **A crew ride is the crew's day**: it cannot be moved (409), converted indoor, swapped
+  for an alternate, or replaced by an FTP test. A crew action (deleting a ride, removing
+  a member) never edits a rider's workouts: reads mark the session `orphaned`
+  (`cancelled` / `left`) and the rider updates their own plan by leaving.
+- **Ride together** (`PUT /api/crews/{id}/together`, `GET /api/training/ride-together`,
+  `POST .../{id}/accept|decline`): members opt in with weekdays; a proposal for one day
+  and one visible route is computed when either rider reads and stored once per crew and
+  week. Accept and decline write only the caller's own member row and own workout.
+  Only the days flag and a proposal's week, day, route, riders and statuses cross
+  between riders (`TestAProposalCarriesNothingOfAnyRidersPlan` asserts the keys).
+- **Cleanup**: `riderTables` registers `crew_ride_going`, `crew_ride_together` and
+  `ride_together_members`; `ride_together_proposals` has no rider column and is crew data.
+  Purging a rider (`Schedule.DeleteRider`), removing a member (`Schedule.RemoveRider`) and
+  deleting a crew (`Schedule.DeleteForCrew`, crew ids are reused) all remove the flags and
+  end every proposal involved.
+- **Probing caveat, accepted by the spec**: to compute a proposal the server reads each
+  opted-in rider's own plan on behalf of the group. A rider who opts in can therefore infer
+  from whether a proposal appears that their peer has a free day and a qualifying session
+  that week. That is the price of the opt-in; nothing more than the proposal's fields is
+  ever returned.
+
 ## The Helm chart lives elsewhere
 
 The chart is **not in this repo** — it's [wncservices/Domestique-chart](https://github.com/wncservices/Domestique-chart),

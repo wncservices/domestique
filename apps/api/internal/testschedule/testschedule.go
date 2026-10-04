@@ -346,7 +346,7 @@ func (s *suggester) available(d time.Time) bool {
 // internal/api keeps the two definitions equal).
 func IsPlanMade(w workout.Workout) bool {
 	// A routed ride is the rider's own choice for its day (see internal/api).
-	return w.RouteSlug == "" &&
+	return w.RouteSlug == "" && w.CrewRideID == "" &&
 		w.GoalID != "" &&
 		strings.HasPrefix(w.Description, scheduler.GeneratedDescription) &&
 		!strings.Contains(w.Description, scheduler.SwappedMarker)
