@@ -28,10 +28,12 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/rideimport/rideimporttest"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/state"
 	"github.com/wncservices/domestique/apps/api/internal/targets"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // ---------- harness ----------
@@ -178,8 +180,13 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	training, err := workout.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := &api.Server{
 		Source:   src,
+		Training: training,
 		Store:    store,
 		Accounts: seedAccounts(t, src),
 		Crew:     seedCrews(t, src),
@@ -1523,5 +1530,132 @@ func TestUnknownTargetsSurfaceAfterACrewIsDeleted(t *testing.T) {
 		if item.AccountID == "garmin:one" {
 			t.Errorf("still planning for garmin:one after crew:soloone was deleted")
 		}
+	}
+}
+
+// ---------- ride-history import, then the export matrix ----------
+
+// The two training features over real HTTP in one flow: a rider uploads a zip
+// of rides, waits for the background job, and then exports workouts, meeting
+// every refusal the trainer formats have.
+func TestAcceptanceImportRideHistoryThenExportWorkouts(t *testing.T) {
+	h := newHarness(t)
+	t.Setenv("TMPDIR", t.TempDir())
+
+	postJSON := func(path, body string) *http.Response {
+		return h.do(http.MethodPost, path, strings.NewReader(body), "application/json")
+	}
+	step := func(name, intensity string, secs int, target string, lo, hi int) string {
+		return fmt.Sprintf(`{"name":%q,"intensity":%q,"duration":"time","seconds":%d,"target":%q,"targetLow":%d,"targetHigh":%d}`, name, intensity, secs, target, lo, hi)
+	}
+	createWorkout := func(name, sport, extra string, steps ...string) string {
+		t.Helper()
+		resp := postJSON("/api/training/workouts", fmt.Sprintf(`{"name":%q,"sport":%q,"date":"2026-03-04"%s,"steps":[%s]}`, name, sport, extra, strings.Join(steps, ",")))
+		h.expectStatus(resp, http.StatusCreated)
+		var out struct {
+			ID string `json:"id"`
+		}
+		h.decode(resp, &out)
+		return out.ID
+	}
+	exportStatus := func(id, format string) int {
+		return h.get("/api/training/workouts/" + id + "/export?format=" + format).StatusCode
+	}
+
+	power := createWorkout("Over unders", "cycling", `,"zone":"threshold"`,
+		step("Warm up", "warmup", 600, "power", 125, 175), step("Hard", "active", 600, "power", 262, 262), step("Cool down", "cooldown", 300, "power", 125, 175))
+	hr := createWorkout("Heart rate ride", "cycling", "", step("Z2", "active", 1800, "heart_rate", 120, 140))
+	test := createWorkout("FTP Test (twenty minute)", "cycling", `,"testProtocol":"twenty_minute"`,
+		`{"name":"Warmup","intensity":"warmup","duration":"time","seconds":600,"target":"open"}`,
+		`{"name":"Effort","intensity":"active","duration":"time","seconds":1200,"target":"open"}`)
+	run := createWorkout("Easy run", "running", "", step("Run", "active", 1800, "heart_rate", 130, 150))
+
+	// No FTP yet: .zwo and .mrc need one, .erg does not.
+	if got := exportStatus(power, "zwo"); got != http.StatusConflict {
+		t.Errorf("zwo without an FTP: %d, want 409", got)
+	}
+	if got := exportStatus(power, "erg"); got != http.StatusOK {
+		t.Errorf("erg without an FTP: %d, want 200", got)
+	}
+
+	// Import: a zip of three synthetic rides and a GPX that is counted, not read.
+	var entries []rideimporttest.Entry
+	for i, day := range []int{1, 2, 3} {
+		spec := ride(day, 1200+i*600, 200+i*5)
+		entries = append(entries, rideimporttest.Entry{Name: fmt.Sprintf("activities/%d.fit", 100+i), Data: spec.Build(t)})
+	}
+	entries = append(entries, rideimporttest.Entry{Name: "activities/9.gpx", Data: []byte("<gpx/>")})
+	zipBytes := rideimporttest.Zip(t, entries...)
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", "export.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fw.Write(zipBytes)
+	_ = mw.Close()
+	resp := h.do(http.MethodPost, "/api/training/import", &body, mw.FormDataContentType())
+	h.expectStatus(resp, http.StatusAccepted)
+
+	var st struct {
+		State string `json:"state"`
+		Added int    `json:"added"`
+		Unsup int    `json:"unsupported"`
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		resp := h.get("/api/training/import/status")
+		h.expectStatus(resp, http.StatusOK)
+		h.decode(resp, &st)
+		if st.State != "running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the import never finished")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if st.State != "done" || st.Added != 3 || st.Unsup != 1 {
+		t.Fatalf("import = %+v, want done with 3 rides added and the GPX unsupported", st)
+	}
+	var fit struct {
+		Sessions []struct {
+			Provider string `json:"provider"`
+		} `json:"sessions"`
+	}
+	h.decode(h.get("/api/training/fitness"), &fit)
+	if len(fit.Sessions) != 3 {
+		t.Errorf("fitness lists %d sessions after the import, want 3", len(fit.Sessions))
+	}
+
+	// With an FTP the matrix is: power workouts export in every format; a
+	// heart-rate or running workout never does; an open step (an FTP test)
+	// is a FreeRide in .zwo and refused by .mrc and .erg.
+	h.expectStatus(h.do(http.MethodPut, "/api/training/profile", strings.NewReader(`{"ftpWatts":250}`), "application/json"), http.StatusOK)
+	for _, f := range []string{"zwo", "mrc", "erg"} {
+		if got := exportStatus(power, f); got != http.StatusOK {
+			t.Errorf("power workout as %s: %d, want 200", f, got)
+		}
+		if got := exportStatus(hr, f); got != http.StatusUnprocessableEntity {
+			t.Errorf("heart-rate workout as %s: %d, want 422", f, got)
+		}
+		if got := exportStatus(run, f); got != http.StatusUnprocessableEntity {
+			t.Errorf("running workout as %s: %d, want 422", f, got)
+		}
+	}
+	if got := exportStatus(test, "zwo"); got != http.StatusOK {
+		t.Errorf("FTP test as zwo: %d, want 200 (a FreeRide)", got)
+	}
+	for _, f := range []string{"mrc", "erg"} {
+		if got := exportStatus(test, f); got != http.StatusUnprocessableEntity {
+			t.Errorf("FTP test as %s: %d, want 422", f, got)
+		}
+	}
+	if got := exportStatus(power, "docx"); got != http.StatusBadRequest {
+		t.Errorf("unknown format: %d, want 400", got)
+	}
+	if got := h.get("/api/training/weeks/2026-03-02/export?format=mrc").StatusCode; got != http.StatusOK {
+		t.Errorf("week zip: %d, want 200", got)
 	}
 }

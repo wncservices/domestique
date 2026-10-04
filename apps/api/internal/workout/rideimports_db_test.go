@@ -127,6 +127,30 @@ func TestStartRideImportTakesOverAJobAStaleRestartLeft(t *testing.T) {
 			if oldState != ImportFailed || oldError != "interrupted" {
 				t.Errorf("the stale job is %q/%q, want failed/interrupted", oldState, oldError)
 			}
+
+			// The old job was only slow, not dead, and now reports in: neither its
+			// heartbeat nor its finish may bring it back.
+			if err := db.UpdateRideImport(ctx, "old", ImportAnalysing, RideImportCounts{Added: 9}, later); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.FinishRideImport(ctx, "old", ImportDone, "", RideImportCounts{Added: 9}, later); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.db.QueryRow(db.query(`SELECT state, error FROM ride_imports WHERE id = ?`), "old").Scan(&oldState, &oldError); err != nil {
+				t.Fatal(err)
+			}
+			if oldState != ImportFailed || oldError != "interrupted" {
+				t.Errorf("a late finish turned the interrupted job into %q/%q", oldState, oldError)
+			}
+			if running, err := db.RideImportRunning(ctx, "old"); err != nil || running {
+				t.Errorf("RideImportRunning(old) = %v, %v, want false", running, err)
+			}
+			if running, err := db.RideImportRunning(ctx, "new"); err != nil || !running {
+				t.Errorf("RideImportRunning(new) = %v, %v, want true", running, err)
+			}
+			if running, _ := db.RideImportRunning(ctx, "never-existed"); running {
+				t.Error("a job that does not exist reads as running")
+			}
 		})
 	}
 }

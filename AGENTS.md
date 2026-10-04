@@ -1017,6 +1017,52 @@ adapter genuinely works.
 prerequisite: a naive conversion navigates as a breadcrumb line with no turn cues, and Wahoo's API
 will not accept GPX at all. See `docs/plan.md`.
 
+## Export and import
+
+**Export** (`internal/workoutexport`, `internal/api/workoutexport.go`) writes a
+workout as `.zwo`, `.mrc` or `.erg` from its *indoor form* (`indoor.Convert`).
+Only time and power export; heart-rate or pace steps, running, and (for `.mrc`/
+`.erg`) open steps are refused, never guessed. A week zip skips what refuses and
+lists it in `SKIPPED.txt`; when nothing exported it sets `X-Domestique-Skipped:
+all` and the UI toasts instead of saving an empty zip.
+
+**Import** (`internal/rideimport`, `internal/api/rideimport.go`) reads a Strava
+or Garmin export, or loose `.fit`/`.fit.gz`, in a background job. Ride files are
+personal location and health data, so:
+
+- **Nothing from the upload is stored or logged.** The only disk use is a 0600
+  temp spool per part (`domestique-upload-*`) and per nested zip
+  (`domestique-import-*`), removed by the job on every path including a panic.
+  `SweepImportSpools` deletes any older than 10 minutes at start, for a crash.
+  Entry names are never used, stored or logged; logs carry rider, job id and
+  counts. `ride_imports` holds counts and a short error class only.
+- **Limits are upload-wide**, enforced by counting bytes read, never by trusting
+  headers: 1 GiB body, 64 MiB per entry, 6 GiB decompressed in total, 20 000
+  entries, zip depth 2, 200x ratio (`rideimport.ReadAll` shares one budget across
+  all parts). The zip directory is checked before `archive/zip` lists it,
+  mirroring its zip64 switch and bounding the directory by byte length, because
+  `archive/zip` ignores the declared count.
+- **One upload at a time per rider, a small global cap, and a 30 minute body read
+  deadline** (set through `http.ResponseController`, which is why the repo's
+  response-writer wrappers implement `Unwrap`). Claimed before a byte is read.
+  A 10 minute cooldown follows a finished job. Chart note: the spool needs
+  `emptyDir` of at least 2 GiB (an upload plus one nested archive).
+- **One bad file never aborts a job.** `Parse` and `fileOneRide` recover from a
+  panic, count the file unreadable and log a Warn with ids only; recompute and
+  threshold detection still run. `Resample` refuses spans over 72 hours.
+- **Provider `import` is never fetched.** Imported rides are analysed when
+  imported; `analyseNewSessions` skips them. They are never matched to a plan
+  and never move a progression level. A re-upload is idempotent through
+  `external_id` (UTC start plus a keyed MAC of the rider, `secrets.Box.MAC`), and
+  rides already synced from Garmin or Wahoo are recognised by tolerance (same
+  sport, day plus or minus one, duration within max(60 s, 2 %), power within 3 %).
+  A rename or key rotation changes the MAC, so a re-upload then relies on that
+  tolerance dedupe.
+- A job stops writing when its `ride_imports` row is gone (the rider was purged),
+  and `Finish`/`Update` only touch a still-running row. Detection reads the
+  profile fresh just before it runs, through `inferFromHistory`, the tail shared
+  with the metrics sync.
+
 ## Conventions
 
 - Go: standard library first. The dependencies are `gopkg.in/yaml.v3`, `modernc.org/sqlite`

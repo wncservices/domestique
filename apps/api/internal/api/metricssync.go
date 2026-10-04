@@ -385,25 +385,81 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// before the cruder EstimateFTP fallback below, whose own condition
 	// reads tdr.HasFTPPowerCurve to decide whether Detect already had
 	// something better to say about FTP.
-	testRides, err := s.readFTPTestRides(ctx, rider, sessions, time.Now())
+	inf, err := s.inferFromHistory(ctx, rider, profile, before, sessions, suggestion.FTPWatts, autoFilled, time.Now())
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
-	tdr, err := s.detectThresholdsFresh(ctx, rider, profile, sessions, time.Now(), freshTestSessions(testRides))
-	if err != nil {
-		return syncMetricsResultDTO{}, err
-	}
+	tdr, testRides := inf.Detection, inf.TestRides
 	ftpTests := s.ftpTestResults(rider, testRides, tdr)
+	profile, autoFilled = inf.Profile, inf.AutoFilled
+
+	var estimatedFTP float64
+	if slices.Contains(autoFilled, "ftp") {
+		estimatedFTP = profile.FTPWatts
+	}
+	if !slices.Contains(autoFilled, workout.FieldRestingHR) {
+		restingHR = 0
+	}
+	recalibrated := inf.Recalibrated
+
+	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
+	return syncMetricsResultDTO{
+		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
+		AutoFilled: autoFilled, Detected: tdr.Detected, LevelsRecalibrated: recalibrated,
+		FTPTests: ftpTests,
+	}, nil
+}
+
+// historyInference is what a rider's own history says about their profile.
+type historyInference struct {
+	// Profile is the profile after every auto-fill, already saved when
+	// AutoFilled is not empty.
+	Profile workout.RiderProfile
+	// AutoFilled names the fields filled in, including any the caller passed in.
+	AutoFilled   []string
+	Detection    thresholdDetectionResult
+	TestRides    []ftpTestRide
+	Recalibrated *levelsRecalibratedDTO
+}
+
+// inferFromHistory is the tail of a metrics sync, shared with a ride-history
+// import so both read the same history the same way: threshold detection
+// first (it auto-applies to an empty or estimated field, and stores a
+// suggestion for a rider-typed one), then the cruder FTP estimate, but only
+// where Garmin gave none (garminFTP) and detection had no power-curve ride to
+// go on, then the rider's training pattern. Both merge through
+// autoprofile.Apply, so an unset or already-estimated field may be filled and a
+// rider-confirmed one never is.
+//
+// profile is the baseline and must be read fresh by the caller: it is what a
+// finding is applied onto and saved over, so a stale copy would revert an edit
+// the rider made since. before is what the profile held before the whole pass,
+// for the level recalibration to tell a first save from a rise. autoFilled is
+// what the caller already filled in. now is the clock the windows count from.
+func (s *Server) inferFromHistory(ctx context.Context, rider string, profile, before workout.RiderProfile, sessions []workout.CompletedSession, garminFTP float64, autoFilled []string, now time.Time) (historyInference, error) {
+	// Threshold detection (internal/thresholds): auto-applies to an empty or
+	// estimated field, stores a suggestion for a rider-typed one. Runs
+	// before the cruder EstimateFTP fallback below, whose own condition
+	// reads tdr.HasFTPPowerCurve to decide whether Detect already had
+	// something better to say about FTP.
+	testRides, err := s.readFTPTestRides(ctx, rider, sessions, now)
+	if err != nil {
+		return historyInference{}, err
+	}
+	tdr, err := s.detectThresholdsFresh(ctx, rider, profile, sessions, now, freshTestSessions(testRides))
+	if err != nil {
+		return historyInference{}, err
+	}
 	profile = tdr.Profile
 	autoFilled = append(autoFilled, tdr.AutoFields...)
 
 	history := autoprofile.Suggestion{}
-	if suggestion.FTPWatts == 0 && !tdr.HasFTPPowerCurve {
+	if garminFTP == 0 && !tdr.HasFTPPowerCurve {
 		if watts, ok := fitnesstest.EstimateFTP(sessions); ok {
 			history.FTPWatts = watts
 		}
 	}
-	if pattern, ok := autoprofile.Infer(sessions, time.Now()); ok {
+	if pattern, ok := autoprofile.Infer(sessions, now); ok {
 		history.AvailableDays = pattern.AvailableDays
 		history.HoursPerAvailableDay = pattern.HoursPerAvailableDay
 		history.ExperienceLevel = pattern.ExperienceLevel
@@ -415,42 +471,28 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// estimate that replaced it in one run) — report it once.
 	autoFilled = uniq(autoFilled)
 
-	var estimatedFTP float64
-	if slices.Contains(autoFilled, "ftp") {
-		estimatedFTP = profile.FTPWatts
-	}
-	if !slices.Contains(autoFilled, workout.FieldRestingHR) {
-		restingHR = 0
-	}
-
-	var recalibrated *levelsRecalibratedDTO
+	out := historyInference{Profile: profile, AutoFilled: autoFilled, Detection: tdr, TestRides: testRides}
 	if len(autoFilled) > 0 {
 		if _, err := s.Training.SaveProfile(ctx, profile); err != nil {
-			return syncMetricsResultDTO{}, err
+			return historyInference{}, err
 		}
 		s.logger().Info("training profile auto-filled", "rider", rider, "fields", autoFilled)
 		s.recordDetectedThresholds(ctx, rider, tdr.Detected)
 		// Whichever source produced a new FTP (Garmin, threshold detection,
 		// the EstimateFTP fallback), the over-reach risk is the same, so all
 		// of them go through the one helper. The profile write has already
-		// landed, so a failure here is logged rather than failing the sync.
+		// landed, so a failure here is logged rather than failing the pass.
 		if profile.FTPWatts != before.FTPWatts {
 			dto, changed, err := s.recalibrateLevelsForFTP(ctx, rider, before, "auto_applied")
 			if err != nil {
 				s.logger().Error("level recalibration failed", "rider", rider, "err", err)
 			}
 			if changed {
-				recalibrated = &dto
+				out.Recalibrated = &dto
 			}
 		}
 	}
-
-	s.logger().Info("training metrics synced", "rider", rider, "synced", synced, "warnings", len(warnings))
-	return syncMetricsResultDTO{
-		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
-		AutoFilled: autoFilled, Detected: tdr.Detected, LevelsRecalibrated: recalibrated,
-		FTPTests: ftpTests,
-	}, nil
+	return out, nil
 }
 
 func uniq(in []string) []string {

@@ -184,6 +184,10 @@ type statusRecorder struct {
 	status int
 }
 
+// Unwrap lets http.ResponseController reach the real writer through this one,
+// for the per-request deadlines and flushes a handler may need.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)

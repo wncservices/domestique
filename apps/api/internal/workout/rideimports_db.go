@@ -109,14 +109,29 @@ func (d *DB) UpdateRideImport(ctx context.Context, id, phase string, c RideImpor
 	return err
 }
 
-// FinishRideImport closes a job as done or failed with its final counts.
-// errClass is a short class for a failure and "" otherwise.
+// FinishRideImport closes a running job as done or failed with its final
+// counts. errClass is a short class for a failure and "" otherwise. It only
+// touches a job that is still running: one a restart took over was closed as
+// interrupted, and a straggler finishing late must not flip it back to done.
 func (d *DB) FinishRideImport(ctx context.Context, id, state, errClass string, c RideImportCounts, now time.Time) error {
 	_, err := d.db.ExecContext(ctx, d.query(`
         UPDATE ride_imports SET state = ?, error = ?, added = ?, duplicate = ?, skipped_sport = ?, unsupported = ?, unreadable = ?, updated_at = ?
-        WHERE id = ?`),
-		state, errClass, c.Added, c.Duplicate, c.SkippedSport, c.Unsupported, c.Unreadable, importTime(now), id)
+        WHERE id = ? AND state = ?`),
+		state, errClass, c.Added, c.Duplicate, c.SkippedSport, c.Unsupported, c.Unreadable, importTime(now), id, ImportRunning)
 	return err
+}
+
+// RideImportRunning reports whether a job still exists and is running. A job's
+// row is deleted with its rider, which is how a job learns it was purged, and
+// closed as failed when a restart took it over, which is how it learns it was
+// replaced.
+func (d *DB) RideImportRunning(ctx context.Context, id string) (bool, error) {
+	var one int
+	err := d.db.QueryRowContext(ctx, d.query(`SELECT 1 FROM ride_imports WHERE id = ? AND state = ?`), id, ImportRunning).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // LatestRideImport returns rider's most recent import. ok is false when they

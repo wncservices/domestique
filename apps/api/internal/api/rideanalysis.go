@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
 	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
+	"github.com/wncservices/domestique/apps/api/internal/rideimport"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -124,6 +125,12 @@ func (s *Server) analyseNewSessions(
 			continue
 		}
 		if analyzedIDs[sess.ID] {
+			continue
+		}
+		// An imported ride has no provider to fetch its file from, and is
+		// analysed when it is imported: there is nothing to retry here, and
+		// trying would only log a failed download on every sync.
+		if sess.Provider == rideimport.Provider {
 			continue
 		}
 		if perProvider[sess.Provider] >= maxAnalysesPerProviderPerSync {

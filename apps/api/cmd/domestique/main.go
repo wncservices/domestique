@@ -1231,6 +1231,9 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// Background work started by a request (planning a season after a goal is
 	// saved) runs on this, so it stops at shutdown rather than with the request.
 	srv.Lifecycle = ctx
+	// A crash or a kill can leave an upload spool behind; nothing in a freshly
+	// started process can still be using one that old.
+	api.SweepImportSpools(os.TempDir(), 10*time.Minute, time.Now(), log)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

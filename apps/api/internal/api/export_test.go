@@ -11,3 +11,7 @@ import (
 func HoldSchedulingLockForTest(ctx context.Context, db *sql.DB, fn func()) bool {
 	return withDBLock(ctx, db, autoScheduleLockKey, fn)
 }
+
+// ImportHeartbeat exposes the import job's heartbeat interval to the external
+// tests, which hold it against the stale window.
+const ImportHeartbeat = importHeartbeat

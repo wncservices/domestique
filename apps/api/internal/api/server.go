@@ -104,6 +104,17 @@ type Server struct {
 	// gigabyte.
 	ImportMaxUploadBytes int64
 	ImportLimits         rideimport.Limits
+	// ImportMaxConcurrent caps uploads in flight across all riders (zero means
+	// 4) and ImportReadTimeout how long one has to deliver its body (zero means
+	// 30 minutes). BeforeImportFile runs before each file of a job is filed and
+	// BeforeImportRecompute before the history is recomputed: tests only, to
+	// panic, purge a rider or edit a profile at exactly that moment.
+	ImportMaxConcurrent   int
+	ImportReadTimeout     time.Duration
+	BeforeImportFile      func()
+	BeforeImportRecompute func()
+	// importSlots is the in-memory half of one upload at a time per rider.
+	importSlots importSlots
 	// AfterLifeEventSaved, when set, runs once a life event has been written
 	// and before its diff is applied; an error from it stands in for a failed
 	// write, so tests can reach the rollback. Nil in production.
