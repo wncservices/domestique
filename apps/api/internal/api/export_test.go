@@ -48,3 +48,7 @@ const (
 func CrewsToRefreshForTest(snap crew.Snapshot, rider string) []crew.Crew {
 	return crewsToRefresh(snap, rider)
 }
+
+// ImportHeartbeat exposes the import job's heartbeat interval to the external
+// tests, which hold it against the stale window.
+const ImportHeartbeat = importHeartbeat

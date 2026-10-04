@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,7 +44,102 @@ const (
 	importHeartbeat = 30 * time.Second
 	// importProgressEvery is how many rides pass between count updates.
 	importProgressEvery = 20
+	// defaultImportMaxConcurrent is how many uploads, across all riders, may be
+	// in flight at once: each holds up to a gigabyte of spool on disk.
+	defaultImportMaxConcurrent = 4
+	// defaultImportReadTimeout is how long a rider has to deliver the whole body:
+	// a gigabyte over a slow line, with room to spare. The server sets no read
+	// timeout of its own, so without this a client that stops sending holds its
+	// spool and its slot for ever.
+	defaultImportReadTimeout = 30 * time.Minute
 )
+
+// importSlots is the in-memory half of "one upload at a time per rider", and
+// the global cap on uploads in flight. It is claimed before the body is read,
+// so a second upload is refused before a single byte of it is spooled, and a
+// rider cannot fill the disk with parallel gigabytes. The database half (one
+// running job per rider) covers the job after the upload; this covers the
+// window before it exists.
+type importSlots struct {
+	mu     sync.Mutex
+	riders map[string]bool
+}
+
+type slotRefusal int
+
+const (
+	slotGranted slotRefusal = iota
+	slotRiderBusy
+	slotServerBusy
+)
+
+func (t *importSlots) acquire(rider string, max int) slotRefusal {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.riders == nil {
+		t.riders = map[string]bool{}
+	}
+	if t.riders[rider] {
+		return slotRiderBusy
+	}
+	if len(t.riders) >= max {
+		return slotServerBusy
+	}
+	t.riders[rider] = true
+	return slotGranted
+}
+
+func (t *importSlots) release(rider string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.riders, rider)
+}
+
+func (s *Server) importMaxConcurrent() int {
+	if s.ImportMaxConcurrent > 0 {
+		return s.ImportMaxConcurrent
+	}
+	return defaultImportMaxConcurrent
+}
+
+func (s *Server) importReadTimeout() time.Duration {
+	if s.ImportReadTimeout > 0 {
+		return s.ImportReadTimeout
+	}
+	return defaultImportReadTimeout
+}
+
+// SweepImportSpools removes upload and archive spools older than maxAge from
+// dir, and returns how many. Run once at start: a spool is removed by the job
+// that owns it on every path, but a crash or a kill leaves it behind, and a
+// restarted process has no job that could still be using one that old.
+func SweepImportSpools(dir string, maxAge time.Duration, now time.Time, log *slog.Logger) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Warn("ride import: could not list the temp dir for stale spools", "err", err)
+		return 0
+	}
+	removed := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || (!strings.HasPrefix(name, "domestique-upload-") && !strings.HasPrefix(name, "domestique-import-")) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) < maxAge {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			log.Warn("ride import: could not remove a stale spool", "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		log.Info("ride import: removed stale spools", "count", removed)
+	}
+	return removed
+}
 
 // rideImportDTO mirrors RideImport in apps/web/src/api/types.ts.
 type rideImportDTO struct {
@@ -169,6 +267,28 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 				"You imported recently. Try again in %d minutes.", int((wait+time.Minute-1)/time.Minute))})
 			return
 		}
+	}
+
+	// Claim the slot before reading a byte, so a parallel upload is refused
+	// without spooling anything.
+	switch s.importSlots.acquire(rider, s.importMaxConcurrent()) {
+	case slotRiderBusy:
+		s.logger().Info("ride import refused: an upload from this rider is in progress", "rider", rider)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "An upload of yours is already in progress. Wait for it to finish."})
+		return
+	case slotServerBusy:
+		s.logger().Info("ride import refused: too many uploads in flight", "rider", rider)
+		w.Header().Set("Retry-After", "30")
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Other riders are uploading right now. Try again in a minute."})
+		return
+	}
+	defer s.importSlots.release(rider)
+
+	// A body that stops arriving is cut off: this endpoint, alone, gets a read
+	// deadline long enough for a gigabyte on a slow line.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.importReadTimeout())); err != nil {
+		// Not fatal, but then a stalled body is not cut off: worth knowing.
+		s.logger().Warn("ride import: could not set a read deadline on the upload", "rider", rider, "err", err)
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, s.importMaxBytes())
@@ -306,6 +426,8 @@ func importErrorClass(err error) string {
 		return "unsafe archive"
 	case errors.Is(err, rideimport.ErrBadArchive):
 		return "unreadable archive"
+	case errors.Is(err, errImportGone):
+		return "cancelled"
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "interrupted"
 	}
@@ -370,6 +492,60 @@ func (s *Server) runRideImport(ctx context.Context, rider, id string, spools []s
 		"unsupported", counts.Unsupported, "unreadable", counts.Unreadable)
 }
 
+// errImportGone ends a job whose row has been deleted: the rider was purged
+// while it ran, and a job must not keep writing a deleted rider's rides back.
+var errImportGone = errors.New("ride import: the job's rider was removed")
+
+type fileOutcome int
+
+const (
+	fileAdded fileOutcome = iota
+	fileDuplicate
+	fileOtherSport
+	fileUnreadable
+)
+
+// fileOneRide parses and files one FIT. It recovers from a panic in the decoder
+// or the analysis: one file that breaks them is counted unreadable and logged
+// (ids only, never the panic value, which could carry bytes from the upload),
+// and the job goes on. A store error is returned and stops the job, since that
+// is this app's own storage failing; so is errImportGone.
+func (s *Server) fileOneRide(ctx context.Context, rider, id string, profile workout.RiderProfile, fit []byte) (outcome fileOutcome, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger().Warn("ride import: a file could not be filed", "rider", rider, "job", id, "panic", fmt.Sprintf("%T", rec))
+			outcome, err = fileUnreadable, nil
+		}
+	}()
+	if s.BeforeImportFile != nil {
+		s.BeforeImportFile()
+	}
+	// Still wanted? The row is deleted with the rider, and any replica sees that.
+	running, err := s.Training.RideImportRunning(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if !running {
+		return 0, errImportGone
+	}
+
+	ride, err := rideimport.Parse(fit, profile)
+	switch {
+	case errors.Is(err, rideimport.ErrSport):
+		return fileOtherSport, nil
+	case err != nil:
+		return fileUnreadable, nil
+	}
+	saved, err := rideimport.Save(ctx, s.Training, s.Box, rider, ride)
+	if err != nil {
+		return 0, err
+	}
+	if saved == rideimport.Added {
+		return fileAdded, nil
+	}
+	return fileDuplicate, nil
+}
+
 // importJob is the work of a job. It returns the error class that ended it,
 // "" for a job that ran to the end. A panic is recovered into "internal": one
 // bad file must not take the server down, and the spools are removed by the
@@ -403,24 +579,20 @@ func (s *Server) importJob(ctx context.Context, rider, id string, spools []spool
 		}
 		seen++
 
-		ride, err := rideimport.Parse(fit, profile)
-		switch {
-		case errors.Is(err, rideimport.ErrSport):
-			prog.update(func(c *workout.RideImportCounts) { c.SkippedSport++ })
-			return nil
-		case err != nil:
-			prog.update(func(c *workout.RideImportCounts) { c.Unreadable++ })
-			return nil
-		}
-		outcome, err := rideimport.Save(ctx, s.Training, rider, ride)
+		outcome, err := s.fileOneRide(ctx, rider, id, profile, fit)
 		if err != nil {
 			return err
 		}
 		prog.update(func(c *workout.RideImportCounts) {
-			if outcome == rideimport.Added {
+			switch outcome {
+			case fileAdded:
 				c.Added++
-			} else {
+			case fileDuplicate:
 				c.Duplicate++
+			case fileOtherSport:
+				c.SkippedSport++
+			default:
+				c.Unreadable++
 			}
 		})
 		if seen%importProgressEvery == 0 {
@@ -430,20 +602,27 @@ func (s *Server) importJob(ctx context.Context, rider, id string, spools []spool
 	}
 
 	limits := s.importLimits()
-	for _, sp := range spools {
-		rep := rideimport.Read(sp.f, sp.size, limits, emit)
-		prog.update(func(c *workout.RideImportCounts) {
-			c.Unsupported += rep.Unsupported
-			// A file skipped for its size or damaged in transit is one the rider
-			// should hear about like a broken one.
-			c.Unreadable += rep.Unreadable + rep.Oversize
-		})
-		if rep.Err != nil {
-			class = importErrorClass(rep.Err)
-			if class == "internal" {
-				s.logger().Error("ride import: filing a ride failed", "rider", rider, "job", id, "err", rep.Err)
-			}
-			break
+	parts := make([]rideimport.Part, len(spools))
+	for i, sp := range spools {
+		parts[i] = rideimport.Part{File: sp.f, Size: sp.size}
+	}
+	// One budget across every part: the caps are for the upload, not each file.
+	rep := rideimport.ReadAll(parts, limits, emit)
+	prog.update(func(c *workout.RideImportCounts) {
+		c.Unsupported += rep.Unsupported
+		// A file skipped for its size or damaged in transit is one the rider
+		// should hear about like a broken one.
+		c.Unreadable += rep.Unreadable + rep.Oversize
+	})
+	if rep.Err != nil {
+		class = importErrorClass(rep.Err)
+		switch class {
+		case "internal":
+			s.logger().Error("ride import: filing a ride failed", "rider", rider, "job", id, "err", rep.Err)
+		case "cancelled":
+			// The rider was purged: there is nobody to recompute for.
+			s.logger().Info("ride import: stopped, the rider's data was removed", "rider", rider, "job", id)
+			return class
 		}
 	}
 
@@ -454,11 +633,14 @@ func (s *Server) importJob(ctx context.Context, rider, id string, spools []spool
 		prog.setPhase(workout.ImportRecomputing)
 		save(ctx)
 		final := context.WithoutCancel(ctx)
+		if s.BeforeImportRecompute != nil {
+			s.BeforeImportRecompute()
+		}
 		if err := s.Training.RecomputeFitnessSnapshots(final, rider); err != nil {
 			s.logger().Error("ride import: recomputing the fitness history failed", "rider", rider, "job", id, "err", err)
 			return "internal"
 		}
-		if err := s.detectAfterImport(final, rider, profile); err != nil {
+		if err := s.detectAfterImport(final, rider); err != nil {
 			s.logger().Error("ride import: threshold detection failed", "rider", rider, "job", id, "err", err)
 			return "internal"
 		}
@@ -466,34 +648,25 @@ func (s *Server) importJob(ctx context.Context, rider, id string, spools []spool
 	return class
 }
 
-// detectAfterImport re-runs threshold detection over the rider's history the
-// way a sync does: a finding on an empty or estimated field is applied, one on
-// a value the rider typed is stored as a suggestion. Detection windows are
-// relative to today, so rides from years ago only matter to its 90-day history
-// rule and to the fitness chart. FTP tests are not read from an import.
-func (s *Server) detectAfterImport(ctx context.Context, rider string, before workout.RiderProfile) error {
+// detectAfterImport re-runs what a sync runs over the rider's history (see
+// inferFromHistory): threshold detection, the FTP estimate where detection had
+// nothing better, and the training pattern. Detection windows are relative to
+// today, so rides from years ago only matter to its 90-day history rule and to
+// the fitness chart. FTP tests are not captured from an import.
+//
+// The profile is read here, just before detection, and not carried from the
+// start of the job: the rider may have edited it in the minutes the import
+// took, and detection saves its result over whatever it was handed.
+func (s *Server) detectAfterImport(ctx context.Context, rider string) error {
+	profile, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		return err
+	}
+	profile.Rider = rider
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
 		return err
 	}
-	tdr, err := s.detectThresholdsFresh(ctx, rider, before, sessions, s.now(), nil)
-	if err != nil {
-		return err
-	}
-	if len(tdr.AutoFields) == 0 {
-		return nil
-	}
-	if _, err := s.Training.SaveProfile(ctx, tdr.Profile); err != nil {
-		return err
-	}
-	s.logger().Info("training profile auto-filled by an import", "rider", rider, "fields", tdr.AutoFields)
-	s.recordDetectedThresholds(ctx, rider, tdr.Detected)
-	if tdr.Profile.FTPWatts != before.FTPWatts {
-		if _, _, err := s.recalibrateLevelsForFTP(ctx, rider, before, "auto_applied"); err != nil {
-			// The profile write has landed, so this is logged, not failed: the
-			// same call a sync makes.
-			s.logger().Error("level recalibration failed", "rider", rider, "err", err)
-		}
-	}
-	return nil
+	_, err = s.inferFromHistory(ctx, rider, profile, profile, sessions, 0, nil, s.now())
+	return err
 }
