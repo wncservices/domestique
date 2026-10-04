@@ -48,7 +48,7 @@ func TestCourseCRLFAndTabs(t *testing.T) {
 func TestCourseStepRampAndBoundary(t *testing.T) {
 	steps := []workout.WorkoutStep{
 		pw("w", workout.IntensityWarmup, 300, 100, 200), // ramp 100 -> 200 W
-		steady("s", 600, 250),                            // step
+		steady("s", 600, 250),                           // step
 	}
 	got, err := Erg(steps, 0, Meta{Name: "x"})
 	if err != nil {
