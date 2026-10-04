@@ -32,6 +32,7 @@ const (
 	codeUnscheduled   = "unscheduled"
 	codePast          = "past"
 	codeRidden        = "ridden"
+	codeCrewRide      = "crew_ride"
 	messageNoStart    = "choose where your rides start first"
 	messageNoLoop     = "could not find a loop close enough to the length of that ride"
 	messageEngineDown = "the routing engine could not make a loop right now"
@@ -53,6 +54,10 @@ func (s *Server) workoutRouteRefusal(w http.ResponseWriter, r *http.Request, wk 
 		return refuse(codeIndoor, "an indoor ride needs no route")
 	case wk.TestProtocol != "":
 		return refuse(codeFTPTest, "an FTP test needs no route")
+	case wk.CrewRideID != "":
+		// The crew already picked the route; a loop of the rider's own would
+		// quietly replace the ride they committed to riding together.
+		return refuse(codeCrewRide, crewRideRouteMessage)
 	case wk.Date == "":
 		return refuse(codeUnscheduled, "give the ride a day first")
 	}

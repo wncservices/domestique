@@ -388,6 +388,37 @@ func TestSchedulingOntoALifeEventDayIsRefused(t *testing.T) {
 	}
 }
 
+// A day holding a crew ride is the crew's: the ride already has the crew's
+// route, so neither linking a library route to it nor adding a second ride
+// beside it is offered.
+func TestSchedulingOntoACrewRideDayIsRefused(t *testing.T) {
+	h, rt, route := scheduleHarness(t)
+	crewRide, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: model.SportCycling, Name: "Sunday Club", Date: wrFuture, CrewRideID: "ride-1",
+		Steps: []workout.WorkoutStep{timedStep("Crew ride", workout.IntensityActive, route, 0)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, status := h.situation("wilant", rt.Slug, wrFuture); status != http.StatusConflict {
+		t.Errorf("situation for a crew-ride day: %d, want 409", status)
+	}
+	for _, body := range []string{
+		`{"date":"` + wrFuture + `","choice":"new"}`,
+		`{"date":"` + wrFuture + `","choice":"link","workoutId":"` + crewRide.ID + `"}`,
+		`{"date":"` + wrFuture + `","choice":"adjust","workoutId":"` + crewRide.ID + `"}`,
+	} {
+		resp, raw := h.schedule("wilant", rt.Slug, body)
+		if resp.StatusCode != http.StatusConflict || !strings.Contains(raw, "crew_ride") {
+			t.Errorf("POST %s = %d %s, want 409 with code crew_ride", body, resp.StatusCode, raw)
+		}
+	}
+	if got, _ := h.training.GetWorkout(context.Background(), crewRide.ID); got.RouteSlug != "" {
+		t.Errorf("a refused schedule linked a route to the crew ride: %+v", got)
+	}
+}
+
 func TestSchedulePermissionIsCheckedBeforeTheBodyIsRead(t *testing.T) {
 	h, rt, _ := scheduleHarness(t)
 	resp := h.asGroup("guest", "guests", http.MethodPost, "/api/routes/"+rt.Slug+"/schedule", "not json")

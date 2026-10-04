@@ -225,6 +225,8 @@ const canRoute = computed(() => {
   const day = props.day
   if (!props.routingConfigured || !w || !day || w.sport !== 'cycling') return false
   if (w.indoor || w.testProtocol || w.plannedSeconds <= 0) return false
+  // A crew ride follows the crew's route.
+  if (w.crewRide) return false
   // A day inside a life event is a day the rider is away: no route for it.
   if (onEventDay.value) return false
   return day.completed.length === 0 && day.date >= todayISO()

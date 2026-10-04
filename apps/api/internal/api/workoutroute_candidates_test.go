@@ -343,6 +343,16 @@ func TestCandidatesAreRefusedForARideThatCannotTakeARoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A crew ride follows the crew's own route, so a generated loop would
+	// replace the ride the rider committed to with the crew.
+	crewRide, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: "cycling", Name: "Sunday Club", Date: wrFuture, CrewRideID: "ride-1",
+		Steps: []workout.WorkoutStep{timedStep("Crew ride", workout.IntensityActive, 7200, 0)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	ridden := h.enduranceWorkout("wilant", wrToday)
 	if _, err := h.training.UpsertSession(ctx, workout.UpsertSessionRequest{
 		Rider: "wilant", Provider: "garmin", ExternalID: "x1", Sport: "cycling", Date: wrToday, DurationSeconds: 3600,
@@ -352,7 +362,7 @@ func TestCandidatesAreRefusedForARideThatCannotTakeARoute(t *testing.T) {
 
 	for name, id := range map[string]string{
 		"past": past.ID, "undated": undated.ID, "indoor": indoor.ID, "test": test.ID,
-		"running": running.ID, "ridden today": ridden.ID,
+		"running": running.ID, "ridden today": ridden.ID, "crew ride": crewRide.ID,
 	} {
 		resp := h.candidatesFor("wilant", id, "", "")
 		if resp.StatusCode != http.StatusConflict {

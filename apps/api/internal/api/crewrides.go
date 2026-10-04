@@ -38,6 +38,10 @@ import (
 // crewRideMoveMessage is why a crew ride cannot be moved to another day.
 const crewRideMoveMessage = "A crew ride's day is the crew's. Leave the ride to change your plan."
 
+// crewRideRouteMessage answers a route request for a crew ride or its day:
+// the crew already chose where the ride goes.
+const crewRideRouteMessage = "This is a crew ride, so it follows the crew's route. Leave the ride to plan your own."
+
 // crewRideOutdoorMessage is why a crew ride has no trainer version and no
 // alternates: the day and the road are the crew's.
 const crewRideOutdoorMessage = "A crew ride is ridden outdoors with the group, so it has no indoor version or alternates."

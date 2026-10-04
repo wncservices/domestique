@@ -152,6 +152,15 @@ func (s *Server) loadSchedule(w http.ResponseWriter, r *http.Request, date strin
 		s.fail(w, err)
 		return sc, false
 	}
+	// A crew ride is the crew's, route included: neither link it to another
+	// route nor put a second ride beside it on its day.
+	for _, wk := range all {
+		if wk.Date == sc.date && wk.CrewRideID != "" {
+			s.logger().Info("route not scheduled: that day holds a crew ride", "by", sc.rider)
+			writeJSON(w, http.StatusConflict, map[string]string{"error": crewRideRouteMessage, "code": codeCrewRide})
+			return sc, false
+		}
+	}
 	var onDay []workout.Workout
 	for _, wk := range all {
 		if wk.Date == sc.date && wk.Sport == model.SportCycling && !wk.Indoor && wk.TestProtocol == "" {
