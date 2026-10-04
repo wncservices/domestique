@@ -150,6 +150,9 @@ func (p *previewer) joining() {
 			}
 		}
 	case Endurance:
+		if p.replacedEnduranceOnItsDay() {
+			break
+		}
 		if w, ok := p.enduranceToReplace(); ok {
 			p.removeOrLeave(w, "your crew ride takes the place of one endurance session")
 		}
@@ -242,25 +245,34 @@ func (p *previewer) removed(id string) bool {
 	return false
 }
 
-// enduranceToReplace is the generated endurance session nearest the ride, later
-// first on a tie: the one the ride most plainly stands in for.
+// enduranceToReplace is the generated endurance session the ride stands in for
+// when its own day did not already hold one: the week's last, which is the slot
+// scheduler.WeekWorkouts drops (applyFixed), so the preview and a week filled
+// after joining name the same session.
 func (p *previewer) enduranceToReplace() (workout.Workout, bool) {
-	ride, _ := time.Parse(dateLayout, p.in.Ride.Date)
-	best, bestDist, found := workout.Workout{}, math.MaxFloat64, false
+	var best workout.Workout
+	found := false
 	for _, w := range p.weekSessions() {
 		if w.Date == p.in.Ride.Date || p.changed[w.ID] || !p.eligible(w) || scheduler.IsLongRideName(w.Name) || w.Zone != workout.ZoneEndurance {
 			continue
 		}
-		d, err := time.Parse(dateLayout, w.Date)
-		if err != nil {
-			continue
-		}
-		dist := math.Abs(d.Sub(ride).Hours())
-		if dist < bestDist || (dist == bestDist && w.Date > best.Date) {
-			best, bestDist, found = w, dist, true
+		if !found || w.Date > best.Date {
+			best, found = w, true
 		}
 	}
 	return best, found
+}
+
+// replacedEnduranceOnItsDay is whether joining removed an endurance session on
+// the ride's own day: that is the slot an endurance ride replaces, and no second
+// one goes.
+func (p *previewer) replacedEnduranceOnItsDay() bool {
+	for _, w := range p.byDate(p.in.Ride.Date) {
+		if p.removed(w.ID) && w.Zone == workout.ZoneEndurance && !scheduler.IsLongRideName(w.Name) {
+			return true
+		}
+	}
+	return false
 }
 
 // eligible is whether the plan may change w on its own: it made it, nobody has
