@@ -135,6 +135,17 @@ func (p *previewer) joining() {
 		p.warn("You are away on that day (a life event). The ride stays in your plan, and it is up to you whether to go.")
 	}
 
+	// A long ride the day before an FTP test reads FTP low.
+	if kind == Long {
+		next := addDays(p.in.Ride.Date, 1)
+		for _, w := range p.in.Workouts {
+			if w.TestProtocol != "" && w.Date == next {
+				p.warn("Your FTP test is the day after this ride. A long ride the day before makes a test read low, so you may want to move the test.")
+				break
+			}
+		}
+	}
+
 	// Its day is taken.
 	for _, w := range p.byDate(p.in.Ride.Date) {
 		p.removeOrLeave(w, "that day is now your crew ride")

@@ -153,6 +153,10 @@ func (s *Server) resolveGoing(ctx context.Context, rider, rideID string, body go
 	if ride.Date < s.now().Format(dateLayout) {
 		return in, http.StatusConflict, "that ride has already passed", nil
 	}
+	// No distance, no estimate: the ride would be planned as a zero-length session.
+	if route.Stats.DistanceM <= 0 {
+		return in, http.StatusConflict, "this route has no distance yet", nil
+	}
 	in.route = route
 	if in.existing, err = s.fixedSessionFor(ctx, rider, rideID); err != nil {
 		return in, 0, "", err
@@ -500,10 +504,14 @@ func (s *Server) keepAroundCrewRide(ctx context.Context, wk workout.Workout, j *
 }
 
 // rollBackGoing puts back what a failed apply wrote: the sessions it deleted are
-// made again (with a new id, and without their copy on a device), the ones it
-// updated are restored, and the fixed session and going row are removed again.
-// The stores take no shared transaction, so this compensates; it does not
-// commit atomically.
+// made again, the ones it updated are restored, and the fixed session and going
+// row are removed again. The stores take no shared transaction, so this
+// compensates; it does not commit atomically.
+//
+// Two things a compensation cannot give back: a re-made session has a new id and
+// a fresh updated_at (so it no longer reads as "untouched" to the season refresh),
+// and its copy on a Garmin account, which was deleted with the original, is not
+// re-sent until the next push.
 func (s *Server) rollBackGoing(ctx context.Context, in goingInput, j *goingJournal) {
 	log := func(what string, err error) {
 		if err != nil {
@@ -512,12 +520,22 @@ func (s *Server) rollBackGoing(ctx context.Context, in goingInput, j *goingJourn
 	}
 	for i := len(j.removed) - 1; i >= 0; i-- {
 		o := j.removed[i]
-		_, err := s.Training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		made, err := s.Training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
 			Rider: o.Rider, Sport: o.Sport, Name: o.Name, GoalID: o.GoalID, Date: o.Date,
 			Description: o.Description, Steps: o.Steps, Zone: o.Zone, Level: o.Level,
 			TestProtocol: o.TestProtocol, CrewRideID: o.CrewRideID,
 		})
 		log("restore a deleted session", err)
+		// An indoor session stays indoor, with the outdoor steps it reverts to.
+		if err == nil && o.Indoor {
+			var outdoor []workout.WorkoutStep
+			if o.OutdoorSteps != nil {
+				outdoor = append([]workout.WorkoutStep{}, *o.OutdoorSteps...)
+			}
+			yes := true
+			_, err = s.Training.UpdateWorkout(ctx, made.ID, workout.UpdateWorkoutRequest{Indoor: &yes, OutdoorSteps: &outdoor})
+			log("restore a deleted session's indoor state", err)
+		}
 	}
 	ids := make([]string, 0, len(j.updated))
 	for id := range j.updated {
