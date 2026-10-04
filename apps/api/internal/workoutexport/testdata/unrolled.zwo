@@ -1,0 +1,27 @@
+<workout_file>
+  <author>Domestique</author>
+  <name>Over-unders</name>
+  <description>Two by twenty.</description>
+  <sportType>bike</sportType>
+  <tags/>
+  <workout>
+    <SteadyState Duration="60" Power="0.800">
+      <textevent timeoffset="0" message="a"/>
+    </SteadyState>
+    <SteadyState Duration="30" Power="0.600">
+      <textevent timeoffset="0" message="b"/>
+    </SteadyState>
+    <SteadyState Duration="45" Power="0.400">
+      <textevent timeoffset="0" message="c"/>
+    </SteadyState>
+    <SteadyState Duration="60" Power="0.800">
+      <textevent timeoffset="0" message="a"/>
+    </SteadyState>
+    <SteadyState Duration="30" Power="0.600">
+      <textevent timeoffset="0" message="b"/>
+    </SteadyState>
+    <SteadyState Duration="45" Power="0.400">
+      <textevent timeoffset="0" message="c"/>
+    </SteadyState>
+  </workout>
+</workout_file>

@@ -1,0 +1,24 @@
+<workout_file>
+  <author>Domestique</author>
+  <name>Sweet spot</name>
+  <description></description>
+  <sportType>bike</sportType>
+  <tags/>
+  <workout>
+    <Warmup Duration="900" PowerLow="0.500" PowerHigh="0.700">
+      <textevent timeoffset="0" message="Warm up"/>
+    </Warmup>
+    <SteadyState Duration="1200" Power="0.900">
+      <textevent timeoffset="0" message="Sweet spot 1"/>
+    </SteadyState>
+    <SteadyState Duration="300" Power="0.500">
+      <textevent timeoffset="0" message="Rest"/>
+    </SteadyState>
+    <SteadyState Duration="1200" Power="0.900">
+      <textevent timeoffset="0" message="Sweet spot 2"/>
+    </SteadyState>
+    <Cooldown Duration="600" PowerLow="0.700" PowerHigh="0.500">
+      <textevent timeoffset="0" message="Cool down"/>
+    </Cooldown>
+  </workout>
+</workout_file>

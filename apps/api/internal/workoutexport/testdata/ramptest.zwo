@@ -1,0 +1,14 @@
+<workout_file>
+  <author>Domestique</author>
+  <name>Ramp test</name>
+  <description></description>
+  <sportType>bike</sportType>
+  <tags/>
+  <workout>
+    <SteadyState Duration="60" Power="0.500"/>
+    <SteadyState Duration="60" Power="0.600"/>
+    <SteadyState Duration="60" Power="0.700"/>
+    <SteadyState Duration="60" Power="0.800"/>
+    <SteadyState Duration="60" Power="0.900"/>
+  </workout>
+</workout_file>
