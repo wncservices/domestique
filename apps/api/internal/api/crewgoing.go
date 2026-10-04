@@ -245,6 +245,15 @@ func (s *Server) rideWeek(ctx context.Context, rider string, ride crewplan.Ride,
 	if err != nil {
 		return nil, nil, err
 	}
+	// The goal the fixed session is linked to comes first, so a leave puts back
+	// what that goal's plan would have made; any other covering goal is the fallback.
+	preferred := ""
+	for _, w := range workouts {
+		if w.CrewRideID == ride.ID {
+			preferred = w.GoalID
+		}
+	}
+	sort.SliceStable(goals, func(i, j int) bool { return goals[i].ID == preferred && goals[j].ID != preferred })
 	for _, g := range goals {
 		if g.Rider != rider {
 			continue
