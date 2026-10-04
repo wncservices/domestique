@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/muktihari/fit/decoder"
 	"github.com/muktihari/fit/profile/filedef"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
@@ -437,13 +435,7 @@ var errAnalysisPanicked = errors.New("the activity file could not be processed")
 // internal/rideanalysis's fixtures_test.go, which builds and decodes its
 // synthetic fixtures the same way, exercising the real decode path rather
 // than a hand-built Activity).
-func decodeFIT(raw []byte) (*filedef.Activity, error) {
-	fit, err := decoder.New(bytes.NewReader(raw)).Decode()
-	if err != nil {
-		return nil, err
-	}
-	return filedef.NewActivity(fit.Messages...), nil
-}
+func decodeFIT(raw []byte) (*filedef.Activity, error) { return rideanalysis.DecodeFIT(raw) }
 
 // powerCurveDTO converts Analyze's int-keyed power curve to the
 // string-keyed shape workout.SessionAnalysis stores — JSON object keys must
