@@ -24,8 +24,11 @@ const props = withDefaults(
     label?: string
     size?: 'xs' | 'sm' | 'md'
     variant?: 'outline' | 'ghost'
+    // Show the label only from the sm breakpoint up, like the other week-strip
+    // buttons, so the header row does not overflow at phone width.
+    labelFromSm?: boolean
   }>(),
-  { label: undefined, size: 'md', variant: 'outline' },
+  { label: undefined, size: 'md', variant: 'outline', labelFromSm: false },
 )
 
 const toast = useToast()
@@ -36,9 +39,17 @@ const FORMATS: { format: ExportFormat; label: string }[] = [
   { format: 'erg', label: '.erg' },
 ]
 
-async function save(url: string, what: string) {
+async function save(url: string, what: string, format?: ExportFormat) {
   try {
-    const { blob, filename } = await fetchFile(url)
+    const { blob, filename, skippedAll } = await fetchFile(url)
+    if (skippedAll) {
+      toast.add({
+        title: `Nothing in this week can be exported as .${format ?? 'file'}`,
+        icon: 'i-lucide-info',
+        color: 'warning',
+      })
+      return
+    }
     const href = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = href
@@ -90,7 +101,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
     children: FORMATS.map(
       (f): DropdownMenuItem => ({
         label: f.label,
-        onSelect: () => void save(api.weekExportUrl(week.start, f.format), 'this week'),
+        onSelect: () => void save(api.weekExportUrl(week.start, f.format), 'this week', f.format),
       }),
     ),
   }
@@ -108,7 +119,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
       :trailing-icon="label ? 'i-lucide-chevron-down' : undefined"
       :aria-label="label ?? 'Export'"
     >
-      <template v-if="label">{{ label }}</template>
+      <span v-if="label" :class="{ 'hidden sm:inline': labelFromSm }">{{ label }}</span>
     </UButton>
   </UDropdownMenu>
 </template>

@@ -288,7 +288,7 @@ watch(
         >
           <span class="hidden sm:inline">FTP test</span>
         </UButton>
-        <ExportMenu :week="week" label="Export" size="sm" />
+        <ExportMenu :week="week" label="Export" size="sm" label-from-sm />
         <UButton
           v-if="isCurrentWeek"
           color="neutral"
