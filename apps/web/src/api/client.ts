@@ -100,6 +100,9 @@ import type { BasemapLayers } from '@/utils/staticBasemap'
  * password, and matching on the text of an error message across the API
  * boundary is a thing that breaks the next time the wording is improved.
  */
+/** The trainer-app file formats a workout can be exported as. */
+export type ExportFormat = 'zwo' | 'mrc' | 'erg'
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -884,6 +887,15 @@ export const api = {
    *  comment for why this is the proven path to a real device in this
    *  phase rather than a provider push. */
   workoutFitUrl: (id: string) => `/api/training/workouts/${encodeURIComponent(id)}/fit`,
+  /** A workout as a trainer-app file: .zwo (Zwift), .mrc (TrainerRoad and
+   *  others) or .erg. The server refuses what a trainer cannot hold (heart-rate
+   *  steps, an open step in .mrc/.erg), so callers fetch this and show the
+   *  server's message rather than linking straight to it. */
+  workoutExportUrl: (id: string, format: ExportFormat) =>
+    `/api/training/workouts/${encodeURIComponent(id)}/export?format=${format}`,
+  /** The week containing `monday` (YYYY-MM-DD) as a zip of those files. */
+  weekExportUrl: (monday: string, format: ExportFormat) =>
+    `/api/training/weeks/${encodeURIComponent(monday)}/export?format=${format}`,
   /** Pushes a structured workout straight to the rider's own connected
    *  Garmin account — Connect's own JSON workout schema, not the FIT
    *  bytes workoutFitUrl serves; see internal/garmin's own doc comment.
