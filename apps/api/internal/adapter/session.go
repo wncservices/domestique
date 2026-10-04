@@ -462,6 +462,12 @@ func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession
 		if !scheduler.IsGenerated(w) || scheduler.IsKeySession(w) || done(w, sessions, analyses) {
 			continue
 		}
+		// A routed ride is given up for nothing: taking its slot deletes it, and
+		// the rider chose that route for that day. Readiness easing may shorten
+		// it, but never remove it.
+		if w.RouteSlug != "" {
+			continue
+		}
 		return w, true
 	}
 	return workout.Workout{}, false

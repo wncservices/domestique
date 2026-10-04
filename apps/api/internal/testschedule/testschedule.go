@@ -345,7 +345,9 @@ func (s *suggester) available(d time.Time) bool {
 // swapped for an alternate is theirs now, so it is not (a pin test in
 // internal/api keeps the two definitions equal).
 func IsPlanMade(w workout.Workout) bool {
-	return w.GoalID != "" &&
+	// A routed ride is the rider's own choice for its day (see internal/api).
+	return w.RouteSlug == "" &&
+		w.GoalID != "" &&
 		strings.HasPrefix(w.Description, scheduler.GeneratedDescription) &&
 		!strings.Contains(w.Description, scheduler.SwappedMarker)
 }

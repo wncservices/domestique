@@ -143,6 +143,10 @@ func (s *Server) handleCreateRouteShare(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if refuseTaggedRoute(w, route.Tags) {
+		return
+	}
+
 	var body struct {
 		TTLDays int `json:"ttlDays"`
 	}

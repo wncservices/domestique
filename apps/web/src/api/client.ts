@@ -83,6 +83,12 @@ import type {
   ProjectionResponse,
   EaseTomorrowResult,
   IndoorPreview,
+  CourseOutcome,
+  RideStart,
+  RouteCandidates,
+  ScheduleResult,
+  ScheduleSituation,
+  WorkoutPushResult,
   WeatherPrefs,
   WeatherResponse,
   AlternateKind,
@@ -840,6 +846,55 @@ export const api = {
   /** "Stop using weather": removes the stored town. */
   removeWeatherLocation: () =>
     request<WeatherPrefs>('/api/training/weather/location', { method: 'DELETE' }),
+  /** Whether a start point for planned rides is set, and its town. Never the
+   *  coordinates. A 412 means this deployment cannot store one. */
+  rideStart: () => request<RideStart>('/api/training/ride-start'),
+  /** Saves where planned rides start, from the route builder's location
+   *  chooser. The server keeps it to about 110 m and never sends it back. */
+  setRideStart: (place: string, lat: number, lon: number) =>
+    request<void>('/api/training/ride-start', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ place, lat, lon }),
+    }),
+  /** Forgets the start point. Idempotent. */
+  removeRideStart: () => request<void>('/api/training/ride-start', { method: 'DELETE' }),
+  /** Up to three loops sized and shaped for a planned ride, from the rider's
+   *  saved start. 409 `no_start_point` asks for one; 410/412/429/502 are the
+   *  engine's. Held on the server for 30 minutes. */
+  workoutRouteCandidates: (id: string, today?: string) =>
+    request<RouteCandidates>(
+      `/api/training/workouts/${encodeURIComponent(id)}/route-candidates${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'POST' },
+    ),
+  /** Saves a held candidate as an owner-only route and links it to the ride. */
+  saveWorkoutRoute: (id: string, candidateId: string, today?: string) =>
+    request<Workout>(
+      `/api/training/workouts/${encodeURIComponent(id)}/route${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidateId }),
+      },
+    ),
+  /** Unlinks the route; a loop made for the ride is deleted with it. */
+  removeWorkoutRoute: (id: string) =>
+    request<Workout>(`/api/training/workouts/${encodeURIComponent(id)}/route`, { method: 'DELETE' }),
+  /** Sends a routed ride's course to every one of the rider's own devices. */
+  pushWorkoutCourse: (id: string) =>
+    request<{ course: CourseOutcome }>(`/api/training/workouts/${encodeURIComponent(id)}/route/push`, { method: 'POST' }),
+  /** What putting this route on a day would offer. Writes nothing. */
+  routeSchedule: (slug: string, date: string, today?: string) =>
+    request<ScheduleSituation>(
+      `/api/routes/${encodeSlug(slug)}/schedule?date=${encodeURIComponent(date)}${today ? `&today=${encodeURIComponent(today)}` : ''}`,
+    ),
+  /** Puts the route on the day: link it to the ride there, adjust that ride to
+   *  the route's time, or make a new one. */
+  scheduleRoute: (slug: string, body: { date: string; choice: 'link' | 'adjust' | 'new'; workoutId?: string }, today?: string) =>
+    request<ScheduleResult>(
+      `/api/routes/${encodeSlug(slug)}/schedule${today ? `?today=${encodeURIComponent(today)}` : ''}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    ),
   /** The easier, harder, shorter and longer versions of a plan-made session.
    *  Writes nothing; `today` is the browser's own day. */
   workoutAlternates: (id: string, today?: string) =>
@@ -890,7 +945,7 @@ export const api = {
    *  One-shot: always creates a new Garmin workout rather than updating
    *  one from an earlier push. */
   pushWorkoutToGarmin: (id: string) =>
-    request<{ status: string; garminWorkoutId: string }>(
+    request<WorkoutPushResult>(
       `/api/training/workouts/${encodeURIComponent(id)}/push/garmin`,
       { method: 'POST' },
     ),

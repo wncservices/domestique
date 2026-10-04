@@ -40,6 +40,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
@@ -253,6 +254,14 @@ type Server struct {
 	// rider with no row in WeatherPrefs never causes a request.
 	Weather      *weather.Client
 	WeatherPrefs *weather.Store
+	// RideStarts is where each rider's planned rides start, opt-in by row. Nil
+	// means the feature answers 412; see ridestart.go.
+	RideStarts *ridestart.Store
+
+	// candidates holds generated route loops in memory until their rider
+	// picks one; see candidates.go. Created on first use.
+	candidates     *candidateStore
+	candidatesOnce sync.Once
 
 	// Narration is Phase E of docs/training-plan.md — an LLM layer that
 	// explains a plan and proposes profile edits from free text, strictly
@@ -333,6 +342,12 @@ type Server struct {
 	// sign-in-shaped limits would make unusable well before anything
 	// resembling abuse.
 	RouteBuilderLimiter *ratelimit.Limiter
+
+	// WorkoutRouteLimiter throttles generating routes for a planned ride, by
+	// rider. Each generate is ten calls against the same shared routing quota
+	// the builder draws on, so it gets its own, much tighter budget: a rider
+	// planning a week asks six times, not sixty.
+	WorkoutRouteLimiter *ratelimit.Limiter
 
 	// GeocodeLimiter throttles the location-search endpoint by rider.
 	// Unlike RouteBuilderLimiter, this is protecting a shared *public*
@@ -543,6 +558,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/training/weather/location", s.handleSetWeatherLocation)
 	mux.HandleFunc("PUT /api/training/weather/window", s.handleSetWeatherWindow)
 	mux.HandleFunc("DELETE /api/training/weather/location", s.handleDeleteWeatherLocation)
+	mux.HandleFunc("GET /api/training/ride-start", s.handleGetRideStart)
+	mux.HandleFunc("PUT /api/training/ride-start", s.handleSetRideStart)
+	mux.HandleFunc("DELETE /api/training/ride-start", s.handleDeleteRideStart)
+	mux.HandleFunc("POST /api/training/workouts/{id}/route-candidates", s.handleWorkoutRouteCandidates)
+	mux.HandleFunc("POST /api/training/workouts/{id}/route", s.handleSaveWorkoutRoute)
+	mux.HandleFunc("DELETE /api/training/workouts/{id}/route", s.handleRemoveWorkoutRoute)
+	mux.HandleFunc("POST /api/training/workouts/{id}/route/push", s.handlePushWorkoutCourse)
+	mux.HandleFunc("GET /api/routes/{slug}/schedule", s.handleRouteScheduleSituation)
+	mux.HandleFunc("POST /api/routes/{slug}/schedule", s.handleRouteSchedule)
 	mux.HandleFunc("GET /api/training/week", s.handleTrainingWeek)
 	mux.HandleFunc("POST /api/training/replan", s.handleReplan)
 	mux.HandleFunc("POST /api/training/plan/propose-edit", s.handleProposePlanEdit)
@@ -2982,6 +3006,23 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.Targets != nil && len(*body.Targets) > 0 {
+		// A route generated for a ride starts at the rider's saved start point:
+		// no crew target while it carries its tag. A request that removes the tag
+		// in the same breath is the rider's deliberate choice.
+		tags := body.Tags
+		if tags == nil {
+			current, err := s.routeTags(r.Context(), slug)
+			if err != nil {
+				s.failLookup(w, err)
+				return
+			}
+			tags = &current
+		}
+		if refuseTaggedRoute(w, *tags) {
+			return
+		}
+	}
 	if body.Targets != nil {
 		if err := validateCrewTargets(*body.Targets, ownerForValidation, crews); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -3265,6 +3306,16 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		s.failLookup(w, err)
 		return
 	}
+	// A rider's planned rides must not keep pointing at a route that is gone:
+	// the slug would read as a route that exists, and a later route created
+	// under it would attach itself to a stranger's ride.
+	if s.Training != nil {
+		if n, err := s.Training.UnlinkRoute(r.Context(), slug); err != nil {
+			s.logger().Warn("could not clear workout links to a deleted route", "slug", slug, "err", err)
+		} else if n > 0 {
+			s.logger().Info("workout links to a deleted route cleared", "slug", slug, "workouts", n)
+		}
+	}
 
 	s.logger().Info("route deleted", "slug", slug)
 	s.autoSyncIfEnabled(auth.FromContext(r.Context()).User)
@@ -3387,6 +3438,17 @@ func (s *Server) rateLimitAuthAction(w http.ResponseWriter, rider string) bool {
 // a separate, more generous budget than rateLimitConnect/rateLimitAuthAction.
 func (s *Server) rateLimitRouteBuilder(w http.ResponseWriter, rider string) bool {
 	return rateLimit(w, s.RouteBuilderLimiter, rider, "too many route-builder requests — wait a few minutes and try again")
+}
+
+// rateLimitWorkoutRoute enforces WorkoutRouteLimiter, and logs a Warn when it
+// fires: the routing quota is the scarce thing here, and an operator should be
+// able to see who is spending it without reading a rider's coordinates.
+func (s *Server) rateLimitWorkoutRoute(w http.ResponseWriter, rider string) bool {
+	if rateLimit(w, s.WorkoutRouteLimiter, rider, "you have asked for a lot of routes — wait a few minutes and try again") {
+		return true
+	}
+	s.logger().Warn("workout route generation rate limited", "by", rider)
+	return false
 }
 
 // rateLimitGeocode enforces GeocodeLimiter for a rider's own location

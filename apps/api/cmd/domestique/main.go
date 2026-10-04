@@ -51,6 +51,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
@@ -860,6 +861,9 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// per waypoint placed, dragged or removed) while still bounding a
 		// script that would otherwise hammer the routing engine unchecked.
 		RouteBuilderLimiter: ratelimit.New(60, 5*time.Minute),
+		// Generating a route for a planned ride is ten engine calls a press, from
+		// the same shared quota: 6 per 10 minutes is a week's planning, not a loop.
+		WorkoutRouteLimiter: ratelimit.New(6, 10*time.Minute),
 		// Tighter than RouteBuilderLimiter — see GeocodeLimiter's own doc
 		// comment: this protects Nominatim's own shared public-usage
 		// policy (roughly one request a second across every user of this
@@ -977,6 +981,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 	srv.WeatherPrefs = weatherPrefs
+	// Where a rider's planned rides start: opt-in by row, kept at about 110 m
+	// and never returned by the API.
+	if srv.RideStarts, err = ridestart.UseDB(src.Conn(), src.DSN()); err != nil {
+		return err
+	}
 	if cfg.Weather.On() {
 		srv.Weather = weather.New(cfg.Weather.BaseURL, os.Getenv(weather.EnvAPIKey), nil)
 	}
@@ -1208,6 +1217,10 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// fixed morning and evening times (config: training.sync_times), whether
 	// or not auto-schedule is on — it only reads, it never changes a workout.
 	go srv.RunMetricsSyncLoop(ctx)
+
+	// Drops generated route loops nobody came back for, so a rider's location
+	// data does not sit in memory past its 30 minutes.
+	go srv.RunCandidateJanitor(ctx)
 
 	log.Info("listening", "addr", addr, "library", src.Describe(),
 		"auth", authenticator.Mode())
