@@ -434,6 +434,11 @@ func (s *Server) applyCrewRide(ctx context.Context, in goingInput, plan crewPlan
 		if wk.ID == "" {
 			wk = *in.existing
 		}
+		// A routed session keeps its chosen day; only the fixed crew session
+		// itself is removed when the rider leaves.
+		if wk.RouteSlug != "" && wk.CrewRideID == "" {
+			continue
+		}
 		s.removeWorkoutFromGarmin(ctx, wk)
 		if err := s.Training.DeleteWorkout(ctx, wk.ID); err != nil && !errors.Is(err, workout.ErrWorkoutNotFound) {
 			return n, fixed, err

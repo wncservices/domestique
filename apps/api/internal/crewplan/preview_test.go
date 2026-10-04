@@ -117,6 +117,43 @@ func TestAShortRideTakesItsDayAndNothingElseMoves(t *testing.T) {
 	}
 }
 
+func TestJoiningNeverRemovesARoutedSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ride Ride
+		w    workout.Workout
+	}{
+		{"same day", Ride{ID: "r", Date: sat, Seconds: 30 * 60}, gen("routed", "Endurance ride", sat, workout.ZoneEndurance, 3600)},
+		{"long ride", longRide, gen("routed", "Long ride", thu, workout.ZoneEndurance, 3*3600)},
+		{"endurance replacement", Ride{ID: "r", Date: sat, Seconds: 90 * 60}, gen("routed", "Endurance ride", thu, workout.ZoneEndurance, 3600)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.w.RouteSlug = "chosen-loop"
+			d := Preview(input(tc.ride, tc.w))
+			if _, ok := ops(d)["remove:routed"]; ok {
+				t.Errorf("changes = %+v: a chosen route must keep its session", d.Changes)
+			}
+		})
+	}
+
+	routed := gen("routed", "Endurance ride", thu, workout.ZoneEndurance, 3600)
+	routed.RouteSlug = "chosen-loop"
+	d := Preview(input(Ride{ID: "r", Date: sat, Seconds: 90 * 60},
+		gen("unrouted", "Endurance ride", wed, workout.ZoneEndurance, 3600), routed))
+	if _, ok := ops(d)["remove:unrouted"]; !ok {
+		t.Errorf("changes = %+v, want the unrouted endurance slot replaced", d.Changes)
+	}
+}
+
+func TestARoutedSessionCanStillBeEasedBeforeACrewRide(t *testing.T) {
+	w := hard("routed", fri)
+	w.RouteSlug = "chosen-loop"
+	d := Preview(input(longRide, w))
+	if _, ok := ops(d)["ease:routed"]; !ok {
+		t.Errorf("changes = %+v, want the routed session eased, not removed", d.Changes)
+	}
+}
+
 func TestTheDayBeforeAHardSessionIsEasedForLongAndEnduranceRides(t *testing.T) {
 	for _, secs := range []float64{4 * 3600, 90 * 60} {
 		d := Preview(input(Ride{ID: "r", Date: sat, Seconds: secs}, hard("fri-hard", fri)))

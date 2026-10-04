@@ -264,7 +264,7 @@ func (p *previewer) enduranceToReplace() (workout.Workout, bool) {
 	var best workout.Workout
 	found := false
 	for _, w := range p.weekSessions() {
-		if w.Date == p.in.Ride.Date || p.changed[w.ID] || !p.eligible(w) || scheduler.IsLongRideName(w.Name) || w.Zone != workout.ZoneEndurance {
+		if w.Date == p.in.Ride.Date || p.changed[w.ID] || !p.eligible(w) || w.RouteSlug != "" || scheduler.IsLongRideName(w.Name) || w.Zone != workout.ZoneEndurance {
 			continue
 		}
 		if !found || w.Date > best.Date {
@@ -297,7 +297,7 @@ func (p *previewer) removeOrLeave(w workout.Workout, reason string) {
 	if p.changed[w.ID] {
 		return
 	}
-	if !p.eligible(w) {
+	if !p.eligible(w) || w.RouteSlug != "" {
 		p.leave(w)
 		return
 	}
@@ -316,6 +316,8 @@ func (p *previewer) leave(w workout.Workout) {
 		reason = "you have already ridden it"
 	case w.Date < p.today:
 		reason = "it is in the past"
+	case w.RouteSlug != "":
+		reason = "you chose a route for it"
 	case strings.Contains(w.Description, KeptMarker):
 		reason = "you chose to keep it as planned"
 	case strings.Contains(w.Description, scheduler.SwappedMarker):

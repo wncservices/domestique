@@ -146,6 +146,32 @@ func TestJoiningAppliesTheRecomputedDiffAndRecordsWhy(t *testing.T) {
 	}
 }
 
+func TestJoiningKeepsARoutedSessionAndItsLink(t *testing.T) {
+	h := newCrewPlanHarness(t)
+	jw := h.joinWeek()
+	route := h.seedRoute("Chosen loop", "wilant", 40, 0)
+	seconds := 5400.0
+	_, err := h.training.UpdateWorkout(context.Background(), jw.sat.ID, workout.UpdateWorkoutRequest{
+		RouteSlug: &route.Slug, RouteSeconds: &seconds,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, preview := h.setGoing("wilant", jw.ride, `{"going":true,"dryRun":true}`)
+	if resp.StatusCode != http.StatusOK || changeIDs(preview)["remove:"+jw.sat.ID] {
+		t.Fatalf("preview = %+v, status = %d: the routed session must stay", preview, resp.StatusCode)
+	}
+	out := h.mustGo("wilant", jw.ride)
+	if out.Applied == nil || out.Applied.Removed != 0 {
+		t.Fatalf("applied = %+v, want no session removed", out.Applied)
+	}
+	got, ok := h.get("wilant", jw.sat.ID)
+	if !ok || got.RouteSlug != route.Slug || got.RouteSeconds != seconds {
+		t.Errorf("routed session = %+v, found %v: its route link must stay", got, ok)
+	}
+}
+
 func TestSkippingACrewRideChangeLeavesThatSessionAlone(t *testing.T) {
 	h := newCrewPlanHarness(t)
 	jw := h.joinWeek()
