@@ -48,9 +48,16 @@ type Ride struct {
 // rider's current one: training load and TSS are scored against today's FTP,
 // not the one true on the day, the trade-off CompletedSession's own doc
 // already accepts. It reads nothing but the bytes it is given.
-func Parse(fit []byte, p workout.RiderProfile) (Ride, error) {
+func Parse(fit []byte, p workout.RiderProfile) (ride Ride, err error) {
+	// The decoder and the analysis read hostile bytes. Whatever they trip over,
+	// one file is an unreadable file, never a crashed import.
+	defer func() {
+		if recover() != nil {
+			ride, err = Ride{}, ErrUnreadable
+		}
+	}()
 	act, err := rideanalysis.DecodeFIT(fit)
-	if err != nil || act == nil || len(act.Records) == 0 {
+	if err != nil || act == nil || len(act.Records) == 0 || !plausibleSpan(act) {
 		return Ride{}, ErrUnreadable
 	}
 
@@ -83,6 +90,10 @@ func Parse(fit []byte, p workout.RiderProfile) (Ride, error) {
 		Profile:  p,
 		Sport:    sport,
 	})
+	// A FIT whose records yielded no usable second says nothing about the ride.
+	if r.Analysis.SamplesUnreadable {
+		return Ride{}, ErrUnreadable
+	}
 	return r, nil
 }
 
@@ -207,4 +218,16 @@ func summarise(s *mesgdef.Session, act *filedef.Activity) (duration, elapsed, di
 		}
 	}
 	return duration, elapsed, distance, avgPower, avgHR
+}
+
+// plausibleSpan is whether every record has a real timestamp. How far apart
+// they are is rideanalysis.Resample's business: it collapses long gaps and caps
+// the samples it lays out, so a corrupt timestamp cannot ask for a huge slice.
+func plausibleSpan(act *filedef.Activity) bool {
+	for _, r := range act.Records {
+		if !validTime(r.Timestamp) {
+			return false
+		}
+	}
+	return true
 }
