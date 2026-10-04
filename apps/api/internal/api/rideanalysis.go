@@ -1,14 +1,12 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/muktihari/fit/decoder"
 	"github.com/muktihari/fit/profile/filedef"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
@@ -150,7 +148,7 @@ func (s *Server) analyseNewSessions(
 			downloadFailed++
 			s.logger().Warn("ride analysis: fit download failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", downloadErr)
 		default:
-			decoded, decodeErr := decodeFIT(raw)
+			decoded, decodeErr := rideanalysis.DecodeFIT(raw)
 			if decodeErr != nil {
 				fitErr = decodeErr
 				s.logger().Warn("ride analysis: fit decode failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", decodeErr)
@@ -365,19 +363,6 @@ func (s *Server) fetchSessionFIT(
 	default:
 		return nil, errUnknownProvider
 	}
-}
-
-// decodeFIT decodes a downloaded FIT body into the same *filedef.Activity
-// shape rideanalysis.Analyze scores — the repo's own decode idiom (see
-// internal/rideanalysis's fixtures_test.go, which builds and decodes its
-// synthetic fixtures the same way, exercising the real decode path rather
-// than a hand-built Activity).
-func decodeFIT(raw []byte) (*filedef.Activity, error) {
-	fit, err := decoder.New(bytes.NewReader(raw)).Decode()
-	if err != nil {
-		return nil, err
-	}
-	return filedef.NewActivity(fit.Messages...), nil
 }
 
 // powerCurveDTO converts Analyze's int-keyed power curve to the
