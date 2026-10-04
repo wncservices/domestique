@@ -6,6 +6,8 @@ import type { Crew, Person, Ride, RideSeriesInterval, RideSync, UpcomingRide } f
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
+import CrewRideGoing from '@/components/CrewRideGoing.vue'
+import CrewTogetherDays from '@/components/CrewTogetherDays.vue'
 import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import TrackPreview from '@/components/TrackPreview.vue'
 
@@ -304,6 +306,25 @@ const detailCrew = computed(() => crews.value.find((c) => c.id === detailTarget.
 const rides = ref<Ride[]>([])
 const ridesLoading = ref(false)
 
+// Who is going to each ride, from the training API. Optional: a rider without
+// training access (or a failed read) just sees the rides without the toggle.
+const goingByRide = ref<Record<string, { going: string[]; mine: boolean }>>({})
+
+async function loadGoing(crewId: string) {
+  try {
+    const all = await api.trainingCrewRides(todayISO())
+    goingByRide.value = Object.fromEntries(
+      all.filter((r) => r.crewId === crewId).map((r) => [r.id, { going: r.going, mine: r.mine }]),
+    )
+  } catch {
+    goingByRide.value = {}
+  }
+}
+
+async function onGoingChanged() {
+  if (detailTarget.value) await loadGoing(detailTarget.value.id)
+}
+
 async function loadRides(crewId: string) {
   ridesLoading.value = true
   try {
@@ -324,7 +345,9 @@ async function loadRides(crewId: string) {
 function openDetail(crew: Crew) {
   detailTarget.value = crew
   rides.value = []
+  goingByRide.value = {}
   loadRides(crew.id)
+  loadGoing(crew.id)
 }
 
 // --- auto-share (owner/admin only: changes what the crew does for every
@@ -1030,6 +1053,15 @@ async function saveShare() {
                   <p class="truncate text-xs text-dimmed">
                     <template v-if="ride.time">{{ ride.time }} · </template>Scheduled by {{ ride.createdBy }}
                   </p>
+                  <CrewRideGoing
+                    v-if="goingByRide[ride.id] && ride.date >= todayISO()"
+                    class="mt-1"
+                    :ride-id="ride.id"
+                    :going="goingByRide[ride.id]!.going"
+                    :mine="goingByRide[ride.id]!.mine"
+                    :route-name="ride.routeName"
+                    @changed="onGoingChanged"
+                  />
                 </div>
                 <UTooltip text="Sync to the crew's devices now">
                   <UButton
@@ -1234,6 +1266,14 @@ async function saveShare() {
               No routes to schedule yet — share one, or upload one of your own.
             </p>
           </section>
+
+          <!-- Open to riding together: your own row, visible to the crew -->
+          <CrewTogetherDays
+            v-if="detailCrew.membershipStatus === 'approved' && me?.user"
+            :crew="detailCrew"
+            :me="me.user"
+            @saved="refresh"
+          />
 
           <!-- Roster -->
           <section class="app-card flex flex-col gap-4 p-4">
