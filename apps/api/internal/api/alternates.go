@@ -75,6 +75,9 @@ func (s *Server) alternatesFor(ctx context.Context, wk workout.Workout, today ti
 		return alternateSet{}, err
 	}
 	switch {
+	// A crew ride is the crew's: it has no alternates, so the menu is empty.
+	case wk.CrewRideID != "":
+		return alternateSet{refusal: crewRideOutdoorMessage}, nil
 	case wk.Date != "" && wk.Date < todayStr:
 		return alternateSet{refusal: indoorPastMessage}, nil
 	case ridden[wk.ID]:

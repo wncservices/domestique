@@ -8,6 +8,7 @@
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type {
+  CrewRideAdvice,
   ReadinessVerdict,
   RiderProfile,
   SessionAnalysis,
@@ -23,7 +24,9 @@ import { todayISO } from '@/utils/rideDates'
 import { ftpTestLabel, ftpTestTrainerNote } from '@/utils/ftpTests'
 import { summariseEfforts, type EffortGrade } from '@/utils/effortSummary'
 import { adjustmentNote, describeTarget, formatDuration, isPlanMadeSession, pickAnalysedSession, swapNote } from '@/utils/workoutMath'
+import CrewRideGoing from '../CrewRideGoing.vue'
 import AlternatesMenu from './AlternatesMenu.vue'
+import CrewRideBadge from './CrewRideBadge.vue'
 import LifeEventBand from './LifeEventBand.vue'
 import { rangeLabel } from './lifeEvents'
 import FeelRating from './FeelRating.vue'
@@ -63,6 +66,9 @@ const props = defineProps<{
   // The life events covering this day: the card shows them, and hides the
   // readiness chip, which has nothing to say about a day off.
   lifeEvents?: LifeEvent[]
+  // Advice for a crew ride today or tomorrow when the rider is not ready. Advice
+  // only: the ride is never changed and nothing here offers to swap it.
+  crewAdvice?: CrewRideAdvice
 }>()
 
 const emit = defineEmits<{
@@ -82,6 +88,8 @@ const emit = defineEmits<{
   // the page, not here, so this just asks it to reload both rather than
   // this card trying to patch props it doesn't own.
   rated: []
+  // The rider updated their plan around a crew ride (left it): reload.
+  crewChanged: []
   backToToday: []
   editLifeEvent: [e: LifeEvent]
   lifeEventBack: [e: LifeEvent]
@@ -178,7 +186,8 @@ function moveMenuItems(w: Workout, fromDate: string) {
 const canChangeIndoor = computed(() => {
   const w = firstWorkout.value
   const day = props.day
-  if (!w || !day || w.sport !== 'cycling') return false
+  // A crew ride is outdoors with the group: it has no trainer version.
+  if (!w || !day || w.sport !== 'cycling' || w.crewRide) return false
   return day.completed.length === 0 && day.date >= todayISO()
 })
 const canConvertIndoor = computed(() => canChangeIndoor.value && !firstWorkout.value?.indoor)
@@ -198,6 +207,19 @@ const canOfferAlternates = computed(() => {
 })
 
 const yesterdayWorkout = computed(() => props.yesterday?.planned[0])
+
+// What the day card says about a crew ride: the advice for today's (or
+// tomorrow's) readiness, and why the session may be orphaned.
+const crewRide = computed(() => firstWorkout.value?.crewRide)
+const crewAdviceHere = computed(() => {
+  const a = props.crewAdvice
+  const w = firstWorkout.value
+  return a && w?.crewRide && a.date === w.date ? a : undefined
+})
+const crewKindLabel = computed(() => (crewRide.value?.kind === 'long' ? 'Long crew ride' : 'Crew ride'))
+const orphanedTitle = computed(() =>
+  crewRide.value?.orphaned === 'cancelled' ? 'This crew ride was cancelled' : 'You are no longer in this crew',
+)
 
 // The weather banner belongs to the session on show, and only while it can
 // still change: a done day has nothing left to move or switch.
@@ -384,6 +406,7 @@ function onRated(analysis: SessionAnalysis) {
               <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
               <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
               <IndoorBadge v-if="firstWorkout.indoor" :description="firstWorkout.description" />
+              <CrewRideBadge v-if="firstWorkout.crewRide" :crew-ride="firstWorkout.crewRide" />
               <UBadge v-if="firstWorkout.swapped" color="neutral" variant="subtle" icon="i-lucide-shuffle">Customised</UBadge>
               <UBadge v-if="firstWorkout.testProtocol" color="primary" variant="subtle" icon="i-lucide-gauge">
                 {{ ftpTestLabel(firstWorkout.testProtocol) }}
@@ -393,6 +416,44 @@ function onRated(analysis: SessionAnalysis) {
               {{ formatDuration(firstWorkout.plannedSeconds) }}
               <template v-if="firstWorkoutTarget"> · {{ firstWorkoutTarget }}</template>
             </p>
+          </div>
+          <div v-if="crewRide" class="flex flex-col gap-2 rounded-lg border border-default p-3">
+            <p class="flex flex-wrap items-center gap-x-2 text-sm text-highlighted">
+              <UIcon name="i-lucide-users" class="size-4 text-primary" />
+              <span class="font-medium">{{ crewKindLabel }}</span>
+              <span v-if="crewRide.crewName" class="text-muted">with {{ crewRide.crewName }}</span>
+            </p>
+            <p class="font-mono tabular-nums text-xs text-muted">
+              About {{ formatDuration(firstWorkout.plannedSeconds) }} · estimated TSS {{ Math.round(crewRide.estimatedTss) }}
+            </p>
+            <p v-if="(crewRide.goingNames?.length ?? 0) > 0" class="text-xs text-muted">
+              {{ crewRide.goingNames!.length }} going: {{ crewRide.goingNames!.join(', ') }}
+            </p>
+            <UAlert
+              v-if="crewAdviceHere"
+              :color="crewAdviceHere.severity === 'rest' ? 'warning' : 'info'"
+              variant="subtle"
+              icon="i-lucide-heart-pulse"
+              :description="crewAdviceHere.advice"
+            />
+            <UAlert
+              v-if="crewRide.orphaned"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              :title="orphanedTitle"
+              description="Your plan has not changed. Update it when you are ready."
+            >
+              <template #actions>
+                <CrewRideGoing
+                  mode="update"
+                  :ride-id="crewRide.rideId"
+                  :mine="true"
+                  :route-name="crewRide.routeName"
+                  @changed="emit('crewChanged')"
+                />
+              </template>
+            </UAlert>
           </div>
           <WorkoutProfile :steps="firstWorkout.steps" :profile="profile" interactive />
           <WhyPopover :why="firstWorkout.why" :note="adjustmentNote(firstWorkout.description)" />
@@ -423,7 +484,7 @@ function onRated(analysis: SessionAnalysis) {
             >
               Send to Garmin
             </UButton>
-            <UDropdownMenu :items="moveMenuItems(firstWorkout, day.date)">
+            <UDropdownMenu v-if="!crewRide" :items="moveMenuItems(firstWorkout, day.date)">
               <UButton color="neutral" variant="outline" icon="i-lucide-calendar-clock">Move</UButton>
             </UDropdownMenu>
             <AlternatesMenu

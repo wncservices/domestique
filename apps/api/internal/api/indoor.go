@@ -108,6 +108,12 @@ func (s *Server) handleIndoorConvert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": indoorRunningMessage})
 		return
 	}
+	// A crew ride is ridden outdoors with the group: it has no trainer version.
+	if wk.CrewRideID != "" {
+		s.logger().Info("indoor conversion refused: a crew ride is outdoors", "rider", wk.Rider, "workout", wk.ID)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": crewRideOutdoorMessage})
+		return
+	}
 	if s.refuseIfSettled(w, r, wk) {
 		return
 	}
