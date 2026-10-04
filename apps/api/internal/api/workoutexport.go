@@ -249,6 +249,11 @@ func (s *Server) handleExportWeek(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger().Info("week exported", "rider", rider, "week", first, "format", f.name, "exported", exported, "skipped", len(skipped))
+	if exported == 0 {
+		// Still a 200 (the zip explains itself in SKIPPED.txt), but the page
+		// can tell the rider instead of saving a zip with nothing in it.
+		w.Header().Set("X-Domestique-Skipped", "all")
+	}
 	writeExportAttachment(s.logger(), w, fmt.Sprintf("week-%s-%s.zip", first, f.name), "application/zip", buf.Bytes())
 }
 
