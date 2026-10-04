@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -185,4 +186,42 @@ func (d *DB) ListFitnessSnapshots(ctx context.Context, rider string) ([]FitnessS
 		snapshots = append(snapshots, s)
 	}
 	return snapshots, rows.Err()
+}
+
+// FindSimilarSession returns a rider's sessions of one sport on any of the
+// given local dates, oldest first. It is how an imported ride finds the rides
+// already synced from a provider: a provider session keeps a day, not a start
+// time, and an export file carries no activity id, so the only honest question
+// is "what did this rider ride that sport on these days", answered by the
+// caller's own tolerance rules. Dates are "YYYY-MM-DD"; none means no sessions.
+func (d *DB) FindSimilarSession(ctx context.Context, rider, sport string, dates []string) ([]CompletedSession, error) {
+	if len(dates) == 0 {
+		return nil, nil
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?, ", len(dates)), ", ")
+	args := make([]any, 0, len(dates)+2)
+	args = append(args, normalizeRider(rider), sport)
+	for _, date := range dates {
+		args = append(args, date)
+	}
+	rows, err := d.db.QueryContext(ctx, d.query(`
+        SELECT id, rider, provider, external_id, sport, date,
+               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, created_at
+        FROM completed_sessions WHERE rider = ? AND sport = ? AND date IN (`+marks+`)
+        ORDER BY date, id`), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var sessions []CompletedSession
+	for rows.Next() {
+		var s CompletedSession
+		if err := rows.Scan(&s.ID, &s.Rider, &s.Provider, &s.ExternalID, &s.Sport, &s.Date,
+			&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, s)
+	}
+	return sessions, rows.Err()
 }
