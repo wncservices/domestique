@@ -358,6 +358,7 @@ watch(
           <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
           <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
           <IndoorBadge v-if="w.indoor" :description="w.description" compact />
+          <UIcon v-if="w.route && !w.route.inactive" name="i-lucide-route" class="size-3 text-primary" :aria-label="`Route: ${w.route.name}`" />
           <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
             {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
           </UBadge>

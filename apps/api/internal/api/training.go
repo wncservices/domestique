@@ -216,6 +216,13 @@ type workoutDTO struct {
 	// per response; a workout adjusted before reasons were recorded has none
 	// and the client falls back to the note in Description.
 	Why *whyDTO `json:"why,omitempty"`
+	// Route is the library route this ride is to be ridden on, filled by
+	// attachRoutes and left off when the rider cannot see it. Never carries a
+	// coordinate.
+	Route *workoutRouteDTO `json:"route,omitempty"`
+
+	routeSlug    string
+	routeSeconds float64
 }
 
 func workoutDTOFrom(w workout.Workout) workoutDTO {
@@ -226,7 +233,8 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		TestProtocol:   w.TestProtocol,
 		Indoor:         w.Indoor,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
-		Steps:          make([]workoutStepDTO, 0, len(w.Steps)),
+		routeSlug:      w.RouteSlug, routeSeconds: w.RouteSeconds,
+		Steps: make([]workoutStepDTO, 0, len(w.Steps)),
 	}
 	for _, s := range w.Steps {
 		dto.Steps = append(dto.Steps, stepDTOFrom(s))
@@ -1209,6 +1217,7 @@ func (s *Server) handleListWorkouts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, workoutDTOFrom(wk))
 	}
 	s.attachWhy(r.Context(), rider, out)
+	s.attachRoutes(r.Context(), rider, out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1476,8 +1485,18 @@ func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", res.RemoteID, "outcome", res.Outcome, "rider", identity.User)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "outcome": res.Outcome, "garminWorkoutId": res.RemoteID})
+	// A routed ride sends its course with it. A failed course is a Warn and
+	// never fails the workout that has just gone.
+	course, cerr := s.pushWorkoutCourse(r.Context(), wk, true)
+	if cerr != nil {
+		course = courseFailed
+		// A push that ran and failed is logged at Error by applyPush; this is
+		// only for one that could not be attempted.
+		s.logger().Warn("course could not be attempted with the workout", "workout", id, "rider", identity.User)
+	}
+
+	s.logger().Info("workout pushed to garmin", "workout", id, "garminWorkoutId", res.RemoteID, "outcome", res.Outcome, "course", course, "rider", identity.User)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "pushed", "outcome": res.Outcome, "garminWorkoutId": res.RemoteID, "course": course})
 }
 
 // ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------

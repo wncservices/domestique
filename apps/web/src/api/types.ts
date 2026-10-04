@@ -920,6 +920,22 @@ export interface Workout {
    *  changed, or one adjusted before reasons were recorded (the note in
    *  `description` is then the only explanation). */
   why?: Why
+  /** The library route this ride is to be ridden on; absent when none, or when
+   *  the rider cannot see it. Never carries a coordinate. */
+  route?: WorkoutRoute
+}
+
+/** The route linked to a planned ride. `generated` is a loop made for this
+ *  ride; `inactive` while the ride is indoor (the link is kept). */
+export interface WorkoutRoute {
+  slug: string
+  name: string
+  distanceM: number
+  ascentM: number
+  /** What the route was estimated to take when it was chosen. */
+  estimatedSeconds: number
+  generated: boolean
+  inactive?: boolean
 }
 
 export interface CreateWorkoutRequest {
@@ -1622,6 +1638,82 @@ export interface WeatherPrefs {
   place?: string
   window: { start: number; end: number }
   attribution: string
+}
+
+/** Where the rider's planned rides start. Deliberately has no coordinate
+ *  fields: the server keeps a point rounded to about 110 m and never returns
+ *  it, only whether one is set and its town. */
+export interface RideStart {
+  set: boolean
+  place?: string
+}
+
+/** What sending a routed ride's course did. `none` means there was nothing to
+ *  send it to (no connected device for this rider, or the route is not theirs). */
+export type CourseOutcome = 'none' | 'pushed' | 'unchanged' | 'failed'
+
+/** The answer to "Send to Garmin" for a workout. `course` is how its route went
+ *  with it; a failed course never fails the workout. */
+export interface WorkoutPushResult {
+  status: string
+  outcome: 'created' | 'updated' | 'scheduled' | 'unchanged'
+  garminWorkoutId: string
+  course: CourseOutcome
+}
+
+/** One generated loop for a planned ride, returned to its owner only. `points`
+ *  are [lat, lon]; they appear nowhere else. `fit` is the overall score 0-1
+ *  (half time, half terrain); `terrainFit` the terrain half, `note` what is
+ *  missing when it is low. */
+export interface RouteCandidate {
+  id: string
+  points: [number, number][]
+  distanceM: number
+  ascentM: number
+  surface: { type: string; distanceM: number; fraction: number }[]
+  elevationProfile: { distanceM: number; eleM: number }[]
+  estimatedSeconds: number
+  family: string
+  /** Overall score 0-1: half time, half terrain. */
+  score: number
+  /** The terrain half alone; "Best fit" is a claim about this one. */
+  terrainFit: number
+  note?: string
+}
+
+export interface RouteCandidates {
+  candidates: RouteCandidate[]
+  plannedSeconds: number
+  speedKph: number
+  /** True when the speed leans on an assumption (no FTP or no weight). */
+  speedAssumed: boolean
+}
+
+/** What putting a library route on a day would offer. */
+export interface ScheduleSituation {
+  date: string
+  /** An estimate at endurance power. */
+  routeSeconds: number
+  routeAssumed: boolean
+  sessions: {
+    id: string
+    name: string
+    plannedSeconds: number
+    /** Adjusting a key session replaces it. */
+    keySession: boolean
+    routed: boolean
+    /** Planned time within 20 percent of the route's. */
+    close: boolean
+  }[]
+  choices: ('link' | 'adjust' | 'new')[]
+  default?: 'link' | 'adjust' | 'new'
+  needsWorkoutId?: boolean
+}
+
+export interface ScheduleResult {
+  workout: Workout
+  choice: 'link' | 'adjust' | 'new'
+  replacedKeySession?: boolean
 }
 
 /** Which reason is worst on a day or for a session; picks the chip's icon. */

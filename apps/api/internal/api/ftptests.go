@@ -328,6 +328,16 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "You have already ridden that day."})
 			return
 		}
+		// A ride with a route on that day is not replaced (it is the rider's own
+		// choice, and deleting it strands its loop), and two sessions on one day
+		// is what replacing exists to prevent.
+		if routed, err := s.dayHasRoutedRide(ctx, rider, body.Date); err != nil {
+			s.fail(w, err)
+			return
+		} else if routed {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "That day has a ride with a route. Remove the route first, or pick another day."})
+			return
+		}
 	}
 
 	req, _ := fitnesstest.BuildTestWorkout(protocol, ftp)
@@ -626,4 +636,18 @@ func testOnDay(workouts []workout.Workout, date string) workout.Workout {
 		}
 	}
 	return workout.Workout{}
+}
+
+// dayHasRoutedRide is whether any of the rider's workouts on date links a route.
+func (s *Server) dayHasRoutedRide(ctx context.Context, rider, date string) (bool, error) {
+	all, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		return false, err
+	}
+	for _, wk := range all {
+		if wk.Date == date && wk.RouteSlug != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

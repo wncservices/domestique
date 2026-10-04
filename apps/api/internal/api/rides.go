@@ -308,6 +308,9 @@ func (s *Server) resolveRideRoute(w http.ResponseWriter, r *http.Request, crewID
 		})
 		return model.Route{}, false
 	}
+	if refuseTaggedRoute(w, route.Tags) {
+		return model.Route{}, false
+	}
 	existing := []string{}
 	if route.Targets != nil {
 		existing = *route.Targets

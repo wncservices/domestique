@@ -124,7 +124,11 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 func hasPlanSessions(existing []workout.Workout, g workout.Goal, week periodization.Week) bool {
 	start, end := weekBounds(week)
 	for _, wk := range existing {
-		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.Date >= start && wk.Date <= end {
+		// Neither is a ride the rider put on the day with a route and no plan
+		// description ("new" in routeschedule.go): it carries the goal id so the
+		// day reads as taken, but it is theirs, not the plan's.
+		riderRouted := wk.RouteSlug != "" && !strings.HasPrefix(wk.Description, scheduler.GeneratedDescription)
+		if wk.GoalID == g.ID && wk.TestProtocol == "" && !riderRouted && wk.Date >= start && wk.Date <= end {
 			return true
 		}
 	}
@@ -241,6 +245,10 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		// a session touched (the note changes its description), but that must
 		// not be the only thing keeping the refresh off it.
 		!wk.Indoor &&
+		// A route link is the rider's own choice, and a rebuilt session would
+		// silently drop it or swap the content under a route chosen for the
+		// old one. It already moves UpdatedAt, but the guarantee is stated here.
+		wk.RouteSlug == "" &&
 		// A swap for an alternate is the rider's choice. It already fails the
 		// description and timestamp tests, but the guarantee is stated here
 		// rather than left to those.

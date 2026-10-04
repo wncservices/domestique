@@ -361,8 +361,15 @@ type Workout struct {
 	// version" always returns to what the plan made and not to the previous
 	// swap. nil until a session has been swapped.
 	PlannedSnapshot *PlannedSnapshot
-	CreatedAt       string
-	UpdatedAt       string
+	// RouteSlug is the library route this ride is to be ridden on, "" when
+	// none: either a loop generated for it (tagged wroute:<id>) or a route the
+	// rider scheduled onto the day. RouteSeconds is what that route was
+	// estimated to take when it was chosen, so a week of workouts reads no
+	// GPX; 0 with no route.
+	RouteSlug    string
+	RouteSeconds float64
+	CreatedAt    string
+	UpdatedAt    string
 }
 
 // PlannedSnapshot is what a swap overwrites: name, zone, level, description
@@ -462,6 +469,10 @@ type UpdateWorkoutRequest struct {
 	// must not replace it. ClearPlannedSnapshot removes it (a revert).
 	PlannedSnapshot      *PlannedSnapshot
 	ClearPlannedSnapshot bool
+	// RouteSlug and RouteSeconds link or unlink a route: a pointer to "" and 0
+	// clears both. Nil leaves them alone, so an ordinary edit keeps the link.
+	RouteSlug    *string
+	RouteSeconds *float64
 }
 
 // FITSteps converts to the leaf-level type fitworkout.Encode takes. The one
