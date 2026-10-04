@@ -563,6 +563,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/training/workouts/{id}", s.handleUpdateWorkout)
 	mux.HandleFunc("DELETE /api/training/workouts/{id}", s.handleDeleteWorkout)
 	mux.HandleFunc("GET /api/training/workouts/{id}/fit", s.handleDownloadWorkoutFIT)
+	mux.HandleFunc("GET /api/training/workouts/{id}/export", s.handleExportWorkout)
+	mux.HandleFunc("GET /api/training/weeks/{monday}/export", s.handleExportWeek)
 	mux.HandleFunc("GET /api/training/workouts/{id}/alternates", s.handleAlternates)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates", s.handleAlternateApply)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates/revert", s.handleAlternateRevert)
