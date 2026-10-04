@@ -5,9 +5,9 @@
 // week strip; this only ever lists the ones with nowhere on the calendar
 // yet — tests, templates, anything built ahead of scheduling it.
 import { computed } from 'vue'
-import { api } from '@/api/client'
 import type { Goal, Workout } from '@/api/types'
 import { formatDuration } from '@/utils/workoutMath'
+import ExportMenu from './ExportMenu.vue'
 
 const props = defineProps<{
   goals: Goal[]
@@ -107,15 +107,7 @@ const library = computed(() => props.workouts.filter((w) => !w.date))
             title="Push to your connected Garmin account"
             @click="emit('pushWorkout', w)"
           />
-          <UButton
-            icon="i-lucide-download"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            :to="api.workoutFitUrl(w.id)"
-            target="_blank"
-            title="Download as a FIT workout file"
-          />
+          <ExportMenu :workout="w" variant="ghost" size="sm" />
           <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" size="sm" @click="emit('editWorkout', w)" />
           <UButton
             icon="i-lucide-trash-2"

@@ -7,6 +7,7 @@ import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { AnalysisStep, CompletedSession, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import ExportMenu from './ExportMenu.vue'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
@@ -287,6 +288,7 @@ watch(
         >
           <span class="hidden sm:inline">FTP test</span>
         </UButton>
+        <ExportMenu :week="week" label="Export" size="sm" />
         <UButton
           v-if="isCurrentWeek"
           color="neutral"

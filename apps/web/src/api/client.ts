@@ -135,25 +135,41 @@ export function garminMFABody(err: ApiError): GarminConnectMFA {
   }
 }
 
+/** The ApiError for a failed response: the API's {"error": "..."} message, or the status text. */
+async function apiErrorFrom(response: Response, path: string): Promise<ApiError> {
+  // The API returns {"error": "..."} on failure; fall back to the status text
+  // when something upstream (a proxy, a crash) returns something else.
+  let detail = response.statusText
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await response.json()) as Record<string, unknown>
+    if (typeof body.error === 'string') detail = body.error
+  } catch {
+    /* not JSON — keep the status text */
+  }
+  return new ApiError(detail || `request to ${path} failed`, response.status, body)
+}
+
+/**
+ * Fetches a file the server builds on request (an export), so a refusal
+ * arrives as an ApiError carrying the server's own message instead of the
+ * browser navigating to a JSON error page.
+ */
+export async function fetchFile(path: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(path)
+  if (!response.ok) throw await apiErrorFrom(response, path)
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^";]+)"?/.exec(disposition)
+  return { blob: await response.blob(), filename: match?.[1] ?? 'download' }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
     ...init,
   })
 
-  if (!response.ok) {
-    // The API returns {"error": "..."} on failure; fall back to the status text
-    // when something upstream (a proxy, a crash) returns something else.
-    let detail = response.statusText
-    let body: Record<string, unknown> = {}
-    try {
-      body = (await response.json()) as Record<string, unknown>
-      if (typeof body.error === 'string') detail = body.error
-    } catch {
-      /* not JSON — keep the status text */
-    }
-    throw new ApiError(detail || `request to ${path} failed`, response.status, body)
-  }
+  if (!response.ok) throw await apiErrorFrom(response, path)
 
   if (response.status === 204) return undefined as T
   return (await response.json()) as T

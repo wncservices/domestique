@@ -6,7 +6,6 @@
 // any day can be looked at closely and edited without opening the editor
 // straight away; "Back to today" returns.
 import { computed, ref } from 'vue'
-import { api } from '@/api/client'
 import type {
   ReadinessVerdict,
   RiderProfile,
@@ -28,6 +27,7 @@ import LifeEventBand from './LifeEventBand.vue'
 import { rangeLabel } from './lifeEvents'
 import FeelRating from './FeelRating.vue'
 import IndoorBadge from './IndoorBadge.vue'
+import ExportMenu from './ExportMenu.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
@@ -527,9 +527,7 @@ function onRated(analysis: SessionAnalysis) {
             <UButton v-if="canRevertIndoor" color="neutral" variant="outline" icon="i-lucide-undo-2" @click="emit('outdoor', firstWorkout)">
               Back to outdoor version
             </UButton>
-            <UButton color="neutral" variant="outline" icon="i-lucide-download" :to="api.workoutFitUrl(firstWorkout.id)" target="_blank">
-              FIT
-            </UButton>
+            <ExportMenu :workout="firstWorkout" label="Export" />
             <UButton color="neutral" variant="ghost" icon="i-lucide-pencil" @click="emit('edit', firstWorkout)">Edit</UButton>
           </div>
         </div>
