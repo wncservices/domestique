@@ -196,7 +196,8 @@ judges them, `api/workoutroute*.go` serves them) and a library route can be put 
   `removePlanMadeWorkouts`), hidden from alternates, but still eased by readiness. Linking or scheduling is
   a rider action, so it writes no adjustment rows.
 - **Today's push** sends the course to the rider's own Garmin accounts only, through `applyPush`, idempotent
-  and never deleting. A course failure is a Warn and never fails the workout push.
+  and never deleting. A course failure never fails the workout push; it is logged once at Error and counted
+  in `domestique_push_errors_total`, since a route that did not reach the head unit is a real push failure.
 
 ## Komoot
 
