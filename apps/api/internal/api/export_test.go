@@ -36,3 +36,7 @@ func (s *Server) PurgeRiderDataForTest(ctx context.Context, rider string) (int, 
 	sum, err := s.purgeRiderData(ctx, rider)
 	return sum.CrewMemberships, err
 }
+
+// ImportHeartbeat exposes the import job's heartbeat interval to the external
+// tests, which hold it against the stale window.
+const ImportHeartbeat = importHeartbeat
