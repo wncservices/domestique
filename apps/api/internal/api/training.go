@@ -1312,6 +1312,13 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A crew ride's day is the crew's: moving the session would desync it from
+	// the ride. Name and step edits stay allowed.
+	if wk.CrewRideID != "" && body.Date != nil && *body.Date != wk.Date {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": crewRideMoveMessage})
+		return
+	}
+
 	req := workout.UpdateWorkoutRequest{
 		Name: body.Name, GoalID: body.GoalID, Date: body.Date, Description: body.Description,
 		Level: body.Level,

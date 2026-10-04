@@ -35,6 +35,9 @@ import (
 //   - applying a join or a leave recomputes everything on the server, under the
 //     scheduling advisory lock Replan uses; a preview is only ever a picture.
 
+// crewRideMoveMessage is why a crew ride cannot be moved to another day.
+const crewRideMoveMessage = "A crew ride's day is the crew's. Leave the ride to change your plan."
+
 // crewRideNamePrefix starts the name of every fixed session.
 const crewRideNamePrefix = "Crew ride: "
 
@@ -549,10 +552,17 @@ func (s *Server) attachCrewRides(ctx context.Context, rider string, lists ...[]w
 				ref.Orphaned = "cancelled"
 				continue
 			}
-			ref.CrewID, ref.CrewName = ride.CrewID, crewNames[ride.CrewID]
 			if rt, ok := routes[ride.Slug]; ok {
 				ref.RouteName = rt.Name
 			}
+			// A rider who is no longer in the crew keeps their own session and the
+			// note that they left, but sees nothing of the crew: not its name and
+			// not who else is going.
+			if !snap.ApprovedRiders.Has(ride.CrewID, rider) {
+				ref.Orphaned = "left"
+				continue
+			}
+			ref.CrewID, ref.CrewName = ride.CrewID, crewNames[ride.CrewID]
 			names := append([]string(nil), going[ride.ID]...)
 			sort.Strings(names)
 			ref.GoingNames = names
@@ -560,9 +570,6 @@ func (s *Server) attachCrewRides(ctx context.Context, rider string, lists ...[]w
 				if strings.EqualFold(n, rider) {
 					ref.Going = true
 				}
-			}
-			if !snap.ApprovedRiders.Has(ride.CrewID, rider) {
-				ref.Orphaned = "left"
 			}
 		}
 	}

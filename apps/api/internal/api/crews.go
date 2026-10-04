@@ -675,7 +675,7 @@ func (s *Server) handleRemoveCrewMember(w http.ResponseWriter, r *http.Request) 
 	// been left, until they confirm an update themselves.
 	if s.Schedule != nil {
 		if err := s.Schedule.RemoveRider(r.Context(), id, rider); err != nil {
-			s.logger().Warn("could not clear a removed member's crew ride rows", "crew", id, "rider", rider, "err", err)
+			s.logger().Error("could not clear a removed member's crew ride rows", "crew", id, "rider", rider, "err", err)
 		}
 	}
 

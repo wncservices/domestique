@@ -171,7 +171,9 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 // "Re-plan this week" must not delete it. It still counts for scheduling,
 // because its GoalID is kept.
 func isPlanMade(wk workout.Workout) bool {
-	return wk.GoalID != "" &&
+	// A crew ride carries the goal too and never counts as plan-made, whatever
+	// its description says.
+	return wk.GoalID != "" && wk.CrewRideID == "" &&
 		strings.HasPrefix(wk.Description, scheduler.GeneratedDescription) &&
 		!strings.Contains(wk.Description, scheduler.SwappedMarker)
 }
