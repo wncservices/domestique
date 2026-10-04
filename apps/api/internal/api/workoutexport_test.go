@@ -306,6 +306,30 @@ func TestExportWeekZipHasNoSkippedFileWhenNothingSkipped(t *testing.T) {
 	}
 }
 
+func TestExportWeekWithNothingExportableSaysSoInAHeader(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.setFTP("wilant", 250)
+	hr := exportRide("Heart rate ride", "2026-03-05")
+	hr.Zone = ""
+	hr.Steps = []workout.WorkoutStep{{Name: "Z2", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 1800,
+		Target: workout.TargetHeartRate, TargetLow: 120, TargetHigh: 140}}
+	h.seedExport(hr)
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/weeks/2026-03-02/export?format=mrc", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Domestique-Skipped"); got != "all" {
+		t.Errorf("X-Domestique-Skipped = %q, want all so the page can say so instead of saving an empty zip", got)
+	}
+	// A week where something exported carries no such header.
+	h.seedExport(exportRide("Over unders", "2026-03-02"))
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/weeks/2026-03-02/export?format=mrc", "")
+	if got := resp.Header.Get("X-Domestique-Skipped"); got != "" {
+		t.Errorf("X-Domestique-Skipped = %q on a week that exported", got)
+	}
+}
+
 func TestExportWeekZipErrors(t *testing.T) {
 	h := newTrainingHarness(t)
 	h.setFTP("wilant", 250)
