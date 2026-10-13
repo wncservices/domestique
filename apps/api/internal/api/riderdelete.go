@@ -99,6 +99,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			if err := s.Source.Delete(ctx, rt.Slug); err != nil && !errors.Is(err, source.ErrNotFound) {
 				return sum, fmt.Errorf("deleting route %s: %w", rt.Slug, err)
 			}
+			// Whoever made a link to it (an admin may share anybody's route),
+			// and the rendered card previews, both keyed by a reusable slug.
+			if err := s.forgetRoute(ctx, rt.Slug); err != nil {
+				return sum, fmt.Errorf("removing what was keyed by route %s: %w", rt.Slug, err)
+			}
 			sum.Routes++
 		}
 	}

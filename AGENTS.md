@@ -297,6 +297,19 @@ table; `internal/mailer` sends.
   those three is refused before a connection is made, and `none` is only for a loopback host
   (`mailer.IsLoopbackHost`), in the mailer and in validation alike.
 
+## Share links and reusable slugs
+
+A route's slug is a name, and a deleted route's name is free to be taken by
+somebody else's route. Anything that remembers a route by slug therefore has
+to be erased with the route (`Server.forgetRoute`: share links, and the two
+card-preview caches) and, for shares, bound to the route itself. A share
+stores the route's owner and `created_at` when it is made, and `resolveShare`
+answers 404 unless `Share.Matches` the route now under the slug. The owner
+recorded is the *route's*, not the link-maker's: an admin may share anybody's
+route. Links from before the binding columns fall back to "the creator owns
+the route", which fails closed. A new slug-keyed table belongs in
+`forgetRoute`.
+
 ## Komoot
 
 `internal/komoot` speaks Komoot's undocumented v006/v007 API: there is no

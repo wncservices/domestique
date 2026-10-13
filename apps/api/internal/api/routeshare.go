@@ -16,8 +16,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -163,7 +165,9 @@ func (s *Server) handleCreateRouteShare(w http.ResponseWriter, r *http.Request) 
 	}
 
 	identity := auth.FromContext(r.Context())
-	token, share, err := s.Shares.Create(r.Context(), route.Slug, identity.User, ttl)
+	token, share, err := s.Shares.Create(r.Context(), routeshare.Route{
+		Slug: route.Slug, Owner: route.Owner, CreatedAt: route.CreatedAt,
+	}, identity.User, ttl)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -302,6 +306,15 @@ func (s *Server) resolveShare(w http.ResponseWriter, r *http.Request) (routeshar
 		}
 	}
 	if idx == -1 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "this route no longer exists"})
+		return routeshare.Share{}, model.Route{}, false
+	}
+	// A slug is only a name, and a deleted route's name can be taken by
+	// somebody else's route. The link was made for one particular route; when
+	// what sits under the slug now is another, it is the same answer as for a
+	// route that is gone, so it cannot be told apart by probing.
+	if !share.Matches(routes[idx].Owner, routes[idx].CreatedAt) {
+		s.logger().Warn("share link no longer matches the route under its slug", "share", share.ID)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "this route no longer exists"})
 		return routeshare.Share{}, model.Route{}, false
 	}
@@ -499,4 +512,30 @@ func (s *Server) handleImportSharedRoute(w http.ResponseWriter, r *http.Request)
 
 	s.logger().Info("shared route imported", "slug", route.Slug, "as", created.Slug, "by", identity.User)
 	writeJSON(w, http.StatusCreated, map[string]string{"slug": created.Slug})
+}
+
+// forgetRoute removes what is keyed by a route's slug once the route is gone:
+// its share links and the two card-preview caches. A slug is reusable, so
+// anything left would attach itself to the next route to take the name; the
+// share check in resolveShare is the backstop, this is the erasure. A failure
+// is returned for the caller to decide on: the purge stops on it, a plain
+// delete (already done by then) logs it.
+func (s *Server) forgetRoute(ctx context.Context, slug string) error {
+	var errs []error
+	if s.Shares != nil {
+		if _, err := s.Shares.DeleteRoute(ctx, slug); err != nil {
+			errs = append(errs, fmt.Errorf("removing share links: %w", err))
+		}
+	}
+	if s.PreviewCache != nil {
+		if err := s.PreviewCache.Delete(slug); err != nil {
+			errs = append(errs, fmt.Errorf("clearing cached route preview: %w", err))
+		}
+	}
+	if s.PreviewImageCache != nil {
+		if err := s.PreviewImageCache.Delete(slug); err != nil {
+			errs = append(errs, fmt.Errorf("clearing cached route preview image: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }

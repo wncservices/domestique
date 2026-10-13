@@ -22,6 +22,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
@@ -36,6 +37,9 @@ type shareHarness struct {
 	base   string
 	src    *source.DB
 	shares *routeshare.Store
+	// previews and images are the two slug-keyed card caches.
+	previews *basemap.PreviewCache
+	images   *basemap.PreviewImageCache
 }
 
 func newShareHarness(t *testing.T) *shareHarness {
@@ -56,6 +60,15 @@ func newShareHarness(t *testing.T) *shareHarness {
 		t.Fatal(err)
 	}
 
+	previews, err := basemap.UsePreviewCacheDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	images, err := basemap.UsePreviewImageCacheDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	authenticator, err := auth.New(auth.Config{
 		Mode:          auth.ModeProxy,
 		RequiredGroup: "domestique-access",
@@ -70,11 +83,13 @@ func newShareHarness(t *testing.T) *shareHarness {
 	}
 
 	srv := &api.Server{
-		Source: db,
-		Store:  st,
-		Auth:   authenticator,
-		Shares: sharesStore,
-		Config: &config.Config{},
+		Source:            db,
+		Store:             st,
+		Auth:              authenticator,
+		Shares:            sharesStore,
+		PreviewCache:      previews,
+		PreviewImageCache: images,
+		Config:            &config.Config{},
 		TargetFactory: func(model.Account) (targets.Target, error) {
 			return stubTarget{}, nil
 		},
@@ -82,7 +97,7 @@ func newShareHarness(t *testing.T) *shareHarness {
 
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
-	return &shareHarness{t: t, client: server.Client(), base: server.URL, src: db, shares: sharesStore}
+	return &shareHarness{t: t, client: server.Client(), base: server.URL, src: db, shares: sharesStore, previews: previews, images: images}
 }
 
 // as issues a request as user in groups — an empty user sets neither

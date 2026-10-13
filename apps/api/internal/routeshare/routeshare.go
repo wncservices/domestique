@@ -50,8 +50,44 @@ type Share struct {
 	CreatedBy string
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	// RouteOwner and RouteCreatedAt pin the share to the route it was made
+	// for. A slug is only a name, and a deleted route's name can be taken by
+	// somebody else's route; without these the old link would open it.
+	// Empty on a link made before the columns existed (see Matches).
+	RouteOwner     string
+	RouteCreatedAt string
 	// RevokedAt is nil until the owner revokes the link early.
 	RevokedAt *time.Time
+}
+
+// Route is what a share is bound to when it is made: the route's slug plus the
+// two facts that tell one route under that slug from another.
+type Route struct {
+	Slug string
+	// Owner is who owned the route when it was shared. It is not necessarily
+	// the rider who made the link: an admin may share anybody's route.
+	Owner string
+	// CreatedAt is the route's creation time, the generation marker of the slug.
+	CreatedAt string
+}
+
+// Matches reports whether the route now sitting under this share's slug is the
+// one the share was made for. A mismatch means the route was deleted and the
+// slug reused, and the link must behave as if it never existed.
+//
+// A share from before the binding columns has no recorded owner or creation
+// time; it falls back to the strictest check that needs neither, the route's
+// owner being the rider who made the link. That fails closed for an old admin
+// share of someone else's route, which is the safe side to get wrong.
+func (s Share) Matches(owner, createdAt string) bool {
+	if s.RouteCreatedAt != "" && s.RouteCreatedAt != createdAt {
+		return false
+	}
+	want := s.RouteOwner
+	if want == "" {
+		want = s.CreatedBy
+	}
+	return strings.EqualFold(want, owner)
 }
 
 // Expired reports whether now is past this share's expiry — independent of
@@ -119,7 +155,29 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 	if _, err := db.Exec(schema(d)); err != nil {
 		return nil, fmt.Errorf("migrate route_shares table: %w", err)
 	}
+	if err := store.addBindingColumns(); err != nil {
+		return nil, err
+	}
 	return store, nil
+}
+
+// addBindingColumns adds the route-binding columns to a route_shares table
+// that predates them. CREATE TABLE IF NOT EXISTS is a no-op against an
+// existing table, so a new column needs its own step; running it against a
+// table that already has them is not an error, which keeps start-up idempotent
+// on both engines.
+func (s *Store) addBindingColumns() error {
+	for _, col := range []string{"route_owner", "route_created_at"} {
+		// #nosec G701 -- col comes from the literal list above.
+		_, err := s.db.Exec(`ALTER TABLE route_shares ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT ''`)
+		if err != nil {
+			msg := strings.ToLower(err.Error())
+			if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
+				return fmt.Errorf("route_shares: adding %s: %w", col, err)
+			}
+		}
+	}
+	return nil
 }
 
 // Create generates a new share link for routeSlug and returns the raw
@@ -127,8 +185,8 @@ func UseDB(db *sql.DB, dsn string) (*Store, error) {
 // stored; losing the returned token means the link is gone even though the
 // row survives (the owner can only see it existed and revoke it, per
 // ListForRoute).
-func (s *Store) Create(ctx context.Context, routeSlug, createdBy string, ttl time.Duration) (token string, share Share, err error) {
-	routeSlug = strings.TrimSpace(routeSlug)
+func (s *Store) Create(ctx context.Context, route Route, createdBy string, ttl time.Duration) (token string, share Share, err error) {
+	routeSlug := strings.TrimSpace(route.Slug)
 	createdBy = strings.ToLower(strings.TrimSpace(createdBy))
 	switch {
 	case routeSlug == "":
@@ -150,12 +208,16 @@ func (s *Store) Create(ctx context.Context, routeSlug, createdBy string, ttl tim
 		CreatedBy: createdBy,
 		CreatedAt: now,
 		ExpiresAt: now.Add(ttl),
+
+		RouteOwner:     strings.ToLower(strings.TrimSpace(route.Owner)),
+		RouteCreatedAt: route.CreatedAt,
 	}
 	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
-        INSERT INTO route_shares (id, route_slug, created_by, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?)`),
+        INSERT INTO route_shares (id, route_slug, created_by, created_at, expires_at, route_owner, route_created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`),
 		share.ID, share.RouteSlug, share.CreatedBy,
-		share.CreatedAt.Format(time.RFC3339), share.ExpiresAt.Format(time.RFC3339)); err != nil {
+		share.CreatedAt.Format(time.RFC3339), share.ExpiresAt.Format(time.RFC3339),
+		share.RouteOwner, share.RouteCreatedAt); err != nil {
 		return "", Share{}, fmt.Errorf("routeshare: create: %w", err)
 	}
 	return tok, share, nil
@@ -171,9 +233,10 @@ func (s *Store) Get(ctx context.Context, id string) (Share, error) {
 	var createdAt, expiresAt string
 	var revokedAt sql.NullString
 	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(`
-        SELECT id, route_slug, created_by, created_at, expires_at, revoked_at
+        SELECT id, route_slug, created_by, created_at, expires_at, revoked_at, route_owner, route_created_at
         FROM route_shares WHERE id = ?`), id).
-		Scan(&share.ID, &share.RouteSlug, &share.CreatedBy, &createdAt, &expiresAt, &revokedAt)
+		Scan(&share.ID, &share.RouteSlug, &share.CreatedBy, &createdAt, &expiresAt, &revokedAt,
+			&share.RouteOwner, &share.RouteCreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Share{}, ErrNotFound
 	}
@@ -221,7 +284,7 @@ func (s *Store) Lookup(ctx context.Context, token string) (Share, error) {
 // full history of who a route has been shared with, not just what's live.
 func (s *Store) ListForRoute(ctx context.Context, routeSlug string) ([]Share, error) {
 	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`
-        SELECT id, route_slug, created_by, created_at, expires_at, revoked_at
+        SELECT id, route_slug, created_by, created_at, expires_at, revoked_at, route_owner, route_created_at
         FROM route_shares WHERE route_slug = ? ORDER BY created_at DESC`), routeSlug)
 	if err != nil {
 		return nil, fmt.Errorf("routeshare: list: %w", err)
@@ -233,7 +296,8 @@ func (s *Store) ListForRoute(ctx context.Context, routeSlug string) ([]Share, er
 		var share Share
 		var createdAt, expiresAt string
 		var revokedAt sql.NullString
-		if err := rows.Scan(&share.ID, &share.RouteSlug, &share.CreatedBy, &createdAt, &expiresAt, &revokedAt); err != nil {
+		if err := rows.Scan(&share.ID, &share.RouteSlug, &share.CreatedBy, &createdAt, &expiresAt, &revokedAt,
+			&share.RouteOwner, &share.RouteCreatedAt); err != nil {
 			return nil, fmt.Errorf("routeshare: list: %w", err)
 		}
 		if share.CreatedAt, err = time.Parse(time.RFC3339, createdAt); err != nil {
@@ -334,6 +398,41 @@ func (s *Store) DeleteRider(ctx context.Context, rider string) (int, error) {
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("routeshare: purge rider: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// DeleteRoute removes every share link to a route, and everyone's record of
+// having viewed them, for when the route itself is deleted. A slug is only a
+// name and gets reused, so a link left behind would one day open a stranger's
+// route. Deleted rather than revoked: the owner's share history is a list of
+// links to a route that no longer exists, and there is nothing to show for it.
+// Returns how many links went.
+func (s *Store) DeleteRoute(ctx context.Context, routeSlug string) (int, error) {
+	routeSlug = strings.TrimSpace(routeSlug)
+	if routeSlug == "" {
+		return 0, errors.New("routeshare: no route to delete shares of")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("routeshare: delete route shares: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// #nosec G701 -- constant statements, bound parameters.
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM route_share_redemptions
+        WHERE share_id IN (SELECT id FROM route_shares WHERE route_slug = ?)`), routeSlug); err != nil {
+		return 0, fmt.Errorf("routeshare: delete route redemptions: %w", err)
+	}
+	// #nosec G701 -- constant statement, bound parameter.
+	res, err := tx.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM route_shares WHERE route_slug = ?`), routeSlug)
+	if err != nil {
+		return 0, fmt.Errorf("routeshare: delete route shares: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("routeshare: delete route shares: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil

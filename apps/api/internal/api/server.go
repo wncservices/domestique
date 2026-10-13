@@ -3362,6 +3362,13 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		s.failLookup(w, err)
 		return
 	}
+	// The slug is free to be taken again, so anything keyed by it goes now.
+	// The route is already deleted; a failure here leaves a share link that
+	// resolveShare still refuses (it checks the route is the one shared), so
+	// the request succeeds, but it is logged as the error it is.
+	if err := s.forgetRoute(r.Context(), slug); err != nil {
+		s.logger().Error("could not remove what was keyed by a deleted route's slug", "slug", slug, "err", err)
+	}
 	// A rider's planned rides must not keep pointing at a route that is gone:
 	// the slug would read as a route that exists, and a later route created
 	// under it would attach itself to a stranger's ride.

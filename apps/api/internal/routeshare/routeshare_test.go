@@ -59,7 +59,7 @@ func TestRouteShareEachEngine(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
 
-				token, share, err := store.Create(ctx, "hill-loop", "wilant", sevenDays)
+				token, share, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
 				if err != nil {
 					t.Fatalf("create: %v", err)
 				}
@@ -93,7 +93,7 @@ func TestRouteShareEachEngine(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
 
-				token, share, err := store.Create(ctx, "hill-loop", "wilant", sevenDays)
+				token, share, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
 				if err != nil {
 					t.Fatalf("create: %v", err)
 				}
@@ -117,7 +117,7 @@ func TestRouteShareEachEngine(t *testing.T) {
 			t.Run("revoking an already-revoked or unknown id is not an error", func(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
-				_, share, err := store.Create(ctx, "hill-loop", "wilant", sevenDays)
+				_, share, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
 				if err != nil {
 					t.Fatalf("create: %v", err)
 				}
@@ -135,7 +135,7 @@ func TestRouteShareEachEngine(t *testing.T) {
 			t.Run("an expired share is still returned by Lookup, reporting Expired true", func(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
-				token, share, err := store.Create(ctx, "hill-loop", "wilant", sevenDays)
+				token, share, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
 				if err != nil {
 					t.Fatalf("create: %v", err)
 				}
@@ -155,7 +155,7 @@ func TestRouteShareEachEngine(t *testing.T) {
 
 			t.Run("Create rejects an unsupported lifetime", func(t *testing.T) {
 				store := open(t)
-				if _, _, err := store.Create(t.Context(), "hill-loop", "wilant", 3*24*time.Hour); err == nil {
+				if _, _, err := store.Create(t.Context(), Route{Slug: "hill-loop"}, "wilant", 3*24*time.Hour); err == nil {
 					t.Fatal("expected an error for an unsupported ttl")
 				}
 			})
@@ -163,10 +163,10 @@ func TestRouteShareEachEngine(t *testing.T) {
 			t.Run("Create requires a route and a rider", func(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
-				if _, _, err := store.Create(ctx, "", "wilant", sevenDays); err == nil {
+				if _, _, err := store.Create(ctx, Route{Slug: ""}, "wilant", sevenDays); err == nil {
 					t.Fatal("expected an error for a missing route")
 				}
-				if _, _, err := store.Create(ctx, "hill-loop", "", sevenDays); err == nil {
+				if _, _, err := store.Create(ctx, Route{Slug: "hill-loop"}, "", sevenDays); err == nil {
 					t.Fatal("expected an error for a missing rider")
 				}
 			})
@@ -174,7 +174,7 @@ func TestRouteShareEachEngine(t *testing.T) {
 			t.Run("Touch records a redemption, and a repeat visit updates it rather than duplicating", func(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
-				_, share, err := store.Create(ctx, "hill-loop", "wilant", sevenDays)
+				_, share, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
 				if err != nil {
 					t.Fatalf("create: %v", err)
 				}
@@ -206,15 +206,103 @@ func TestRouteShareEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("DeleteRoute removes that route's shares and redemptions only", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				_, gone, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, kept, err := store.Create(ctx, Route{Slug: "flat-loop"}, "wilant", sevenDays)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, id := range []string{gone.ID, kept.ID} {
+					if err := store.Touch(ctx, id, "bob"); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				n, err := store.DeleteRoute(ctx, "hill-loop")
+				if err != nil || n != 1 {
+					t.Fatalf("DeleteRoute = %d, %v; want 1, nil", n, err)
+				}
+				if _, err := store.Get(ctx, gone.ID); !errors.Is(err, ErrNotFound) {
+					t.Errorf("deleted route's share: err = %v, want ErrNotFound", err)
+				}
+				if r, _ := store.Redemptions(ctx, gone.ID); len(r) != 0 {
+					t.Errorf("redemptions of the deleted route's share remain: %v", r)
+				}
+				if _, err := store.Get(ctx, kept.ID); err != nil {
+					t.Errorf("another route's share was touched: %v", err)
+				}
+				if r, _ := store.Redemptions(ctx, kept.ID); len(r) != 1 {
+					t.Errorf("another route's redemptions were touched: %v", r)
+				}
+			})
+
+			t.Run("the route binding is stored and read back", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				_, share, err := store.Create(ctx, Route{Slug: "hill-loop", Owner: "Alice", CreatedAt: "2026-01-01T00:00:00Z"}, "root", sevenDays)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := store.Get(ctx, share.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.RouteOwner != "alice" || got.RouteCreatedAt != "2026-01-01T00:00:00Z" {
+					t.Fatalf("binding = %q, %q", got.RouteOwner, got.RouteCreatedAt)
+				}
+				// An admin's share of alice's route matches alice's route, not root's.
+				if !got.Matches("alice", "2026-01-01T00:00:00Z") {
+					t.Error("same route must match")
+				}
+				if got.Matches("root", "2026-01-01T00:00:00Z") || got.Matches("bob", "2026-01-01T00:00:00Z") {
+					t.Error("another owner under the same slug must not match")
+				}
+				if got.Matches("alice", "2026-02-02T00:00:00Z") {
+					t.Error("another generation of the slug must not match")
+				}
+			})
+
+			t.Run("a share from before the binding falls back to the creator being the owner", func(t *testing.T) {
+				legacy := Share{CreatedBy: "alice"}
+				if !legacy.Matches("alice", "anything") {
+					t.Error("the creator's own route must still match")
+				}
+				if legacy.Matches("bob", "anything") {
+					t.Error("someone else's route under the slug must not match")
+				}
+			})
+
+			t.Run("opening the store again is idempotent and keeps old rows", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+				_, share, err := store.Create(ctx, Route{Slug: "hill-loop", Owner: "alice"}, "alice", sevenDays)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := store.addBindingColumns(); err != nil {
+					t.Fatalf("second migration: %v", err)
+				}
+				if _, err := store.Get(ctx, share.ID); err != nil {
+					t.Fatalf("share lost across migration: %v", err)
+				}
+			})
+
 			t.Run("ListForRoute is scoped to one route and includes revoked shares", func(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()
 
-				_, shareA, err := store.Create(ctx, "hill-loop", "wilant", sevenDays)
+				_, shareA, err := store.Create(ctx, Route{Slug: "hill-loop"}, "wilant", sevenDays)
 				if err != nil {
 					t.Fatalf("create: %v", err)
 				}
-				if _, _, err := store.Create(ctx, "flat-loop", "wilant", sevenDays); err != nil {
+				if _, _, err := store.Create(ctx, Route{Slug: "flat-loop"}, "wilant", sevenDays); err != nil {
 					t.Fatalf("create: %v", err)
 				}
 				if err := store.Revoke(ctx, shareA.ID); err != nil {
