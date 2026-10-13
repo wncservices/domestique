@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch, computed } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
-import type { AssignableRole, Person } from '@/api/types'
+import type { AssignableRole, Person, RiderInfo } from '@/api/types'
 import { roleColor } from '@/utils/role'
 import { usePagedList } from '@/composables/usePagedList'
 
@@ -18,12 +18,20 @@ const error = ref('')
 // rather than just showing an alert above it.
 const unavailable = ref(false)
 
+// Riders that have data here but no account to sign in as them. Best effort:
+// the list is a hint for the admin, so a failure to fetch it is not an error.
+const orphanRiders = ref<string[]>([])
+// The signed-in admin's own rider, to tell their own row from everyone else's.
+const myRider = ref('')
+
 async function load() {
   loading.value = true
   error.value = ''
   unavailable.value = false
   try {
     people.value = await api.people()
+    api.orphanRiders().then((r) => { orphanRiders.value = r.riders }).catch(() => { orphanRiders.value = [] })
+    api.me().then((m) => { myRider.value = m.user ?? '' }).catch(() => {})
   } catch (err) {
     if (err instanceof ApiError && err.status === 412) {
       unavailable.value = true
@@ -194,16 +202,58 @@ async function confirmToggleBlocked() {
 const bindTarget = ref<Person | null>(null)
 const bindRider = ref('')
 const binding = ref('')
+// What binding to the typed rider would hand over, so the admin sees it first.
+const bindInfo = ref<RiderInfo | null>(null)
+const bindConfirmed = ref(false)
+
+// A person's own row: their rider is the signed-in admin's. Moving your own
+// sign-in is only for the way out of a lockout, onto a rider nobody is bound to.
+function isOwn(person: Person): boolean {
+  return !!myRider.value && person.boundRider === myRider.value
+}
 
 function openBind(person: Person) {
   bindTarget.value = person
-  bindRider.value = person.boundRider ?? person.likelyRider ?? ''
+  // Prefilled with the account's own rider, except for a conflict: there the
+  // likely rider is exactly the name two accounts are fighting over, and
+  // pre-typing it invites binding the wrong one.
+  bindRider.value = person.bindingStatus === 'conflict' ? '' : (person.boundRider ?? person.likelyRider ?? '')
+  bindInfo.value = null
+  bindConfirmed.value = false
 }
+
+let infoTimer: ReturnType<typeof setTimeout> | undefined
+watch(bindRider, (rider) => {
+  bindConfirmed.value = false
+  bindInfo.value = null
+  clearTimeout(infoTimer)
+  const wanted = rider.trim().toLowerCase()
+  if (!wanted || !bindTarget.value) return
+  infoTimer = setTimeout(async () => {
+    try {
+      const info = await api.riderInfo(wanted)
+      if (wanted === bindRider.value.trim().toLowerCase()) bindInfo.value = info
+    } catch {
+      bindInfo.value = null
+    }
+  }, 250)
+})
+
+// Binding to a rider that has data or other accounts needs an explicit yes.
+const needsConfirm = computed(() => !!bindInfo.value && (bindInfo.value.hasData || bindInfo.value.bindings > 0))
+// Own account onto a rider someone is bound to is refused by the server; say so
+// before the click rather than after.
+const ownBlocked = computed(
+  () => !!bindTarget.value && isOwn(bindTarget.value) && !!bindInfo.value && bindInfo.value.bindings > 0,
+)
+const canBind = computed(
+  () => !!bindRider.value.trim() && !!bindInfo.value && !ownBlocked.value && (!needsConfirm.value || bindConfirmed.value),
+)
 
 async function confirmBind() {
   const target = bindTarget.value
   const rider = bindRider.value.trim().toLowerCase()
-  if (!target || !rider) return
+  if (!target || !rider || !canBind.value) return
   binding.value = target.id
   try {
     const result = await api.setPersonBinding(target.id, rider)
@@ -240,11 +290,40 @@ const deleteTarget = ref<Person | null>(null)
 const deleteRider = ref('')
 const deletingPerson = ref('')
 
+// How many OTHER accounts are bound to the rider whose data a delete would
+// purge: the purge removes the rider, and with it their bindings.
+const deleteInfo = ref<RiderInfo | null>(null)
+const otherAccounts = computed(() => {
+  const info = deleteInfo.value
+  const target = deleteTarget.value
+  if (!info || !target) return 0
+  const mine = target.boundRider && target.boundRider === info.rider ? 1 : 0
+  return Math.max(0, info.bindings - mine)
+})
+
+let deleteTimer: ReturnType<typeof setTimeout> | undefined
+function refreshDeleteInfo() {
+  clearTimeout(deleteTimer)
+  deleteInfo.value = null
+  const wanted = deleteRider.value.trim().toLowerCase()
+  if (!wanted) return
+  deleteTimer = setTimeout(async () => {
+    try {
+      const info = await api.riderInfo(wanted)
+      if (wanted === deleteRider.value.trim().toLowerCase()) deleteInfo.value = info
+    } catch {
+      deleteInfo.value = null
+    }
+  }, 250)
+}
+watch(deleteRider, refreshDeleteInfo)
+
 function openDeleteConfirm(person: Person) {
   deleteTarget.value = person
   // The binding is the rider this account is; the profile-name guess is only
   // for someone who has no binding yet.
   deleteRider.value = person.boundRider ?? person.likelyRider ?? ''
+  refreshDeleteInfo()
 }
 
 async function confirmDeletePerson() {
@@ -314,6 +393,16 @@ async function confirmDeletePerson() {
         class="mb-4"
       />
 
+      <UAlert
+        v-if="orphanRiders.length"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-user-x"
+        title="Riders with data but no account"
+        :description="`${orphanRiders.join(', ')} — nobody can sign in as ${orphanRiders.length === 1 ? 'this rider' : 'these riders'}. Bind an account to one from its row, or remove the data.`"
+        class="mb-4"
+      />
+
       <UEmpty
         v-if="unavailable"
         icon="i-lucide-key-round"
@@ -334,6 +423,15 @@ async function confirmDeletePerson() {
             </div>
             <UBadge v-if="person.bindingStatus === 'bound'" color="neutral" variant="subtle" size="sm" icon="i-lucide-link">
               {{ person.boundRider }}
+            </UBadge>
+            <UBadge
+              v-else-if="person.bindingStatus === 'needs-attention'"
+              color="error"
+              variant="subtle"
+              size="sm"
+              icon="i-lucide-triangle-alert"
+            >
+              needs attention: {{ person.likelyRider }}
             </UBadge>
             <UBadge
               v-else-if="person.bindingStatus === 'conflict'"
@@ -359,7 +457,10 @@ async function confirmDeletePerson() {
               aria-label="Change role"
               @update:model-value="(role: AssignableRole) => changeRole(person, role)"
             />
-            <UTooltip v-if="person.bindingStatus" text="Change which rider this is">
+            <UTooltip
+              v-if="person.bindingStatus"
+              :text="isOwn(person) ? 'Your own sign-in: only onto a rider nobody is bound to (lockout recovery)' : 'Change which rider this is'"
+            >
               <UButton
                 size="sm"
                 color="neutral"
@@ -492,23 +593,41 @@ async function confirmDeletePerson() {
         <p class="text-sm text-toned">
           {{ bindTarget?.email }} signs in as the rider it is bound to, whatever its name says.
           <template v-if="bindTarget?.bindingStatus === 'conflict'">
-            Another account with a different email claims
-            <span class="text-highlighted">{{ bindTarget?.likelyRider }}</span>, so neither was bound
-            automatically. Bind only the one you know is the real rider.
+            Accounts claiming
+            <span class="text-highlighted">{{ bindTarget?.likelyRider }}</span> disagree, or the only one
+            joined after that rider's data existed, so none was bound automatically. Bind only the one you
+            know is the real rider; the name is left empty on purpose.
           </template>
         </p>
         <UFormField label="Rider" hint="their routes, devices and training follow this name" class="mt-3">
           <UInput v-model="bindRider" class="w-full" @keydown.enter.prevent="confirmBind" />
         </UFormField>
+        <UAlert
+          v-if="bindInfo"
+          class="mt-3"
+          :color="ownBlocked ? 'error' : needsConfirm ? 'warning' : 'neutral'"
+          variant="subtle"
+          :icon="needsConfirm ? 'i-lucide-triangle-alert' : 'i-lucide-info'"
+          :description="`${bindInfo.rider}: ${bindInfo.hasData ? 'has data here' : 'has no data'}, ${bindInfo.bindings} account${bindInfo.bindings === 1 ? '' : 's'} bound.`"
+        />
+        <p v-if="ownBlocked" class="mt-2 text-sm text-error">
+          Your own sign-in can only go onto a rider nobody is bound to. Ask another admin, or run
+          <code>domestique bind-identity</code> on the server.
+        </p>
+        <UCheckbox
+          v-else-if="needsConfirm"
+          v-model="bindConfirmed"
+          class="mt-3"
+          label="I know this account belongs to that rider, and give it their data"
+        />
         <p class="mt-3 text-xs text-dimmed">
-          Their current sign-ins end, and they sign in again as this rider. You cannot change your own
-          here: ask another admin, or run <code>domestique bind-identity</code> on the server.
+          Their current sign-ins end, and they sign in again as this rider.
         </p>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">
           <UButton color="neutral" variant="ghost" :disabled="!!binding" @click="bindTarget = null">Cancel</UButton>
-          <UButton icon="i-lucide-link" :loading="!!binding" :disabled="!bindRider.trim()" @click="confirmBind">
+          <UButton icon="i-lucide-link" :loading="!!binding" :disabled="!canBind" @click="confirmBind">
             Bind
           </UButton>
         </div>
@@ -527,6 +646,14 @@ async function confirmDeletePerson() {
         >
           <UInput v-model="deleteRider" placeholder="(leave empty to skip local data)" class="w-full" />
         </UFormField>
+        <UAlert
+          v-if="otherAccounts > 0"
+          class="mt-3"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-triangle-alert"
+          :description="`${otherAccounts} other account${otherAccounts === 1 ? ' is' : 's are'} also bound to ${deleteInfo?.rider}. Their data goes too and they lose the rider. Clear the field to keep it.`"
+        />
       </template>
       <template #footer>
         <div class="flex justify-end gap-2">

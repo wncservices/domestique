@@ -127,13 +127,26 @@ rider's verified email matched. Things that are easy to break:
 
 - **Fail closed.** No identity store, or the startup bootstrap not finished,
   means an unbound sign-in is refused (500 / 503), never resolved by name.
-  Bound accounts keep signing in.
+  Bound accounts keep signing in. `domestique_identity_bootstrap_ready` is 0
+  while the gate is closed; alert on it staying 0.
+- **The gate comes before the binding.** `handleSSOCallback` runs
+  `Authorize` first: an account outside `required_group` gets a notice, no
+  binding and no session.
+- **A session is honoured only while its binding agrees** (`sessionOrSignedOut`,
+  in `authenticate`): the session's `(issuer, sub)` must be bound to exactly the
+  rider the session holds, else the session is deleted and the request is
+  signed out. A session with no sub, or no identity store, fails closed. One
+  indexed lookup per request. This is what makes the one-time session reset
+  belt-and-braces rather than the only defence.
 - **The check and the insert are one transaction** (`identities.ClaimFree`),
   so two first sign-ins cannot both take a free name.
-- **A person never moves their own binding.** `PUT /api/people/{id}/binding`
-  needs `people:manage` and refuses the caller's own `sub`; the CLI
-  (`bind-identity`, `unbind-identity`, both `--dry-run`) is the way for an admin
-  to move their own. Moving or removing a binding ends that account's sessions.
+- **A person never moves their own binding onto someone else.**
+  `PUT /api/people/{id}/binding` needs `people:manage`. For the caller's own
+  `sub` it is refused if any account is bound to the target rider, and allowed
+  (logged at Warn) only onto a rider nobody is bound to: that is the owner's way
+  out of a lockout. The CLI (`bind-identity`, `unbind-identity`, `--dry-run`,
+  and `--force` for an issuer other than `auth.oidc.issuer`) is the fallback.
+  Moving or removing a binding ends that account's sessions.
 - **`PATCH /api/me` renames the display name only.** It cannot change who
   anyone is, so it needs no collision check.
 - **Never log an email or a `sub` next to a rider name.**
@@ -143,12 +156,27 @@ rider's verified email matched. Things that are easy to break:
   `identity_migrations` makes that happen only once).
 
 At startup `StartIdentityBootstrap` binds the riders that existed before
-bindings, from the People connector (`planBootstrap`): a rider is bound only if
-every account claiming it has a verified email and they are all the same
-address. A disagreement binds nobody and logs Error (`identity bootstrap
-conflict`, rider and count only); the People page shows it and an admin
-resolves it. Without a Management API nothing runs and the riders are bound by
-hand with the CLI.
+bindings, from the People connector (`planBootstrap`). It runs in the
+background and retries until it succeeds, so a slow Auth0 can never outlast a
+liveness probe; the gate above stays closed meanwhile. The rules:
+
+- a rider claimed by **one** gate-role account is bound even if its email is
+  unverified (the address is kept only when verified), unless the rider has
+  data and that account's Auth0 `created_at` is later than the rider's earliest
+  `created_at`/`updated_at` in `riderTables` (an approximation, see
+  `identities.RidersWithData`): a likely renamer, flagged as a conflict;
+- several claimants are bound only if all have the same verified email;
+- a person the Users Search had no profile for is unknown and blocks that
+  rider (Error with a count); Users Search and role listings are chunked/paged
+  past 50;
+- an unverified/unknown claimant of a rider with data is an Error
+  (`needs attention`); riders with data but no account are a Warn count and the
+  People page's "riders with data but no account".
+
+A disagreement binds nobody and logs Error (`identity bootstrap conflict`,
+rider and count only); the People page shows it and an admin resolves it.
+Without a Management API nothing runs and the riders are bound by hand with the
+CLI. `docs/rider-migration.md` has the deployment runbook.
 
 Roles come from groups — Authelia's or the OIDC issuer's `groups_claim` — most-privileged match wins:
 
@@ -191,7 +219,7 @@ wires it through `PeopleConnector`, an interface so tests never touch a real
 tenant.
 
 **The People page shows which rider each account is.** `boundRider` and
-`bindingStatus` (`bound`, `unbound`, `conflict`) come from `rider_identities`
+`bindingStatus` (`bound`, `unbound`, `conflict`, `needs-attention`) come from `rider_identities`
 and the same `planBootstrap` rule the startup used, so the page flags exactly
 the riders the bootstrap left alone. `likelyRider` stays a guess for the crew
 picker; it is not what anything runs on. `ridersOfPerson` (block, role change)

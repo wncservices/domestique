@@ -92,9 +92,13 @@ commands:
                 --replace resolves a conflict by keeping the old rider's row)
   bind-identity   <issuer> <sub> <rider>   (auth.mode oidc) make an issuer account
                   sign in as a rider, or move it to another; ends that account's
-                  sessions. --dry-run says what it would do and writes nothing
-  unbind-identity <issuer> <sub>           remove an account's binding (--dry-run
-                  as above); it then signs in as a new rider of its own
+                  sessions. --dry-run says what it would do and writes nothing.
+                  The issuer must be auth.oidc.issuer exactly (--force overrides).
+                  The first command that is not a dry run
+                  creates the bindings table and ends ALL sessions (everyone signs in again)
+  unbind-identity <issuer> <sub>           remove an account's binding (same flags
+                  and the same issuer check); it then signs in as a new rider of
+                  its own
   keygen        print a new DOMESTIQUE_ENCRYPTION_KEY
   version       print the version
 
@@ -171,6 +175,7 @@ func run(args []string) error {
 	from := fs.String("from", "", "directory of GPX routes to import")
 	out := fs.String("out", "", "file to write (default <slug>.fit)")
 	cues := fs.Bool("cues", false, "add turn cues inferred from the track's shape")
+	force := fs.Bool("force", false, "bind-identity, unbind-identity: accept an issuer that is not auth.oidc.issuer")
 	owner := fs.String("owner", "", "komoot import: rider to record as the owner of imported routes")
 
 	var positional []string
@@ -251,9 +256,9 @@ func run(args []string) error {
 	case "rename-rider":
 		return runRenameRider(src, positional, *dryRun, *replace)
 	case "bind-identity":
-		return runBindIdentity(src, positional, *dryRun)
+		return runBindIdentity(src, positional, *dryRun, cfg.Auth.OIDC.Issuer, *force)
 	case "unbind-identity":
-		return runUnbindIdentity(src, positional, *dryRun)
+		return runUnbindIdentity(src, positional, *dryRun, cfg.Auth.OIDC.Issuer, *force)
 	}
 	return nil
 }

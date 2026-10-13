@@ -549,6 +549,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/people/{id}/blocked", s.handleSetPersonBlocked)
 	mux.HandleFunc("DELETE /api/people/{id}", s.handleDeletePerson)
 	mux.HandleFunc("PUT /api/people/{id}/binding", s.handlePeopleSetBinding)
+	mux.HandleFunc("GET /api/people/riders/{rider}", s.handlePeopleRiderInfo)
+	mux.HandleFunc("GET /api/people/orphans", s.handlePeopleOrphans)
 
 	mux.HandleFunc("POST /api/crews", s.handleCreateCrew)
 	mux.HandleFunc("GET /api/crews", s.handleListCrews)

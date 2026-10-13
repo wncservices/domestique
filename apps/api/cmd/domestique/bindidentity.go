@@ -17,16 +17,42 @@ import (
 // anything, and opening the store the normal way creates the table and ends
 // every session (identities.UseDB), so a dry run only attaches to a table
 // that is already there: store is nil when there is none, which reads as "no
-// bindings".
-func bindingStore(src *source.DB, dryRun bool, box *secrets.Box) (*identities.Store, error) {
-	if !dryRun {
-		return identities.UseDB(src.Conn(), src.DSN(), box)
-	}
+// bindings". created reports that the table was not there and this call (not a
+// dry run) made it, which ended every session; the caller says so.
+func bindingStore(src *source.DB, dryRun bool, box *secrets.Box) (store *identities.Store, created bool, err error) {
 	exists, err := identities.Exists(src.Conn(), src.DSN())
-	if err != nil || !exists {
-		return nil, err
+	if err != nil {
+		return nil, false, err
 	}
-	return identities.Attach(src.Conn(), src.DSN(), box)
+	switch {
+	case dryRun && !exists:
+		return nil, false, nil
+	case dryRun:
+		store, err = identities.Attach(src.Conn(), src.DSN(), box)
+		return store, false, err
+	}
+	store, err = identities.UseDB(src.Conn(), src.DSN(), box)
+	return store, !exists, err
+}
+
+// firstUseNote is what to tell an operator whose command just created the table.
+const firstUseNote = "note:       this was the first identity command on this database: it created the bindings table\n" +
+	"            and ended ALL sessions, so every rider signs in again"
+
+// wouldCreateNote is the dry-run version, printed when the table is not there yet.
+const wouldCreateNote = "note:       the table is not there yet: a real run would create the bindings table and end ALL sessions"
+
+// checkIssuer refuses an issuer that is not the configured auth.oidc.issuer. A
+// sign-in looks bindings up under exactly that string, so a binding under any
+// other (a missing trailing slash is the usual slip) would be written, reported
+// as done, and never match. Nothing to compare against (no issuer configured)
+// passes; --force is for a deployment really moving between tenants.
+func checkIssuer(issuer, configured string, force bool) error {
+	if configured == "" || issuer == configured || force {
+		return nil
+	}
+	return fmt.Errorf("the issuer %q is not the configured auth.oidc.issuer %q: sign-ins look bindings up under exactly that string, "+
+		"so this binding would never match (pass --force if the deployment really is changing tenants)", issuer, configured)
 }
 
 // sessionKey is the deployment's encryption key if there is one. A session
@@ -68,7 +94,7 @@ func endSessions(ctx context.Context, src *source.DB, box *secrets.Box, sub stri
 //
 // It never reads or writes an email. A binding made here has none recorded,
 // and gets one the next time the account signs in.
-func runBindIdentity(src *source.DB, args []string, dryRun bool) error {
+func runBindIdentity(src *source.DB, args []string, dryRun bool, configuredIssuer string, force bool) error {
 	if len(args) != 3 {
 		return errors.New("bind-identity needs exactly three arguments: <issuer> <sub> <rider>\n" +
 			"       the issuer is auth.oidc.issuer exactly as configured; the sub is the account's id (Auth0: auth0|… or google-oauth2|…)")
@@ -80,15 +106,21 @@ func runBindIdentity(src *source.DB, args []string, dryRun bool) error {
 	if rider == "" || !accounts.RiderPattern.MatchString(rider) {
 		return fmt.Errorf("bind-identity: %q is not a rider name (letters, digits and . _ @ | - only)", args[2])
 	}
+	if err := checkIssuer(issuer, configuredIssuer, force); err != nil {
+		return fmt.Errorf("bind-identity: %w", err)
+	}
 
 	box, err := sessionKey()
 	if err != nil {
 		return err
 	}
 	ctx := context.Background()
-	store, err := bindingStore(src, dryRun, box)
+	store, created, err := bindingStore(src, dryRun, box)
 	if err != nil {
 		return err
+	}
+	if created {
+		defer fmt.Println(firstUseNote)
 	}
 
 	from, bound := "", false
@@ -121,6 +153,9 @@ func runBindIdentity(src *source.DB, args []string, dryRun bool) error {
 	}
 
 	if dryRun {
+		if store == nil {
+			fmt.Println(wouldCreateNote)
+		}
 		fmt.Println("\ndry run — nothing written")
 		return nil
 	}
@@ -131,7 +166,7 @@ func runBindIdentity(src *source.DB, args []string, dryRun bool) error {
 // then signs in as a new rider of its own the next time (see
 // handleSSOCallback), so this is for undoing a wrong binding, not for locking
 // someone out: block them in Auth0 for that.
-func runUnbindIdentity(src *source.DB, args []string, dryRun bool) error {
+func runUnbindIdentity(src *source.DB, args []string, dryRun bool, configuredIssuer string, force bool) error {
 	if len(args) != 2 {
 		return errors.New("unbind-identity needs exactly two arguments: <issuer> <sub>")
 	}
@@ -139,15 +174,21 @@ func runUnbindIdentity(src *source.DB, args []string, dryRun bool) error {
 	if issuer == "" || sub == "" {
 		return errors.New("unbind-identity: neither the issuer nor the sub may be empty")
 	}
+	if err := checkIssuer(issuer, configuredIssuer, force); err != nil {
+		return fmt.Errorf("unbind-identity: %w", err)
+	}
 
 	box, err := sessionKey()
 	if err != nil {
 		return err
 	}
 	ctx := context.Background()
-	store, err := bindingStore(src, dryRun, box)
+	store, created, err := bindingStore(src, dryRun, box)
 	if err != nil {
 		return err
+	}
+	if created {
+		defer fmt.Println(firstUseNote)
 	}
 
 	var b identities.Binding

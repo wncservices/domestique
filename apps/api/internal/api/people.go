@@ -57,9 +57,10 @@ type personDTO struct {
 	// a guess from the profile's name. Empty when the account has no binding
 	// or this deployment keeps none.
 	BoundRider string `json:"boundRider,omitempty"`
-	// BindingStatus is "bound", "unbound", or "conflict": unbound, and another
-	// account with a different verified email claims the same likely rider, so
-	// the startup bootstrap bound neither. Empty when this deployment keeps no
+	// BindingStatus is "bound", "unbound", "conflict" (unbound, and the accounts
+	// claiming the same likely rider disagree, or the only one joined after the
+	// rider's data existed) or "needs-attention" (unbound, the rider has data, and
+	// a claimant is unverified or unknown). Empty when this deployment keeps no
 	// bindings (anything but mode oidc).
 	BindingStatus string `json:"bindingStatus,omitempty"`
 }
@@ -243,8 +244,13 @@ func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) ma
 		}
 	}
 	// The same rule the startup bootstrap used, so the page flags exactly the
-	// riders it left alone for an admin.
-	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] })
+	// riders it left alone for an admin. A failure to read which riders have
+	// data only loses the "needs attention" distinction.
+	data, err := s.Identities.RidersWithData(ctx, riderDataColumns())
+	if err != nil {
+		s.logger().Warn("reading which riders have data for the people page failed", "err", err)
+	}
+	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] }, data)
 
 	out := make(map[string]bindingView, len(people))
 	for _, p := range people {
@@ -253,8 +259,14 @@ func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) ma
 			continue
 		}
 		status := "unbound"
-		if plan.Conflicts[likelyRider(p.Name, p.Nickname, p.UserID)] > 0 {
+		guess := likelyRider(p.Name, p.Nickname, p.UserID)
+		switch {
+		case plan.Conflicts[guess] > 0:
 			status = "conflict"
+		case plan.NeedsAttention[guess] > 0:
+			// Data that somebody cannot currently sign in as: an unverified or
+			// unknown claimant among several, or a profile the search lacked.
+			status = "needs-attention"
 		}
 		out[p.UserID] = bindingView{status: status}
 	}
@@ -595,13 +607,7 @@ func (s *Server) handlePeopleSetBinding(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	caller := auth.FromContext(r.Context())
-	if sub == caller.Sub {
-		s.logger().Warn("an admin tried to move their own identity binding", "rider", caller.User)
-		writeJSON(w, http.StatusForbidden, map[string]string{
-			"error": "you cannot move your own sign-in here — ask another admin, or run `domestique bind-identity` on the server",
-		})
-		return
-	}
+	own := sub == caller.Sub
 
 	var body struct {
 		Rider string `json:"rider"`
@@ -616,6 +622,27 @@ func (s *Server) handlePeopleSetBinding(w http.ResponseWriter, r *http.Request) 
 			"error": "rider must be letters, digits and . _ @ | -",
 		})
 		return
+	}
+
+	// Nobody moves their own sign-in onto a rider that someone is bound to: that
+	// is the whole attack. The one exception is the way out of a lockout: an
+	// admin whose own account landed on a suffixed rider (the bootstrap could not
+	// tell them from a renamer) may take a rider that has no binding at all, so
+	// the owner is not stuck needing a second admin that does not exist. Always
+	// logged at Warn.
+	if own {
+		taken, err := s.Identities.RiderBound(r.Context(), rider)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if taken {
+			s.logger().Warn("an admin tried to move their own identity binding onto a bound rider", "rider", caller.User, "target", rider)
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "you cannot move your own sign-in onto a rider someone is already bound to — ask another admin, or run `domestique bind-identity` on the server",
+			})
+			return
+		}
 	}
 
 	issuer := s.authenticator().OIDC().Issuer
@@ -637,6 +664,104 @@ func (s *Server) handlePeopleSetBinding(w http.ResponseWriter, r *http.Request) 
 	}
 	s.endSessionsOf(r.Context(), sub, "identity binding changed")
 
-	s.logger().Info("identity binding moved by admin", "rider", rider, "from", from, "by", caller.User)
+	if own {
+		s.logger().Warn("admin moved their own identity binding", "rider", rider, "from", from)
+	} else {
+		s.logger().Info("identity binding moved by admin", "rider", rider, "from", from, "by", caller.User)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"boundRider": rider})
+}
+
+// handlePeopleRiderInfo tells an admin, before they bind an account to a rider,
+// whether that rider has data and how many accounts are already bound to it:
+// binding to a rider with either is how one person ends up with another's
+// routes, so the page asks for a confirmation.
+func (s *Server) handlePeopleRiderInfo(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManagePeople) {
+		return
+	}
+	if s.Identities == nil {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment keeps no identity bindings (they exist under auth.mode: oidc)",
+		})
+		return
+	}
+	rider := strings.ToLower(strings.TrimSpace(r.PathValue("rider")))
+	if rider == "" || !accounts.RiderPattern.MatchString(rider) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "that is not a rider name"})
+		return
+	}
+	all, err := s.Identities.List(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	bindings := 0
+	for _, b := range all {
+		if b.Rider == rider {
+			bindings++
+		}
+	}
+	data, err := s.Identities.RidersWithData(r.Context(), riderDataColumns())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	_, hasData := data[rider]
+	writeJSON(w, http.StatusOK, map[string]any{"rider": rider, "hasData": hasData, "bindings": bindings})
+}
+
+// handlePeopleOrphans lists riders that have data here but no account in the
+// gate role to sign in as them and no binding: data that nobody can reach until
+// an admin binds an account to it or removes it.
+func (s *Server) handlePeopleOrphans(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManagePeople) {
+		return
+	}
+	if !s.peopleAvailable(w) {
+		return
+	}
+	if s.Identities == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"riders": []string{}})
+		return
+	}
+	gate := s.Auth.RequiredGroup()
+	if gate == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"riders": []string{}})
+		return
+	}
+	adminRole, riderRole := s.permissionRoleNames()
+	var roles []string
+	if adminRole != "" {
+		roles = append(roles, adminRole)
+	}
+	if riderRole != "" {
+		roles = append(roles, riderRole)
+	}
+	people, err := s.People.ListPeople(r.Context(), gate, roles...)
+	if err != nil {
+		s.logger().Warn("listing people for the orphan riders failed", "err", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Auth0 would not list who has access just now."})
+		return
+	}
+	all, err := s.Identities.List(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	bound := map[string]bool{}
+	for _, b := range all {
+		bound[b.Rider] = true
+	}
+	data, err := s.Identities.RidersWithData(r.Context(), riderDataColumns())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	plan := planBootstrap(people, func(rider string) bool { return bound[rider] }, data)
+	orphans := plan.Orphans
+	if orphans == nil {
+		orphans = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"riders": orphans})
 }

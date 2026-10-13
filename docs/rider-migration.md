@@ -124,60 +124,111 @@ used the app under the new identity for a while before running this), do not
 reach for `--replace`; resolve that one by hand instead, the same as before
 this flag existed.
 
-## Identity bindings: after the deploy that adds them
+## Identity bindings: deployment runbook
 
 Since audit finding H1 an OIDC sign-in is resolved through a binding
 (`rider_identities`), not through the name claims; `docs/oidc.md` has the
-design. Two things change for an operator.
+design. This is the order to deploy it in.
 
-**Everyone is signed out once.** Creating the table ends every existing
-session (a marker row makes that happen only once, so a later start never does
-it again). Expect each rider to sign in again; those sessions held a rider that
-was chosen by a name.
+### What the deploy does
 
-**Existing riders have to be bound before their accounts sign in.** With the
-Auth0 Management API configured the server does it at startup, from the people
-in the gate role:
+- **Everyone is signed out once.** Creating the table ends every existing
+  session (a marker row makes that happen only once, so a later start never does
+  it again). Those sessions held a rider that was chosen by a name.
+- **A session is only honoured while its binding agrees.** Every request checks
+  that the session's account is bound to the rider the session holds; if not, the
+  session is deleted and the request is signed out. So a session an old pod made
+  after the reset (name-derived rider, anyone's `sub`) is useless, not trusted.
+- **Accounts the gate does not admit get nothing.** A sign-in outside
+  `required_group` gets a "not a member" notice and no binding and no session.
+- **Existing riders are bound at startup**, in the background, from the Auth0
+  gate-role members (the server is listening from the first second; until the
+  bootstrap succeeds, an account with no binding gets "starting up, try again"
+  and `domestique_identity_bootstrap_ready` is 0; bound accounts are unaffected):
+  - a rider claimed by **exactly one** account is bound, even if Auth0 has never
+    verified its email (the address is only kept when it is verified);
+  - several accounts claim one rider: bound only if every one has a verified
+    email and they are all the same address (Google plus a password for one
+    person); anything else binds nobody;
+  - **not bound, on purpose**: a rider that has data whose only claimant joined
+    Auth0 *after that data existed* (Auth0 `created_at` against the earliest
+    `created_at`/`updated_at` in the rider's tables; a rough comparison, a likely
+    renamer is indistinguishable from a real owner who joined later), and anyone
+    the Auth0 search had no profile for.
 
-- an account whose rider has a verified email, and where every account claiming
-  that rider has the same address, is bound automatically (this covers one
-  person reached through Google and through a password);
-- anything else is **not** bound, on purpose, and logged. Watch the start-up
-  log for `identity bootstrap conflict` (Error, a rider and a count) and
-  `identity bootstrap skipped a rider` (Warn).
+### Before the deploy
 
-After the deploy, **open the People page and check it**:
+1. **Pre-check the Auth0 gate members.** In Auth0, list the members of the gate
+   role (`auth.required_group`, e.g. `domestique-users`). For each, note the
+   name or nickname (that is the rider the old rule gave them), the email and
+   whether it is verified. Confirm:
+   - the **owner's** account is in the gate role (an account outside it can never
+     be bound or sign in);
+   - no one else has a name that equals an existing rider's;
+   - each existing rider has one account, or accounts with the same verified email.
 
-1. every person you expect shows their own rider (the link badge);
-2. a **conflict** badge means two accounts with different verified emails claim
-   the same rider. Decide which is real, and use *Change which rider this is*
-   to bind that one to the rider. Bind the other to a name of its own (or leave
-   it: it will get a suffixed rider the next time it signs in);
-3. **not bound** next to someone who has data means their email is unverified
-   (a password account whose address was never confirmed is the usual case).
-   Bind them from the same dialog, or have them confirm the address and restart.
+   Expect the owner to be flagged if their Auth0 account is newer than their
+   data (data from the Authelia days predates it). That is fine; step 3 of "After"
+   fixes it in one click.
+2. **Know the exact issuer string.** It is `auth.oidc.issuer` as configured
+   (Auth0 has a trailing slash: `https://<tenant>.auth0.com/`). Bindings are
+   looked up under exactly that string, and `bind-identity` refuses any other
+   (`--force` overrides).
+3. **No old pods may keep minting sessions.** Use the `Recreate` strategy or a
+   single replica for this release; or run `DELETE FROM sessions;` once after the
+   rollout finishes. With the session check this is belt-and-braces: a leftover
+   session is rejected and deleted anyway.
+4. **Back up the database.** The deploy creates a table and deletes sessions.
 
-Until that is done, such a rider signing in lands on a rider named like
-`wilant-2` with none of their data. Nothing is lost: bind the account to
-`wilant` and sign in again.
+### After the deploy
 
-While the bootstrap has not succeeded (Auth0 unreachable at start), accounts
-with no binding get a "starting up, try again" page and are retried in the
-background; bound accounts are unaffected.
+1. **Check the log and the gauge.** `identity bootstrap complete`, then no
+   `level=ERROR` lines that start with `identity bootstrap`:
+   - `conflict` (rider, count): accounts disagree, or the only claimant is newer
+     than the rider's data;
+   - `needs attention` (rider, count): a rider with data has an unverified or
+     unknown claimant;
+   - `missing profile data` (count): the Auth0 search had nothing on some people;
+   - `found riders with data but no account` (Warn, count).
 
-Without Management API credentials, bind them yourself, per account, before
-or right after the deploy:
+   `domestique_identity_bootstrap_ready` should be 1. Alert on it staying 0.
+2. **Sign in as the owner first, before anyone else,** and open the People page.
+   Confirm the owner's own row shows the owner's real rider (the link badge reads
+   `wilant`, not `wilant-2`).
+3. **If the owner is on a suffixed rider** (`wilant-2`, no data): on the People
+   page use the link button on your own row and bind yourself to `wilant`. An
+   admin may bind their own account to a rider that nobody is bound to (logged at
+   Warn); onto a rider that has any binding it is refused. Your sign-in then
+   ends and you sign in again. If the page is not reachable, use the CLI below.
+4. **Check everyone else.** Every person shows a rider badge; resolve the rest:
+   - **conflict**: pick the real one and bind it with *Change which rider this
+     is* (the rider field starts empty on purpose, and the dialog shows whether
+     the rider has data and how many accounts are bound; binding to a rider with
+     either asks for a confirmation);
+   - **needs attention**: a rider with data whose claimant is unverified or
+     unknown: bind the right account from the same dialog;
+   - **not bound** without data: nothing to do, they get a rider of their own on
+     first sign-in.
 
-```bash
-# the issuer is auth.oidc.issuer exactly as configured; the sub is Auth0's user id
-domestique bind-identity --dry-run 'https://tenant.example.auth0.com/' 'auth0|64f2a1b2c3d4e5f6' wilant
-domestique bind-identity           'https://tenant.example.auth0.com/' 'auth0|64f2a1b2c3d4e5f6' wilant
-```
+   The *Riders with data but no account* alert lists data nobody can reach; bind
+   an account to it or remove it. Someone who signs in before being bound lands
+   on a suffixed rider with none of the data; nothing is lost, bind the account
+   to the real rider and they sign in again.
+5. **CLI fallback** (no Management API, or the page is not usable). In the pod:
 
-`bind-identity` also ends that account's sessions (it needs
-`DOMESTIQUE_ENCRYPTION_KEY` for that and says so if it is missing).
-`unbind-identity <issuer> <sub>` removes a binding. An admin moving their own
-account must use this: the People page refuses it.
+   ```bash
+   kubectl exec -it deploy/domestique -- domestique bind-identity --dry-run \
+     'https://tenant.example.auth0.com/' 'auth0|64f2a1b2c3d4e5f6' wilant
+   kubectl exec -it deploy/domestique -- domestique bind-identity \
+     'https://tenant.example.auth0.com/' 'auth0|64f2a1b2c3d4e5f6' wilant
+   ```
+
+   The issuer must be `auth.oidc.issuer` exactly, the sub is the Auth0 user id.
+   The first command that is not a dry run on a database that does not have the
+   table yet creates it and ends **all** sessions; the command says so. It also
+   ends that account's sessions (it needs `DOMESTIQUE_ENCRYPTION_KEY`, which the
+   pod has). `unbind-identity <issuer> <sub>` removes a binding.
+
 
 **This changes the migration above.** A rider is no longer whatever string the
 issuer hands over, so moving an Authelia rider to `mode: oidc` no longer needs

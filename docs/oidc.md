@@ -67,18 +67,31 @@ both accounts carry the same verified address.
 Deploying this must not open a window where an unbound existing rider can be
 claimed by name. At startup, when the Auth0 Management API is configured, the
 server lists the gate role's members and groups them by the rider the old rule
-would have given them. A rider is bound only when **every account claiming it
-has a verified email and all those emails are the same address**. If they
-disagree (someone renamed an account to "Wilant" before the deploy) nobody is
-bound, an Error `identity bootstrap conflict` is logged with the rider and a
-count only, and the People page shows the conflict for an admin to resolve.
+would have given them. A rider claimed by **one** account is bound (an
+unverified email is not a reason to lock the owner out; the address is only kept
+when it is verified), unless the rider has data and that account joined the
+tenant after the data existed, which looks like a renamer. Several accounts
+claiming one rider are bound only when **every one has a verified email and all
+those emails are the same address**. If they disagree (someone renamed an
+account to "Wilant" before the deploy) nobody is bound, an Error `identity
+bootstrap conflict` is logged with the rider and a count only, and the People
+page shows the conflict for an admin to resolve. A person the Auth0 search has
+no profile for is never bound from missing data (Error, a count), and riders
+with data but no account are reported.
 
 Until the bootstrap has succeeded, **sign-in refuses an account that has no
 binding** (503, `Retry-After`) rather than resolving it by name. Accounts that
 already have a binding sign in as usual. The server does not wait for Auth0
-before it starts listening: the first attempt runs before it does, and a
-failure is retried in the background, so an Auth0 outage costs unbound
-sign-ins a minute, not the whole app.
+before it starts listening: the bootstrap runs in the background and retries, so
+an Auth0 outage costs unbound sign-ins a minute, not the whole app, and cannot
+outlast a liveness probe. `domestique_identity_bootstrap_ready` is 0 until it
+has succeeded.
+
+A session is also checked against the bindings on every request: it is honoured
+only while its account is bound to the rider it holds, so sessions that predate
+bindings, or a binding that has since moved, cannot carry a rider on their own.
+An account outside the gate (`required_group`) is refused at the callback and
+gets neither a binding nor a session.
 
 Without Management API credentials there is nothing to bootstrap from: nothing
 is bound, and existing riders land on a suffixed rider (`wilant-2`) until

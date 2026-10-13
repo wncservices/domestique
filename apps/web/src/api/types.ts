@@ -312,11 +312,21 @@ export interface Person {
    *  everything they own is keyed on. Unlike likelyRider this is the truth,
    *  not a guess; absent when the account has no binding. */
   boundRider?: string
-  /** 'bound', 'unbound', or 'conflict' (unbound, and another account with a
-   *  different verified email claims the same likely rider, so the startup
-   *  bootstrap bound neither and an admin has to decide). Absent when this
+  /** 'bound'; 'unbound'; 'conflict' (the accounts claiming the same likely
+   *  rider disagree, or the only one joined after the rider's data existed, so
+   *  the startup bootstrap bound none); or 'needs-attention' (unbound, the rider
+   *  has data, and a claimant is unverified or unknown). Absent when this
    *  deployment keeps no bindings. */
-  bindingStatus?: 'bound' | 'unbound' | 'conflict'
+  bindingStatus?: 'bound' | 'unbound' | 'conflict' | 'needs-attention'
+}
+
+/** What an admin should know about a rider before binding an account to it. */
+export interface RiderInfo {
+  rider: string
+  /** Whether any of this rider's data (routes, training, devices) exists. */
+  hasData: boolean
+  /** How many accounts are already bound to the rider. */
+  bindings: number
 }
 
 export interface InvitePersonRequest {

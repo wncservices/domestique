@@ -46,13 +46,19 @@ type bindingHarness struct {
 }
 
 func newBindingHarness(t *testing.T, people ...auth0mgmt.Person) *bindingHarness {
+	return newBindingHarnessAs(t, "Boss", people...)
+}
+
+// newBindingHarnessAs is newBindingHarness with the admin signing in under the
+// given display name, which is what the rider is derived from.
+func newBindingHarnessAs(t *testing.T, adminName string, people ...auth0mgmt.Person) *bindingHarness {
 	t.Helper()
 	fake := &fakePeople{people: people}
 	h := newGatedSSOHarness(t, func(s *api.Server) { s.People = fake })
 	h.srv.MarkBindingsReady()
 	l := capturedLogs(h.srv)
 	admin := h.newActor()
-	if resp := admin.signIn(inGroups(google("auth0|boss", "Boss", "boss@example.com", true), "admins")); resp.StatusCode != http.StatusFound {
+	if resp := admin.signIn(inGroups(google("auth0|boss", adminName, "boss@example.com", true), "admins")); resp.StatusCode != http.StatusFound {
 		t.Fatalf("admin sign-in = %d", resp.StatusCode)
 	}
 	return &bindingHarness{ssoHarness: h, people: fake, admin: admin, logs: l}
@@ -215,13 +221,13 @@ func TestDeletingAPersonRemovesTheirBinding(t *testing.T) {
 	}
 }
 
-func TestMovingABindingNeedsAnIdentityStore(t *testing.T) {
+// With no identity store no session can be checked against a binding, so none is
+// honoured: the request is signed out before the handler (and its own 412 guard)
+// is ever reached.
+func TestMovingABindingWithoutAnIdentityStoreFailsClosed(t *testing.T) {
 	h := newBindingHarness(t, person("auth0|x", "X", "x@example.com", true))
 	h.srv.Identities = nil
-	if resp := h.admin.do(http.MethodPut, peoplePath("auth0|x", "/binding"), `{"rider":"x"}`); resp.StatusCode != http.StatusPreconditionFailed {
-		t.Errorf("status = %d, want 412", resp.StatusCode)
-	}
-	if !strings.Contains(h.logs.String(), "level=WARN") {
-		t.Errorf("the guard did not log:\n%s", h.logs.String())
+	if resp := h.admin.do(http.MethodPut, peoplePath("auth0|x", "/binding"), `{"rider":"x"}`); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
 }

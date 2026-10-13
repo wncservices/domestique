@@ -54,7 +54,7 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 	// take the real wilant's calendar feed and morning email with it.
 	bound := false
 	if s.Identities != nil {
-		names, err := s.Identities.RidersOfSub(ctx, id)
+		names, err := s.Identities.RidersOfSub(ctx, s.authenticator().OIDC().Issuer, id)
 		if err != nil {
 			s.logger().Warn("people access: could not read the bindings of a person", "err", err)
 		}
