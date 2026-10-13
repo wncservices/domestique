@@ -1031,7 +1031,7 @@ func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.People.UpdateName(r.Context(), sub, name); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 
@@ -1146,7 +1146,7 @@ func (s *Server) handleSelfPasswordReset(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := s.People.SendInviteEmail(r.Context(), id.Email); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
@@ -1187,7 +1187,7 @@ func (s *Server) handleListMFA(w http.ResponseWriter, r *http.Request) {
 	}
 	enrollments, err := s.People.ListEnrollments(r.Context(), sub)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	out := make([]enrollmentDTO, 0, len(enrollments))
@@ -1214,7 +1214,7 @@ func (s *Server) handleEnrollMFA(w http.ResponseWriter, r *http.Request) {
 	}
 	ticketURL, err := s.People.CreateGuardianEnrollmentTicket(r.Context(), sub)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ticketUrl": ticketURL})
@@ -1236,7 +1236,7 @@ func (s *Server) handleRemoveMFA(w http.ResponseWriter, r *http.Request) {
 
 	enrollments, err := s.People.ListEnrollments(r.Context(), sub)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	owned := false
@@ -1252,7 +1252,7 @@ func (s *Server) handleRemoveMFA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.People.DeleteEnrollment(r.Context(), enrollmentID); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -2438,7 +2438,7 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		s.logger().Error("route builder preview failed", "err", err, "by", rider)
 		recordRouteBuilderError(r.Context(), "preview")
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "The routing engine", err)
 		return
 	}
 
@@ -2896,7 +2896,7 @@ func (s *Server) handleGeocodeSearch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.logger().Error("location search failed", "err", err, "by", rider)
 		recordRouteBuilderError(r.Context(), "geocode")
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "The location search", err)
 		return
 	}
 
@@ -3554,9 +3554,24 @@ func rateLimit(w http.ResponseWriter, limiter *ratelimit.Limiter, key, message s
 	return false
 }
 
+// fail is the answer for an error nobody planned for. Its text can name a
+// table, a driver or an internal host, so the client gets a fixed message and
+// the detail goes to the log. An error the rider can act on (validation, a
+// missing route, a refused credential) gets its own status and message at the
+// call site, not this.
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	s.logger().Error("request failed", "err", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+}
+
+// failUpstream is the answer when a third party refused or failed: the caller
+// is told who, never what they said, since a response body or a transport error
+// can carry a host, a token's scope or a request id. Warn, not Error: the
+// service being down or unhappy is not a fault in this app, and the log line
+// keeps the detail for whoever has to look.
+func (s *Server) failUpstream(w http.ResponseWriter, upstream string, err error) {
+	s.logger().Warn("upstream request failed", "upstream", upstream, "err", err)
+	writeJSON(w, http.StatusBadGateway, map[string]string{"error": upstream + " could not complete that request"})
 }
 
 func (s *Server) failLookup(w http.ResponseWriter, err error) {

@@ -209,9 +209,9 @@ func (s *Server) handleBasemapUpdate(w http.ResponseWriter, r *http.Request) {
 	jobName, err := s.BasemapJobs.Trigger(r.Context(), bbox, body.MaxZoom, buildDate)
 	if err != nil {
 		s.logger().Error("triggering basemap update job failed", "err", err)
-		_ = s.Basemap.MarkFailed(id, err.Error())
+		_ = s.Basemap.MarkFailed(id, "the cluster refused the update job")
 		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "the cluster refused the update job: " + err.Error(),
+			"error": "the cluster refused the update job",
 		})
 		return
 	}
