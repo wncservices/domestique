@@ -182,6 +182,12 @@ type Server struct {
 	// WebFS is the built frontend. Nil serves an API-only server.
 	WebFS fs.FS
 
+	// MetricsToken is the bearer token GET /api/metrics requires, from
+	// DOMESTIQUE_METRICS_TOKEN. Empty means no token is configured: metrics
+	// are then open only when auth is off (a laptop, `just demo`) and closed
+	// otherwise. See metricsGate.
+	MetricsToken string
+
 	// LandingHost is the hostname that gets the logged-out page instead of
 	// the app — the apex, while the app itself lives behind Authelia on a
 	// subdomain. Empty serves the app to everyone, which is what a laptop
@@ -419,7 +425,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.Handle("GET /api/metrics", metricsHandler())
+	mux.Handle("GET /api/metrics", s.metricsGate(metricsHandler()))
 	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("PATCH /api/me", s.handleUpdateMe)
 	mux.HandleFunc("DELETE /api/me", s.handleDeleteMe)
@@ -651,13 +657,13 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return hideSecretPaths(otelhttp.NewHandler(
+	return securityHeaders(hideSecretPaths(otelhttp.NewHandler(
 		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(mux))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + redactPath(r.URL.Path)
 		}),
-	))
+	)))
 }
 
 // authenticate resolves the identity once per request and puts it on the

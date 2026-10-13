@@ -769,7 +769,7 @@ cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
   through the OTel metrics API (`Int64Counter`, `Float64Histogram`, `Float64Gauge`) rather than
   `prometheus/client_golang` directly, but the wire format and metric names
   (`domestique_http_requests_total`, `domestique_http_request_duration_seconds`,
-  `domestique_push_last_success_timestamp_seconds`, `domestique_push_errors_total`) are unchanged
+  `domestique_push_last_success_timestamp_seconds`, `domestique_push_errors_total`) are unchanged (the push ones are labelled by provider, see below)
   — a ServiceMonitor scrapes Prometheus text, not an OTLP metrics pipeline, so that is what stays
   exposed. `otelprom.WithoutScopeInfo()` and `WithoutTargetInfo()` are both set on purpose: without
   them the Prometheus bridge invents an `otel_scope_*` label on every series plus a `target_info`
@@ -882,6 +882,31 @@ in `elevation.Client`, per their own comments:
    calls (`domestique_push_errors_total`'s own reasoning). Follow the existing `Int64Counter`/
    `Float64Histogram`/`Float64Gauge` pattern in `internal/api/metrics.go`, not
    `prometheus/client_golang` directly.
+
+## Security headers and metrics access
+
+- **`GET /api/metrics` is not anonymous.** It sits outside the rider session (a scraper has no
+  rider), so it has its own credential, `Server.metricsGate`: with `DOMESTIQUE_METRICS_TOKEN` set,
+  a matching `Authorization: Bearer` is required in every auth mode; with no token and auth on
+  (`proxy`/`oidc`) it is **closed** (401, and a start-up Warn says so); with no token and
+  `auth.mode: none` (`just demo`, a laptop) it stays open. A token beat a trusted-peer CIDR because
+  behind Traefik every public request arrives from the ingress, so "trusted peer" would have to
+  mean the Prometheus pod's range, a cluster detail; a Secret reference in the ServiceMonitor
+  (`authorization.credentials`) is not. Keep the `/api/metrics` carve-out in `authenticate` (it is
+  about the session, not about access).
+- **No rider names in metric labels.** Push metrics are labelled by `provider` and `op`, the Garmin
+  session gauge is one series (the earliest expiry), and `method` is normalised to the HTTP verbs
+  or `OTHER` (`normalizeMethod`). Anyone who can scrape reads labels, and the method is
+  attacker-chosen before auth. A new metric must not take a rider, an account id or a slug as a
+  label; who failed is a log line.
+- **`securityHeaders` is outermost in `Handler()`**: a CSP, `X-Frame-Options: DENY` /
+  `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: same-origin` (a share token sits in the
+  `/shared/<token>` URL), and HSTS only when the request is HTTPS. It sets before the handler runs,
+  so the calendar feed's own `no-referrer` wins. The CSP is `script-src 'self'` (no inline, no
+  eval); the only third parties in `connect-src` are Protomaps' CDN (sprite and glyphs) and the
+  Iconify API hosts (runtime icons, since the build ships no icon CSS). **A new third-party host
+  in the frontend means a CSP change in `securityheaders.go`, and the symptom is a console
+  violation, not a build error**; check the app in a browser after touching it.
 
 ## Security guardrails
 

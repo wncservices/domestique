@@ -122,13 +122,22 @@ func (s *Server) checkGarminExpiry(ctx context.Context) {
 	}
 
 	now := time.Now()
+	var earliest time.Time
+	// One series for the whole deployment, recorded once the loop is done.
+	defer func() {
+		if !earliest.IsZero() {
+			recordGarminSessionExpiry(ctx, earliest)
+		}
+	}()
 	for _, rider := range riders {
 		link, err := s.Links.Get(garminProvider, rider)
 		if err != nil {
 			continue
 		}
 		expiry := garmin.Session{ObtainedAt: link.UpdatedAt}.TokenExpiry()
-		recordGarminSessionExpiry(ctx, rider, expiry)
+		if earliest.IsZero() || expiry.Before(earliest) {
+			earliest = expiry
+		}
 
 		if now.After(expiry) {
 			// Already expired — the push-time error path already tells the
