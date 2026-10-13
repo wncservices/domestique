@@ -90,6 +90,15 @@ commands:
                 training data) to a new identity
                 (see docs/rider-migration.md before running this for real;
                 --replace resolves a conflict by keeping the old rider's row)
+  bind-identity   <issuer> <sub> <rider>   (auth.mode oidc) make an issuer account
+                  sign in as a rider, or move it to another; ends that account's
+                  sessions. --dry-run says what it would do and writes nothing.
+                  The issuer must be auth.oidc.issuer exactly (--force overrides).
+                  The first command that is not a dry run
+                  creates the bindings table and ends ALL sessions (everyone signs in again)
+  unbind-identity <issuer> <sub>           remove an account's binding (same flags
+                  and the same issuer check); it then signs in as a new rider of
+                  its own
   keygen        print a new DOMESTIQUE_ENCRYPTION_KEY
   version       print the version
 
@@ -166,12 +175,13 @@ func run(args []string) error {
 	from := fs.String("from", "", "directory of GPX routes to import")
 	out := fs.String("out", "", "file to write (default <slug>.fit)")
 	cues := fs.Bool("cues", false, "add turn cues inferred from the track's shape")
+	force := fs.Bool("force", false, "bind-identity, unbind-identity: accept an issuer that is not auth.oidc.issuer")
 	owner := fs.String("owner", "", "komoot import: rider to record as the owner of imported routes")
 
 	var positional []string
 
 	switch cmd {
-	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "keygen":
+	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "bind-identity", "unbind-identity", "keygen":
 		// Go's flag package stops at the first positional argument, so
 		// `fit <slug> --cues` would silently ignore --cues. Parse in a loop,
 		// peeling off positionals, so flags and arguments can interleave in
@@ -245,6 +255,10 @@ func run(args []string) error {
 		return runFITWorkout(src, positional, *out)
 	case "rename-rider":
 		return runRenameRider(src, positional, *dryRun, *replace)
+	case "bind-identity":
+		return runBindIdentity(src, positional, *dryRun, cfg.Auth.OIDC.Issuer, *force)
+	case "unbind-identity":
+		return runUnbindIdentity(src, positional, *dryRun, cfg.Auth.OIDC.Issuer, *force)
 	}
 	return nil
 }
@@ -1138,8 +1152,8 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 
 		// Until the riders that already exist are bound, an account that has no
 		// binding is refused at sign-in. With the Management API configured
-		// that is opened by the bootstrap (a later change in this stack); with
-		// none there is nothing to bind them from, so it opens now and the
+		// that is opened by the bootstrap (srv.StartIdentityBootstrap, below);
+		// with none there is nothing to bind them from, so it opens now and the
 		// existing riders have to be bound by hand.
 		if srv.People == nil {
 			srv.MarkBindingsReady()
@@ -1317,6 +1331,19 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// Drops generated route loops nobody came back for, so a rider's location
 	// data does not sit in memory past its 30 minutes.
 	go srv.RunCandidateJanitor(ctx)
+
+	// Binds the riders that existed before identity binding, from the people
+	// the Management API lists. Runs in the background and retries until it
+	// succeeds: it must not delay listening (a slow Auth0 would otherwise outlast
+	// the liveness window), and until it finishes accounts that have no binding
+	// are refused (503, domestique_identity_bootstrap_ready 0). Without a
+	// Management API there is nothing to run (the gate was opened above). Does
+	// nothing outside mode oidc.
+	if srv.People != nil {
+		srv.StartIdentityBootstrap(ctx, func(attempt int) time.Duration {
+			return min(time.Duration(attempt)*10*time.Second, 2*time.Minute)
+		})
+	}
 
 	log.Info("listening", "addr", addr, "library", src.Describe(),
 		"auth", authenticator.Mode())

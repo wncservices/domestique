@@ -37,10 +37,15 @@ Three words that are easy to confuse, and the distinction is the whole design:
   index (`Sessions.DeleteRider`/`DeleteSub`) without opening every sealed
   identity. Changing someone's role ends their sessions too, because the role
   is resolved from the groups stored at sign-in.
-- A **rider** is that user's name as it appears on things they own —
-  `preferred_username` falling back through `name`/`nickname`/`sub` under
-  `mode: oidc`, simply the Authelia username under `mode: proxy`. Either way
-  it is copied at the moment they act, never looked up again.
+- A **rider** is that user's name as it appears on things they own. Under
+  `mode: proxy` it is simply the Authelia username. Under `mode: oidc` it comes
+  from a **binding** (`internal/identities`, table `rider_identities`): the
+  issuer account (issuer + `sub`) is bound to a rider, and that is the only
+  thing that picks one. The name claims (`preferred_username`, `name`,
+  `nickname`) are editable by their holder, so they only *suggest* a name for
+  an account that has no binding yet and never choose a rider that already
+  exists. Either way the rider is copied at the moment they act, never looked
+  up again.
 - An **account** is a *connection to a head unit* — a Garmin Connect or Wahoo
   account, with a label and (Garmin, today) an encrypted credential. Neither
   Authelia nor the OIDC issuer knows anything about a rider's Garmin login,
@@ -103,6 +108,76 @@ state and `/sso/login` refuses outright.
 `Remote-Email` is treated as a **verified** address under this mode (it comes from Authelia's own
 user directory, which an administrator controls): see **Morning summary**.
 
+**Identity binding (`mode: oidc` only).** `handleSSOCallback` resolves the rider
+through `riderForSignIn` (`internal/api/ssobinding.go`), after the token is
+verified, in this order:
+
+1. a binding for `(issuer, sub)` exists: that rider, whatever the name claims
+   say now;
+2. the token's email is **verified** and matches (a keyed MAC, `secrets.Box.MAC`
+   purpose `identity-email`, never the address) accounts bound to exactly one
+   rider: the account joins that rider (one person, a second way to sign in);
+3. otherwise the account gets a rider of its own from the claims, or the first
+   free `name-2`, `name-3`... if the name is **taken**, which means bound to
+   another `sub` or present in *any* table of `riderTables`;
+4. a verified email shared by more than one rider joins none and falls to 3.
+
+No path binds a `sub` to a rider that has data or another binding unless that
+rider's verified email matched. Things that are easy to break:
+
+- **Fail closed.** No identity store, or the startup bootstrap not finished,
+  means an unbound sign-in is refused (500 / 503), never resolved by name.
+  Bound accounts keep signing in. `domestique_identity_bootstrap_ready` is 0
+  while the gate is closed; alert on it staying 0.
+- **The gate comes before the binding.** `handleSSOCallback` runs
+  `Authorize` first: an account outside `required_group` gets a notice, no
+  binding and no session.
+- **A session is honoured only while its binding agrees** (`sessionOrSignedOut`,
+  in `authenticate`): the session's `(issuer, sub)` must be bound to exactly the
+  rider the session holds, else the session is deleted and the request is
+  signed out. A session with no sub, or no identity store, fails closed. One
+  indexed lookup per request. This is what makes the one-time session reset
+  belt-and-braces rather than the only defence.
+- **The check and the insert are one transaction** (`identities.ClaimFree`),
+  so two first sign-ins cannot both take a free name.
+- **A person never moves their own binding onto someone else.**
+  `PUT /api/people/{id}/binding` needs `people:manage`. For the caller's own
+  `sub` it is refused if any account is bound to the target rider, and allowed
+  (logged at Warn) only onto a rider nobody is bound to: that is the owner's way
+  out of a lockout. The CLI (`bind-identity`, `unbind-identity`, `--dry-run`,
+  and `--force` for an issuer other than `auth.oidc.issuer`) is the fallback.
+  Moving or removing a binding ends that account's sessions.
+- **`PATCH /api/me` renames the display name only.** It cannot change who
+  anyone is, so it needs no collision check.
+- **Never log an email or a `sub` next to a rider name.**
+- **A new table with a rider column** goes in `riderTables`; that is what makes
+  it count as "taken" at sign-in, purge it and rename it.
+- Existing sessions were ended once when the table was created (a marker row in
+  `identity_migrations` makes that happen only once).
+
+At startup `StartIdentityBootstrap` binds the riders that existed before
+bindings, from the People connector (`planBootstrap`). It runs in the
+background and retries until it succeeds, so a slow Auth0 can never outlast a
+liveness probe; the gate above stays closed meanwhile. The rules:
+
+- a rider claimed by **one** gate-role account is bound even if its email is
+  unverified (the address is kept only when verified), unless the rider has
+  data and that account's Auth0 `created_at` is later than the rider's earliest
+  `created_at`/`updated_at` in `riderTables` (an approximation, see
+  `identities.RidersWithData`): a likely renamer, flagged as a conflict;
+- several claimants are bound only if all have the same verified email;
+- a person the Users Search had no profile for is unknown and blocks that
+  rider (Error with a count); Users Search and role listings are chunked/paged
+  past 50;
+- an unverified/unknown claimant of a rider with data is an Error
+  (`needs attention`); riders with data but no account are a Warn count and the
+  People page's "riders with data but no account".
+
+A disagreement binds nobody and logs Error (`identity bootstrap conflict`,
+rider and count only); the People page shows it and an admin resolves it.
+Without a Management API nothing runs and the riders are bound by hand with the
+CLI. `docs/rider-migration.md` has the deployment runbook.
+
 Roles come from groups — Authelia's or the OIDC issuer's `groups_claim` — most-privileged match wins:
 
 | Role | Can |
@@ -142,6 +217,14 @@ admin People page needs from Auth0's Management API — list who has access,
 invite a new rider, change roles — plus `FindByEmail`. `internal/api/people.go`
 wires it through `PeopleConnector`, an interface so tests never touch a real
 tenant.
+
+**The People page shows which rider each account is.** `boundRider` and
+`bindingStatus` (`bound`, `unbound`, `conflict`, `needs-attention`) come from `rider_identities`
+and the same `planBootstrap` rule the startup used, so the page flags exactly
+the riders the bootstrap left alone. `likelyRider` stays a guess for the crew
+picker; it is not what anything runs on. `ridersOfPerson` (block, role change)
+uses the binding when there is one, so blocking an account bound to `wilant-2`
+whose profile says "Wilant" cannot take the real wilant's calendar feed.
 
 **Inviting an email that already has an Auth0 identity grants access to it
 instead of creating a second one.** A Google sign-in creates its own identity
@@ -950,6 +1033,7 @@ just demo         # serve a local SQLite library with the example route loaded
 just api          # run the API on :8080, serving apps/web/dist if built
 just web          # Vite dev server on :5173, proxying /api to :8080
 just import DIR   # load a folder of .gpx files into the database
+# also: domestique bind-identity <issuer> <sub> <rider> [--dry-run], unbind-identity <issuer> <sub>
 just komoot ARGS  # list or import Komoot routes (needs KOMOOT_* env vars)
 just fit SLUG     # write a route out as a FIT course for a real device
 ```
@@ -1014,6 +1098,7 @@ state file ──────Open────> state.Store ───┘
 - `internal/config` — `domestique.yaml`, deliberately small: where the database
   is, and how to recognise a user. No accounts, no targets.
 - `internal/auth` — identity, roles and permissions. See above.
+- `internal/identities` — the `rider_identities` bindings. See above.
 - `internal/fitcourse` — GPX to FIT course conversion. See above.
 - `internal/komoot` — the undocumented Komoot client.
 - `internal/source` — the route library. **PostgreSQL and SQLite**: `dbx` holds

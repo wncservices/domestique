@@ -7,12 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
-	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
 // patch is ssoHarness's own client/base/cookies, plus a body — the sso
@@ -144,41 +142,44 @@ func TestUpdateMeRejectsAnEmptyName(t *testing.T) {
 	}
 }
 
-// The security-critical case: identityFromToken falls back to name (then
-// nickname, then sub) as the rider string whenever an issuer sends no
-// preferred_username — true of this deployment's Auth0 database connection.
-// Without this check, a rider could PATCH their own name to "someone-else"
-// and, on their next login, become that rider outright — inheriting their
-// routes, their linked accounts, and anything stored against that identity.
-func TestUpdateMeRejectsANameThatCollidesWithAnotherRider(t *testing.T) {
-	db, err := source.OpenDB(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	accountStore, err := accounts.UseDB(db.Conn(), db.DSN())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := accountStore.Link(t.Context(), model.ProviderGarmin, "someone-else", "their head unit"); err != nil {
-		t.Fatal(err)
-	}
-
+// PATCH /api/me renames the display name and nothing else. Who a person is
+// comes from the binding of their issuer account, so a name that happens to be
+// another rider's changes nothing about whose data they see: it used to be
+// refused because the next sign-in would have made the caller that rider, and
+// it no longer can.
+func TestUpdateMeRenamesOnlyTheDisplayNameEvenToAnotherRidersName(t *testing.T) {
 	fake := &fakePeople{}
-	h := newSSOHarness(t, func(s *api.Server) { s.People = fake; s.Accounts = accountStore })
+	h := newSSOHarness(t, func(s *api.Server) { s.People = fake })
+	acc, _ := wireData(t, h)
+	if _, err := acc.Link(t.Context(), model.ProviderGarmin, "someone-else", "their head unit"); err != nil {
+		t.Fatal(err)
+	}
+	bindTo(t, h, "auth0|someone-else", "someone-else", "someone@example.com")
+
 	h.loginWithUser([]string{"cyclists"}, map[string]any{
 		"preferred_username": "wilant", "email": "wilant@example.com",
 	})
-
-	// Case-insensitive on purpose — every rider comparison in this codebase
-	// normalizes the same way, and a collision hiding behind different
-	// casing would be exactly as exploitable as an exact match.
+	// Case-insensitive match with an existing rider, which the old guard refused.
 	resp := h.patch("/api/me", `{"name":"Someone-Else"}`)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %v", resp.StatusCode, jsonBody(t, resp))
 	}
-	if len(fake.updatedName) != 0 {
-		t.Errorf("UpdateName should not have been called: %v", fake.updatedName)
+	if got := fake.updatedName["auth0|64f2a1b2c3d4e5f6"]; got != "Someone-Else" {
+		t.Errorf("UpdateName called with %q, want the new display name", got)
+	}
+
+	// Signing in again with the account's name claim now reading "Someone-Else"
+	// is still the same rider, and still cannot see theirs.
+	again := h.newActor()
+	again.signIn(map[string]any{
+		"sub": "auth0|64f2a1b2c3d4e5f6", "name": "Someone-Else", "email": "wilant@example.com",
+		"email_verified": true, "groups": []string{"cyclists"},
+	})
+	if got := again.rider(); got != "wilant" {
+		t.Fatalf("after the rename the rider is %q, want wilant", got)
+	}
+	if _, a, _ := exposed(t, again); a != 0 {
+		t.Errorf("the renamed account sees %d of someone-else's linked accounts", a)
 	}
 }
 

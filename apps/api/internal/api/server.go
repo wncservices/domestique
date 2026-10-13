@@ -548,6 +548,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/people/{id}/role", s.handlePeopleSetRole)
 	mux.HandleFunc("PUT /api/people/{id}/blocked", s.handleSetPersonBlocked)
 	mux.HandleFunc("DELETE /api/people/{id}", s.handleDeletePerson)
+	mux.HandleFunc("PUT /api/people/{id}/binding", s.handlePeopleSetBinding)
+	mux.HandleFunc("GET /api/people/riders/{rider}", s.handlePeopleRiderInfo)
+	mux.HandleFunc("GET /api/people/orphans", s.handlePeopleOrphans)
 
 	mux.HandleFunc("POST /api/crews", s.handleCreateCrew)
 	mux.HandleFunc("GET /api/crews", s.handleListCrews)
@@ -1005,6 +1008,11 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 // Auth0 is the system of record (Update writes there first), and the
 // current session is patched to match afterward so the change is visible
 // immediately rather than after sessionTTL forces a fresh login.
+//
+// The display name only. Who a rider is comes from the binding of their
+// issuer account (internal/identities), which this endpoint never touches, so
+// a name that equals another rider's changes nothing about whose data anyone
+// sees and needs no check.
 func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	sub, ok := s.meAuth0Sub(w, r)
 	if !ok {
@@ -1024,29 +1032,6 @@ func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// identityFromToken falls back to name (then nickname, then sub) as the
-	// rider string whenever an issuer sends no preferred_username — true of
-	// this deployment's Auth0 database connection. That makes this endpoint
-	// capable of far more than a display-name edit: without this check,
-	// renaming to "wilant" and signing in again would make the caller BE
-	// wilant — inheriting their routes, their linked Garmin/Wahoo sessions
-	// (including delete/push), and their crew memberships. Refusing a name
-	// that already belongs to somebody else closes that off. It does not
-	// address the older, narrower issue that a rider legitimately renaming
-	// their OWN identity this way still needs the `rename-rider` CLI's
-	// migration to carry their own existing rows forward — that gap
-	// predates this check and is out of scope for it.
-	rider := auth.FromContext(r.Context()).User
-	if taken, err := s.riderIdentityInUse(r.Context(), name, rider); err != nil {
-		s.fail(w, err)
-		return
-	} else if taken {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "that name is already in use — pick a different one",
-		})
-		return
-	}
-
 	if _, err := s.People.UpdateName(r.Context(), sub, name); err != nil {
 		s.failUpstream(w, "Auth0", err)
 		return
@@ -1063,72 +1048,6 @@ func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"name": name})
-}
-
-// riderIdentityInUse reports whether candidate, once normalized the same
-// way every rider comparison in this codebase is (lowercased, trimmed —
-// see crew.normalizeRider and source.normalizeRider), already identifies
-// someone other than self. Checked against every place a rider string is
-// the key: route ownership, linked head units, provider connections (each
-// probed directly rather than listed — providerlink.Store has no List, and
-// there are only three providers to ask), and crew membership of any
-// status. self is excluded so a rider fixing the case of their own existing
-// name, or making no real change, is never refused.
-func (s *Server) riderIdentityInUse(ctx context.Context, candidate, self string) (bool, error) {
-	normalized := strings.ToLower(strings.TrimSpace(candidate))
-	self = strings.ToLower(strings.TrimSpace(self))
-	if normalized == "" || normalized == self {
-		return false, nil
-	}
-
-	if s.Source != nil {
-		routes, _, err := s.Source.List(ctx)
-		if err != nil {
-			return false, fmt.Errorf("checking route ownership: %w", err)
-		}
-		for _, rt := range routes {
-			if strings.EqualFold(rt.Owner, normalized) {
-				return true, nil
-			}
-		}
-	}
-
-	if s.Accounts != nil {
-		accountList, err := s.Accounts.List(ctx)
-		if err != nil {
-			return false, fmt.Errorf("checking linked accounts: %w", err)
-		}
-		for _, a := range accountList {
-			if strings.EqualFold(a.Rider, normalized) {
-				return true, nil
-			}
-		}
-	}
-
-	if s.Links != nil {
-		for _, provider := range []string{garminProvider, wahooProvider, komootProvider} {
-			switch _, err := s.Links.Get(provider, normalized); {
-			case err == nil:
-				return true, nil
-			case errors.Is(err, providerlink.ErrNotFound):
-				// expected — that provider, that name, nobody connected
-			default:
-				return false, fmt.Errorf("checking %s connections: %w", provider, err)
-			}
-		}
-	}
-
-	if s.Crew != nil {
-		has, err := s.Crew.HasRider(ctx, normalized)
-		if err != nil {
-			return false, fmt.Errorf("checking crew membership: %w", err)
-		}
-		if has {
-			return true, nil
-		}
-	}
-
-	return false, nil
 }
 
 // handleSelfPasswordReset sends the signed-in rider Auth0's own

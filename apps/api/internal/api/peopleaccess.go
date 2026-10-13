@@ -48,6 +48,22 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 		}
 	}
 
+	// The binding is the rider this account is, and nothing else about the
+	// profile is. Where there is one, the name-based guess below is not used:
+	// an account bound to "wilant-2" whose profile still reads "Wilant" must not
+	// take the real wilant's calendar feed and morning email with it.
+	bound := false
+	if s.Identities != nil {
+		names, err := s.Identities.RidersOfSub(ctx, s.authenticator().OIDC().Issuer, id)
+		if err != nil {
+			s.logger().Warn("people access: could not read the bindings of a person", "err", err)
+		}
+		for _, n := range names {
+			add(n)
+			bound = true
+		}
+	}
+
 	if s.People != nil && s.Auth != nil {
 		if gate := s.Auth.RequiredGroup(); gate != "" {
 			adminRole, riderRole := s.permissionRoleNames()
@@ -66,7 +82,9 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 				if p.UserID != id {
 					continue
 				}
-				add(likelyRider(p.Name, p.Nickname, p.UserID))
+				if !bound {
+					add(likelyRider(p.Name, p.Nickname, p.UserID))
+				}
 				if email == "" {
 					email = strings.ToLower(strings.TrimSpace(p.Email))
 				}

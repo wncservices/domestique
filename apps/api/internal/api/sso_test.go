@@ -178,17 +178,17 @@ var ssoNow = time.Date(2026, 10, 13, 9, 30, 0, 0, time.FixedZone("CEST", 2*3600)
 // request off the same pointer, not a snapshot taken at construction.
 func newSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
 	t.Helper()
-	return buildSSOHarness(t, true, opts...)
+	return buildSSOHarness(t, true, "", opts...)
 }
 
 // newGatedSSOHarness is newSSOHarness before the startup step that binds the
 // riders that already exist has finished: an unbound account is refused.
 func newGatedSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
 	t.Helper()
-	return buildSSOHarness(t, false, opts...)
+	return buildSSOHarness(t, false, "domestique-users", opts...)
 }
 
-func buildSSOHarness(t *testing.T, bindingsReady bool, opts ...func(*api.Server)) *ssoHarness {
+func buildSSOHarness(t *testing.T, bindingsReady bool, requiredGroup string, opts ...func(*api.Server)) *ssoHarness {
 	t.Helper()
 	issuer := newFakeIssuer(t)
 
@@ -212,7 +212,7 @@ func buildSSOHarness(t *testing.T, bindingsReady bool, opts ...func(*api.Server)
 	}
 
 	authenticator, err := auth.New(auth.Config{
-		Mode:  auth.ModeOIDC,
+		Mode: auth.ModeOIDC, RequiredGroup: requiredGroup,
 		Roles: auth.RoleMapping{Admin: []string{"admins"}, Rider: []string{"cyclists"}},
 		OIDC: auth.OIDCConfig{
 			Issuer: issuer.server.URL, ClientID: "domestique-test",
@@ -259,7 +259,7 @@ func buildSSOHarness(t *testing.T, bindingsReady bool, opts ...func(*api.Server)
 	// absolute URL on this harness's own address, decided only once the
 	// server is up.
 	authenticator2, err := auth.New(auth.Config{
-		Mode:  auth.ModeOIDC,
+		Mode: auth.ModeOIDC, RequiredGroup: requiredGroup,
 		Roles: auth.RoleMapping{Admin: []string{"admins"}, Rider: []string{"cyclists"}},
 		OIDC: auth.OIDCConfig{
 			Issuer: issuer.server.URL, ClientID: "domestique-test",

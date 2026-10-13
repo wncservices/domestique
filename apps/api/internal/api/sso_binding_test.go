@@ -109,6 +109,12 @@ func google(sub, name, email string, verified bool) map[string]any {
 	}
 }
 
+// inGate adds the group a harness built with a required group needs.
+func inGate(claims map[string]any) map[string]any {
+	claims["groups"] = []string{"cyclists", "domestique-users"}
+	return claims
+}
+
 // logs captures what the server logs, so a test can assert on what is, and is
 // not, in it.
 type logs struct {
@@ -388,7 +394,7 @@ func TestSignInRefusesAnUnboundAccountUntilTheBootstrapHasRun(t *testing.T) {
 	bindTo(t, h, "google-oauth2|bound", "wilant", "wilant@example.com")
 
 	unbound := h.newActor()
-	resp := unbound.signIn(google("google-oauth2|new", "Wilant", "new@example.com", true))
+	resp := unbound.signIn(inGate(google("google-oauth2|new", "Wilant", "new@example.com", true)))
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("unbound callback = %d, want 503", resp.StatusCode)
 	}
@@ -403,7 +409,7 @@ func TestSignInRefusesAnUnboundAccountUntilTheBootstrapHasRun(t *testing.T) {
 	}
 
 	bound := h.newActor()
-	if resp := bound.signIn(google("google-oauth2|bound", "Anything", "wilant@example.com", true)); resp.StatusCode != http.StatusFound {
+	if resp := bound.signIn(inGate(google("google-oauth2|bound", "Anything", "wilant@example.com", true))); resp.StatusCode != http.StatusFound {
 		t.Fatalf("bound callback = %d, want 302", resp.StatusCode)
 	}
 	if got := bound.rider(); got != "wilant" {
@@ -411,7 +417,7 @@ func TestSignInRefusesAnUnboundAccountUntilTheBootstrapHasRun(t *testing.T) {
 	}
 
 	h.srv.MarkBindingsReady()
-	if resp := unbound.signIn(google("google-oauth2|new", "Wilant", "new@example.com", true)); resp.StatusCode != http.StatusFound {
+	if resp := unbound.signIn(inGate(google("google-oauth2|new", "Wilant", "new@example.com", true))); resp.StatusCode != http.StatusFound {
 		t.Errorf("after the bootstrap the callback = %d, want 302", resp.StatusCode)
 	}
 }
