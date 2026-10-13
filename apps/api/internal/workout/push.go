@@ -26,7 +26,7 @@ func (d *DB) GetPush(ctx context.Context, workoutID, provider string) (Push, boo
 // SavePush upserts the record: a workout has at most one copy per provider,
 // and recording a first push or a later update is the same write.
 func (d *DB) SavePush(ctx context.Context, p Push) error {
-	p.PushedAt = timestamp()
+	p.PushedAt = d.timestamp()
 	if p.Origin == "" {
 		p.Origin = PushOriginManual
 	}

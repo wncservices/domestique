@@ -149,6 +149,7 @@ func newMSHarness(t *testing.T, mode auth.Mode, dsn string, opts msOpts) *msHarn
 		Clock:           func() time.Time { return h.clock },
 		TestMailLimiter: api.NewTestMailLimiter(),
 	}
+	followServerClock(srv, training)
 	if !opts.noMailer {
 		srv.Mailer = notif
 	}

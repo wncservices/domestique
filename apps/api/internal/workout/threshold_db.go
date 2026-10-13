@@ -16,7 +16,7 @@ import (
 // suggestions created within the same sync run (or the same test) need a
 // created_at that actually orders them, not one that ties and falls back to
 // comparing random ids.
-func thresholdTimestamp() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+func (d *DB) thresholdTimestamp() string { return d.now().UTC().Format(time.RFC3339Nano) }
 
 // Threshold suggestion status values — see ThresholdSuggestion's own doc
 // comment and docs/superpowers/specs/2026-09-28-threshold-detection-design.md's
@@ -93,7 +93,7 @@ func (d *DB) CreateSuggestion(ctx context.Context, s ThresholdSuggestion) (Thres
 	if err != nil {
 		return ThresholdSuggestion{}, err
 	}
-	ts := thresholdTimestamp()
+	ts := d.thresholdTimestamp()
 
 	direction := s.Direction
 	if direction == "" {
@@ -205,7 +205,7 @@ func (d *DB) MarkSuggestionDismissed(ctx context.Context, id string) error {
 func (d *DB) markSuggestion(ctx context.Context, id, status string) error {
 	result, err := d.db.ExecContext(ctx, d.query(
 		`UPDATE threshold_suggestions SET status = ?, updated_at = ? WHERE id = ? AND status = ?`),
-		status, thresholdTimestamp(), id, ThresholdPending)
+		status, d.thresholdTimestamp(), id, ThresholdPending)
 	if err != nil {
 		return err
 	}

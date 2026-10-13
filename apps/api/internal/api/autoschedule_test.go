@@ -41,6 +41,21 @@ type autoScheduleHarness struct {
 	now time.Time
 }
 
+// followServerClock makes the training store read "now" from whatever clock
+// the server is given, including one a test installs later. The store stamps
+// created_at/updated_at and decides how far fitness runs up to; the server
+// compares those with dates from its own clock. Left on the real clock, a
+// test that fixes only the server passes or fails depending on the day it
+// runs.
+func followServerClock(srv *api.Server, store *workout.DB) {
+	store.Clock = func() time.Time {
+		if srv.Clock != nil {
+			return srv.Clock()
+		}
+		return time.Now()
+	}
+}
+
 func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
 	t.Helper()
 
@@ -70,6 +85,7 @@ func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
 	}
 
 	srv := &api.Server{Source: db, Auth: authenticator, Training: trainingStore, Settings: appSettings}
+	followServerClock(srv, trainingStore)
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
