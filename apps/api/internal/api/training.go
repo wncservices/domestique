@@ -1195,7 +1195,7 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proposal, err := s.Narration.ProposeGoal(r.Context(), body.Note, time.Now())
+	proposal, err := s.Narration.ProposeGoal(r.Context(), body.Note, s.now())
 	if err != nil {
 		s.logger().Warn("goal proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not turn that into a goal — try rephrasing it, or fill the form in by hand"})

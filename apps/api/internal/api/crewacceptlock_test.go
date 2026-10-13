@@ -67,6 +67,7 @@ func TestAcceptingIsRefusedWhileTheSchedulingLockIsHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &api.Server{Source: db, Auth: authenticator, Training: store, Crew: crews, Schedule: sched, Settings: appSettings, Clock: cpClock}
+	followServerClock(srv, store)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
