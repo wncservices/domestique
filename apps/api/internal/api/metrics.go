@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -77,6 +78,20 @@ var (
 		metric.WithDescription("Unix time of the last successful push per account, by op (create/update/delete)."),
 	))
 
+	// pushAccountsFailing and garminSessionsExpired exist because the labels
+	// above deliberately name no rider, which hides one stuck account behind
+	// another that keeps succeeding. They count, and name nobody: how many linked
+	// accounts' latest push failed, and how many Garmin sessions are already past
+	// expiry. Alert on these being above zero.
+	pushAccountsFailing = must(meter.Float64Gauge(
+		"domestique_push_accounts_failing",
+		metric.WithDescription("Linked accounts whose most recent push attempt failed, by provider."),
+	))
+	garminSessionsExpired = must(meter.Float64Gauge(
+		"domestique_garmin_sessions_expired",
+		metric.WithDescription("Linked Garmin sessions already past their expected expiry."),
+	))
+
 	pushErrorsTotal = must(meter.Int64Counter(
 		"domestique_push_errors_total",
 		metric.WithDescription("Failed push attempts per account."),
@@ -112,8 +127,66 @@ var (
 // recordGarminSessionExpiry is checkGarminExpiry's own metric-recording
 // call, kept here for the same reason recordTrackPreviewSize is: metrics.go
 // owns every instrument, callers just report a value against one.
-func recordGarminSessionExpiry(ctx context.Context, earliest time.Time) {
-	garminSessionExpiry.Record(ctx, float64(earliest.Unix()))
+//
+// earliest is the first expiry among sessions that still work, or the zero time
+// when there is none (nobody connected, or every session already lapsed): then
+// the gauge reads 0, not the last rider's value. An alert on this gauge needs
+// `> 0`; "a session has already lapsed" is garminSessionsExpired's job.
+func recordGarminSessionExpiry(ctx context.Context, earliest time.Time, expired int) {
+	var v float64
+	if !earliest.IsZero() {
+		v = float64(earliest.Unix())
+	}
+	garminSessionExpiry.Record(ctx, v)
+	garminSessionsExpired.Record(ctx, float64(expired))
+}
+
+// pushOutcomes remembers, per account, whether its latest push attempt failed.
+// The per-provider counter and timestamp cannot show one account stuck while
+// another of the same provider succeeds (the success refreshes the shared
+// timestamp), so the number of accounts whose latest attempt failed is kept
+// alongside. Only the count leaves this struct: it holds account ids, which
+// carry a rider's name, and they are never a label.
+var pushOutcomes = struct {
+	sync.Mutex
+	failing map[string]bool
+}{failing: map[string]bool{}}
+
+// recordPushOutcome notes one attempt and republishes the failing count for
+// every provider (so a provider that just recovered reads 0, not its last value).
+func recordPushOutcome(ctx context.Context, accountID string, failed bool) {
+	pushOutcomes.Lock()
+	defer pushOutcomes.Unlock()
+	if failed {
+		pushOutcomes.failing[accountID] = true
+	} else {
+		delete(pushOutcomes.failing, accountID)
+	}
+	publishPushFailingLocked(ctx)
+}
+
+// forgetUnlinkedPushOutcomes drops accounts that are no longer linked, so an
+// account that failed and was then unlinked does not hold the count above zero
+// for good. Run on the reconcile tick, with the ids that exist now.
+func forgetUnlinkedPushOutcomes(ctx context.Context, linked map[string]bool) {
+	pushOutcomes.Lock()
+	defer pushOutcomes.Unlock()
+	for id := range pushOutcomes.failing {
+		if !linked[id] {
+			delete(pushOutcomes.failing, id)
+		}
+	}
+	publishPushFailingLocked(ctx)
+}
+
+func publishPushFailingLocked(ctx context.Context) {
+	counts := map[string]int{string(model.ProviderGarmin): 0, string(model.ProviderWahoo): 0}
+	for id := range pushOutcomes.failing {
+		counts[providerOf(id)]++
+	}
+	for provider, n := range counts {
+		pushAccountsFailing.Record(ctx, float64(n), metric.WithAttributes(attribute.String("provider", provider)))
+	}
 }
 
 // newMeter gives metrics.go its own MeterProvider bound to reg, independent
@@ -227,6 +300,7 @@ func (s *Server) recordPushResult(item model.PlanItem, err error) {
 		attribute.String("op", string(item.Op)),
 	)
 	ctx := context.Background()
+	recordPushOutcome(ctx, item.AccountID, err != nil)
 	if err != nil {
 		pushErrorsTotal.Add(ctx, 1, attrs)
 		return
@@ -277,8 +351,8 @@ func providerOf(accountID string) string {
 func (s *Server) metricsGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case s.MetricsToken != "":
-			if !bearerMatches(r.Header.Get("Authorization"), s.MetricsToken) {
+		case strings.TrimSpace(s.MetricsToken) != "":
+			if !bearerMatches(r.Header.Get("Authorization"), strings.TrimSpace(s.MetricsToken)) {
 				metricsDenied(w)
 				return
 			}
