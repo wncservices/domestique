@@ -130,7 +130,7 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
 
 	analysedAt := a.AnalysedAt
 	if analysedAt == "" {
-		analysedAt = timestamp()
+		analysedAt = d.timestamp()
 	}
 
 	_, err = d.db.ExecContext(ctx, d.query(`

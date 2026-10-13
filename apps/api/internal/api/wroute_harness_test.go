@@ -106,6 +106,7 @@ func newWRHarness(t *testing.T, mutate ...func(*wrHarness, *api.Server)) *wrHarn
 		m(h, srv)
 	}
 	h.srv = srv
+	followServerClock(srv, training)
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 	h.client, h.base = server.Client(), server.URL

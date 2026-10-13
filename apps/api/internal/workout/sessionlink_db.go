@@ -31,7 +31,7 @@ func (d *DB) SetSessionLink(ctx context.Context, rider, sessionID, workoutID str
         VALUES (?, ?, ?, ?)
         ON CONFLICT (session_id) DO UPDATE SET
             rider = excluded.rider, workout_id = excluded.workout_id, created_at = excluded.created_at`),
-		sessionID, rider, workoutID, timestamp())
+		sessionID, rider, workoutID, d.timestamp())
 	return err
 }
 
