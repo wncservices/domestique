@@ -27,6 +27,8 @@ type purgeSummary struct {
 	// and progression removed; ShareLinks the route links they had created.
 	TrainingRows int
 	ShareLinks   int
+	// IdentitiesUnbound is the issuer accounts that no longer sign in as the rider.
+	IdentitiesUnbound int
 	// SessionsEnded is the logins (one per device) that were ended.
 	SessionsEnded int
 	// AdjustmentsRemoved is the "Why?" records of the rider's plan changes:
@@ -44,8 +46,7 @@ type purgeSummary struct {
 // Composed from each store's own public methods rather than one SQL
 // transaction: Source is the source.Library interface, and a
 // directory-backed deployment satisfies it with no SQL table at all, so no
-// single cross-table transaction could span every step here regardless (see
-// s.riderIdentityInUse for the same reasoning applied to a read). Every step
+// single cross-table transaction could span every step here regardless. Every step
 // below tolerates "already gone" so a retry after a partial failure is safe.
 //
 // A failure is logged at Error and returned: a rider whose purge stopped half
@@ -85,6 +86,16 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("ending sessions: %w", err)
 		}
 		sum.SessionsEnded = n
+	}
+
+	// Also before anything is removed: with the binding gone, an account that
+	// signs in again is a new one and cannot reach what is being deleted.
+	if s.Identities != nil {
+		n, err := s.Identities.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing identity bindings: %w", err)
+		}
+		sum.IdentitiesUnbound = n
 	}
 
 	if s.Source != nil {
@@ -295,6 +306,6 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("rider deleted own account", "rider", rider, "routes", sum.Routes,
 		"accountsUnlinked", sum.AccountsUnlinked, "providerLinks", sum.ProviderLinks, "crewMemberships", sum.CrewMemberships,
 		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks, "sessionsEnded", sum.SessionsEnded,
-		"adjustmentsRemoved", sum.AdjustmentsRemoved)
+		"adjustmentsRemoved", sum.AdjustmentsRemoved, "identitiesUnbound", sum.IdentitiesUnbound)
 	writeJSON(w, http.StatusOK, map[string]string{"redirectTo": redirectTo})
 }

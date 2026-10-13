@@ -16,6 +16,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -114,6 +115,9 @@ func openRiderDataEnv(t *testing.T, dsn string) *riderDataEnv {
 		t.Fatal(err)
 	}
 	if srv.Sessions, err = sessions.UseDB(conn, dsnUsed, box); err != nil {
+		t.Fatal(err)
+	}
+	if srv.Identities, err = identities.UseDB(conn, dsnUsed, box); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = settings.UseDB(conn, dsnUsed, box); err != nil {
@@ -354,6 +358,15 @@ func riderSeeds() []seed {
 		{"adjustments", func(e *riderDataEnv, rider, id string) error {
 			rec := why.NewRecord(why.MissedMoved, "moved", why.MissedMovedInputs{})
 			return e.srv.Training.RecordAdjustment(context.Background(), rider, workout.SubjectWorkout, "workout-"+id, rec, "2026-01-02")
+		}, "rider", byRider},
+		{"rider_identities", func(e *riderDataEnv, rider, id string) error {
+			// Two accounts, as a rider who signs in with Google and a password has.
+			for _, sub := range []string{"google-oauth2|" + rider, "auth0|" + rider} {
+				if _, err := e.srv.Identities.Bind(context.Background(), "https://issuer.test/", sub, rider, ""); err != nil {
+					return err
+				}
+			}
+			return nil
 		}, "rider", byRider},
 		{"sessions", func(e *riderDataEnv, rider, id string) error {
 			// Two sessions, as a rider on a phone and a laptop has.
