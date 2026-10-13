@@ -130,6 +130,33 @@ func UseDB(db *sql.DB, dsn string, box *secrets.Box) (*Store, error) {
 	return s, nil
 }
 
+// Exists reports whether the bindings table has been created in this database.
+func Exists(db *sql.DB, dsn string) (bool, error) {
+	d, err := dbx.For(dsn)
+	if err != nil {
+		return false, err
+	}
+	return tableExists(db, d, "rider_identities")
+}
+
+// Attach opens the store on a database that already has the table, and writes
+// nothing: no table, no migration, no ending of sessions. It is for a dry run
+// that must look without touching, and fails if the table is not there.
+func Attach(db *sql.DB, dsn string, box *secrets.Box) (*Store, error) {
+	d, err := dbx.For(dsn)
+	if err != nil {
+		return nil, err
+	}
+	have, err := tableExists(db, d, "rider_identities")
+	if err != nil {
+		return nil, err
+	}
+	if !have {
+		return nil, errors.New("identities: this database has no rider_identities table yet")
+	}
+	return &Store{db: db, dialect: d, box: box}, nil
+}
+
 // endSessionsOnce deletes every session the first time it runs against a
 // database, and never again.
 //

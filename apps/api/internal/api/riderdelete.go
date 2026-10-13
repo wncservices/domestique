@@ -46,8 +46,7 @@ type purgeSummary struct {
 // Composed from each store's own public methods rather than one SQL
 // transaction: Source is the source.Library interface, and a
 // directory-backed deployment satisfies it with no SQL table at all, so no
-// single cross-table transaction could span every step here regardless (see
-// s.riderIdentityInUse for the same reasoning applied to a read). Every step
+// single cross-table transaction could span every step here regardless. Every step
 // below tolerates "already gone" so a retry after a partial failure is safe.
 //
 // A failure is logged at Error and returned: a rider whose purge stopped half
