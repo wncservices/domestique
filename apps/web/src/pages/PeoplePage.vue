@@ -5,6 +5,7 @@ import { api, ApiError } from '@/api/client'
 import type { AssignableRole, Person } from '@/api/types'
 import { roleColor } from '@/utils/role'
 import { usePagedList } from '@/composables/usePagedList'
+import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
 
@@ -28,7 +29,7 @@ async function load() {
     if (err instanceof ApiError && err.status === 412) {
       unavailable.value = true
     } else {
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = describeError(err)
     }
   } finally {
     loading.value = false
@@ -96,7 +97,7 @@ async function sendInvite() {
     inviteRole.value = 'rider'
     await load()
   } catch (err) {
-    inviteError.value = err instanceof Error ? err.message : String(err)
+    inviteError.value = describeError(err)
   } finally {
     inviting.value = false
   }
@@ -120,7 +121,7 @@ async function changeRole(person: Person, role: AssignableRole) {
   } catch (err) {
     toast.add({
       title: `Could not change ${person.email}'s role`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -174,7 +175,7 @@ async function confirmToggleBlocked() {
   } catch (err) {
     toast.add({
       title: `Could not ${blocked ? 'block' : 'unblock'} ${target.email}`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -214,7 +215,7 @@ async function confirmDeletePerson() {
   } catch (err) {
     toast.add({
       title: `Could not delete ${target.email}`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

@@ -7,6 +7,7 @@ import type { Account, Me, Poi, Route } from '@/api/types'
 import PacingCard from './PacingCard.vue'
 import RouteMap from './RouteMap.vue'
 import ScheduleRideModal from './ScheduleRideModal.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const router = useRouter()
 
@@ -109,7 +110,7 @@ async function saveInfo() {
   } catch (err) {
     toast.add({
       title: 'Could not update the route',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -142,7 +143,7 @@ async function recalculateElevation() {
   } catch (err) {
     toast.add({
       title: 'Could not recalculate elevation',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

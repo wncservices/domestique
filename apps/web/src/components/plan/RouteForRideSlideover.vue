@@ -15,6 +15,7 @@ import RouteCandidatePreview from '@/components/RouteCandidatePreview.vue'
 import { formatDuration } from '@/utils/workoutMath'
 import { todayISO } from '@/utils/rideDates'
 import RideStartPicker from './RideStartPicker.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ workout: Workout | null }>()
@@ -37,7 +38,7 @@ const FAMILY_LABEL: Record<string, string> = {
 }
 
 function copyFor(err: unknown): string {
-  if (!(err instanceof ApiError)) return err instanceof Error ? err.message : String(err)
+  if (!(err instanceof ApiError)) return describeError(err)
   switch (err.status) {
     case 410:
       return 'That route is no longer available. Generate again.'

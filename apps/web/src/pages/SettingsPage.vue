@@ -18,6 +18,7 @@ import GarminSetup from '@/components/GarminSetup.vue'
 import KomootConnect from '@/components/KomootConnect.vue'
 import WeatherSettings from '@/components/WeatherSettings.vue'
 import RideStartCard from '@/components/plan/RideStartCard.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const {
   accounts,
@@ -60,7 +61,7 @@ async function saveName() {
   } catch (err) {
     toast.add({
       title: 'Could not update your name',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -244,7 +245,7 @@ async function loadConnection() {
   try {
     connection.value = await api.komootConnection()
   } catch (err) {
-    connectionError.value = err instanceof Error ? err.message : String(err)
+    connectionError.value = describeError(err)
   }
 }
 
@@ -275,7 +276,7 @@ async function loadBasemap() {
   } catch (err) {
     toast.add({
       title: 'Could not read the basemap status',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -305,7 +306,7 @@ async function loadAutoSync() {
   } catch (err) {
     toast.add({
       title: 'Could not read the auto-sync setting',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -327,7 +328,7 @@ async function toggleAutoSync(enabled: boolean) {
   } catch (err) {
     toast.add({
       title: 'Could not change auto-sync',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -343,7 +344,7 @@ async function loadAutoSchedule() {
   } catch (err) {
     toast.add({
       title: 'Could not read the auto-schedule setting',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -365,7 +366,7 @@ async function toggleAutoSchedule(enabled: boolean) {
   } catch (err) {
     toast.add({
       title: 'Could not change auto-schedule',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -379,7 +380,7 @@ async function loadGarmin() {
   try {
     garmin.value = await api.garminConnection()
   } catch (err) {
-    garminError.value = err instanceof Error ? err.message : String(err)
+    garminError.value = describeError(err)
   }
 }
 
@@ -388,7 +389,7 @@ async function loadWahoo() {
   try {
     wahoo.value = await api.wahooConnection()
   } catch (err) {
-    wahooError.value = err instanceof Error ? err.message : String(err)
+    wahooError.value = describeError(err)
   }
 }
 

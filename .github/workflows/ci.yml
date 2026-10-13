@@ -108,6 +108,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Unit tests
+        run: npm --workspace @domestique/web test
       - run: npm run build
       - name: Fail if the build produced nothing
         run: test -f apps/web/dist/index.html

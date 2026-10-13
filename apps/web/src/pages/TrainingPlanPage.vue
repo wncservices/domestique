@@ -63,6 +63,7 @@ import { useWeather } from '@/composables/useWeather'
 import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
+import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
 const route = useRoute()
@@ -75,9 +76,8 @@ const { canSyncGarmin, routingConfigured } = useLibrary()
 // feature flag, not just auth. ---
 const me = ref<Me | null>(null)
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
+// Handed to the plan composables, which report their own failures with it.
+const errorMessage = describeError
 
 // --- rider profile: read-only here, just enough to gate "Schedule this
 // week" and the periodization hint on whether hours/available days are on
@@ -147,7 +147,7 @@ async function loadWorkouts() {
   try {
     workouts.value = await api.workouts()
   } catch (err) {
-    toast.add({ title: 'Could not load workouts', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not load workouts', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     loadingWorkouts.value = false
   }
@@ -208,7 +208,7 @@ async function saveWorkout() {
     await loadWorkouts()
     await loadWeek()
   } catch (err) {
-    toast.add({ title: 'Could not save workout', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not save workout', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     savingWorkout.value = false
   }
@@ -223,7 +223,7 @@ async function deleteWorkout(w: Workout) {
     await loadWorkouts()
     await loadWeek()
   } catch (err) {
-    toast.add({ title: `Could not delete ${w.name}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: `Could not delete ${w.name}`, description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     deletingWorkout.value = ''
   }
@@ -321,7 +321,7 @@ async function removeRouteFrom(w: Workout) {
     toast.add({ title: 'Route removed from your ride', icon: 'i-lucide-route', color: 'success' })
     await Promise.all([loadWeek(), loadWorkouts()])
   } catch (err) {
-    toast.add({ title: 'Could not remove the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not remove the route', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   }
 }
 
@@ -348,7 +348,7 @@ async function sendCourseOf(w: Workout) {
         toast.add({ title: 'The route could not be sent', icon: 'i-lucide-triangle-alert', color: 'warning' })
     }
   } catch (err) {
-    toast.add({ title: 'Could not send the route', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not send the route', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     sendingCourse.value = false
   }
@@ -371,7 +371,7 @@ async function pushWorkoutToGarmin(w: Workout) {
   } catch (err) {
     toast.add({
       title: `Could not push ${w.name} to Garmin`,
-      description: errorMessage(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -442,7 +442,7 @@ async function answerRideTogether(id: string, accept: boolean) {
     if (err instanceof ApiError) await loadRideTogether()
     toast.add({
       title: 'Nothing was moved',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'warning',
     })
@@ -481,7 +481,7 @@ async function easeTomorrow() {
     if (err instanceof ApiError && err.status === 409) {
       toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
     } else {
-      toast.add({ title: "Could not ease tomorrow's session", description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: "Could not ease tomorrow's session", description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   } finally {
     easingTomorrow.value = false
@@ -535,7 +535,7 @@ async function scheduleFtpTest(req: BuildFtpTestRequest) {
     if (err instanceof ApiError && err.status === 409) {
       toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
     } else {
-      toast.add({ title: 'Could not schedule the FTP test', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: 'Could not schedule the FTP test', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   } finally {
     schedulingFtpTest.value = false
@@ -548,7 +548,7 @@ async function snoozeFtpTest() {
   try {
     await api.snoozeFTPTest()
   } catch (err) {
-    toast.add({ title: 'Could not dismiss the suggestion', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not dismiss the suggestion', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     snoozingFtpTest.value = false
   }
@@ -570,7 +570,7 @@ async function loadWeek() {
     if (requestId === weekRequest) week.value = result
   } catch (err) {
     if (requestId === weekRequest) {
-      toast.add({ title: 'Could not load this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: 'Could not load this week', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   }
 }
@@ -612,7 +612,7 @@ async function moveWorkout(w: Workout, date: string) {
     await loadWorkouts()
     await loadWeather()
   } catch (err) {
-    toast.add({ title: `Could not move ${w.name}`, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: `Could not move ${w.name}`, description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   }
 }
 
@@ -803,7 +803,7 @@ async function proposeEdit(text: string) {
     lifeModalProposal.value = res
     lifeModalOpen.value = true
   } catch (err) {
-    planEditMessage.value = err instanceof ApiError && err.status === 502 ? err.message : `Could not propose that: ${errorMessage(err)}`
+    planEditMessage.value = err instanceof ApiError && err.status === 502 ? err.message : `Could not propose that: ${describeError(err)}`
   } finally {
     proposingEdit.value = false
   }
@@ -848,7 +848,7 @@ async function confirmReplan() {
     if (err instanceof ApiError && err.status === 409) {
       toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
     } else {
-      toast.add({ title: 'Could not replan this week', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: 'Could not replan this week', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   } finally {
     replanning.value = false

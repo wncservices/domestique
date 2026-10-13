@@ -13,6 +13,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type { MorningSummaryStatus } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
+import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
 const { canManageSettings } = useLibrary()
@@ -24,10 +25,6 @@ const sending = ref(false)
 const showExplanation = computed(
   () => status.value?.available === false && status.value.reason === 'not_configured' && canManageSettings.value,
 )
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 async function load() {
   try {
@@ -48,7 +45,7 @@ async function toggle(enabled: boolean) {
       color: enabled ? 'success' : 'neutral',
     })
   } catch (err) {
-    toast.add({ title: 'Could not change the morning summary', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not change the morning summary', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     await load()
   } finally {
     saving.value = false
@@ -64,7 +61,7 @@ async function sendTest() {
     const tooMany = err instanceof ApiError && err.status === 429
     toast.add({
       title: tooMany ? 'Too many test emails' : 'Could not send the test email',
-      description: errorMessage(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: tooMany ? 'warning' : 'error',
     })

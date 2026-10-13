@@ -14,6 +14,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { GeocodeResult, WeatherPrefs } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const emit = defineEmits<{ changed: [] }>()
 
@@ -34,12 +35,8 @@ const start = ref(9)
 const end = ref(12)
 const savingWindow = ref(false)
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 function fail(title: string, err: unknown) {
-  toast.add({ title, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  toast.add({ title, description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
 }
 
 const pad = (h: number) => `${String(h).padStart(2, '0')}:00`
