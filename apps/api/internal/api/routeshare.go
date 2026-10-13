@@ -169,7 +169,9 @@ func (s *Server) handleCreateRouteShare(w http.ResponseWriter, r *http.Request) 
 		Slug: route.Slug, Owner: route.Owner, CreatedAt: route.CreatedAt,
 	}, identity.User, ttl)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		// Everything Create validates (ttl, slug, rider) was checked above, so
+		// what is left is the store failing.
+		s.fail(w, err)
 		return
 	}
 

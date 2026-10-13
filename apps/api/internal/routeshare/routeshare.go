@@ -80,14 +80,16 @@ type Route struct {
 // owner being the rider who made the link. That fails closed for an old admin
 // share of someone else's route, which is the safe side to get wrong.
 func (s Share) Matches(owner, createdAt string) bool {
+	// Legacy means neither binding column was ever written. A bound share has a
+	// creation time even when the route has no owner, so an empty RouteOwner on
+	// its own says nothing: it is compared as it is, empty to empty.
+	if s.RouteCreatedAt == "" && s.RouteOwner == "" {
+		return strings.EqualFold(s.CreatedBy, owner)
+	}
 	if s.RouteCreatedAt != "" && s.RouteCreatedAt != createdAt {
 		return false
 	}
-	want := s.RouteOwner
-	if want == "" {
-		want = s.CreatedBy
-	}
-	return strings.EqualFold(want, owner)
+	return strings.EqualFold(s.RouteOwner, owner)
 }
 
 // Expired reports whether now is past this share's expiry — independent of
