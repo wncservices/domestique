@@ -28,6 +28,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/config"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
 	"github.com/wncservices/domestique/apps/api/internal/source"
@@ -122,6 +123,7 @@ func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *
 
 	var a *auth.Authenticator
 	var sess *sessions.Store
+	var ids *identities.Store
 	switch mode {
 	case auth.ModeNone:
 		a, err = auth.New(auth.Config{Mode: auth.ModeNone})
@@ -150,6 +152,9 @@ func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *
 			t.Fatal(err)
 		}
 		a.UseSessions(sess)
+		if ids, err = identities.UseDB(db.Conn(), db.DSN(), box); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	logs := &lockedBuffer{}
@@ -159,7 +164,7 @@ func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *
 	t.Cleanup(func() { otel.SetTracerProvider(prev) })
 
 	srv := &api.Server{
-		Auth: a, Training: training, CalendarFeeds: feeds,
+		Auth: a, Training: training, CalendarFeeds: feeds, Identities: ids,
 		Config:              &config.Config{PublicURL: publicURL},
 		Log:                 slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Clock:               func() time.Time { return calendarNow },
@@ -181,6 +186,15 @@ func (h *calHarness) rider(user string) string {
 	return user
 }
 
+// bindSession binds the session's account to user, as a sign-in would have:
+// under oidc a session is only honoured while its binding agrees.
+func (h *calHarness) bindSession(user string) {
+	h.t.Helper()
+	if _, err := h.srv.Identities.Bind(h.t.Context(), "https://issuer.example.com", "auth0|"+user, user, ""); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 // identify makes req look like it came from user in that group, however this
 // mode recognises someone.
 func (h *calHarness) identify(req *http.Request, user string, groups ...string) {
@@ -189,6 +203,7 @@ func (h *calHarness) identify(req *http.Request, user string, groups ...string) 
 		req.Header.Set(auth.HeaderUser, user)
 		req.Header.Set(auth.HeaderGroups, strings.Join(append([]string{"gate"}, groups...), ","))
 	case auth.ModeOIDC:
+		h.bindSession(user)
 		tok, _, err := h.sessions.Create(auth.Identity{User: user, Sub: "auth0|" + user, Groups: append([]string{"gate"}, groups...)}, time.Hour)
 		if err != nil {
 			h.t.Fatal(err)

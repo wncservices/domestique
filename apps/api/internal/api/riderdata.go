@@ -10,6 +10,10 @@ type riderTable struct {
 	Note string
 	// Rename is what rename-rider does with the table; see renameRule.
 	Rename renameRule
+	// Taken names the columns that hold a rider's name when Rename has none to
+	// offer (accounts and provider_links are renamed bespoke). Sign-in treats a
+	// name found in any of them as taken; see riderNameColumns.
+	Taken []string
 }
 
 // renameRule says how rename-rider treats one registered table. Exactly one of
@@ -57,9 +61,9 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"uploaded_by"}}},
 
 	// internal/accounts, internal/state, internal/providerlink
-	"accounts":       {Purged: true, Note: "Accounts.Unlink", Rename: renameRule{Bespoke: true}},
+	"accounts":       {Purged: true, Note: "Accounts.Unlink", Rename: renameRule{Bespoke: true}, Taken: []string{"rider"}},
 	"sync_state":     {Purged: true, Note: "keyed through account_id; Store.Forget per account", Rename: renameRule{Bespoke: true}},
-	"provider_links": {Purged: true, Note: "Links.Delete per provider", Rename: renameRule{Bespoke: true}},
+	"provider_links": {Purged: true, Note: "Links.Delete per provider", Rename: renameRule{Bespoke: true}, Taken: []string{"rider"}},
 
 	// The pre-provider_links Komoot table, still there on a deployment that
 	// ran the old image. Left behind on purpose, so a purge has to reach it or

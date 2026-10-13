@@ -223,7 +223,9 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if blocked {
-			s.logger().Info("blocked email tried to sign in", "email", identity.Email, "user", identity.User)
+			// No email and no name here: an address next to a name is exactly
+			// what a log should not hold.
+			s.logger().Info("blocked email tried to sign in")
 			returnTo := st.ReturnTo
 			if returnTo == "" {
 				returnTo = "/"
@@ -232,6 +234,30 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// The gate comes first. An account the deployment does not admit (not in
+	// required_group, no role group) must not get a binding, which would
+	// reserve a rider name and a verified email for a stranger, nor a session.
+	// This is the same rule Authorize applies to every later request, applied
+	// here because it is cheaper to refuse once than to bind and then 403.
+	if err := s.authenticator().Authorize(identity); err != nil {
+		s.logger().Warn("oidc sign-in refused: account is not admitted by the gate")
+		returnTo := st.ReturnTo
+		if returnTo == "" {
+			returnTo = "/"
+		}
+		http.Redirect(w, r, withNotice(returnTo, "This account is not a member of this app yet — ask an admin for access."), http.StatusFound)
+		return
+	}
+
+	// identity.User is what the claims suggest. Who this actually is comes from
+	// the binding (see riderForSignIn): nothing a holder can edit at the issuer
+	// chooses a rider that already exists.
+	rider, ok := s.riderForSignIn(r.Context(), w, identity)
+	if !ok {
+		return
+	}
+	identity.User = rider
 
 	token, expiresAt, err := s.Sessions.Create(identity, sessionTTL)
 	if err != nil {
@@ -300,6 +326,12 @@ func (s *Server) handleSSOLogout(w http.ResponseWriter, r *http.Request) {
 
 // identityFromToken builds an Identity from a verified ID token's claims.
 //
+// User is only a suggestion. These claims are what the holder of an account
+// can edit (a Google display name is whatever its owner types), so they never
+// choose a rider that already exists: riderForSignIn replaces User with the
+// rider the account is bound to, and uses this value only to name a rider
+// for an account that has no binding yet.
+//
 // User is preferred_username, falling back to name, falling back to
 // nickname, falling back to sub. Auth0's database connection never
 // populates preferred_username, but does send both name and nickname
@@ -324,8 +356,8 @@ func (s *Server) identityFromToken(idToken *oidc.IDToken) (auth.Identity, error)
 		return auth.Identity{}, err
 	}
 
-	user := strings.ToLower(strings.TrimSpace(stringClaim(claims, "preferred_username")))
-	for _, claim := range []string{"name", "nickname"} {
+	user := ""
+	for _, claim := range []string{"preferred_username", "name", "nickname"} {
 		if user != "" {
 			break
 		}

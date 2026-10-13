@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,6 +26,7 @@ type fakeTenant struct {
 	userRoles   map[string][]string // user id -> role ids currently held
 	lastSeen    map[string]struct{ createdAt, lastLogin, nickname string }
 	blocked     map[string]bool // user id -> blocked
+	verified    map[string]bool // user id -> email_verified
 
 	createdUsers   []map[string]any
 	invitedEmails  []string
@@ -44,6 +46,7 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		userRoles:    map[string][]string{},
 		lastSeen:     map[string]struct{ createdAt, lastLogin, nickname string }{},
 		blocked:      map[string]bool{},
+		verified:     map[string]bool{},
 		grantedRoles: map[string][]string{},
 		revokedRoles: map[string][]string{},
 	}
@@ -68,8 +71,17 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		// Deliberately no created_at/last_login here — the real endpoint
 		// does not return them either (confirmed against Auth0's own
 		// OpenAPI schema), which is the whole reason lastSeen exists.
+		// Paged like the real endpoint: 50 a page unless per_page says otherwise,
+		// page numbers from 0.
+		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		if perPage <= 0 {
+			perPage = 50
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		members := f.roleMembers[r.PathValue("id")]
+		lo, hi := min(page*perPage, len(members)), min((page+1)*perPage, len(members))
 		var out []map[string]string
-		for _, uid := range f.roleMembers[r.PathValue("id")] {
+		for _, uid := range members[lo:hi] {
 			u := f.users[uid]
 			out = append(out, map[string]string{"user_id": uid, "email": u.email, "name": u.name})
 		}
@@ -80,17 +92,31 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		// trusting it blindly — exercises the same OR-of-ids shape lastSeen
 		// actually sends, the way a canned response would not.
 		q := r.URL.Query().Get("q")
+		// A search answers one page, 50 unless asked for more: a client that
+		// ORs a hundred ids into one query silently loses the rest.
+		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		if perPage <= 0 {
+			perPage = 50
+		}
 		var out []map[string]any
 		for _, term := range strings.Split(q, " OR ") {
+			if len(out) >= perPage {
+				break
+			}
 			uid := strings.TrimSuffix(strings.TrimPrefix(term, `user_id:"`), `"`)
 			seen, ok := f.lastSeen[uid]
 			if !ok {
 				continue
 			}
-			out = append(out, map[string]any{
+			entry := map[string]any{
 				"user_id": uid, "created_at": seen.createdAt, "last_login": seen.lastLogin,
 				"nickname": seen.nickname, "blocked": f.blocked[uid],
-			})
+			}
+			// Like the real endpoint, only what fields= asked for.
+			if strings.Contains(r.URL.Query().Get("fields"), "email_verified") {
+				entry["email_verified"] = f.verified[uid]
+			}
+			out = append(out, entry)
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	})
