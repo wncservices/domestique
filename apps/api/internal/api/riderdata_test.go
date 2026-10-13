@@ -153,7 +153,7 @@ func eachRiderDataEngine(t *testing.T, run func(t *testing.T, env *riderDataEnv)
 // riderColumns are the columns that tie a row to a rider. idColumns tie it to
 // something a rider owns, so the row is theirs by one step removed.
 var (
-	riderColumns = []string{"rider", "created_by", "owner", "uploaded_by", "decided_by", "updated_by", "added_by"}
+	riderColumns = []string{"rider", "created_by", "owner", "uploaded_by", "decided_by", "updated_by", "added_by", "route_owner"}
 	idColumns    = []string{"workout_id", "session_id", "goal_id", "account_id", "rider_key"}
 )
 

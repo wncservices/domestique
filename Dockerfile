@@ -36,7 +36,9 @@ COPY --from=web /src/apps/web/dist /app/web
 RUN mkdir -p /app/data && chown -R 10001:10001 /app
 
 USER domestique
-EXPOSE 8080
+# 8080 is the app; 9090 is the internal metrics port, scraped from inside the
+# cluster only. The ingress must never route to it.
+EXPOSE 8080 9090
 
 # No route data is baked in, and no volume is declared: routes, sync state and
 # linked head units are all rows in one database. Point DOMESTIQUE_SOURCE_DSN at

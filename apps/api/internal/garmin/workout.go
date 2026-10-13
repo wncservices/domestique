@@ -294,7 +294,7 @@ func (c *Client) CreateWorkout(ctx context.Context, name, sport string, steps []
 	}
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return "", errors.New("garmin: the session was refused — sign in again")
+		return "", ErrSessionRefused
 	case status >= 300:
 		return "", fmt.Errorf("garmin: creating the workout returned %d: %s", status, longSnippet(raw))
 	}
@@ -340,7 +340,7 @@ func (c *Client) UpdateWorkout(ctx context.Context, id, name, sport string, step
 	}
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return errors.New("garmin: the session was refused — sign in again")
+		return ErrSessionRefused
 	case status == http.StatusNotFound:
 		return fmt.Errorf("%w (updating returned 404)", ErrWorkoutGone)
 	case status >= 300:
@@ -370,7 +370,7 @@ func (c *Client) DeleteWorkout(ctx context.Context, id string) error {
 	}
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return errors.New("garmin: the session was refused — sign in again")
+		return ErrSessionRefused
 	case status == http.StatusNotFound:
 		return fmt.Errorf("%w (deleting returned 404)", ErrWorkoutGone)
 	case status >= 300:

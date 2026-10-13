@@ -246,7 +246,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	existing, err := s.People.FindByEmail(r.Context(), body.Email)
 	if err != nil {
 		s.logger().Warn("checking for an existing account failed", "email", body.Email, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	if len(existing) > 1 {
@@ -258,7 +258,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	if len(existing) == 1 {
 		if err := s.People.SetRoles(r.Context(), existing[0].UserID, roleNames); err != nil {
 			s.logger().Warn("granting access to an existing account failed", "email", body.Email, "err", err)
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			s.failUpstream(w, "Auth0", err)
 			return
 		}
 		s.logger().Info("access granted to existing account", "email", body.Email, "role", body.Role, "by", auth.FromContext(r.Context()).User)
@@ -271,7 +271,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	person, err := s.People.Invite(r.Context(), body.Email, body.Name, roleNames)
 	if err != nil {
 		s.logger().Warn("inviting a person failed", "email", body.Email, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 
@@ -281,7 +281,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 		s.logger().Warn("sending the invite email failed", "email", body.Email, "err", err)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"person": s.personDTO(person),
-			"error":  "The account was created, but the invite email could not be sent: " + err.Error(),
+			"error":  "The account was created, but the invite email could not be sent",
 		})
 		return
 	}
@@ -329,7 +329,7 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.People.SetRoles(r.Context(), id, roleNames); err != nil {
 		s.logger().Warn("changing a person's role failed", "id", id, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 
@@ -390,7 +390,7 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 
 	if err := s.People.SetBlocked(r.Context(), id, body.Blocked); err != nil {
 		s.logger().Warn("changing a person's blocked status failed", "id", id, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 
@@ -420,7 +420,7 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 			s.logger().Warn("updating the local blocklist failed", "email", body.Email, "err", err)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status": "updated",
-				"error":  "Auth0 was updated, but the local blocklist could not be: " + err.Error(),
+				"error":  "Auth0 was updated, but the local blocklist could not be",
 			})
 			return
 		}
@@ -475,7 +475,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 		if _, err := s.purgeRiderData(r.Context(), rider); err != nil {
 			s.logger().Warn("purging local data before deleting a person failed", "id", id, "rider", rider, "err", err)
 			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error": "could not remove this rider's local data — nothing was deleted: " + err.Error(),
+				"error": "could not remove this rider's local data — nothing was deleted",
 			})
 			return
 		}
@@ -483,7 +483,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.People.DeleteUser(r.Context(), id); err != nil {
 		s.logger().Warn("deleting a person failed", "id", id, "rider", rider, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
@@ -93,7 +94,7 @@ func (s *Server) handleSSOLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.setStateCookie(w, r, oidcState{
-		State: state, Nonce: nonce, Verifier: verifier, ReturnTo: returnTo, IssuedAt: time.Now().UTC(),
+		State: state, Nonce: nonce, Verifier: verifier, ReturnTo: returnTo, IssuedAt: s.now().UTC(),
 	}); err != nil {
 		s.fail(w, err)
 		return
@@ -460,8 +461,22 @@ func (s *Server) openStateCookie(r *http.Request) (oidcState, error) {
 	if err := json.Unmarshal([]byte(raw), &st); err != nil {
 		return oidcState{}, err
 	}
+	// The cookie is sealed, so it cannot be forged, but nothing else bounds how
+	// long a captured one is honoured: Max-Age is the browser's promise, not
+	// ours. IssuedAt, sealed inside it, is. A little future-dating is allowed
+	// for clocks that disagree between replicas.
+	if age := s.now().Sub(st.IssuedAt); age > oidcStateMaxAge || age < -oidcStateClockSkew {
+		return oidcState{}, errors.New("sign-in state expired")
+	}
 	return st, nil
 }
+
+// oidcStateMaxAge is how long a sign-in may take between /sso/login and
+// /sso/callback. It matches the cookie's own Max-Age (600 seconds) on purpose.
+const (
+	oidcStateMaxAge    = 10 * time.Minute
+	oidcStateClockSkew = time.Minute
+)
 
 func (s *Server) clearStateCookie(w http.ResponseWriter, r *http.Request) {
 	// #nosec G124 -- see the note on the session cookie above.
@@ -480,12 +495,27 @@ func safeReturnTo(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
+	errNotAPath := errors.New("return_to must be a path on this site")
+	// A "/" and then anything but another "/" or a backslash. Browsers read a
+	// backslash in a Location header as a slash, so "/\evil.example" is the
+	// protocol-relative "//evil.example" by the time it leaves the server, and
+	// url.Parse (which sees an ordinary path) cannot be the check for that.
+	// Control characters and spaces never belong in a path a rider was sent to:
+	// a header parser may drop or reinterpret them.
 	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
-		return "", errors.New("return_to must be a path on this site")
+		return "", errNotAPath
+	}
+	if len(raw) > 1 && raw[1] == '\\' {
+		return "", errNotAPath
+	}
+	for _, r := range raw {
+		if r == '\\' || unicode.IsControl(r) || unicode.IsSpace(r) {
+			return "", errNotAPath
+		}
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.IsAbs() || u.Host != "" {
-		return "", errors.New("return_to must be a path on this site")
+		return "", errNotAPath
 	}
 	return raw, nil
 }

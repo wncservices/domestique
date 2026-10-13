@@ -313,12 +313,28 @@ func (c *Client) CreateRoute(ctx context.Context, accessToken string, route Rout
 // Unlike Garmin's course service, Wahoo's routes are a real REST resource —
 // a PUT here is what it says it is, not an import-then-delete dance.
 func (c *Client) UpdateRoute(ctx context.Context, accessToken, id string, route RouteRequest) (string, error) {
-	return c.routeRequest(ctx, http.MethodPut, c.APIBase+"/v1/routes/"+id, accessToken, route)
+	return c.routeRequest(ctx, http.MethodPut, c.routeURL(id), accessToken, route)
+}
+
+// routeURL is the URL of one route. The id is a path segment taken from a
+// request and used with the rider's own Wahoo token, so it is escaped into
+// exactly one segment: "5/../../user" must not become another endpoint, and
+// "5?x=1" must not grow a query. The dot segments need their own case, since
+// an unescaped "." or ".." is a path operator, not a name.
+func (c *Client) routeURL(id string) string {
+	seg := url.PathEscape(id)
+	switch seg {
+	case ".":
+		seg = "%2E"
+	case "..":
+		seg = "%2E%2E"
+	}
+	return c.APIBase + "/v1/routes/" + seg
 }
 
 // DeleteRoute removes a route from the account.
 func (c *Client) DeleteRoute(ctx context.Context, accessToken, id string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.APIBase+"/v1/routes/"+id, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.routeURL(id), nil)
 	if err != nil {
 		return err
 	}
@@ -336,9 +352,23 @@ func (c *Client) DeleteRoute(ctx context.Context, accessToken, id string) error 
 		return fmt.Errorf("wahoo: reading delete response: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("wahoo: delete route returned %d: %s", resp.StatusCode, snippet(body))
+		return refusedOr(resp.StatusCode, fmt.Errorf("wahoo: delete route returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 	return nil
+}
+
+// ErrSessionRefused is what a call made with the rider's token wraps when Wahoo
+// answers 401 or 403: the token was revoked or the refresh no longer works, and
+// the rider has to connect again.
+var ErrSessionRefused = errors.New("wahoo: the connection was refused — connect again")
+
+// refusedOr returns ErrSessionRefused for a 401 or 403 and the given error for
+// anything else, so each call site keeps its own message for the rest.
+func refusedOr(status int, err error) error {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return ErrSessionRefused
+	}
+	return err
 }
 
 // ErrNotFound is what a route request wraps when Wahoo answers 404: the route
@@ -414,7 +444,7 @@ func (c *Client) ListRoutes(ctx context.Context, accessToken string) ([]Route, e
 		return nil, fmt.Errorf("wahoo: reading route list: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wahoo: list routes returned %d: %s", resp.StatusCode, snippet(body))
+		return nil, refusedOr(resp.StatusCode, fmt.Errorf("wahoo: list routes returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 
 	var items []routeListItem
@@ -526,7 +556,7 @@ func (c *Client) DownloadRoute(ctx context.Context, accessToken, fileURL string)
 		return nil, fmt.Errorf("wahoo: reading route download: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wahoo: route download returned %d: %s", resp.StatusCode, snippet(body))
+		return nil, refusedOr(resp.StatusCode, fmt.Errorf("wahoo: route download returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 	return body, nil
 }
@@ -616,7 +646,7 @@ func (c *Client) routeRequest(ctx context.Context, method, endpoint, accessToken
 		return "", fmt.Errorf("wahoo: route request returned 404: %s: %w", snippet(body), ErrNotFound)
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("wahoo: route request returned %d: %s", resp.StatusCode, snippet(body))
+		return "", refusedOr(resp.StatusCode, fmt.Errorf("wahoo: route request returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 
 	var parsed routeResponse

@@ -173,7 +173,7 @@ func (s *Server) handleKomootDisconnect(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.Links.Delete(komootProvider, rider); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.fail(w, err)
 		return
 	}
 

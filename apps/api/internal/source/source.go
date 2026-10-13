@@ -23,6 +23,20 @@ import (
 // ErrNotFound is returned for a slug the library does not hold.
 var ErrNotFound = errors.New("no such route")
 
+// ErrInvalid marks a refusal the caller can fix: a GPX that is empty, too big or
+// does not parse. Anything else a Create or Update returns is the store failing,
+// which is not the rider's to read. Test with errors.Is(err, ErrInvalid); the
+// error's own text is unchanged and fit to show.
+var ErrInvalid = errors.New("invalid route")
+
+type invalidError struct{ err error }
+
+func (e invalidError) Error() string        { return e.err.Error() }
+func (e invalidError) Unwrap() error        { return e.err }
+func (e invalidError) Is(target error) bool { return target == ErrInvalid }
+
+func invalid(err error) error { return invalidError{err} }
+
 // ErrAlreadyOwned is returned for an UpdateRequest with ClaimOwner set
 // against a route that no longer has an empty owner by the time the write
 // actually lands — see UpdateRequest.ClaimOwner's own doc comment.

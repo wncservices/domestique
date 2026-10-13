@@ -1506,7 +1506,7 @@ func (s *Server) handlePushWorkoutToGarmin(w http.ResponseWriter, r *http.Reques
 	}
 	res, err := s.syncWorkoutToGarmin(r.Context(), session, wk, workout.PushOriginManual)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Garmin", err)
 		return
 	}
 

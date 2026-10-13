@@ -107,8 +107,8 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"proposal_id"}}},
 
 	// internal/routeshare
-	"route_shares": {Purged: true, Note: "Shares.DeleteRider: links the rider created",
-		Rename: renameRule{Columns: []string{"created_by"}}},
+	"route_shares": {Purged: true, Note: "Shares.DeleteRider: links the rider created; Shares.DeleteRoute: links to a deleted route",
+		Rename: renameRule{Columns: []string{"created_by", "route_owner"}}},
 	"route_share_redemptions": {Purged: true, Note: "Shares.DeleteRider: what the rider viewed, and who viewed theirs",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"share_id"}}},
 

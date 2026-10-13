@@ -103,6 +103,10 @@ type Route struct {
 	Owner string
 	// UpdatedAt is when the route last changed in its source, if known.
 	UpdatedAt string
+	// CreatedAt is when the route was created. It is the generation marker of
+	// the slug: slugs are reusable once a route is deleted, so anything that
+	// remembers a route by slug (a share link) also remembers this.
+	CreatedAt string
 }
 
 // Op is the kind of change a plan item represents.
