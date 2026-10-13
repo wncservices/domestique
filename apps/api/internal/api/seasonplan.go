@@ -247,6 +247,10 @@ func (s *Server) recordSeasonRefresh(ctx context.Context, rider string, was work
 
 func levelString(l float64) string { return strconv.FormatFloat(l, 'f', -1, 64) }
 
+// untouchedPlanSession is a plan session nothing has changed since it was made:
+// the season refresh may rebuild it. A swap for an alternate, an adjustment and
+// a rider's "kept as planned" all append to the description, which the exact
+// match below refuses, so none needs a clause of its own.
 func untouchedPlanSession(wk workout.Workout) bool {
 	return scheduler.IsGenerated(wk) &&
 		wk.Description == scheduler.GeneratedDescription &&
@@ -259,10 +263,6 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		// silently drop it or swap the content under a route chosen for the
 		// old one. It already moves UpdatedAt, but the guarantee is stated here.
 		wk.RouteSlug == "" &&
-		// A swap for an alternate is the rider's choice. It already fails the
-		// description and timestamp tests, but the guarantee is stated here
-		// rather than left to those.
-		!strings.Contains(wk.Description, scheduler.SwappedMarker) &&
 		wk.PlannedSnapshot == nil &&
 		wk.UpdatedAt == wk.CreatedAt
 }

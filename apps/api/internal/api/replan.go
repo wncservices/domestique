@@ -199,11 +199,9 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		if lifeevents.Touched(wk.Description) {
 			continue
 		}
-		// A routed session is the rider's own too: rebuilding the day would
-		// drop the link and strand the loop.
-		if wk.RouteSlug != "" {
-			continue
-		}
+		// A routed session is the rider's own too, but needs no check here:
+		// scheduler.AutoReplaceable already refuses one (rebuilding the day
+		// would drop the link and strand the loop).
 		if wk.Date == today && riddenToday[wk.ID] {
 			continue
 		}
