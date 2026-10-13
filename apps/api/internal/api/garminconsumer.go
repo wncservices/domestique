@@ -169,7 +169,7 @@ func (s *Server) handleClearGarminConsumer(w http.ResponseWriter, r *http.Reques
 
 	for _, name := range []string{SettingGarminConsumerKey, SettingGarminConsumerSecret} {
 		if err := s.Settings.Delete(name); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			s.fail(w, err)
 			return
 		}
 	}

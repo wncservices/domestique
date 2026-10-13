@@ -304,6 +304,10 @@ func (c *Client) DeleteTour(ctx context.Context, tourID string) error {
 	return nil
 }
 
+// ErrSessionRefused is what a call wraps when Komoot answers 401 or 403: the
+// stored sign-in no longer works, and the rider has to connect again.
+var ErrSessionRefused = errors.New("komoot: rejected")
+
 func (c *Client) do(req *http.Request, into any) error {
 	// Backstop. newRequest already refused anything off-host; this catches a
 	// future caller that builds a request by hand.
@@ -334,7 +338,7 @@ func (c *Client) do(req *http.Request, into any) error {
 
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("rejected (%s) — check the Komoot credentials", resp.Status)
+		return fmt.Errorf("%w (%s) — check the Komoot credentials", ErrSessionRefused, resp.Status)
 	case resp.StatusCode == http.StatusNotFound:
 		return fmt.Errorf("not found (%s)", resp.Status)
 	case resp.StatusCode >= 300:

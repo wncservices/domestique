@@ -31,6 +31,16 @@ var ErrNotFound = errors.New("no such account")
 // ErrExists is returned when a rider already linked that provider.
 var ErrExists = errors.New("that provider is already linked")
 
+// ErrInvalid marks a Link the caller can fix (no rider, a rider that cannot be
+// an id, an unknown provider). Anything else Link returns is the store failing.
+var ErrInvalid = errors.New("invalid account")
+
+type invalidError struct{ err error }
+
+func (e invalidError) Error() string        { return e.err.Error() }
+func (e invalidError) Unwrap() error        { return e.err }
+func (e invalidError) Is(target error) bool { return target == ErrInvalid }
+
 // Store holds the linked accounts.
 type Store struct {
 	db      *sql.DB
@@ -119,17 +129,17 @@ var RiderPattern = regexp.MustCompile(`^[a-zA-Z0-9._@|-]+$`)
 func (s *Store) Link(ctx context.Context, provider model.Provider, rider, label string) (model.Account, error) {
 	rider = strings.TrimSpace(rider)
 	if rider == "" {
-		return model.Account{}, errors.New("accounts: no rider — who is linking this?")
+		return model.Account{}, invalidError{errors.New("accounts: no rider — who is linking this?")}
 	}
 	// The rider comes from Authelia or an OIDC issuer, but it lands in an id
 	// used across the API, so keep it to something that survives a URL.
 	if !RiderPattern.MatchString(rider) {
-		return model.Account{}, fmt.Errorf("accounts: rider %q has characters that cannot appear in an id", rider)
+		return model.Account{}, invalidError{fmt.Errorf("accounts: rider %q has characters that cannot appear in an id", rider)}
 	}
 	switch provider {
 	case model.ProviderGarmin, model.ProviderWahoo:
 	default:
-		return model.Account{}, fmt.Errorf("accounts: unknown provider %q", provider)
+		return model.Account{}, invalidError{fmt.Errorf("accounts: unknown provider %q", provider)}
 	}
 
 	id := ID(provider, rider)

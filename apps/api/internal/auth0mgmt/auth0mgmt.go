@@ -233,12 +233,24 @@ func apiError(status int, raw []byte) error {
 		ErrorCode string `json:"errorCode"`
 	}
 	if err := json.Unmarshal(raw, &body); err == nil && body.Message != "" {
-		if body.ErrorCode != "" {
-			return fmt.Errorf("auth0mgmt: %s (%s)", body.Message, body.ErrorCode)
-		}
-		return errors.New("auth0mgmt: " + body.Message)
+		return &APIError{Status: status, Message: body.Message, Code: body.ErrorCode}
 	}
-	return fmt.Errorf("auth0mgmt: request returned %d: %s", status, snippet(raw))
+	return &APIError{Status: status, Message: fmt.Sprintf("request returned %d: %s", status, snippet(raw))}
+}
+
+// APIError is a Management API refusal. The text is for the log; callers that
+// need to react (a 409 "user already exists", a 429) read Status.
+type APIError struct {
+	Status  int
+	Message string
+	Code    string
+}
+
+func (e *APIError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("auth0mgmt: %s (%s)", e.Message, e.Code)
+	}
+	return "auth0mgmt: " + e.Message
 }
 
 func snippet(raw []byte) string {

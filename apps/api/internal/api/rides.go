@@ -723,7 +723,7 @@ func (s *Server) pushRideRoute(ctx context.Context, crewID string, route model.R
 	resp, err := s.pushRouteToCrew(ctx, crewID, route)
 	if err != nil {
 		s.logger().Warn("crew ride scheduled but its route was not sent to the crew's devices", "crew", crewID, "slug", route.Slug, "err", err)
-		return &rideSyncDTO{Failures: []string{}, Error: err.Error()}
+		return &rideSyncDTO{Failures: []string{}, Error: "the route could not be sent to the crew's devices; use Sync now to retry"}
 	}
 	if len(resp.Failures) > 0 {
 		s.logger().Warn("crew ride scheduled, sending its route had failures", "crew", crewID, "slug", route.Slug, "failures", len(resp.Failures))

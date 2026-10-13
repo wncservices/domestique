@@ -47,7 +47,7 @@ func (c *Client) ScheduleWorkout(ctx context.Context, workoutID, date string) (s
 	}
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return "", errors.New("garmin: the session was refused — sign in again")
+		return "", ErrSessionRefused
 	case status == http.StatusNotFound:
 		return "", fmt.Errorf("%w (scheduling returned 404)", ErrWorkoutGone)
 	case status >= 300:
@@ -76,7 +76,7 @@ func (c *Client) UnscheduleWorkout(ctx context.Context, scheduleID string) error
 	}
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return errors.New("garmin: the session was refused — sign in again")
+		return ErrSessionRefused
 	case status == http.StatusNotFound:
 		return nil
 	case status >= 300:

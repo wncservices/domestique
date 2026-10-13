@@ -252,7 +252,7 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.logger().Warn("purging own data before self-delete failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "could not remove your data — nothing was deleted: " + err.Error(),
+			"error": "could not remove your data — nothing was deleted",
 		})
 		return
 	}
@@ -260,7 +260,7 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	if err := s.People.DeleteUser(r.Context(), sub); err != nil {
 		s.logger().Warn("deleting own Auth0 identity failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "your data was removed, but the account itself could not be deleted: " + err.Error(),
+			"error": "your data was removed, but the account itself could not be deleted",
 		})
 		return
 	}

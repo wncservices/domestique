@@ -24,6 +24,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
@@ -34,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/loops"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
@@ -656,13 +658,13 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return securityHeaders(hideSecretPaths(otelhttp.NewHandler(
-		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(mux))))),
+	return securityHeaders(s.extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
+		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(withRoutePattern(mux)))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + redactPath(r.URL.Path)
 		}),
-	)))
+	))))
 }
 
 // authenticate resolves the identity once per request and puts it on the
@@ -1030,7 +1032,7 @@ func (s *Server) handleUpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.People.UpdateName(r.Context(), sub, name); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 
@@ -1145,7 +1147,7 @@ func (s *Server) handleSelfPasswordReset(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := s.People.SendInviteEmail(r.Context(), id.Email); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
@@ -1186,7 +1188,7 @@ func (s *Server) handleListMFA(w http.ResponseWriter, r *http.Request) {
 	}
 	enrollments, err := s.People.ListEnrollments(r.Context(), sub)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	out := make([]enrollmentDTO, 0, len(enrollments))
@@ -1213,7 +1215,7 @@ func (s *Server) handleEnrollMFA(w http.ResponseWriter, r *http.Request) {
 	}
 	ticketURL, err := s.People.CreateGuardianEnrollmentTicket(r.Context(), sub)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ticketUrl": ticketURL})
@@ -1235,7 +1237,7 @@ func (s *Server) handleRemoveMFA(w http.ResponseWriter, r *http.Request) {
 
 	enrollments, err := s.People.ListEnrollments(r.Context(), sub)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	owned := false
@@ -1251,7 +1253,7 @@ func (s *Server) handleRemoveMFA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.People.DeleteEnrollment(r.Context(), enrollmentID); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Auth0", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
@@ -1360,11 +1362,14 @@ func (s *Server) handleLinkAccount(w http.ResponseWriter, r *http.Request) {
 
 	account, err := s.Accounts.Link(r.Context(), model.Provider(body.Provider), rider, body.Label)
 	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, accounts.ErrExists) {
-			status = http.StatusConflict
+		switch {
+		case errors.Is(err, accounts.ErrExists):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, accounts.ErrInvalid):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			s.fail(w, err)
 		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -2211,6 +2216,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// The body is in: bound the response again (see uploadResponseDeadline).
+	setWriteDeadline(w, r, uploadResponseDeadline)
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -2276,8 +2283,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	route, err := s.Source.Create(r.Context(), req)
 	if err != nil {
-		// A bad GPX is the caller's problem, not a server fault.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.failCreate(w, err)
 		return
 	}
 
@@ -2437,7 +2443,7 @@ func (s *Server) handleRouteBuilderPreview(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		s.logger().Error("route builder preview failed", "err", err, "by", rider)
 		recordRouteBuilderError(r.Context(), "preview")
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "The routing engine", err)
 		return
 	}
 
@@ -2895,7 +2901,7 @@ func (s *Server) handleGeocodeSearch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.logger().Error("location search failed", "err", err, "by", rider)
 		recordRouteBuilderError(r.Context(), "geocode")
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "The location search", err)
 		return
 	}
 
@@ -2932,6 +2938,8 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// The body is in: bound the response again (see uploadResponseDeadline).
+	setWriteDeadline(w, r, uploadResponseDeadline)
 
 	sport, err := parseSport(body.Sport)
 	if err != nil {
@@ -2984,7 +2992,7 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 
 	route, err := s.Source.Create(r.Context(), req)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.failCreate(w, err)
 		return
 	}
 
@@ -3226,6 +3234,8 @@ func (s *Server) handleUpdateRoutePoints(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// The body is in: bound the response again (see uploadResponseDeadline).
+	setWriteDeadline(w, r, uploadResponseDeadline)
 
 	name, err := s.routeNameFor(r.Context(), slug)
 	if err != nil {
@@ -3553,9 +3563,70 @@ func rateLimit(w http.ResponseWriter, limiter *ratelimit.Limiter, key, message s
 	return false
 }
 
+// fail is the answer for an error nobody planned for. Its text can name a
+// table, a driver or an internal host, so the client gets a fixed message and
+// the detail goes to the log. An error the rider can act on (validation, a
+// missing route, a refused credential) gets its own status and message at the
+// call site, not this.
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	s.logger().Error("request failed", "err", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+}
+
+// failUpstream is the answer when a third party refused or failed: the caller
+// is told who, never what they said, since a response body or a transport error
+// can carry a host, a token's scope or a request id. Warn, not Error: the
+// service being down or unhappy is not a fault in this app, and the log line
+// keeps the detail for whoever has to look.
+//
+// Two answers are told apart because the person can act on them:
+//   - a refused session (401/403 from Garmin, Wahoo or Komoot, wrapped as that
+//     package's ErrSessionRefused) is a 409 with reconnect:true and the
+//     provider, so the UI can point to Settings instead of showing "failed";
+//   - Auth0's 409 (already exists) and 429 (rate limited) get short messages of
+//     their own. Everything else Auth0 says stays out of the response.
+func (s *Server) failUpstream(w http.ResponseWriter, upstream string, err error) {
+	s.logger().Warn("upstream request failed", "upstream", upstream, "err", err)
+
+	var provider string
+	switch {
+	case errors.Is(err, garmin.ErrSessionRefused):
+		provider = "garmin"
+	case errors.Is(err, wahoo.ErrSessionRefused):
+		provider = "wahoo"
+	case errors.Is(err, komoot.ErrSessionRefused):
+		provider = "komoot"
+	}
+	if provider != "" {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": upstream + " needs reconnecting", "reconnect": true, "provider": provider,
+		})
+		return
+	}
+
+	var apiErr *auth0mgmt.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Status {
+		case http.StatusConflict:
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "That person already exists in Auth0"})
+			return
+		case http.StatusTooManyRequests:
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Auth0 is rate limiting requests; try again in a minute"})
+			return
+		}
+	}
+	writeJSON(w, http.StatusBadGateway, map[string]string{"error": upstream + " could not complete that request"})
+}
+
+// failCreate answers a failed Source.Create or Update: a GPX the rider can fix
+// is a 400 with its reason (source.ErrInvalid), anything else is the store
+// failing and goes through fail.
+func (s *Server) failCreate(w http.ResponseWriter, err error) {
+	if errors.Is(err, source.ErrInvalid) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.fail(w, err)
 }
 
 func (s *Server) failLookup(w http.ResponseWriter, err error) {
