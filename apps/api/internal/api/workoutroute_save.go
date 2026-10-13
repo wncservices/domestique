@@ -175,6 +175,8 @@ func (s *Server) dropGeneratedRoute(ctx context.Context, wk workout.Workout, slu
 		}
 		if err := s.Source.Delete(ctx, slug); err != nil {
 			s.logger().Warn("could not delete a replaced loop", "workout", wk.ID, "err", err)
+		} else if err := s.forgetRoute(ctx, slug); err != nil {
+			s.logger().Error("could not remove what was keyed by a deleted route's slug", "slug", slug, "err", err)
 		}
 		return
 	}

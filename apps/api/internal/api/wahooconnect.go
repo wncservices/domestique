@@ -284,7 +284,7 @@ func (s *Server) handleWahooDisconnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.Links.Delete(wahooProvider, rider); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.fail(w, err)
 		return
 	}
 

@@ -54,6 +54,9 @@ type compressingWriter struct {
 	gz          *gzip.Writer
 }
 
+// Unwrap lets http.ResponseController reach the connection underneath.
+func (w *compressingWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *compressingWriter) WriteHeader(status int) {
 	if w.wroteHeader {
 		return

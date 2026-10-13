@@ -71,9 +71,10 @@ func (c *PreviewCache) Get(slug, basemapUpdateID string) (layersJSON string, fou
 // this right after a successful edit, so the next card render recomputes
 // against the route's new path instead of serving the old one until some
 // unrelated basemap rebuild happens to invalidate it too. A route being
-// deleted instead leaves its row orphaned rather than calling this — a
-// slug is never reused, so an inert row for a slug nothing will ever
-// request again costs nothing worth a second write on the deletion path.
+// deleted calls this too (api.forgetRoute, and the rider purge). The row is
+// keyed by slug and a slug is reusable, so a row left behind would be served
+// as the background of the next route to take the name, and would keep the
+// deleted route's area on disk after the rider asked for it to be erased.
 func (c *PreviewCache) Delete(slug string) error {
 	_, err := c.db.Exec(c.dialect.Rebind(`DELETE FROM track_preview_cache WHERE slug = ?`), slug)
 	return err

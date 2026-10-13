@@ -297,12 +297,12 @@ func (s *Server) handleGarminCourseDelete(w http.ResponseWriter, r *http.Request
 	consumer, _ := s.garminConsumer()
 	courses, err := s.Garmin.Courses(consumer, session)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Garmin", err)
 		return
 	}
 	if err := courses.DeleteCourse(r.Context(), id); err != nil {
 		s.logger().Warn("garmin course delete failed", "rider", rider, "course", id, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Garmin", err)
 		return
 	}
 
@@ -339,7 +339,7 @@ func (s *Server) handleGarminCourseImport(w http.ResponseWriter, r *http.Request
 
 	result, err := s.importGarminCourses(r.Context(), identity.User, rider, session, body.CourseIDs)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Garmin", err)
 		return
 	}
 
@@ -431,7 +431,8 @@ func (s *Server) importGarminCourses(ctx context.Context, uploader, rider string
 				continue
 			}
 			if err := s.ensureGarminTags(ctx, route, id); err != nil {
-				result.Skipped[id] = err.Error()
+				s.logger().Warn("garmin course import: tagging an already tracked course failed", "course", id, "err", err)
+				result.Skipped[id] = "could not be tagged"
 				continue
 			}
 			result.Imported = append(result.Imported, id)
@@ -440,7 +441,8 @@ func (s *Server) importGarminCourses(ctx context.Context, uploader, rider string
 
 		got := downloads[id]
 		if got.err != nil {
-			result.Skipped[id] = got.err.Error()
+			s.logger().Warn("garmin course import: download failed", "course", id, "err", got.err)
+			result.Skipped[id] = "could not be downloaded from Garmin"
 			continue
 		}
 
@@ -455,7 +457,8 @@ func (s *Server) importGarminCourses(ctx context.Context, uploader, rider string
 			GPX:        got.gpx,
 		})
 		if err != nil {
-			result.Skipped[id] = err.Error()
+			s.logger().Error("garmin course import: saving the route failed", "course", id, "err", err)
+			result.Skipped[id] = "could not be saved"
 			continue
 		}
 

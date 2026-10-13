@@ -257,7 +257,7 @@ func (s *Server) handlePacingPush(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.logger().Error("pacing push failed", "rider", rider, "route", slug, "provider", string(provider), "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("%s did not accept the course: %v", providerName(provider), err)})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": providerName(provider) + " did not accept the course"})
 		return
 	}
 

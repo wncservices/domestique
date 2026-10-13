@@ -76,7 +76,7 @@ func (c *Client) ImportCourse(ctx context.Context, filename string, data []byte)
 
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return "", errors.New("garmin: the session was refused — sign in again")
+		return "", ErrSessionRefused
 	case status >= 300:
 		return "", fmt.Errorf("garmin: course import returned %d: %s", status, snippet(raw))
 	}
@@ -117,7 +117,7 @@ func (c *Client) saveCourse(ctx context.Context, parsed []byte) (string, error) 
 
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return "", errors.New("garmin: the session was refused — sign in again")
+		return "", ErrSessionRefused
 	case status >= 300:
 		// Not snippet(): this body is a Bean Validation dump that names every
 		// field of the DTO, which is the only description of that shape that
@@ -374,7 +374,7 @@ func (c *Client) ListCourses(ctx context.Context) ([]Course, error) {
 
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return nil, errors.New("garmin: the session was refused — sign in again")
+		return nil, ErrSessionRefused
 	case status >= 300:
 		return nil, fmt.Errorf("garmin: listing courses returned %d: %s", status, snippet(raw))
 	}
@@ -424,7 +424,7 @@ func (c *Client) DownloadGPX(ctx context.Context, courseID string) ([]byte, erro
 
 	switch {
 	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return nil, errors.New("garmin: the session was refused — sign in again")
+		return nil, ErrSessionRefused
 	case status == http.StatusNotFound:
 		return nil, fmt.Errorf("garmin: course %s not found", courseID)
 	case status >= 300:

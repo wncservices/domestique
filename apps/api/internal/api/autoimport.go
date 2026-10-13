@@ -56,6 +56,7 @@ func (s *Server) AutoImportTick(ctx context.Context) {
 	// purpose still wants to know a Garmin session is about to need
 	// reconnecting.
 	s.checkGarminExpiry(ctx)
+	s.pruneUnlinkedPushOutcomes(ctx)
 
 	if s.Settings == nil {
 		return
@@ -122,18 +123,27 @@ func (s *Server) checkGarminExpiry(ctx context.Context) {
 	}
 
 	now := time.Now()
+	var earliest time.Time // earliest expiry among sessions that still work
+	expired := 0
+	// One series for the whole deployment, recorded once the loop is done, and
+	// recorded even when there is no rider left so it never keeps a stale value.
+	defer func() { recordGarminSessionExpiry(ctx, earliest, expired) }()
 	for _, rider := range riders {
 		link, err := s.Links.Get(garminProvider, rider)
 		if err != nil {
 			continue
 		}
 		expiry := garmin.Session{ObtainedAt: link.UpdatedAt}.TokenExpiry()
-		recordGarminSessionExpiry(ctx, rider, expiry)
-
 		if now.After(expiry) {
 			// Already expired — the push-time error path already tells the
-			// rider this every time a push to their account is attempted.
+			// rider this every time a push to their account is attempted. It is
+			// counted, not folded into "earliest expiry", which would otherwise
+			// sit in the past for as long as anyone's session is dead.
+			expired++
 			continue
+		}
+		if earliest.IsZero() || expiry.Before(earliest) {
+			earliest = expiry
 		}
 		if expiry.Sub(now) < garminExpiryWarnWindow {
 			s.logger().Warn("garmin session expiring soon", "rider", rider, "expires", expiry)
@@ -295,4 +305,22 @@ func (s *Server) autoImportKomoot(ctx context.Context) int {
 		imported += len(result.Imported)
 	}
 	return imported
+}
+
+// pruneUnlinkedPushOutcomes keeps domestique_push_accounts_failing honest after
+// an account is unlinked: its last failed attempt would otherwise count forever.
+func (s *Server) pruneUnlinkedPushOutcomes(ctx context.Context) {
+	if s.Accounts == nil {
+		return
+	}
+	list, err := s.Accounts.List(ctx)
+	if err != nil {
+		s.logger().Warn("reconcile: listing accounts for the push gauges failed", "err", err)
+		return
+	}
+	linked := make(map[string]bool, len(list))
+	for _, a := range list {
+		linked[a.ID] = true
+	}
+	forgetUnlinkedPushOutcomes(ctx, linked)
 }

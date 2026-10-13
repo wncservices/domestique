@@ -200,7 +200,7 @@ func (d *DB) List(ctx context.Context) ([]model.Route, []string, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT slug, name, description, tags, targets, enabled, sport,
                distance_m, ascent_m, start_lat, start_lng, point_count,
-               content_hash, updated_at, uploaded_by
+               content_hash, updated_at, uploaded_by, created_at
         FROM routes WHERE enabled = TRUE ORDER BY slug`))
 	if err != nil {
 		return nil, nil, err
@@ -220,7 +220,7 @@ func (d *DB) List(ctx context.Context) ([]model.Route, []string, error) {
 			&route.Slug, &route.Name, &route.Description, &tags, &targets, &enabled, &sport,
 			&route.Stats.DistanceM, &route.Stats.AscentM,
 			&route.Stats.StartLat, &route.Stats.StartLng, &route.Stats.PointCount,
-			&route.ContentHash, &route.UpdatedAt, &route.Owner,
+			&route.ContentHash, &route.UpdatedAt, &route.Owner, &route.CreatedAt,
 		); err != nil {
 			return nil, nil, err
 		}
@@ -457,12 +457,12 @@ func (d *DB) get(ctx context.Context, slug string) (model.Route, error) {
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT slug, name, description, tags, targets, enabled, sport,
                distance_m, ascent_m, start_lat, start_lng, point_count,
-               content_hash, updated_at, uploaded_by
+               content_hash, updated_at, uploaded_by, created_at
         FROM routes WHERE slug = ?`), slug).Scan(
 		&route.Slug, &route.Name, &route.Description, &tags, &targets, &enabled, &sport,
 		&route.Stats.DistanceM, &route.Stats.AscentM,
 		&route.Stats.StartLat, &route.Stats.StartLng, &route.Stats.PointCount,
-		&route.ContentHash, &route.UpdatedAt, &route.Owner)
+		&route.ContentHash, &route.UpdatedAt, &route.Owner, &route.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Route{}, ErrNotFound
 	}
@@ -504,15 +504,15 @@ func (d *DB) uniqueSlug(ctx context.Context, base string) (string, error) {
 
 func (d *DB) analyse(ctx context.Context, raw []byte) ([]gpx.Point, model.RouteStats, error) {
 	if len(raw) == 0 {
-		return nil, model.RouteStats{}, errors.New("empty GPX upload")
+		return nil, model.RouteStats{}, invalid(errors.New("empty GPX upload"))
 	}
 	if len(raw) > maxGPXBytes {
-		return nil, model.RouteStats{}, fmt.Errorf("GPX is %d bytes, over the %d byte limit",
-			len(raw), maxGPXBytes)
+		return nil, model.RouteStats{}, invalid(fmt.Errorf("GPX is %d bytes, over the %d byte limit",
+			len(raw), maxGPXBytes))
 	}
 	points, err := gpx.ParsePoints(raw)
 	if err != nil {
-		return nil, model.RouteStats{}, err
+		return nil, model.RouteStats{}, invalid(err)
 	}
 	if gpx.NeedsElevation(points) {
 		d.backfillElevation(ctx, points)
