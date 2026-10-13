@@ -73,6 +73,12 @@ var riderTables = map[string]riderTable{
 	"sessions": {Purged: true, Note: "Sessions.DeleteRider: every login of the rider ends at once",
 		Rename: renameRule{Skip: "rider_key is a keyed HMAC, not the rider name"}},
 
+	// internal/identities: which issuer accounts sign in as the rider. A purge
+	// removes them so an old login cannot reach the rider again; a rename moves
+	// them with the rider. The key is (issuer, sub), so a rename cannot collide.
+	"rider_identities": {Purged: true, Note: "Identities.DeleteRider",
+		Rename: renameRule{Columns: []string{"rider"}}},
+
 	// internal/garminmfa
 	"garmin_mfa_challenges": {Purged: true, Note: "GarminMFA.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},

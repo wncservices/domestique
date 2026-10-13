@@ -27,6 +27,8 @@ type purgeSummary struct {
 	// and progression removed; ShareLinks the route links they had created.
 	TrainingRows int
 	ShareLinks   int
+	// IdentitiesUnbound is the issuer accounts that no longer sign in as the rider.
+	IdentitiesUnbound int
 	// SessionsEnded is the logins (one per device) that were ended.
 	SessionsEnded int
 	// AdjustmentsRemoved is the "Why?" records of the rider's plan changes:
@@ -85,6 +87,16 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 			return sum, fmt.Errorf("ending sessions: %w", err)
 		}
 		sum.SessionsEnded = n
+	}
+
+	// Also before anything is removed: with the binding gone, an account that
+	// signs in again is a new one and cannot reach what is being deleted.
+	if s.Identities != nil {
+		n, err := s.Identities.DeleteRider(ctx, rider)
+		if err != nil {
+			return sum, fmt.Errorf("removing identity bindings: %w", err)
+		}
+		sum.IdentitiesUnbound = n
 	}
 
 	if s.Source != nil {
@@ -295,6 +307,6 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("rider deleted own account", "rider", rider, "routes", sum.Routes,
 		"accountsUnlinked", sum.AccountsUnlinked, "providerLinks", sum.ProviderLinks, "crewMemberships", sum.CrewMemberships,
 		"trainingRows", sum.TrainingRows, "shareLinks", sum.ShareLinks, "sessionsEnded", sum.SessionsEnded,
-		"adjustmentsRemoved", sum.AdjustmentsRemoved)
+		"adjustmentsRemoved", sum.AdjustmentsRemoved, "identitiesUnbound", sum.IdentitiesUnbound)
 	writeJSON(w, http.StatusOK, map[string]string{"redirectTo": redirectTo})
 }

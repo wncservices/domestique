@@ -45,6 +45,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/mailer"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -1067,6 +1068,17 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	authenticator.UseSessions(sessionStore)
 
 	if cfg.Auth.Mode == auth.ModeOIDC {
+		// Which issuer account is which rider. Only under mode oidc: proxy and
+		// none identify a rider by a header or not at all, so they get no table
+		// and, importantly, no one-time deletion of sessions. Opened after the
+		// sessions store so the first start can end the sessions that were made
+		// when a name claim chose the rider (see identities.UseDB).
+		identityStore, err := identities.UseDB(src.Conn(), src.DSN(), box)
+		if err != nil {
+			return err
+		}
+		srv.Identities = identityStore
+
 		// Unlike Komoot/Garmin, mode oidc cannot run degraded without a
 		// client secret — there is no "the sign-in button is just hidden"
 		// fallback when the mode itself is what the operator asked for, so

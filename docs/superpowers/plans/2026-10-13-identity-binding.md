@@ -66,7 +66,7 @@ func (s *Store) List(ctx) ([]Binding, error)
 func (s *Store) RidersOfSub(ctx, sub string) ([]string, error)
 func (s *Store) RiderBound(ctx, rider string) (bool, error)
 func (s *Store) DeleteRider(ctx, rider string) (int, error)
-func (s *Store) ClaimFree(ctx, issuer, sub, emailMAC string, candidates []string, taken TakenColumns) (Claim, error)
+func (s *Store) ClaimFree(ctx, issuer, sub, emailMAC, candidate string, taken TakenColumns) (Claim, error)
 ```
 
 `ClaimFree` runs in one transaction (PostgreSQL advisory lock; SQLite is one writer): returns the existing binding if this `sub` already has one, otherwise the first free of `candidate`, `candidate-2`, `candidate-3`, ... where *taken* means bound to another `sub` or present in a registered table column.

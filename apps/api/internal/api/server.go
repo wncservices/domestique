@@ -35,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/loops"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -226,6 +227,11 @@ type Server struct {
 	// and /sso/callback can create and delete sessions without a second path
 	// back into internal/auth.
 	Sessions *sessions.Store
+	// Identities binds an issuer account (issuer + sub) to the rider it signs
+	// in as, under mode oidc. Without it an oidc sign-in is refused: the only
+	// other way to pick a rider is an editable name claim, which is the hole
+	// this store closes.
+	Identities *identities.Store
 	// Box seals the short-lived OIDC state cookie (PKCE verifier, nonce,
 	// CSRF state) between /sso/login and /sso/callback. The same key as
 	// Links/Settings/Sessions — one key, everything this app keeps sealed.
