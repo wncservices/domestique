@@ -87,7 +87,7 @@ func (d *DB) CreateLifeEvent(ctx context.Context, e LifeEvent) (LifeEvent, error
 	if err != nil {
 		return LifeEvent{}, err
 	}
-	ts := timestamp()
+	ts := d.timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO life_events (`+lifeEventColumns+`)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -104,7 +104,7 @@ func (d *DB) UpdateLifeEvent(ctx context.Context, rider, id string, e LifeEvent)
 	result, err := d.db.ExecContext(ctx, d.query(`
         UPDATE life_events SET kind = ?, start_date = ?, end_date = ?, option = ?, note = ?, updated_at = ?
         WHERE id = ? AND rider = ?`),
-		e.Kind, e.Start, e.End, e.Option, e.Note, timestamp(), id, normalizeRider(rider))
+		e.Kind, e.Start, e.End, e.Option, e.Note, d.timestamp(), id, normalizeRider(rider))
 	if err != nil {
 		return LifeEvent{}, err
 	}

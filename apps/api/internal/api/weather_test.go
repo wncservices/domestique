@@ -132,6 +132,7 @@ func newWeatherHarness(t *testing.T, mutate ...func(*api.Server)) *weatherHarnes
 		Clock:        h.now,
 		Log:          slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
+	followServerClock(srv, training)
 	for _, m := range mutate {
 		m(srv)
 	}
