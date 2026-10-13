@@ -1078,6 +1078,7 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 			return err
 		}
 		srv.Identities = identityStore
+		srv.NoteBindingsPending()
 
 		// Unlike Komoot/Garmin, mode oidc cannot run degraded without a
 		// client secret — there is no "the sign-in button is just hidden"

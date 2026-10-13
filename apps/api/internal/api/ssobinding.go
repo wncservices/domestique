@@ -13,7 +13,17 @@ import (
 // startup step that binds the riders that already exist calls it when it is
 // done; a deployment with nothing to bind them from (no Management API) calls
 // it straight away.
-func (s *Server) MarkBindingsReady() { s.bindingsReady.Store(true) }
+func (s *Server) MarkBindingsReady() {
+	s.bindingsReady.Store(true)
+	identityBootstrapReady.Record(context.Background(), 1)
+}
+
+// NoteBindingsPending publishes that sign-in is refusing unbound accounts. Main
+// calls it at start under mode oidc, so the gauge reads 0 rather than being
+// absent while the bootstrap has not finished.
+func (s *Server) NoteBindingsPending() {
+	identityBootstrapReady.Record(context.Background(), 0)
+}
 
 // riderNameColumns is every column, in every registered table, that holds a
 // rider's name. A name found in any of them is taken: a rider who has only
@@ -115,7 +125,7 @@ func (s *Server) riderForSignIn(ctx context.Context, w http.ResponseWriter, iden
 
 	// 2 and 4. A verified email shared with accounts already bound.
 	if mac != "" {
-		riders, err := s.Identities.RidersByEmail(ctx, mac)
+		riders, err := s.Identities.RidersByEmail(ctx, issuer, mac)
 		if err != nil {
 			return fail("email match", err)
 		}
@@ -151,4 +161,42 @@ func (s *Server) riderForSignIn(ctx context.Context, w http.ResponseWriter, iden
 		s.logger().Info("identity bound to a new rider", "rider", claim.Rider, "issuer", issuer)
 	}
 	return claim.Rider, true
+}
+
+// sessionOrSignedOut returns id if the session it came from still agrees with
+// the bindings, and the anonymous identity (after deleting the session) if not.
+//
+// A session holds the rider it was made with. Sessions made before bindings
+// existed hold a rider chosen by a name, and a session outlives a binding that
+// has since been moved or removed. Either way the binding is the truth: the
+// account (issuer + sub) must be bound, to exactly this rider. One indexed
+// lookup per request. A session with no sub, or no identity store to check
+// against, fails closed.
+//
+// A lookup that errors signs the request out without deleting the session:
+// a database blip should not end everyone's login for good.
+func (s *Server) sessionOrSignedOut(r *http.Request, id auth.Identity) auth.Identity {
+	end := func() auth.Identity {
+		if s.Sessions != nil {
+			if c, err := r.Cookie(auth.SessionCookieName); err == nil {
+				if err := s.Sessions.Delete(c.Value); err != nil {
+					s.logger().Warn("deleting a session that no longer matches its binding failed", "err", err)
+				}
+			}
+		}
+		return auth.Identity{}
+	}
+	sub := strings.TrimSpace(id.Sub)
+	if s.Identities == nil || sub == "" {
+		return end()
+	}
+	b, bound, err := s.Identities.Get(r.Context(), s.authenticator().OIDC().Issuer, sub)
+	if err != nil {
+		s.logger().Warn("checking a session against its binding failed", "err", err)
+		return auth.Identity{}
+	}
+	if !bound || b.Rider != strings.ToLower(strings.TrimSpace(id.User)) {
+		return end()
+	}
+	return id
 }

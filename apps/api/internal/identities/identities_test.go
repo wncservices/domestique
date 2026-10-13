@@ -149,10 +149,10 @@ func TestSeenRefreshesTheClockAndTheEmail(t *testing.T) {
 		if !b.LastSeenAt.Equal(later) || !b.CreatedAt.Equal(fixed) {
 			t.Errorf("times = created %v seen %v, want created %v seen %v", b.CreatedAt, b.LastSeenAt, fixed, later)
 		}
-		if got, _ := e.store.RidersByEmail(ctx, e.store.EmailMAC("old@example.com")); len(got) != 0 {
+		if got, _ := e.store.RidersByEmail(ctx, issuer, e.store.EmailMAC("old@example.com")); len(got) != 0 {
 			t.Errorf("an address the account no longer asserts still matches: %v", got)
 		}
-		if got, _ := e.store.RidersByEmail(ctx, e.store.EmailMAC("new@example.com")); len(got) != 1 {
+		if got, _ := e.store.RidersByEmail(ctx, issuer, e.store.EmailMAC("new@example.com")); len(got) != 1 {
 			t.Errorf("the address the account asserts now matches %v, want one rider", got)
 		}
 
@@ -222,14 +222,14 @@ func TestRidersByEmailIsDistinctAndEmptyMatchesNothing(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		got, err := e.store.RidersByEmail(ctx, mac)
+		got, err := e.store.RidersByEmail(ctx, issuer, mac)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if strings.Join(got, ",") != "sam,wilant" {
 			t.Errorf("riders = %v, want [sam wilant] once each", got)
 		}
-		if got, _ := e.store.RidersByEmail(ctx, ""); len(got) != 0 {
+		if got, _ := e.store.RidersByEmail(ctx, issuer, ""); len(got) != 0 {
 			t.Errorf("an empty MAC matched %v", got)
 		}
 	})
@@ -255,7 +255,7 @@ func TestMoveUnbindListAndDelete(t *testing.T) {
 		if err := e.store.Move(ctx, issuer, "g|none", "robin"); err != ErrNotBound {
 			t.Errorf("Move of an unbound account = %v, want ErrNotBound", err)
 		}
-		if subs, _ := e.store.RidersOfSub(ctx, "g|1"); strings.Join(subs, ",") != "wilant" {
+		if subs, _ := e.store.RidersOfSub(ctx, issuer, "g|1"); strings.Join(subs, ",") != "wilant" {
 			t.Errorf("RidersOfSub = %v", subs)
 		}
 		all, err := e.store.List(ctx)

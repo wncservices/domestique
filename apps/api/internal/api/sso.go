@@ -235,6 +235,21 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The gate comes first. An account the deployment does not admit (not in
+	// required_group, no role group) must not get a binding, which would
+	// reserve a rider name and a verified email for a stranger, nor a session.
+	// This is the same rule Authorize applies to every later request, applied
+	// here because it is cheaper to refuse once than to bind and then 403.
+	if err := s.authenticator().Authorize(identity); err != nil {
+		s.logger().Warn("oidc sign-in refused: account is not admitted by the gate")
+		returnTo := st.ReturnTo
+		if returnTo == "" {
+			returnTo = "/"
+		}
+		http.Redirect(w, r, withNotice(returnTo, "This account is not a member of this app yet — ask an admin for access."), http.StatusFound)
+		return
+	}
+
 	// identity.User is what the claims suggest. Who this actually is comes from
 	// the binding (see riderForSignIn): nothing a holder can edit at the issuer
 	// chooses a rider that already exists.
