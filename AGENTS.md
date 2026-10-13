@@ -764,12 +764,12 @@ Metrics and traces take deliberately different paths out, matching how every oth
 cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
 
 - **Metrics stay pull-based.** `internal/api/metrics.go` owns its own `sdkmetric.MeterProvider`
-  bound to a private `prometheus.Registry`, so `GET /api/metrics` works in every test and in
-  `just demo` on a laptop — neither calls `internal/telemetry.Setup`. Instruments are recorded
+  bound to a private `prometheus.Registry`, so metrics work in every test and in
+  `just demo` on a laptop (`GET /api/metrics` there, with auth off) — neither calls `internal/telemetry.Setup`. Instruments are recorded
   through the OTel metrics API (`Int64Counter`, `Float64Histogram`, `Float64Gauge`) rather than
   `prometheus/client_golang` directly, but the wire format and metric names
   (`domestique_http_requests_total`, `domestique_http_request_duration_seconds`,
-  `domestique_push_last_success_timestamp_seconds`, `domestique_push_errors_total`) are unchanged
+  `domestique_push_last_success_timestamp_seconds`, `domestique_push_errors_total`) are unchanged (the push ones are labelled by provider, see below)
   — a ServiceMonitor scrapes Prometheus text, not an OTLP metrics pipeline, so that is what stays
   exposed. `otelprom.WithoutScopeInfo()` and `WithoutTargetInfo()` are both set on purpose: without
   them the Prometheus bridge invents an `otel_scope_*` label on every series plus a `target_info`
@@ -882,6 +882,43 @@ in `elevation.Client`, per their own comments:
    calls (`domestique_push_errors_total`'s own reasoning). Follow the existing `Int64Counter`/
    `Float64Histogram`/`Float64Gauge` pattern in `internal/api/metrics.go`, not
    `prometheus/client_golang` directly.
+
+## Security headers and metrics access
+
+- **Metrics are pull-based on an internal port.** `api.NewMetricsServer` is its own `http.Server`
+  (short timeouts, no auth) that serves only `GET /metrics` from the same registry. It binds
+  `DOMESTIQUE_METRICS_ADDR` (an env var only, not a yaml key: the chart sets the environment and
+  leaves the config file alone), default `:9090` when unset; set but empty turns it off
+  (`os.LookupEnv` tells the two apart); `domestique validate` checks the address.
+  It shuts down with the main server on SIGTERM. **The chart exposes it as a named container port
+  `metrics` (9090) and a Service port, the ServiceMonitor scrapes `port: metrics`, path
+  `/metrics`, and the ingress must never route to it.** That is the access control: there is no
+  token. On the public port `/api/metrics` exists only with `auth.mode: none` (`just demo`, local
+  dev); with `proxy` or `oidc` it is a plain 404, even for an admin. A bind failure is logged at
+  Error and the app carries on without metrics. As a second layer, deny `/api/metrics` at Traefik.
+- **No rider names in metric labels.** Push metrics are labelled by `provider` and `op`, the Garmin
+  session gauge is one series (the earliest expiry), and `method` is normalised to the HTTP verbs
+  or `OTHER` (`normalizeMethod`). Anyone who can scrape reads labels, and the method is
+  attacker-chosen before auth. A new metric must not take a rider, an account id or a slug as a
+  label; who failed is a log line.
+- **Alerting on metrics that name nobody.** Because push series are per provider, one stuck
+  account hides behind another's successes in `…last_success_timestamp_seconds`. Two gauges count
+  instead: `domestique_push_accounts_failing{provider}` (linked accounts whose latest push attempt
+  failed, republished on every push result and pruned of unlinked accounts on the reconcile tick)
+  and `domestique_garmin_sessions_expired` (Garmin sessions already past expiry).
+  `domestique_garmin_session_expiry_timestamp_seconds` is the earliest expiry among sessions that
+  still work and reads 0 when there is none, so it needs `> 0` in any rule. Alert on:
+  `domestique_push_accounts_failing > 0`, `rate(domestique_push_errors_total[1h]) > 0`,
+  `domestique_garmin_sessions_expired > 0`. Do not alert on the success timestamp's age per
+  provider as the only stuck-push signal.
+- **`securityHeaders` is outermost in `Handler()`**: a CSP, `X-Frame-Options: DENY` /
+  `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: same-origin` (a share token sits in the
+  `/shared/<token>` URL), and HSTS only when the request is HTTPS. It sets before the handler runs,
+  so the calendar feed's own `no-referrer` wins. The CSP is `script-src 'self'` (no inline, no
+  eval); the only third parties in `connect-src` are Protomaps' CDN (sprite and glyphs) and the
+  Iconify API hosts (runtime icons, since the build ships no icon CSS). **A new third-party host
+  in the frontend means a CSP change in `securityheaders.go`, and the symptom is a console
+  violation, not a build error**; check the app in a browser after touching it.
 
 ## Security guardrails
 

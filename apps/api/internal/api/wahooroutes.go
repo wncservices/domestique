@@ -280,7 +280,7 @@ func (s *Server) handleWahooRouteDelete(w http.ResponseWriter, r *http.Request) 
 
 	if err := s.Wahoo.DeleteRoute(r.Context(), token, id); err != nil {
 		s.logger().Warn("wahoo route delete failed", "rider", rider, "route", id, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Wahoo", err)
 		return
 	}
 
@@ -317,7 +317,7 @@ func (s *Server) handleWahooRouteImport(w http.ResponseWriter, r *http.Request) 
 
 	result, err := s.importWahooRoutes(r.Context(), identity.User, rider, token, body.RouteIDs)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Wahoo", err)
 		return
 	}
 
@@ -401,7 +401,8 @@ func (s *Server) importWahooRoutes(ctx context.Context, uploader, rider, token s
 				continue
 			}
 			if err := s.ensureWahooTags(ctx, libraryRoute, id); err != nil {
-				result.Skipped[id] = err.Error()
+				s.logger().Warn("wahoo route import: tagging an already tracked route failed", "route", id, "err", err)
+				result.Skipped[id] = "could not be tagged"
 				continue
 			}
 			result.Imported = append(result.Imported, id)
@@ -410,7 +411,8 @@ func (s *Server) importWahooRoutes(ctx context.Context, uploader, rider, token s
 
 		got := downloads[id]
 		if got.err != nil {
-			result.Skipped[id] = got.err.Error()
+			s.logger().Warn("wahoo route import: download failed", "route", id, "err", got.err)
+			result.Skipped[id] = "could not be downloaded from Wahoo"
 			continue
 		}
 
@@ -424,7 +426,8 @@ func (s *Server) importWahooRoutes(ctx context.Context, uploader, rider, token s
 			GPX:        got.gpx,
 		})
 		if err != nil {
-			result.Skipped[id] = err.Error()
+			s.logger().Error("wahoo route import: saving the route failed", "route", id, "err", err)
+			result.Skipped[id] = "could not be saved"
 			continue
 		}
 

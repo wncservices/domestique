@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -65,13 +67,27 @@ var (
 	// The two metrics docs/plan.md's own "Phase 6" describes: a staleness
 	// gauge and a per-account error counter, so an alert can catch "pushes
 	// stopped" instead of a rider noticing a route missing at the start of
-	// a ride. Labeled by account (already "<provider>:<rider>", the same
-	// id used everywhere else in this codebase) rather than splitting
-	// provider/rider into two labels — one id an operator already
-	// recognizes, not two they have to mentally rejoin.
+	// a ride. Labeled by provider and op, never by account or rider: the
+	// account id is "<provider>:<rider>" and these series are readable by
+	// anyone who can scrape. The trade is that "pushes stopped" is now
+	// per provider, not per rider; the push log names who failed.
 	pushLastSuccessTimestamp = must(meter.Float64Gauge(
 		"domestique_push_last_success_timestamp_seconds",
 		metric.WithDescription("Unix time of the last successful push per account, by op (create/update/delete)."),
+	))
+
+	// pushAccountsFailing and garminSessionsExpired exist because the labels
+	// above deliberately name no rider, which hides one stuck account behind
+	// another that keeps succeeding. They count, and name nobody: how many linked
+	// accounts' latest push failed, and how many Garmin sessions are already past
+	// expiry. Alert on these being above zero.
+	pushAccountsFailing = must(meter.Float64Gauge(
+		"domestique_push_accounts_failing",
+		metric.WithDescription("Linked accounts whose most recent push attempt failed, by provider."),
+	))
+	garminSessionsExpired = must(meter.Float64Gauge(
+		"domestique_garmin_sessions_expired",
+		metric.WithDescription("Linked Garmin sessions already past their expected expiry."),
 	))
 
 	pushErrorsTotal = must(meter.Int64Counter(
@@ -94,12 +110,12 @@ var (
 
 	// garminSessionExpiry mirrors the push-staleness gauges' own reasoning:
 	// a value an alert rule watches, not a number only a person reads.
-	// Recorded every reconcile tick for every connected Garmin rider,
-	// expiring soon or not, so the threshold for "soon" lives in the alert
-	// rule rather than being baked into what gets exposed here. Labeled by
-	// rider, not by account id — a Garmin session is one per rider by
-	// construction (one account per rider per provider), and "rider" is
-	// what an operator reading the alert would want to reconnect.
+	// Recorded every reconcile tick, expiring soon or not, so the threshold
+	// for "soon" lives in the alert rule rather than being baked into what
+	// gets exposed here. One series: the earliest expiry among connected
+	// riders. It used to carry a rider label so an operator could see whom to
+	// ask to reconnect, but that put every rider's name and session lifetime on
+	// an endpoint; the Warn log from checkGarminExpiry names the rider instead.
 	garminSessionExpiry = must(meter.Float64Gauge(
 		"domestique_garmin_session_expiry_timestamp_seconds",
 		metric.WithDescription("Unix time each rider's stored Garmin session is expected to stop working."),
@@ -109,8 +125,66 @@ var (
 // recordGarminSessionExpiry is checkGarminExpiry's own metric-recording
 // call, kept here for the same reason recordTrackPreviewSize is: metrics.go
 // owns every instrument, callers just report a value against one.
-func recordGarminSessionExpiry(ctx context.Context, rider string, expiry time.Time) {
-	garminSessionExpiry.Record(ctx, float64(expiry.Unix()), metric.WithAttributes(attribute.String("rider", rider)))
+//
+// earliest is the first expiry among sessions that still work, or the zero time
+// when there is none (nobody connected, or every session already lapsed): then
+// the gauge reads 0, not the last rider's value. An alert on this gauge needs
+// `> 0`; "a session has already lapsed" is garminSessionsExpired's job.
+func recordGarminSessionExpiry(ctx context.Context, earliest time.Time, expired int) {
+	var v float64
+	if !earliest.IsZero() {
+		v = float64(earliest.Unix())
+	}
+	garminSessionExpiry.Record(ctx, v)
+	garminSessionsExpired.Record(ctx, float64(expired))
+}
+
+// pushOutcomes remembers, per account, whether its latest push attempt failed.
+// The per-provider counter and timestamp cannot show one account stuck while
+// another of the same provider succeeds (the success refreshes the shared
+// timestamp), so the number of accounts whose latest attempt failed is kept
+// alongside. Only the count leaves this struct: it holds account ids, which
+// carry a rider's name, and they are never a label.
+var pushOutcomes = struct {
+	sync.Mutex
+	failing map[string]bool
+}{failing: map[string]bool{}}
+
+// recordPushOutcome notes one attempt and republishes the failing count for
+// every provider (so a provider that just recovered reads 0, not its last value).
+func recordPushOutcome(ctx context.Context, accountID string, failed bool) {
+	pushOutcomes.Lock()
+	defer pushOutcomes.Unlock()
+	if failed {
+		pushOutcomes.failing[accountID] = true
+	} else {
+		delete(pushOutcomes.failing, accountID)
+	}
+	publishPushFailingLocked(ctx)
+}
+
+// forgetUnlinkedPushOutcomes drops accounts that are no longer linked, so an
+// account that failed and was then unlinked does not hold the count above zero
+// for good. Run on the reconcile tick, with the ids that exist now.
+func forgetUnlinkedPushOutcomes(ctx context.Context, linked map[string]bool) {
+	pushOutcomes.Lock()
+	defer pushOutcomes.Unlock()
+	for id := range pushOutcomes.failing {
+		if !linked[id] {
+			delete(pushOutcomes.failing, id)
+		}
+	}
+	publishPushFailingLocked(ctx)
+}
+
+func publishPushFailingLocked(ctx context.Context) {
+	counts := map[string]int{string(model.ProviderGarmin): 0, string(model.ProviderWahoo): 0}
+	for id := range pushOutcomes.failing {
+		counts[providerOf(id)]++
+	}
+	for provider, n := range counts {
+		pushAccountsFailing.Record(ctx, float64(n), metric.WithAttributes(attribute.String("provider", provider)))
+	}
 }
 
 // newMeter gives metrics.go its own MeterProvider bound to reg, independent
@@ -150,9 +224,7 @@ func must[T any](v T, err error) T {
 	return v
 }
 
-// metricsHandler is /api/metrics itself — exempted from auth in authenticate,
-// the same way /api/health and /api/config already are: a scraper has no
-// rider identity to present.
+// metricsHandler serves the registry as Prometheus text.
 func metricsHandler() http.Handler {
 	return promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{Registry: metricsRegistry})
 }
@@ -168,7 +240,7 @@ func instrument(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		attrs := metric.WithAttributes(
-			attribute.String("method", r.Method),
+			attribute.String("method", normalizeMethod(r.Method)),
 			attribute.String("status", strconv.Itoa(rec.status)),
 		)
 		httpRequestsTotal.Add(r.Context(), 1, attrs)
@@ -183,6 +255,9 @@ type statusRecorder struct {
 	http.ResponseWriter
 	status int
 }
+
+// Unwrap lets http.ResponseController reach the connection underneath.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
@@ -215,14 +290,68 @@ func (s *Server) recordPushResult(item model.PlanItem, err error) {
 	if item.Op == model.OpNoop {
 		return
 	}
+	// By provider, not by account: an account id is "provider:rider" and a
+	// metric label is readable by anyone who can scrape. Which rider's push
+	// failed is in the log line push finished with failures; the metric only
+	// has to say that pushes to a provider are failing or have stopped.
 	attrs := metric.WithAttributes(
-		attribute.String("account", item.AccountID),
+		attribute.String("provider", providerOf(item.AccountID)),
 		attribute.String("op", string(item.Op)),
 	)
 	ctx := context.Background()
+	recordPushOutcome(ctx, item.AccountID, err != nil)
 	if err != nil {
 		pushErrorsTotal.Add(ctx, 1, attrs)
 		return
 	}
 	pushLastSuccessTimestamp.Record(ctx, float64(time.Now().Unix()), attrs)
+}
+
+// normalizeMethod keeps the method label to the verbs HTTP defines. A scrape
+// of /api/metrics is cheap only while the number of series is bounded, and the
+// raw method is attacker-chosen: any token a client sends, before it has been
+// authenticated, would otherwise become a series held in memory for good.
+func normalizeMethod(m string) string {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch,
+		http.MethodDelete, http.MethodOptions, http.MethodConnect, http.MethodTrace:
+		return m
+	}
+	return "OTHER"
+}
+
+// providerOf is the provider half of an account id ("garmin:rider"). Only the
+// providers this app has an adapter for come out; anything else is "other", so
+// a malformed id can neither leak a rider's name through the label nor add a
+// series.
+func providerOf(accountID string) string {
+	provider, _, _ := strings.Cut(accountID, ":")
+	switch provider {
+	case string(model.ProviderGarmin), string(model.ProviderWahoo):
+		return provider
+	}
+	return "other"
+}
+
+// MetricsHandler is what the internal metrics listener serves: GET /metrics,
+// from the same registry the rest of the app records into, and nothing else.
+func MetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", metricsHandler())
+	return mux
+}
+
+// NewMetricsServer is the internal listener's own http.Server. It has no
+// authentication on purpose: it is only ever reachable from inside the cluster
+// (the ingress does not route to it), and a Prometheus scrape is a small GET, so
+// the timeouts are short.
+func NewMetricsServer(addr string) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           MetricsHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 }

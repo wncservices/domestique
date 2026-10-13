@@ -259,7 +259,8 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 		consumer, _ := s.garminConsumer()
 		activities, err := s.Garmin.ListActivities(ctx, consumer, garminSession)
 		if err != nil {
-			warnings = append(warnings, "garmin: "+err.Error())
+			s.logger().Warn("metrics sync: listing garmin activities failed", "rider", rider, "err", err)
+			warnings = append(warnings, "garmin: could not read your activities")
 		} else {
 			for _, a := range activities {
 				if a.ID == "" || a.StartTime.IsZero() {
@@ -272,7 +273,8 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 					DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load,
 				})
 				if err != nil {
-					warnings = append(warnings, "garmin: recording a session: "+err.Error())
+					s.logger().Warn("metrics sync: recording a garmin session failed", "rider", rider, "err", err)
+					warnings = append(warnings, "garmin: a session could not be saved")
 					continue
 				}
 				synced++
@@ -304,12 +306,14 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 			// "Sync now" click otherwise re-surfaces "has not connected
 			// Wahoo" forever for a rider who only uses Garmin.
 			if !errors.Is(err, providerlink.ErrNotFound) {
-				warnings = append(warnings, "wahoo: "+err.Error())
+				s.logger().Warn("metrics sync: wahoo session unusable", "rider", rider, "err", err)
+				warnings = append(warnings, "wahoo: could not use your connection; reconnect Wahoo in Settings")
 			}
 		} else {
 			workouts, err := s.Wahoo.ListWorkouts(ctx, token, 1, 30)
 			if err != nil {
-				warnings = append(warnings, "wahoo: "+err.Error())
+				s.logger().Warn("metrics sync: listing wahoo workouts failed", "rider", rider, "err", err)
+				warnings = append(warnings, "wahoo: could not read your workouts")
 			} else {
 				for _, wk := range workouts {
 					if wk.ID == "" || wk.Starts.IsZero() {
@@ -331,7 +335,8 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 						DistanceM: wk.DistanceM, AvgHR: wk.AvgHR, AvgPowerWatts: wk.AvgPowerWatts, TrainingLoad: load,
 					})
 					if err != nil {
-						warnings = append(warnings, "wahoo: recording a session: "+err.Error())
+						s.logger().Warn("metrics sync: recording a wahoo session failed", "rider", rider, "err", err)
+						warnings = append(warnings, "wahoo: a session could not be saved")
 						continue
 					}
 					synced++

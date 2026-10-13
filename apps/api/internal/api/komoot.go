@@ -54,7 +54,7 @@ func (s *Server) handleKomootTours(w http.ResponseWriter, r *http.Request) {
 		// Komoot's API is undocumented and moves; surface it as an upstream
 		// problem rather than a fault in this app.
 		s.logger().Warn("komoot tour listing failed", "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Komoot", err)
 		return
 	}
 
@@ -103,7 +103,7 @@ func (s *Server) handleKomootDuplicates(w http.ResponseWriter, r *http.Request) 
 	tours, err := client.Tours(r.Context(), false)
 	if err != nil {
 		s.logger().Warn("komoot tour listing failed", "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Komoot", err)
 		return
 	}
 
@@ -191,7 +191,7 @@ func (s *Server) handleKomootTourDelete(w http.ResponseWriter, r *http.Request) 
 
 	tours, err := client.Tours(r.Context(), false)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Komoot", err)
 		return
 	}
 	found := false
@@ -210,7 +210,7 @@ func (s *Server) handleKomootTourDelete(w http.ResponseWriter, r *http.Request) 
 
 	if err := client.DeleteTour(r.Context(), id); err != nil {
 		s.logger().Warn("komoot tour delete failed", "tour", id, "err", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Komoot", err)
 		return
 	}
 
@@ -246,7 +246,7 @@ func (s *Server) handleKomootImport(w http.ResponseWriter, r *http.Request) {
 	identity := auth.FromContext(r.Context())
 	result, err := s.importKomootTours(r.Context(), identity.User, client, body.TourIDs)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		s.failUpstream(w, "Komoot", err)
 		return
 	}
 
@@ -303,7 +303,8 @@ func (s *Server) importKomootTours(ctx context.Context, uploader string, client 
 		got := downloads[id]
 		if got.err != nil {
 			// One bad tour must not abandon the rest of the batch.
-			result.Skipped[id] = got.err.Error()
+			s.logger().Warn("komoot import: download failed", "tour", id, "err", got.err)
+			result.Skipped[id] = "could not be downloaded from Komoot"
 			continue
 		}
 		tour := byID[id]
@@ -319,7 +320,8 @@ func (s *Server) importKomootTours(ctx context.Context, uploader string, client 
 			UploadedBy: uploader,
 			GPX:        raw,
 		}); err != nil {
-			result.Skipped[id] = err.Error()
+			s.logger().Error("komoot import: saving the route failed", "tour", id, "err", err)
+			result.Skipped[id] = "could not be saved"
 			continue
 		}
 		result.Imported = append(result.Imported, id)

@@ -354,7 +354,7 @@ func (s *Server) handleGarminDisconnect(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.Links.Delete(garminProvider, rider); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		s.fail(w, err)
 		return
 	}
 

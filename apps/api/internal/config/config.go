@@ -8,9 +8,11 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -166,6 +168,29 @@ type WebConfig struct {
 	// while the app lives behind the proxy on a subdomain. Empty serves the
 	// app to everyone, which is what a laptop wants.
 	LandingHost string `yaml:"landing_host,omitempty"`
+}
+
+// DefaultMetricsAddr is where the internal metrics listener binds unless told
+// otherwise.
+const DefaultMetricsAddr = ":9090"
+
+// EnvMetricsAddr is the one setting for the internal metrics listener: a second
+// port serving only GET /metrics, with no authentication, because nothing that
+// faces the public is meant to route to it. Prometheus scrapes it from inside
+// the cluster. Deliberately not a domestique.yaml key: the chart sets the
+// environment and does not touch the config file.
+//
+// Unset means DefaultMetricsAddr; set but empty turns the listener off.
+const EnvMetricsAddr = "DOMESTIQUE_METRICS_ADDR"
+
+// MetricsAddr is the address the metrics listener should bind, or "" for none.
+// os.LookupEnv, not Getenv, so an unset variable (the default) and an
+// explicitly empty one (off) are told apart.
+func (c *Config) MetricsAddr() string {
+	if v, ok := os.LookupEnv(EnvMetricsAddr); ok {
+		return strings.TrimSpace(v)
+	}
+	return DefaultMetricsAddr
 }
 
 // TrainingConfig is when the fixed-time metrics sync runs: the times of day
@@ -350,6 +375,18 @@ func (c *Config) Validate() error {
 
 	if err := c.Notifications.SMTP.validate(c.PublicURL); err != nil {
 		return err
+	}
+
+	// A bad metrics address would otherwise mean a pod that runs with its
+	// metrics silently absent.
+	if addr := c.MetricsAddr(); addr != "" {
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return fmt.Errorf("metrics address %q is not host:port (%s): %w", addr, EnvMetricsAddr, err)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("metrics address %q has no valid port (%s)", addr, EnvMetricsAddr)
+		}
 	}
 
 	// Surfaces a bad auth config at startup rather than on the first request.

@@ -1,3 +1,4 @@
+import { useToast } from '@nuxt/ui/composables'
 import type {
   Account,
   AppConfig,
@@ -152,6 +153,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (typeof body.error === 'string') detail = body.error
     } catch {
       /* not JSON — keep the status text */
+    }
+    // 409 with reconnect:true is the API saying a provider refused the stored
+    // sign-in (expired or revoked): tell the rider where to fix it, whatever
+    // screen they were on. The error is still thrown, so the caller's own
+    // handling (a failed list, a stopped import) is unchanged.
+    if (response.status === 409 && body.reconnect === true) {
+      useToast().add({
+        title: detail || 'A connection needs reconnecting',
+        description: 'Open Settings to reconnect it.',
+        icon: 'i-lucide-plug-zap',
+        color: 'warning',
+        actions: [{ label: 'Open Settings', onClick: () => window.location.assign('/settings') }],
+      })
     }
     throw new ApiError(detail || `request to ${path} failed`, response.status, body)
   }
