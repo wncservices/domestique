@@ -1319,11 +1319,12 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	go srv.RunCandidateJanitor(ctx)
 
 	// Binds the riders that existed before identity binding, from the people
-	// the Management API lists. The first attempt runs here, before the server
-	// listens, so in the usual case no rider ever sees a closed sign-in; if it
-	// fails the server still starts and keeps retrying, with accounts that have
-	// no binding refused (503) meanwhile. Without a Management API there is
-	// nothing to run (the gate was opened above). Does nothing outside mode oidc.
+	// the Management API lists. Runs in the background and retries until it
+	// succeeds: it must not delay listening (a slow Auth0 would otherwise outlast
+	// the liveness window), and until it finishes accounts that have no binding
+	// are refused (503, domestique_identity_bootstrap_ready 0). Without a
+	// Management API there is nothing to run (the gate was opened above). Does
+	// nothing outside mode oidc.
 	if srv.People != nil {
 		srv.StartIdentityBootstrap(ctx, func(attempt int) time.Duration {
 			return min(time.Duration(attempt)*10*time.Second, 2*time.Minute)

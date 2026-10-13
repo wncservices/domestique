@@ -442,6 +442,82 @@ func (s *Store) ClaimFree(ctx context.Context, issuer, sub, emailMAC, candidate 
 	return Claim{}, fmt.Errorf("identities: no free rider name near %q", candidate)
 }
 
+// RidersWithData is every rider named in any of the given tables, mapped to the
+// earliest row time found for them. The time is an approximation, on purpose
+// cheap: per table the created_at column if it has one, else updated_at, and a
+// table with neither (or a value that is not a timestamp) still counts the rider
+// as having data but contributes no time. Zero means "has data, no usable time".
+// Riders are lower-cased; a blank name is no rider.
+//
+// It reads tables, not bindings: pass the registry's columns without
+// rider_identities, or every bound rider has "data".
+func (s *Store) RidersWithData(ctx context.Context, tables TakenColumns) (map[string]time.Time, error) {
+	out := map[string]time.Time{}
+	names := make([]string, 0, len(tables))
+	for t := range tables {
+		names = append(names, t)
+	}
+	sort.Strings(names)
+	for _, table := range names {
+		have, err := s.columns(ctx, s.db, table)
+		if err != nil {
+			return nil, err
+		}
+		timeCol := ""
+		for _, c := range []string{"created_at", "updated_at"} {
+			if have[c] {
+				timeCol = c
+				break
+			}
+		}
+		for _, col := range tables[table] {
+			if !have[col] {
+				continue
+			}
+			sel := `LOWER(` + col + `)`
+			if timeCol != "" {
+				sel += `, MIN(` + timeCol + `)`
+			} else {
+				sel += `, NULL`
+			}
+			// Table and column names are constants from the caller's registry.
+			// #nosec G701 G202 -- built only from registry constants.
+			rows, err := s.db.QueryContext(ctx, `SELECT `+sel+` FROM `+table+` WHERE `+col+` IS NOT NULL AND `+col+` <> '' GROUP BY LOWER(`+col+`)`)
+			if err != nil {
+				return nil, fmt.Errorf("identities: reading riders of %s: %w", table, err)
+			}
+			for rows.Next() {
+				var rider string
+				var ts sql.NullString
+				if err := rows.Scan(&rider, &ts); err != nil {
+					_ = rows.Close()
+					return nil, err
+				}
+				rider = strings.TrimSpace(rider)
+				if rider == "" {
+					continue
+				}
+				prev, seen := out[rider]
+				if !seen {
+					out[rider] = time.Time{}
+					prev = time.Time{}
+				}
+				if t, err := time.Parse(time.RFC3339Nano, ts.String); ts.Valid && err == nil {
+					if prev.IsZero() || t.Before(prev) {
+						out[rider] = t
+					}
+				}
+			}
+			err = rows.Err()
+			_ = rows.Close()
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
+}
+
 // liveTaken narrows taken to the tables and columns this database has. A
 // deployment that does not use a feature never created its table, and on
 // PostgreSQL a query against a missing table would abort the transaction.
@@ -494,7 +570,7 @@ func (s *Store) isTaken(ctx context.Context, q querier, taken TakenColumns, ride
 			var one int
 			// Table and column names are constants from the caller's registry,
 			// never input.
-			// #nosec G701 -- built only from registry constants; rider is bound.
+			// #nosec G701 G202 -- built only from registry constants. rider is bound.
 			err := q.QueryRowContext(ctx, s.dialect.Rebind(
 				`SELECT 1 FROM `+table+` WHERE LOWER(`+col+`) = ? LIMIT 1`), rider).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {

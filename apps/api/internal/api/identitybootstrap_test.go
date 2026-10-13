@@ -28,6 +28,7 @@ type bootstrapEnv struct {
 	ids    *identities.Store
 	people *fakePeople
 	log    *logs
+	db     *source.DB
 }
 
 func newBootstrapEnv(t *testing.T, mode auth.Mode, people ...auth0mgmt.Person) *bootstrapEnv {
@@ -69,11 +70,11 @@ func newBootstrapEnv(t *testing.T, mode auth.Mode, people ...auth0mgmt.Person) *
 	fake := &fakePeople{people: people}
 	srv := &api.Server{Auth: authenticator, Identities: ids, People: fake, Clock: func() time.Time { return ssoNow }}
 	l := capturedLogs(srv)
-	return &bootstrapEnv{srv: srv, ids: ids, people: fake, log: l}
+	return &bootstrapEnv{srv: srv, ids: ids, people: fake, log: l, db: db}
 }
 
 func person(sub, name, email string, verified bool) auth0mgmt.Person {
-	return auth0mgmt.Person{UserID: sub, Name: name, Email: email, EmailVerified: verified, Roles: []string{"cyclists"}}
+	return auth0mgmt.Person{UserID: sub, Name: name, Email: email, EmailVerified: verified, ProfileKnown: true, Roles: []string{"cyclists"}}
 }
 
 func (e *bootstrapEnv) bound(t *testing.T) map[string]string {
@@ -116,7 +117,7 @@ func TestBootstrapBindsAPersonReachedThroughGoogleAndAPasswordToOneRider(t *test
 		t.Errorf("result = %+v, want 3 bound and no conflicts", res)
 	}
 	// The address is stored as a MAC that the sign-in's own join will match.
-	riders, _ := e.ids.RidersByEmail(context.Background(), e.ids.EmailMAC("wilant@example.com"))
+	riders, _ := e.ids.RidersByEmail(context.Background(), bootstrapIssuer, e.ids.EmailMAC("wilant@example.com"))
 	if len(riders) != 1 || riders[0] != "wilant" {
 		t.Errorf("the verified email matches %v, want [wilant]", riders)
 	}
@@ -161,9 +162,8 @@ func TestBootstrapBindsNobodyWhenIdentitiesClaimingARiderDisagree(t *testing.T) 
 	}
 }
 
-func TestBootstrapBindsNobodyForAnUnverifiedAddress(t *testing.T) {
+func TestBootstrapBindsNobodyForSeveralClaimantsWhenOneIsUnverified(t *testing.T) {
 	e := newBootstrapEnv(t, auth.ModeOIDC,
-		person("auth0|1", "Pat", "pat@example.com", false),
 		person("auth0|2", "Robin", "robin@example.com", true),
 		person("google-oauth2|3", "Robin", "", true), // no address at all
 	)
@@ -172,14 +172,14 @@ func TestBootstrapBindsNobodyForAnUnverifiedAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := e.bound(t); len(got) != 0 {
-		t.Errorf("bindings = %v, want none: an address nobody has verified cannot stand for a person", got)
+		t.Errorf("bindings = %v, want none: with two claimants an address nobody has verified cannot tell them apart", got)
 	}
-	if res.Unverified != 2 {
-		t.Errorf("unverified riders = %d, want 2 (pat, robin)", res.Unverified)
+	if res.Unverified != 1 {
+		t.Errorf("unverified riders = %d, want 1 (robin)", res.Unverified)
 	}
 	out := e.log.String()
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "identity bootstrap skipped") {
-		t.Errorf("no Warn for the skipped riders in:\n%s", out)
+		t.Errorf("no Warn for the skipped rider in:\n%s", out)
 	}
 	if strings.Contains(out, "@example.com") || strings.Contains(out, "auth0|") {
 		t.Errorf("the log contains an address or a sub:\n%s", out)

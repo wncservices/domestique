@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -70,8 +71,17 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		// Deliberately no created_at/last_login here — the real endpoint
 		// does not return them either (confirmed against Auth0's own
 		// OpenAPI schema), which is the whole reason lastSeen exists.
+		// Paged like the real endpoint: 50 a page unless per_page says otherwise,
+		// page numbers from 0.
+		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		if perPage <= 0 {
+			perPage = 50
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		members := f.roleMembers[r.PathValue("id")]
+		lo, hi := min(page*perPage, len(members)), min((page+1)*perPage, len(members))
 		var out []map[string]string
-		for _, uid := range f.roleMembers[r.PathValue("id")] {
+		for _, uid := range members[lo:hi] {
 			u := f.users[uid]
 			out = append(out, map[string]string{"user_id": uid, "email": u.email, "name": u.name})
 		}
@@ -82,8 +92,17 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		// trusting it blindly — exercises the same OR-of-ids shape lastSeen
 		// actually sends, the way a canned response would not.
 		q := r.URL.Query().Get("q")
+		// A search answers one page, 50 unless asked for more: a client that
+		// ORs a hundred ids into one query silently loses the rest.
+		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		if perPage <= 0 {
+			perPage = 50
+		}
 		var out []map[string]any
 		for _, term := range strings.Split(q, " OR ") {
+			if len(out) >= perPage {
+				break
+			}
 			uid := strings.TrimSuffix(strings.TrimPrefix(term, `user_id:"`), `"`)
 			seen, ok := f.lastSeen[uid]
 			if !ok {
