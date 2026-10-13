@@ -58,7 +58,12 @@ jobs:
         run: GOWORK=off go build ./...
         working-directory: apps/api
       - name: Tests
-        run: go test ./apps/api/... -count=1 -race -cover
+        # -timeout: internal/api alone runs ~9-10 minutes under -race on a
+        # 2-core runner (1,150+ tests, none slow on its own), right at go
+        # test's 10-minute default, so a few new tests tipped it into a
+        # timeout panic. Raised to keep CI honest while the package is split
+        # or parallelised; a test that hangs still fails, just later.
+        run: go test ./apps/api/... -count=1 -race -cover -timeout 25m
       - name: Fail if the PostgreSQL tests were skipped
         # A silently skipped engine is worse than no test: it reads green while
         # covering nothing.
