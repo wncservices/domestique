@@ -352,9 +352,23 @@ func (c *Client) DeleteRoute(ctx context.Context, accessToken, id string) error 
 		return fmt.Errorf("wahoo: reading delete response: %w", err)
 	}
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("wahoo: delete route returned %d: %s", resp.StatusCode, snippet(body))
+		return refusedOr(resp.StatusCode, fmt.Errorf("wahoo: delete route returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 	return nil
+}
+
+// ErrSessionRefused is what a call made with the rider's token wraps when Wahoo
+// answers 401 or 403: the token was revoked or the refresh no longer works, and
+// the rider has to connect again.
+var ErrSessionRefused = errors.New("wahoo: the connection was refused — connect again")
+
+// refusedOr returns ErrSessionRefused for a 401 or 403 and the given error for
+// anything else, so each call site keeps its own message for the rest.
+func refusedOr(status int, err error) error {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		return ErrSessionRefused
+	}
+	return err
 }
 
 // ErrNotFound is what a route request wraps when Wahoo answers 404: the route
@@ -430,7 +444,7 @@ func (c *Client) ListRoutes(ctx context.Context, accessToken string) ([]Route, e
 		return nil, fmt.Errorf("wahoo: reading route list: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wahoo: list routes returned %d: %s", resp.StatusCode, snippet(body))
+		return nil, refusedOr(resp.StatusCode, fmt.Errorf("wahoo: list routes returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 
 	var items []routeListItem
@@ -542,7 +556,7 @@ func (c *Client) DownloadRoute(ctx context.Context, accessToken, fileURL string)
 		return nil, fmt.Errorf("wahoo: reading route download: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wahoo: route download returned %d: %s", resp.StatusCode, snippet(body))
+		return nil, refusedOr(resp.StatusCode, fmt.Errorf("wahoo: route download returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 	return body, nil
 }
@@ -632,7 +646,7 @@ func (c *Client) routeRequest(ctx context.Context, method, endpoint, accessToken
 		return "", fmt.Errorf("wahoo: route request returned 404: %s: %w", snippet(body), ErrNotFound)
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("wahoo: route request returned %d: %s", resp.StatusCode, snippet(body))
+		return "", refusedOr(resp.StatusCode, fmt.Errorf("wahoo: route request returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 
 	var parsed routeResponse

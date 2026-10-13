@@ -160,7 +160,7 @@ func (c *Client) ListWorkouts(ctx context.Context, accessToken string, page, per
 		return nil, fmt.Errorf("wahoo: reading workout list: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wahoo: list workouts returned %d: %s", resp.StatusCode, snippet(body))
+		return nil, refusedOr(resp.StatusCode, fmt.Errorf("wahoo: list workouts returned %d: %s", resp.StatusCode, snippet(body)))
 	}
 
 	var parsed workoutListResponse
@@ -249,7 +249,7 @@ func (c *Client) WorkoutFIT(ctx context.Context, fileURL string) ([]byte, error)
 		return nil, fmt.Errorf("wahoo: workout FIT exceeded the %d byte limit", MaxFITBytes)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("wahoo: workout FIT download returned %d: %s", resp.StatusCode, snippet(raw))
+		return nil, refusedOr(resp.StatusCode, fmt.Errorf("wahoo: workout FIT download returned %d: %s", resp.StatusCode, snippet(raw)))
 	}
 	if len(raw) < 12 || !bytes.Equal(raw[8:12], fitSignature) {
 		return nil, errors.New("wahoo: workout FIT response was not a FIT file (missing the .FIT signature)")

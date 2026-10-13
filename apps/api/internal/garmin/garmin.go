@@ -57,6 +57,11 @@ const (
 // Its own error because it is not a failure to fix by retrying, and the UI has
 // to say something different: this flow cannot complete an MFA challenge, and
 // pretending the password was wrong would send the rider round in circles.
+// ErrSessionRefused is what a call made with the rider's stored session wraps
+// when Garmin answers 401 or 403: the session has expired or been revoked, and
+// the rider has to sign in again. Not a Garmin outage.
+var ErrSessionRefused = errors.New("garmin: the session was refused — sign in again")
+
 var ErrMFARequired = errors.New("garmin: this account requires two-factor authentication, which this sign-in cannot complete")
 
 // ErrBadCredentials means Garmin rejected the email or password.

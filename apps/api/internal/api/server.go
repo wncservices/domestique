@@ -24,6 +24,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
@@ -34,6 +35,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/geocoding"
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/loops"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
@@ -3576,8 +3578,43 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 // can carry a host, a token's scope or a request id. Warn, not Error: the
 // service being down or unhappy is not a fault in this app, and the log line
 // keeps the detail for whoever has to look.
+//
+// Two answers are told apart because the person can act on them:
+//   - a refused session (401/403 from Garmin, Wahoo or Komoot, wrapped as that
+//     package's ErrSessionRefused) is a 409 with reconnect:true and the
+//     provider, so the UI can point to Settings instead of showing "failed";
+//   - Auth0's 409 (already exists) and 429 (rate limited) get short messages of
+//     their own. Everything else Auth0 says stays out of the response.
 func (s *Server) failUpstream(w http.ResponseWriter, upstream string, err error) {
 	s.logger().Warn("upstream request failed", "upstream", upstream, "err", err)
+
+	var provider string
+	switch {
+	case errors.Is(err, garmin.ErrSessionRefused):
+		provider = "garmin"
+	case errors.Is(err, wahoo.ErrSessionRefused):
+		provider = "wahoo"
+	case errors.Is(err, komoot.ErrSessionRefused):
+		provider = "komoot"
+	}
+	if provider != "" {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": upstream + " needs reconnecting", "reconnect": true, "provider": provider,
+		})
+		return
+	}
+
+	var apiErr *auth0mgmt.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.Status {
+		case http.StatusConflict:
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "That person already exists in Auth0"})
+			return
+		case http.StatusTooManyRequests:
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "Auth0 is rate limiting requests; try again in a minute"})
+			return
+		}
+	}
 	writeJSON(w, http.StatusBadGateway, map[string]string{"error": upstream + " could not complete that request"})
 }
 
