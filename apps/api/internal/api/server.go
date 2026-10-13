@@ -727,6 +727,9 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		}
 
 		id := s.authenticator().Identify(r)
+		if s.authenticator().Mode() == auth.ModeOIDC && !id.Anonymous() {
+			id = s.sessionOrSignedOut(r, id)
+		}
 		// The /api/me exemption is for reading who-you-are/why-you're-forbidden,
 		// not for acting as that identity — an authenticated-but-unauthorized
 		// caller (no recognized role) should still be blocked from PATCH /api/me
