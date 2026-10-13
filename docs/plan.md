@@ -212,9 +212,8 @@ Specifics this app needs:
 
 The failure mode that matters is silence: a token expires, pushes stop, and
 nobody notices until a route is missing at the start of a ride. Built:
-`GET /api/metrics` (`internal/api/metrics.go`, exempted from auth the same
-way `/api/health`/`/api/config` already are — a scraper has no rider identity
-to present), a `domestique_push_last_success_timestamp_seconds` gauge and a
+`GET /metrics` on a separate internal port (`internal/api/metrics.go`, no
+auth: the ingress never routes to it; see AGENTS.md), a `domestique_push_last_success_timestamp_seconds` gauge and a
 `domestique_push_errors_total` counter, both labeled by account and op
 (create/update/delete), recorded via a callback `internal/sync.Apply` calls
 per changed item — the diff engine itself stays pure and unaware metrics

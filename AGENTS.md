@@ -764,8 +764,8 @@ Metrics and traces take deliberately different paths out, matching how every oth
 cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
 
 - **Metrics stay pull-based.** `internal/api/metrics.go` owns its own `sdkmetric.MeterProvider`
-  bound to a private `prometheus.Registry`, so `GET /api/metrics` works in every test and in
-  `just demo` on a laptop — neither calls `internal/telemetry.Setup`. Instruments are recorded
+  bound to a private `prometheus.Registry`, so metrics work in every test and in
+  `just demo` on a laptop (`GET /api/metrics` there, with auth off) — neither calls `internal/telemetry.Setup`. Instruments are recorded
   through the OTel metrics API (`Int64Counter`, `Float64Histogram`, `Float64Gauge`) rather than
   `prometheus/client_golang` directly, but the wire format and metric names
   (`domestique_http_requests_total`, `domestique_http_request_duration_seconds`,
@@ -885,15 +885,17 @@ in `elevation.Client`, per their own comments:
 
 ## Security headers and metrics access
 
-- **`GET /api/metrics` is not anonymous.** It sits outside the rider session (a scraper has no
-  rider), so it has its own credential, `Server.metricsGate`: with `DOMESTIQUE_METRICS_TOKEN` set,
-  a matching `Authorization: Bearer` is required in every auth mode; with no token and auth on
-  (`proxy`/`oidc`) it is **closed** (401, and a start-up Warn says so); with no token and
-  `auth.mode: none` (`just demo`, a laptop) it stays open. A token beat a trusted-peer CIDR because
-  behind Traefik every public request arrives from the ingress, so "trusted peer" would have to
-  mean the Prometheus pod's range, a cluster detail; a Secret reference in the ServiceMonitor
-  (`authorization.credentials`) is not. Keep the `/api/metrics` carve-out in `authenticate` (it is
-  about the session, not about access).
+- **Metrics are pull-based on an internal port.** `api.NewMetricsServer` is its own `http.Server`
+  (short timeouts, no auth) that serves only `GET /metrics` from the same registry. It binds
+  `DOMESTIQUE_METRICS_ADDR` (an env var only, not a yaml key: the chart sets the environment and
+  leaves the config file alone), default `:9090` when unset; set but empty turns it off
+  (`os.LookupEnv` tells the two apart); `domestique validate` checks the address.
+  It shuts down with the main server on SIGTERM. **The chart exposes it as a named container port
+  `metrics` (9090) and a Service port, the ServiceMonitor scrapes `port: metrics`, path
+  `/metrics`, and the ingress must never route to it.** That is the access control: there is no
+  token. On the public port `/api/metrics` exists only with `auth.mode: none` (`just demo`, local
+  dev); with `proxy` or `oidc` it is a plain 404, even for an admin. A bind failure is logged at
+  Error and the app carries on without metrics. As a second layer, deny `/api/metrics` at Traefik.
 - **No rider names in metric labels.** Push metrics are labelled by `provider` and `op`, the Garmin
   session gauge is one series (the earliest expiry), and `method` is normalised to the HTTP verbs
   or `OTHER` (`normalizeMethod`). Anyone who can scrape reads labels, and the method is

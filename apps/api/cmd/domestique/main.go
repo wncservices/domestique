@@ -932,14 +932,6 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		srv.LandingHost = host
 	}
 
-	// GET /api/metrics is outside the rider session, so it has its own
-	// credential. With auth on and no token it is simply closed, which is
-	// worth one line at start-up: the symptom is a scrape target that is down.
-	srv.MetricsToken = strings.TrimSpace(os.Getenv("DOMESTIQUE_METRICS_TOKEN"))
-	if srv.MetricsToken == "" && srv.Auth != nil && srv.Auth.Enabled() {
-		log.Warn("GET /api/metrics is closed: set DOMESTIQUE_METRICS_TOKEN and give the scraper the same bearer token")
-	}
-
 	srv.KomootEnabled = cfg.Komoot.Enabled
 	srv.Connector = api.LiveKomoot{}
 
@@ -1254,6 +1246,34 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 			log.Warn("http server shutdown", "err", err)
 		}
 	}()
+
+	// Metrics on their own internal port. The public server never serves them
+	// when auth is on, so a scraper needs no credential and a visitor has nothing
+	// to find: the ingress must never route to this port.
+	if maddr := cfg.MetricsAddr(); maddr != "" {
+		if maddr == addr {
+			return fmt.Errorf("metrics address %q is the same as the public listen address", maddr)
+		}
+		metricsSrv := api.NewMetricsServer(maddr)
+		go func() {
+			log.Info("metrics listening", "addr", maddr)
+			if err := metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				// Error, not a failed start: the app is fine, but metrics that were
+				// asked for are missing, and nothing else will say so.
+				log.Error("metrics listener failed", "addr", maddr, "err", err)
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+				log.Warn("metrics server shutdown", "err", err)
+			}
+		}()
+	} else {
+		log.Info("metrics listener off", "hint", "unset "+config.EnvMetricsAddr+" to get the default :9090")
+	}
 
 	// Polls every connected rider's Wahoo/Komoot/Garmin for new routes and,
 	// if auto-sync is on, imports and pushes them out — the unattended half
