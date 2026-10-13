@@ -124,6 +124,15 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 // not had that week filled.
 func hasPlanSessions(existing []workout.Workout, g workout.Goal, week periodization.Week) bool {
 	start, end := weekBounds(week)
+	return hasPlanSessionsBetween(existing, g, start, end)
+}
+
+// hasPlanSessionsBetween is hasPlanSessions for a week given as its first and
+// last date. It is the one definition of "this week was already filled":
+// autoScheduleGoalWeek used to keep its own copy, which missed the routed-ride
+// exclusion below and recorded a week as filled around a ride the rider had put
+// on it, without making the plan's sessions.
+func hasPlanSessionsBetween(existing []workout.Workout, g workout.Goal, start, end string) bool {
 	for _, wk := range existing {
 		// Neither is a ride the rider put on the day with a route and no plan
 		// description ("new" in routeschedule.go): it carries the goal id so the
