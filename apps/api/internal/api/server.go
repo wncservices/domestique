@@ -1361,11 +1361,14 @@ func (s *Server) handleLinkAccount(w http.ResponseWriter, r *http.Request) {
 
 	account, err := s.Accounts.Link(r.Context(), model.Provider(body.Provider), rider, body.Label)
 	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, accounts.ErrExists) {
-			status = http.StatusConflict
+		switch {
+		case errors.Is(err, accounts.ErrExists):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, accounts.ErrInvalid):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			s.fail(w, err)
 		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -2279,8 +2282,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	route, err := s.Source.Create(r.Context(), req)
 	if err != nil {
-		// A bad GPX is the caller's problem, not a server fault.
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.failCreate(w, err)
 		return
 	}
 
@@ -2989,7 +2991,7 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 
 	route, err := s.Source.Create(r.Context(), req)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		s.failCreate(w, err)
 		return
 	}
 
@@ -3578,6 +3580,17 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 func (s *Server) failUpstream(w http.ResponseWriter, upstream string, err error) {
 	s.logger().Warn("upstream request failed", "upstream", upstream, "err", err)
 	writeJSON(w, http.StatusBadGateway, map[string]string{"error": upstream + " could not complete that request"})
+}
+
+// failCreate answers a failed Source.Create or Update: a GPX the rider can fix
+// is a 400 with its reason (source.ErrInvalid), anything else is the store
+// failing and goes through fail.
+func (s *Server) failCreate(w http.ResponseWriter, err error) {
+	if errors.Is(err, source.ErrInvalid) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.fail(w, err)
 }
 
 func (s *Server) failLookup(w http.ResponseWriter, err error) {

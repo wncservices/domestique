@@ -504,15 +504,15 @@ func (d *DB) uniqueSlug(ctx context.Context, base string) (string, error) {
 
 func (d *DB) analyse(ctx context.Context, raw []byte) ([]gpx.Point, model.RouteStats, error) {
 	if len(raw) == 0 {
-		return nil, model.RouteStats{}, errors.New("empty GPX upload")
+		return nil, model.RouteStats{}, invalid(errors.New("empty GPX upload"))
 	}
 	if len(raw) > maxGPXBytes {
-		return nil, model.RouteStats{}, fmt.Errorf("GPX is %d bytes, over the %d byte limit",
-			len(raw), maxGPXBytes)
+		return nil, model.RouteStats{}, invalid(fmt.Errorf("GPX is %d bytes, over the %d byte limit",
+			len(raw), maxGPXBytes))
 	}
 	points, err := gpx.ParsePoints(raw)
 	if err != nil {
-		return nil, model.RouteStats{}, err
+		return nil, model.RouteStats{}, invalid(err)
 	}
 	if gpx.NeedsElevation(points) {
 		d.backfillElevation(ctx, points)
