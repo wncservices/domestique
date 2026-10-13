@@ -25,6 +25,7 @@ type fakeTenant struct {
 	userRoles   map[string][]string // user id -> role ids currently held
 	lastSeen    map[string]struct{ createdAt, lastLogin, nickname string }
 	blocked     map[string]bool // user id -> blocked
+	verified    map[string]bool // user id -> email_verified
 
 	createdUsers   []map[string]any
 	invitedEmails  []string
@@ -44,6 +45,7 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 		userRoles:    map[string][]string{},
 		lastSeen:     map[string]struct{ createdAt, lastLogin, nickname string }{},
 		blocked:      map[string]bool{},
+		verified:     map[string]bool{},
 		grantedRoles: map[string][]string{},
 		revokedRoles: map[string][]string{},
 	}
@@ -87,10 +89,15 @@ func newFakeTenant(t *testing.T) *fakeTenant {
 			if !ok {
 				continue
 			}
-			out = append(out, map[string]any{
+			entry := map[string]any{
 				"user_id": uid, "created_at": seen.createdAt, "last_login": seen.lastLogin,
 				"nickname": seen.nickname, "blocked": f.blocked[uid],
-			})
+			}
+			// Like the real endpoint, only what fields= asked for.
+			if strings.Contains(r.URL.Query().Get("fields"), "email_verified") {
+				entry["email_verified"] = f.verified[uid]
+			}
+			out = append(out, entry)
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	})

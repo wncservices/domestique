@@ -78,9 +78,14 @@ type Person struct {
 	// API the same way CreatedAt/LastLogin are (see lastSeen) since, like
 	// those two, the role-members endpoint ListPeople otherwise uses does
 	// not return it.
-	Blocked   bool
-	CreatedAt time.Time
-	LastLogin time.Time
+	Blocked bool
+	// EmailVerified is Auth0's email_verified for this identity: whether the
+	// issuer vouches that Email belongs to whoever holds the account. Only a
+	// verified address may stand for a person (see internal/identities), so
+	// this is false until proven, including when Auth0 sent nothing.
+	EmailVerified bool
+	CreatedAt     time.Time
+	LastLogin     time.Time
 }
 
 // Client talks to one Auth0 tenant's Management API.
@@ -305,13 +310,14 @@ func (c *Client) roleID(ctx context.Context, name string) (string, error) {
 // just leaves CreatedAt/LastLogin blank, which lastSeen then fills in
 // separately rather than trusting the role listing for them.
 type roleUser struct {
-	UserID    string `json:"user_id"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	Nickname  string `json:"nickname"`
-	Blocked   bool   `json:"blocked"`
-	CreatedAt string `json:"created_at"`
-	LastLogin string `json:"last_login"`
+	UserID        string `json:"user_id"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	Nickname      string `json:"nickname"`
+	Blocked       bool   `json:"blocked"`
+	EmailVerified bool   `json:"email_verified"`
+	CreatedAt     string `json:"created_at"`
+	LastLogin     string `json:"last_login"`
 }
 
 func parseTime(s string) time.Time {
@@ -339,7 +345,7 @@ func (c *Client) lastSeen(ctx context.Context, userIDs []string) (map[string]rol
 	q := url.Values{
 		"search_engine":  {"v3"},
 		"q":              {strings.Join(terms, " OR ")},
-		"fields":         {"user_id,created_at,last_login,nickname,blocked"},
+		"fields":         {"user_id,created_at,last_login,nickname,blocked,email_verified"},
 		"include_fields": {"true"},
 	}
 
@@ -402,14 +408,15 @@ func (c *Client) ListPeople(ctx context.Context, gateRole string, permissionRole
 	for _, m := range gateMembers {
 		s := seen[m.UserID]
 		out = append(out, Person{
-			UserID:    m.UserID,
-			Email:     m.Email,
-			Name:      m.Name,
-			Nickname:  s.Nickname,
-			Roles:     memberOf[m.UserID],
-			Blocked:   s.Blocked,
-			CreatedAt: parseTime(s.CreatedAt),
-			LastLogin: parseTime(s.LastLogin),
+			UserID:        m.UserID,
+			Email:         m.Email,
+			Name:          m.Name,
+			Nickname:      s.Nickname,
+			Roles:         memberOf[m.UserID],
+			Blocked:       s.Blocked,
+			EmailVerified: s.EmailVerified,
+			CreatedAt:     parseTime(s.CreatedAt),
+			LastLogin:     parseTime(s.LastLogin),
 		})
 	}
 	return out, nil
@@ -433,13 +440,14 @@ func (c *Client) FindByEmail(ctx context.Context, email string) ([]Person, error
 	out := make([]Person, 0, len(users))
 	for _, u := range users {
 		out = append(out, Person{
-			UserID:    u.UserID,
-			Email:     u.Email,
-			Name:      u.Name,
-			Nickname:  u.Nickname,
-			Blocked:   u.Blocked,
-			CreatedAt: parseTime(u.CreatedAt),
-			LastLogin: parseTime(u.LastLogin),
+			UserID:        u.UserID,
+			Email:         u.Email,
+			Name:          u.Name,
+			Nickname:      u.Nickname,
+			Blocked:       u.Blocked,
+			EmailVerified: u.EmailVerified,
+			CreatedAt:     parseTime(u.CreatedAt),
+			LastLogin:     parseTime(u.LastLogin),
 		})
 	}
 	return out, nil

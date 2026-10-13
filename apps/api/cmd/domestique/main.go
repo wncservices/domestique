@@ -1137,8 +1137,8 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 
 		// Until the riders that already exist are bound, an account that has no
 		// binding is refused at sign-in. With the Management API configured
-		// that is opened by the bootstrap (a later change in this stack); with
-		// none there is nothing to bind them from, so it opens now and the
+		// that is opened by the bootstrap (srv.StartIdentityBootstrap, below);
+		// with none there is nothing to bind them from, so it opens now and the
 		// existing riders have to be bound by hand.
 		if srv.People == nil {
 			srv.MarkBindingsReady()
@@ -1316,6 +1316,18 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// Drops generated route loops nobody came back for, so a rider's location
 	// data does not sit in memory past its 30 minutes.
 	go srv.RunCandidateJanitor(ctx)
+
+	// Binds the riders that existed before identity binding, from the people
+	// the Management API lists. The first attempt runs here, before the server
+	// listens, so in the usual case no rider ever sees a closed sign-in; if it
+	// fails the server still starts and keeps retrying, with accounts that have
+	// no binding refused (503) meanwhile. Without a Management API there is
+	// nothing to run (the gate was opened above). Does nothing outside mode oidc.
+	if srv.People != nil {
+		srv.StartIdentityBootstrap(ctx, func(attempt int) time.Duration {
+			return min(time.Duration(attempt)*10*time.Second, 2*time.Minute)
+		})
+	}
 
 	log.Info("listening", "addr", addr, "library", src.Describe(),
 		"auth", authenticator.Mode())
