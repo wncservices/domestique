@@ -657,8 +657,8 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return securityHeaders(extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
-		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(mux))))),
+	return securityHeaders(s.extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
+		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(withRoutePattern(mux)))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + redactPath(r.URL.Path)
@@ -2212,6 +2212,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// The body is in: bound the response again (see uploadResponseDeadline).
+	setWriteDeadline(w, r, uploadResponseDeadline)
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -2933,6 +2935,8 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// The body is in: bound the response again (see uploadResponseDeadline).
+	setWriteDeadline(w, r, uploadResponseDeadline)
 
 	sport, err := parseSport(body.Sport)
 	if err != nil {
@@ -3227,6 +3231,8 @@ func (s *Server) handleUpdateRoutePoints(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// The body is in: bound the response again (see uploadResponseDeadline).
+	setWriteDeadline(w, r, uploadResponseDeadline)
 
 	name, err := s.routeNameFor(r.Context(), slug)
 	if err != nil {
