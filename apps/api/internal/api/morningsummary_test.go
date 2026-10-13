@@ -148,7 +148,6 @@ func newMSHarness(t *testing.T, mode auth.Mode, dsn string, opts msOpts) *msHarn
 		Log:             slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Clock:           func() time.Time { return h.clock },
 		TestMailLimiter: api.NewTestMailLimiter(),
-		MetricsToken:    testMetricsToken,
 	}
 	if !opts.noMailer {
 		srv.Mailer = notif
@@ -795,20 +794,16 @@ func TestPassMentionsAnAlreadyRiddenSessionAndAnEasedOne(t *testing.T) {
 	}
 }
 
-// testMetricsToken is what /api/metrics now requires when auth is on.
-const testMetricsToken = "test-metrics-token"
-
 // The metrics counter is process-wide, so tests compare before and after.
 var metricLine = regexp.MustCompile(`(?m)^domestique_morning_summary_total\{[^}]*result="(\w+)"[^}]*\} (\d+(?:\.\d+)?)$`)
 
-func metricCount(t *testing.T, base, result string) int {
+func metricCount(t *testing.T, _ string, result string) int {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, base+"/api/metrics", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Authorization", "Bearer "+testMetricsToken)
-	resp, err := http.DefaultClient.Do(req)
+	// The public port does not serve metrics when auth is on; read them from the
+	// internal listener's handler, which is the same registry.
+	ts := httptest.NewServer(api.MetricsHandler())
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}

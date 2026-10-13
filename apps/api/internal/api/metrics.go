@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"net/http"
 	"strconv"
 	"strings"
@@ -226,9 +224,7 @@ func must[T any](v T, err error) T {
 	return v
 }
 
-// metricsHandler is /api/metrics itself — exempted from the rider session in
-// authenticate, because a scraper has no rider identity to present, and put
-// behind metricsGate instead.
+// metricsHandler serves the registry as Prometheus text.
 func metricsHandler() http.Handler {
 	return promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{Registry: metricsRegistry})
 }
@@ -334,49 +330,25 @@ func providerOf(accountID string) string {
 	return "other"
 }
 
-// metricsGate guards GET /api/metrics. The endpoint is outside the rider
-// session (a scraper has none), so it carries its own credential: the bearer
-// token in DOMESTIQUE_METRICS_TOKEN, which a ServiceMonitor sends as
-// `authorization.credentials`.
-//
-// A token was chosen over a trusted-peer CIDR because, behind Traefik, every
-// public request reaches the app from the ingress's address, so "trusted peer"
-// would have to mean "the Prometheus pod's range", which is a cluster detail
-// that moves, where a Secret reference does not.
-//
-//   - A token is configured: it is required, whatever the auth mode.
-//   - No token, auth on: closed. Metrics are off until someone sets one,
-//     rather than open to whoever can reach the port.
-//   - No token, auth off (mode none: a laptop, `just demo`): open, as before.
-func (s *Server) metricsGate(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.TrimSpace(s.MetricsToken) != "":
-			if !bearerMatches(r.Header.Get("Authorization"), strings.TrimSpace(s.MetricsToken)) {
-				metricsDenied(w)
-				return
-			}
-		case s.authenticator().Enabled():
-			metricsDenied(w)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// MetricsHandler is what the internal metrics listener serves: GET /metrics,
+// from the same registry the rest of the app records into, and nothing else.
+func MetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", metricsHandler())
+	return mux
 }
 
-func metricsDenied(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
-	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "metrics need a bearer token"})
-}
-
-// bearerMatches compares in constant time, over digests so the length of the
-// expected token is not observable either.
-func bearerMatches(header, token string) bool {
-	const prefix = "Bearer "
-	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return false
+// NewMetricsServer is the internal listener's own http.Server. It has no
+// authentication on purpose: it is only ever reachable from inside the cluster
+// (the ingress does not route to it), and a Prometheus scrape is a small GET, so
+// the timeouts are short.
+func NewMetricsServer(addr string) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           MetricsHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
-	got := sha256.Sum256([]byte(header[len(prefix):]))
-	want := sha256.Sum256([]byte(token))
-	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
 }

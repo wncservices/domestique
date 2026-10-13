@@ -182,12 +182,6 @@ type Server struct {
 	// WebFS is the built frontend. Nil serves an API-only server.
 	WebFS fs.FS
 
-	// MetricsToken is the bearer token GET /api/metrics requires, from
-	// DOMESTIQUE_METRICS_TOKEN. Empty means no token is configured: metrics
-	// are then open only when auth is off (a laptop, `just demo`) and closed
-	// otherwise. See metricsGate.
-	MetricsToken string
-
 	// LandingHost is the hostname that gets the logged-out page instead of
 	// the app — the apex, while the app itself lives behind Authelia on a
 	// subdomain. Empty serves the app to everyone, which is what a laptop
@@ -425,7 +419,12 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.Handle("GET /api/metrics", s.metricsGate(metricsHandler()))
+	// Metrics live on their own internal port (NewMetricsServer). The public port
+	// keeps them only with auth off, so `just demo` and local dev need nothing
+	// extra; with proxy or oidc the path is a plain 404.
+	if !s.authenticator().Enabled() {
+		mux.Handle("GET /api/metrics", metricsHandler())
+	}
 	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("PATCH /api/me", s.handleUpdateMe)
 	mux.HandleFunc("DELETE /api/me", s.handleDeleteMe)
