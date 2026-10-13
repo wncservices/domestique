@@ -899,6 +899,16 @@ in `elevation.Client`, per their own comments:
   or `OTHER` (`normalizeMethod`). Anyone who can scrape reads labels, and the method is
   attacker-chosen before auth. A new metric must not take a rider, an account id or a slug as a
   label; who failed is a log line.
+- **Alerting on metrics that name nobody.** Because push series are per provider, one stuck
+  account hides behind another's successes in `…last_success_timestamp_seconds`. Two gauges count
+  instead: `domestique_push_accounts_failing{provider}` (linked accounts whose latest push attempt
+  failed, republished on every push result and pruned of unlinked accounts on the reconcile tick)
+  and `domestique_garmin_sessions_expired` (Garmin sessions already past expiry).
+  `domestique_garmin_session_expiry_timestamp_seconds` is the earliest expiry among sessions that
+  still work and reads 0 when there is none, so it needs `> 0` in any rule. Alert on:
+  `domestique_push_accounts_failing > 0`, `rate(domestique_push_errors_total[1h]) > 0`,
+  `domestique_garmin_sessions_expired > 0`. Do not alert on the success timestamp's age per
+  provider as the only stuck-push signal.
 - **`securityHeaders` is outermost in `Handler()`**: a CSP, `X-Frame-Options: DENY` /
   `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: same-origin` (a share token sits in the
   `/shared/<token>` URL), and HSTS only when the request is HTTPS. It sets before the handler runs,

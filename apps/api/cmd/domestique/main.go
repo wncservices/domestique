@@ -935,7 +935,7 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// GET /api/metrics is outside the rider session, so it has its own
 	// credential. With auth on and no token it is simply closed, which is
 	// worth one line at start-up: the symptom is a scrape target that is down.
-	srv.MetricsToken = os.Getenv("DOMESTIQUE_METRICS_TOKEN")
+	srv.MetricsToken = strings.TrimSpace(os.Getenv("DOMESTIQUE_METRICS_TOKEN"))
 	if srv.MetricsToken == "" && srv.Auth != nil && srv.Auth.Enabled() {
 		log.Warn("GET /api/metrics is closed: set DOMESTIQUE_METRICS_TOKEN and give the scraper the same bearer token")
 	}
