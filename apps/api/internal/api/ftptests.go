@@ -331,6 +331,15 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// A session the rider chose to keep as planned is not replaced, and a
+		// test beside it would put two sessions on one day.
+		for _, wk := range held {
+			if wk.Date == body.Date && scheduler.IsPlanMade(wk) && scheduler.RiderKept(wk.Description) {
+				s.logger().Info("ftp test not scheduled: that day holds a session the rider kept", "rider", rider)
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "You chose to keep that day's session as planned. Pick another day."})
+				return
+			}
+		}
 		ridden, err := s.riddenOn(ctx, rider, body.Date)
 		if err != nil {
 			s.fail(w, err)
@@ -426,7 +435,7 @@ func (s *Server) replacePlanMadeOn(ctx context.Context, rider, date, keep string
 	}
 	removed := 0
 	for _, wk := range workouts {
-		if wk.Date != date || wk.ID == keep || !isPlanMade(wk) {
+		if wk.Date != date || wk.ID == keep || !scheduler.AutoReplaceable(wk) {
 			continue
 		}
 		s.removeWorkoutFromGarmin(ctx, wk)

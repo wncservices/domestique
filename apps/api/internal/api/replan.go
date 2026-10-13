@@ -162,22 +162,6 @@ func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO
 	return replanResultDTO{Removed: removed, Created: created, Adjusted: adjusted, Week: week}, nil
 }
 
-// isPlanMade reports whether a workout was built by scheduleGoal rather
-// than by the rider's own hand — GoalID set and a description starting
-// with scheduler.GeneratedDescription, which also matches one carrying
-// scheduler.AdjustedMarker (adaptRider appends to the description, it never
-// replaces its own prefix). A session the rider swapped for an alternate
-// (scheduler.SwappedMarker) is not plan-made any more: the rider chose it, so
-// "Re-plan this week" must not delete it. It still counts for scheduling,
-// because its GoalID is kept. Likewise a session with a route (RouteSlug).
-func isPlanMade(wk workout.Workout) bool {
-	// A crew ride carries the goal too and never counts as plan-made, whatever
-	// its description says.
-	return wk.GoalID != "" && wk.CrewRideID == "" && wk.RouteSlug == "" &&
-		strings.HasPrefix(wk.Description, scheduler.GeneratedDescription) &&
-		!strings.Contains(wk.Description, scheduler.SwappedMarker)
-}
-
 // removePlanMadeWorkouts deletes every plan-made workout dated today
 // through weekEnd, except one dated today that the rider has already
 // ridden — a session that happened must survive a replan run five minutes
@@ -199,7 +183,9 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		if wk.Date < today || wk.Date > weekEnd {
 			continue
 		}
-		if !isPlanMade(wk) {
+		// scheduler.AutoReplaceable: plan-made, and not one the rider kept as
+		// planned around a crew ride or through a return to training.
+		if !scheduler.AutoReplaceable(wk) {
 			continue
 		}
 		// An indoor version is the rider's own choice, made by hand. Rebuilding

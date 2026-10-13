@@ -30,17 +30,64 @@ const AdjustedMarker = "Adjusted automatically:"
 // swap: each one is the rider acting.
 const SwappedMarker = "Swapped by you:"
 
+// CrewKeptMarker is written into a session whose ease the rider unticked in a
+// crew-ride preview (internal/crewplan.KeptMarker is this same text).
+const CrewKeptMarker = "Kept as planned by you around your crew ride."
+
+// LifeKeptMarker is written into a session whose ease or shortening the rider
+// unticked in a life-event preview (internal/lifeevents.KeptMarker is this same
+// text).
+const LifeKeptMarker = "Kept as planned by you through the return to training."
+
+// RiderKept reports whether the rider explicitly chose to keep a session as
+// planned, in either feature that offers the choice. It is the one place the two
+// markers are listed: every automatic path asks it (through IsGenerated and
+// AutoReplaceable) instead of checking whichever marker it happens to know.
+func RiderKept(description string) bool {
+	return strings.Contains(description, CrewKeptMarker) || strings.Contains(description, LifeKeptMarker)
+}
+
+// IsPlanSession reports whether w is a session the scheduler made and the rider
+// has not swapped, adjusted-or-not aside: a goal, the generated description,
+// no crew ride, not swapped. It says nothing about whether the rider asked for
+// it to be left alone (RiderKept), so it is for the places that must still
+// *move* such a session out of a day a life event took, not change its content.
+func IsPlanSession(w workout.Workout) bool {
+	return w.GoalID != "" && w.CrewRideID == "" &&
+		strings.HasPrefix(w.Description, GeneratedDescription) &&
+		!strings.Contains(w.Description, AdjustedMarker) &&
+		!strings.Contains(w.Description, SwappedMarker)
+}
+
 // IsGenerated reports whether w was made by the scheduler and has not
 // already been adjusted or swapped, the only workouts adaptation may change.
+// A session the rider chose to keep as planned (RiderKept) is not.
 //
 // A crew ride row is never generated, whatever its description says: it is the
 // rider's own commitment to a ride the crew set, linked to a goal only so its
 // day reads as taken. Nothing automatic may move, ease, replace or delete it.
 func IsGenerated(w workout.Workout) bool {
-	return w.GoalID != "" && w.CrewRideID == "" &&
+	return IsPlanSession(w) && !RiderKept(w.Description)
+}
+
+// IsPlanMade reports whether a workout was built by scheduleGoal rather than by
+// the rider's own hand: a goal and a description starting with
+// GeneratedDescription, which also matches one carrying AdjustedMarker (the
+// adapter appends to the description, never replaces its prefix). A session the
+// rider swapped for an alternate (SwappedMarker) is not plan-made any more, nor
+// is one with a route (RouteSlug) or a crew ride: the rider chose those. It
+// still counts for scheduling, because its GoalID is kept.
+func IsPlanMade(w workout.Workout) bool {
+	return w.GoalID != "" && w.CrewRideID == "" && w.RouteSlug == "" &&
 		strings.HasPrefix(w.Description, GeneratedDescription) &&
-		!strings.Contains(w.Description, AdjustedMarker) &&
 		!strings.Contains(w.Description, SwappedMarker)
+}
+
+// AutoReplaceable is IsPlanMade for the paths that delete a session to build
+// another in its place (replan, scheduling an FTP test): a session the rider
+// kept as planned stays.
+func AutoReplaceable(w workout.Workout) bool {
+	return IsPlanMade(w) && !RiderKept(w.Description)
 }
 
 // CrewLongRideSeconds is how long a crew ride has to be to count as the week's

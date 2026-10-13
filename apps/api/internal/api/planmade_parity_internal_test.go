@@ -4,10 +4,13 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
-	"github.com/wncservices/domestique/apps/api/internal/testschedule"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
+// There is one definition of "plan-made" now (internal/scheduler), where this
+// used to pin two copies against each other. The suggester and the apply both
+// call scheduler.AutoReplaceable, and this table keeps its answers honest.
+//
 // The FTP-test suggester decides which session a test would "replace"; the API
 // decides which one the apply actually replaces. When the two definitions of
 // "plan-made" drift, the suggester offers a swap the apply refuses to make and
@@ -36,11 +39,27 @@ func TestTheTwoDefinitionsOfPlanMadeAgree(t *testing.T) {
 		"routed": {workout.Workout{GoalID: "g", Description: gen, RouteSlug: "a-loop"}, false},
 	}
 	for name, c := range cases {
-		if got := isPlanMade(c.w); got != c.want {
-			t.Errorf("api.isPlanMade(%s) = %v, want %v", name, got, c.want)
+		if got := scheduler.IsPlanMade(c.w); got != c.want {
+			t.Errorf("scheduler.IsPlanMade(%s) = %v, want %v", name, got, c.want)
 		}
-		if got := testschedule.IsPlanMade(c.w); got != c.want {
-			t.Errorf("testschedule.IsPlanMade(%s) = %v, want %v", name, got, c.want)
+		// Replacing is IsPlanMade minus what the rider kept (below).
+		if got := scheduler.AutoReplaceable(c.w); got != c.want {
+			t.Errorf("scheduler.AutoReplaceable(%s) = %v, want %v", name, got, c.want)
+		}
+	}
+}
+
+// The suggester (testschedule) must offer to replace exactly what the apply
+// (replacePlanMadeOn) removes: both go through scheduler.AutoReplaceable, so a
+// kept session is neither offered nor deleted.
+func TestAKeptSessionIsNeitherOfferedNorReplacedByAnFTPTest(t *testing.T) {
+	for _, marker := range []string{scheduler.CrewKeptMarker, scheduler.LifeKeptMarker} {
+		w := workout.Workout{GoalID: "g", Description: scheduler.GeneratedDescription + " " + marker}
+		if scheduler.AutoReplaceable(w) {
+			t.Errorf("a session carrying %q is replaceable", marker)
+		}
+		if !scheduler.IsPlanMade(w) {
+			t.Errorf("a kept session is still plan-made structurally (%q)", marker)
 		}
 	}
 }
