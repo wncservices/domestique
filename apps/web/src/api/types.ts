@@ -308,6 +308,15 @@ export interface Person {
   /** Whether an admin has blocked this person — mirrors Auth0's own blocked
    *  flag. Absent (false) for everyone else. */
   blocked?: boolean
+  /** The rider this account actually signs in as, from its binding — what
+   *  everything they own is keyed on. Unlike likelyRider this is the truth,
+   *  not a guess; absent when the account has no binding. */
+  boundRider?: string
+  /** 'bound', 'unbound', or 'conflict' (unbound, and another account with a
+   *  different verified email claims the same likely rider, so the startup
+   *  bootstrap bound neither and an admin has to decide). Absent when this
+   *  deployment keeps no bindings. */
+  bindingStatus?: 'bound' | 'unbound' | 'conflict'
 }
 
 export interface InvitePersonRequest {

@@ -741,6 +741,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ blocked, email, reason }),
     }),
+  /** Points a person's sign-in at a rider (admin only, never one's own).
+   *  Creates the binding if the account has none; ends that account's
+   *  sessions, which hold the old rider. */
+  setPersonBinding: (id: string, rider: string) =>
+    request<{ boundRider: string }>(`/api/people/${encodeURIComponent(id)}/binding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rider }),
+    }),
   /** Deletes a person entirely: their local data for the given rider
    *  identity (best-effort — see Person.likelyRider), then their Auth0
    *  identity. Irreversible. Pass no rider to delete only the Auth0

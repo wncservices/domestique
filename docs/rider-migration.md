@@ -1,5 +1,10 @@
 # Moving a rider from Authelia to an OIDC issuer
 
+> **Read "Identity bindings" below first.** Since identity binding, the rename
+> described next is usually unnecessary: you bind the new account to the
+> existing rider instead. The rename steps are kept because `rename-rider`
+> still exists and the reasoning still applies to a real rename.
+
 You have real data today keyed to an Authelia username — routes you
 uploaded, a Garmin sign-in you connected, an account you linked. Once
 `mode: oidc` is live, your new identity provider names you differently:
@@ -118,6 +123,70 @@ actually the one with real data (the less common direction — you already
 used the app under the new identity for a while before running this), do not
 reach for `--replace`; resolve that one by hand instead, the same as before
 this flag existed.
+
+## Identity bindings: after the deploy that adds them
+
+Since audit finding H1 an OIDC sign-in is resolved through a binding
+(`rider_identities`), not through the name claims; `docs/oidc.md` has the
+design. Two things change for an operator.
+
+**Everyone is signed out once.** Creating the table ends every existing
+session (a marker row makes that happen only once, so a later start never does
+it again). Expect each rider to sign in again; those sessions held a rider that
+was chosen by a name.
+
+**Existing riders have to be bound before their accounts sign in.** With the
+Auth0 Management API configured the server does it at startup, from the people
+in the gate role:
+
+- an account whose rider has a verified email, and where every account claiming
+  that rider has the same address, is bound automatically (this covers one
+  person reached through Google and through a password);
+- anything else is **not** bound, on purpose, and logged. Watch the start-up
+  log for `identity bootstrap conflict` (Error, a rider and a count) and
+  `identity bootstrap skipped a rider` (Warn).
+
+After the deploy, **open the People page and check it**:
+
+1. every person you expect shows their own rider (the link badge);
+2. a **conflict** badge means two accounts with different verified emails claim
+   the same rider. Decide which is real, and use *Change which rider this is*
+   to bind that one to the rider. Bind the other to a name of its own (or leave
+   it: it will get a suffixed rider the next time it signs in);
+3. **not bound** next to someone who has data means their email is unverified
+   (a password account whose address was never confirmed is the usual case).
+   Bind them from the same dialog, or have them confirm the address and restart.
+
+Until that is done, such a rider signing in lands on a rider named like
+`wilant-2` with none of their data. Nothing is lost: bind the account to
+`wilant` and sign in again.
+
+While the bootstrap has not succeeded (Auth0 unreachable at start), accounts
+with no binding get a "starting up, try again" page and are retried in the
+background; bound accounts are unaffected.
+
+Without Management API credentials, bind them yourself, per account, before
+or right after the deploy:
+
+```bash
+# the issuer is auth.oidc.issuer exactly as configured; the sub is Auth0's user id
+domestique bind-identity --dry-run 'https://tenant.example.auth0.com/' 'auth0|64f2a1b2c3d4e5f6' wilant
+domestique bind-identity           'https://tenant.example.auth0.com/' 'auth0|64f2a1b2c3d4e5f6' wilant
+```
+
+`bind-identity` also ends that account's sessions (it needs
+`DOMESTIQUE_ENCRYPTION_KEY` for that and says so if it is missing).
+`unbind-identity <issuer> <sub>` removes a binding. An admin moving their own
+account must use this: the People page refuses it.
+
+**This changes the migration above.** A rider is no longer whatever string the
+issuer hands over, so moving an Authelia rider to `mode: oidc` no longer needs
+`rename-rider`: bind the new account to the existing rider name
+(`bind-identity … wilant`, or the People page) and everything keyed to `wilant`
+is theirs again. The first sign-in in "Order matters" now lands on a rider of its
+own (`wilant-2` while `wilant` still has data); that is expected, and binding
+the account to `wilant` is the fix. `rename-rider` is still there for genuinely
+renaming a rider, and it moves the bindings along with everything else.
 
 ## Admin bootstrapping
 

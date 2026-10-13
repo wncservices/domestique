@@ -52,6 +52,16 @@ type personDTO struct {
 	// derived; this is a hint for admin tooling (the crew add-member
 	// picker), never a source of truth for who someone is.
 	LikelyRider string `json:"likelyRider,omitempty"`
+	// BoundRider is the rider this account actually signs in as, from the
+	// binding (internal/identities), as opposed to LikelyRider, which is only
+	// a guess from the profile's name. Empty when the account has no binding
+	// or this deployment keeps none.
+	BoundRider string `json:"boundRider,omitempty"`
+	// BindingStatus is "bound", "unbound", or "conflict": unbound, and another
+	// account with a different verified email claims the same likely rider, so
+	// the startup bootstrap bound neither. Empty when this deployment keeps no
+	// bindings (anything but mode oidc).
+	BindingStatus string `json:"bindingStatus,omitempty"`
 }
 
 // likelyRider guesses what identityFromToken (sso.go) would resolve this
@@ -192,11 +202,63 @@ func (s *Server) handlePeopleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	views := s.bindingViews(r.Context(), people)
 	out := make([]personDTO, 0, len(people))
 	for _, p := range people {
-		out = append(out, s.personDTO(p))
+		dto := s.personDTO(p)
+		if v, ok := views[p.UserID]; ok {
+			dto.BoundRider, dto.BindingStatus = v.rider, v.status
+		}
+		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// bindingView is what the People page shows about one account's binding.
+type bindingView struct {
+	rider, status string
+}
+
+// bindingViews reads the bindings once and says, for each listed person,
+// which rider they are bound to or why they are not. Nil when this deployment
+// keeps no bindings or they cannot be read (logged): the page then shows no
+// binding column at all, which is the honest answer, rather than showing every
+// account as unbound.
+func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) map[string]bindingView {
+	if s.Identities == nil {
+		return nil
+	}
+	all, err := s.Identities.List(ctx)
+	if err != nil {
+		s.logger().Warn("reading identity bindings for the people page failed", "err", err)
+		return nil
+	}
+	issuer := s.authenticator().OIDC().Issuer
+	bySub := map[string]string{}
+	boundRiders := map[string]bool{}
+	for _, b := range all {
+		boundRiders[b.Rider] = true
+		if b.Issuer == issuer {
+			bySub[b.Sub] = b.Rider
+		}
+	}
+	// The same rule the startup bootstrap used, so the page flags exactly the
+	// riders it left alone for an admin.
+	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] })
+
+	out := make(map[string]bindingView, len(people))
+	for _, p := range people {
+		if rider, ok := bySub[p.UserID]; ok {
+			out[p.UserID] = bindingView{rider: rider, status: "bound"}
+			continue
+		}
+		status := "unbound"
+		if plan.Conflicts[likelyRider(p.Name, p.Nickname, p.UserID)] > 0 {
+			status = "conflict"
+		}
+		out[p.UserID] = bindingView{status: status}
+	}
+	return out
 }
 
 // handlePeopleInvite creates a new Auth0 account, grants it the requested
@@ -487,6 +549,94 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Last, and only now: with the account gone from Auth0 the binding points at
+	// nothing. Done before the delete, a failed delete would leave an account
+	// that can still sign in with no binding, which would give it a new rider.
+	if s.Identities != nil {
+		if _, err := s.Identities.Unbind(r.Context(), s.authenticator().OIDC().Issuer, id); err != nil {
+			s.logger().Error("could not remove the binding of a deleted person", "rider", rider, "err", err)
+		}
+	}
+
 	s.logger().Info("person deleted", "id", id, "rider", rider, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handlePeopleSetBinding points an account at a rider, or binds one that has
+// no binding yet. This is how an admin settles what the startup bootstrap
+// left alone (a conflict, an unverified address) and how a rider who ended up
+// on a suffixed name gets back to their own data.
+//
+// Admin only, and never for the caller's own account: a binding decides whose
+// data a person sees, and the one thing the whole design forbids is a person
+// choosing that for themselves. An admin who needs their own moved uses the
+// CLI on the server (bind-identity), which needs access to the database and so
+// to the deployment rather than only to a login.
+//
+// The account's live sessions are ended, because they hold the old rider.
+func (s *Server) handlePeopleSetBinding(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManagePeople) {
+		return
+	}
+	if !s.peopleAvailable(w) {
+		return
+	}
+	if s.Identities == nil {
+		s.logger().Warn("binding requested but this deployment keeps no identity bindings")
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+			"error": "this deployment keeps no identity bindings (they exist under auth.mode: oidc)",
+		})
+		return
+	}
+
+	sub := r.PathValue("id")
+	if sub == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no person id"})
+		return
+	}
+	caller := auth.FromContext(r.Context())
+	if sub == caller.Sub {
+		s.logger().Warn("an admin tried to move their own identity binding", "rider", caller.User)
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "you cannot move your own sign-in here — ask another admin, or run `domestique bind-identity` on the server",
+		})
+		return
+	}
+
+	var body struct {
+		Rider string `json:"rider"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	rider := strings.ToLower(strings.TrimSpace(body.Rider))
+	if rider == "" || !accounts.RiderPattern.MatchString(rider) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "rider must be letters, digits and . _ @ | -",
+		})
+		return
+	}
+
+	issuer := s.authenticator().OIDC().Issuer
+	from := ""
+	existing, bound, err := s.Identities.Get(r.Context(), issuer, sub)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if bound {
+		from = existing.Rider
+		err = s.Identities.Move(r.Context(), issuer, sub, rider)
+	} else {
+		_, err = s.Identities.Bind(r.Context(), issuer, sub, rider, "")
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.endSessionsOf(r.Context(), sub, "identity binding changed")
+
+	s.logger().Info("identity binding moved by admin", "rider", rider, "from", from, "by", caller.User)
+	writeJSON(w, http.StatusOK, map[string]string{"boundRider": rider})
 }

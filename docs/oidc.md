@@ -23,8 +23,80 @@ real data hit it:
   `identityFromToken` (`internal/api/sso.go`) falls through
   `preferred_username` → `name` → `nickname` → `sub`, each checked against
   the same rider pattern.
+- **That chain no longer decides who someone is** (audit finding H1,
+  2026-10-13). A name claim is editable by its holder: anyone invited could
+  rename their Google account to another rider's name and sign in as that
+  rider, inheriting their routes, Garmin/Wahoo sessions, crews and training
+  data. A rider is now whatever the account is **bound** to — see
+  "Identity binding" below. The chain survives only as the suggestion for a
+  new account's own rider name.
 
 The rest of this document is unchanged from before any of it was built.
+
+## Identity binding
+
+*Added after the rest of this document, to close audit finding H1; the design
+record is `docs/superpowers/specs/2026-10-13-identity-binding-design.md`.*
+
+A sign-in reaches a rider through a row in `rider_identities`:
+`(issuer, sub) -> rider`. `sub` is assigned by the issuer and cannot be edited
+by its holder; the name claims can, so they are never trusted to *pick* a
+rider.
+
+When `/sso/callback` has verified the token it decides the rider like this:
+
+| | Case | Result |
+|---|---|---|
+| 1 | `(issuer, sub)` is bound | that rider, whatever the name claims say now |
+| 2 | unbound, verified email matches accounts bound to exactly one rider | joins that rider (Info `identity bound by verified email`) |
+| 3 | unbound, otherwise | a rider of its own, from the claims, or the first free `name-2`, `name-3`... if the name is taken (Warn `sign-in name already belongs to another rider`) |
+| 4 | unbound, verified email matches more than one rider | joins none; behaves as 3 (Warn) |
+
+*Taken* means bound to another `sub` **or** present in any table of
+`riderTables` (`internal/api/riderdata.go`): a rider with only training data
+is somebody. The email is only used when the issuer says it is verified, and
+is stored only as a keyed MAC (`secrets.Box.MAC`, purpose `identity-email`),
+never as the address; nothing logs an email or a `sub`.
+
+Two people are never merged by a name. Someone who signs in through both Google
+and a password (this tenant does not link them) is joined to one rider only if
+both accounts carry the same verified address.
+
+### Moving the riders that already existed
+
+Deploying this must not open a window where an unbound existing rider can be
+claimed by name. At startup, when the Auth0 Management API is configured, the
+server lists the gate role's members and groups them by the rider the old rule
+would have given them. A rider is bound only when **every account claiming it
+has a verified email and all those emails are the same address**. If they
+disagree (someone renamed an account to "Wilant" before the deploy) nobody is
+bound, an Error `identity bootstrap conflict` is logged with the rider and a
+count only, and the People page shows the conflict for an admin to resolve.
+
+Until the bootstrap has succeeded, **sign-in refuses an account that has no
+binding** (503, `Retry-After`) rather than resolving it by name. Accounts that
+already have a binding sign in as usual. The server does not wait for Auth0
+before it starts listening: the first attempt runs before it does, and a
+failure is retried in the background, so an Auth0 outage costs unbound
+sign-ins a minute, not the whole app.
+
+Without Management API credentials there is nothing to bootstrap from: nothing
+is bound, and existing riders land on a suffixed rider (`wilant-2`) until
+`domestique bind-identity` binds them. `docs/rider-migration.md` has the
+runbook.
+
+All sessions were deleted once, when the table was created, so every rider
+signs in again through the binding.
+
+### Admin
+
+The People page shows each account's bound rider and flags `unbound` and
+`conflict`; an admin can move a binding (and bind an account that has none),
+which ends that account's sessions. An admin cannot move their own: use
+`domestique bind-identity <issuer> <sub> <rider>` on the server (`--dry-run`
+shows what it would do; `unbind-identity` undoes one). `PATCH /api/me` now
+renames the display name only, so the check that refused names belonging to
+another rider is gone.
 
 ## Why this rather than picking a provider
 
@@ -131,7 +203,9 @@ people by hand; that is the correct outcome, not a bug to work around.
 
 **`sub` is the identity, not the email.** Emails get reused and changed.
 Riders are currently keyed by Authelia username, so a migration needs a stable
-`rider` value — probably `preferred_username`, falling back to `sub`. **This is
+`rider` value — probably `preferred_username`, falling back to `sub`. (That
+guess did not hold: see "Identity binding" above, where the binding table is
+the "mapping table from the day OIDC lands" this paragraph weighs.) **This is
 the one genuinely hard part**: routes, accounts and provider sign-ins are all
 keyed on the rider string, and changing what that string means orphans them.
 Either keep a mapping table from the day OIDC lands, or accept a one-off

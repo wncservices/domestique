@@ -183,6 +183,53 @@ async function confirmToggleBlocked() {
   }
 }
 
+// --- which rider an account is ---
+//
+// An account signs in as the rider it is bound to. Nothing the person can edit
+// (their name at Google, say) chooses that. An admin settles what the startup
+// bootstrap left alone: a conflict between two accounts claiming one rider, or
+// an account that ended up on a suffixed rider. Never for one's own account:
+// the server refuses, and says to use the CLI.
+
+const bindTarget = ref<Person | null>(null)
+const bindRider = ref('')
+const binding = ref('')
+
+function openBind(person: Person) {
+  bindTarget.value = person
+  bindRider.value = person.boundRider ?? person.likelyRider ?? ''
+}
+
+async function confirmBind() {
+  const target = bindTarget.value
+  const rider = bindRider.value.trim().toLowerCase()
+  if (!target || !rider) return
+  binding.value = target.id
+  try {
+    const result = await api.setPersonBinding(target.id, rider)
+    target.boundRider = result.boundRider
+    target.bindingStatus = 'bound'
+    bindTarget.value = null
+    toast.add({
+      title: `${target.email} now signs in as ${result.boundRider}`,
+      description: 'Their current sign-ins were ended; they sign in again.',
+      icon: 'i-lucide-link',
+      color: 'success',
+    })
+    // Another account may have stopped being a conflict.
+    await load()
+  } catch (err) {
+    toast.add({
+      title: `Could not change which rider ${target.email} is`,
+      description: err instanceof Error ? err.message : String(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    binding.value = ''
+  }
+}
+
 // --- delete ---
 //
 // likelyRider is only a guess at this person's local rider identity (see
@@ -195,7 +242,9 @@ const deletingPerson = ref('')
 
 function openDeleteConfirm(person: Person) {
   deleteTarget.value = person
-  deleteRider.value = person.likelyRider ?? ''
+  // The binding is the rider this account is; the profile-name guess is only
+  // for someone who has no binding yet.
+  deleteRider.value = person.boundRider ?? person.likelyRider ?? ''
 }
 
 async function confirmDeletePerson() {
@@ -283,6 +332,21 @@ async function confirmDeletePerson() {
               <p class="truncate text-sm text-highlighted">{{ person.name || person.email }}</p>
               <p class="truncate text-xs text-dimmed">{{ person.email }} · {{ lastSeen(person) }}</p>
             </div>
+            <UBadge v-if="person.bindingStatus === 'bound'" color="neutral" variant="subtle" size="sm" icon="i-lucide-link">
+              {{ person.boundRider }}
+            </UBadge>
+            <UBadge
+              v-else-if="person.bindingStatus === 'conflict'"
+              color="warning"
+              variant="subtle"
+              size="sm"
+              icon="i-lucide-triangle-alert"
+            >
+              conflict: {{ person.likelyRider }}
+            </UBadge>
+            <UBadge v-else-if="person.bindingStatus === 'unbound'" color="neutral" variant="outline" size="sm">
+              not bound
+            </UBadge>
             <UBadge v-if="person.blocked" color="error" variant="subtle" size="sm">blocked</UBadge>
             <UBadge :color="roleColor(person.role)" variant="subtle" size="sm">{{ person.role }}</UBadge>
             <USelect
@@ -295,6 +359,17 @@ async function confirmDeletePerson() {
               aria-label="Change role"
               @update:model-value="(role: AssignableRole) => changeRole(person, role)"
             />
+            <UTooltip v-if="person.bindingStatus" text="Change which rider this is">
+              <UButton
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-link"
+                aria-label="Change which rider this is"
+                :loading="binding === person.id"
+                @click="openBind(person)"
+              />
+            </UTooltip>
             <UTooltip :text="person.blocked ? 'Unblock' : 'Block'">
               <UButton
                 size="sm"
@@ -412,6 +487,34 @@ async function confirmDeletePerson() {
       </template>
     </UModal>
 
+    <UModal :open="!!bindTarget" title="Which rider is this?" @update:open="bindTarget = null">
+      <template #body>
+        <p class="text-sm text-toned">
+          {{ bindTarget?.email }} signs in as the rider it is bound to, whatever its name says.
+          <template v-if="bindTarget?.bindingStatus === 'conflict'">
+            Another account with a different email claims
+            <span class="text-highlighted">{{ bindTarget?.likelyRider }}</span>, so neither was bound
+            automatically. Bind only the one you know is the real rider.
+          </template>
+        </p>
+        <UFormField label="Rider" hint="their routes, devices and training follow this name" class="mt-3">
+          <UInput v-model="bindRider" class="w-full" @keydown.enter.prevent="confirmBind" />
+        </UFormField>
+        <p class="mt-3 text-xs text-dimmed">
+          Their current sign-ins end, and they sign in again as this rider. You cannot change your own
+          here: ask another admin, or run <code>domestique bind-identity</code> on the server.
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="!!binding" @click="bindTarget = null">Cancel</UButton>
+          <UButton icon="i-lucide-link" :loading="!!binding" :disabled="!bindRider.trim()" @click="confirmBind">
+            Bind
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
     <UModal :open="!!deleteTarget" title="Delete this person?" @update:open="deleteTarget = null">
       <template #body>
         <p class="text-sm text-toned">
@@ -419,7 +522,7 @@ async function confirmDeletePerson() {
         </p>
         <UFormField
           label="Local rider identity to also remove"
-          hint="their routes, linked devices and crew membership — best-effort guess, check or clear it"
+          hint="their routes, linked devices and crew membership — the rider they are bound to, else a guess: check or clear it"
           class="mt-3"
         >
           <UInput v-model="deleteRider" placeholder="(leave empty to skip local data)" class="w-full" />

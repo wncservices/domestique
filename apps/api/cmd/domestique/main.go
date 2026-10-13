@@ -90,6 +90,11 @@ commands:
                 training data) to a new identity
                 (see docs/rider-migration.md before running this for real;
                 --replace resolves a conflict by keeping the old rider's row)
+  bind-identity   <issuer> <sub> <rider>   (auth.mode oidc) make an issuer account
+                  sign in as a rider, or move it to another; ends that account's
+                  sessions. --dry-run says what it would do and writes nothing
+  unbind-identity <issuer> <sub>           remove an account's binding (--dry-run
+                  as above); it then signs in as a new rider of its own
   keygen        print a new DOMESTIQUE_ENCRYPTION_KEY
   version       print the version
 
@@ -171,7 +176,7 @@ func run(args []string) error {
 	var positional []string
 
 	switch cmd {
-	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "keygen":
+	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "bind-identity", "unbind-identity", "keygen":
 		// Go's flag package stops at the first positional argument, so
 		// `fit <slug> --cues` would silently ignore --cues. Parse in a loop,
 		// peeling off positionals, so flags and arguments can interleave in
@@ -245,6 +250,10 @@ func run(args []string) error {
 		return runFITWorkout(src, positional, *out)
 	case "rename-rider":
 		return runRenameRider(src, positional, *dryRun, *replace)
+	case "bind-identity":
+		return runBindIdentity(src, positional, *dryRun)
+	case "unbind-identity":
+		return runUnbindIdentity(src, positional, *dryRun)
 	}
 	return nil
 }
