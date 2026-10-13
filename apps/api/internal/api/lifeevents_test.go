@@ -648,6 +648,7 @@ func TestApplyingWhileTheTickHoldsTheLockIsAConflict(t *testing.T) {
 	}
 	srv := &api.Server{Source: db, Auth: authenticator, Training: store, Settings: appSettings,
 		Clock: func() time.Time { return utcNoon(2026, time.October, 7) }}
+	followServerClock(srv, store)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

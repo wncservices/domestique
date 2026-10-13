@@ -69,7 +69,7 @@ func (d *DB) SaveLevel(ctx context.Context, l ProgressionLevel) error {
 
 	updatedAt := l.UpdatedAt
 	if updatedAt == "" {
-		updatedAt = timestamp()
+		updatedAt = d.timestamp()
 	}
 
 	// History first records a move, so a value saved again unchanged (a

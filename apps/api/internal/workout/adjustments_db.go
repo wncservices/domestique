@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/why"
 )
@@ -44,8 +43,8 @@ type Adjustment struct {
 
 // adjustmentTime is fixed-width, unlike RFC3339Nano (which drops trailing
 // zeros), so "latest by created_at" is a plain string comparison.
-func adjustmentTime() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")
+func (d *DB) adjustmentTime() string {
+	return d.now().UTC().Format("2006-01-02T15:04:05.000000000Z")
 }
 
 func newAdjustmentID() (string, error) {
@@ -78,7 +77,7 @@ func (d *DB) RecordAdjustment(ctx context.Context, rider, kind, subjectID string
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (rider, subject_kind, subject_id, day, rule) DO UPDATE SET
             inputs = excluded.inputs, text = excluded.text, created_at = excluded.created_at`),
-		id, rider, kind, subjectID, string(r.Rule), string(inputs), r.Text, day, adjustmentTime()); err != nil {
+		id, rider, kind, subjectID, string(r.Rule), string(inputs), r.Text, day, d.adjustmentTime()); err != nil {
 		return err
 	}
 	if kind == SubjectLevel {
