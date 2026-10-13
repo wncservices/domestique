@@ -1221,6 +1221,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Addr:              addr,
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		// Whole-request bounds. Without them a client that trickles a body, or
+		// never reads its response, holds a connection and a goroutine for as long
+		// as it likes (ReadHeaderTimeout only covers the headers). The handlers
+		// that need longer, the GPX uploads and the requests that call out to
+		// other services, extend their own deadline: see api.extendDeadlines.
+		ReadTimeout:  api.ServerReadTimeout,
+		WriteTimeout: api.ServerWriteTimeout,
 		// Bounds how long a keep-alive connection may sit idle between
 		// requests. Unset, it defaults to unlimited — harmless for a
 		// handful of riders, but nothing then reclaims a connection left
