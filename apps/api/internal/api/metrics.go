@@ -90,6 +90,14 @@ var (
 		metric.WithDescription("Linked Garmin sessions already past their expected expiry."),
 	))
 
+	// identityBootstrapReady is 1 once sign-in accepts accounts that have no
+	// binding, 0 while it refuses them (the startup bootstrap has not
+	// succeeded). Stuck at 0 locks out every unbound account, so alert on it.
+	identityBootstrapReady = must(meter.Float64Gauge(
+		"domestique_identity_bootstrap_ready",
+		metric.WithDescription("1 when sign-in accepts accounts with no identity binding, 0 while the startup bootstrap has not finished."),
+	))
+
 	pushErrorsTotal = must(meter.Int64Counter(
 		"domestique_push_errors_total",
 		metric.WithDescription("Failed push attempts per account."),

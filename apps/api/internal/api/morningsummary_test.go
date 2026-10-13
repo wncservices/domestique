@@ -21,6 +21,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/config"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/mailer"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -115,6 +116,7 @@ func newMSHarness(t *testing.T, mode auth.Mode, dsn string, opts msOpts) *msHarn
 
 	var a *auth.Authenticator
 	var sess *sessions.Store
+	var ids *identities.Store
 	roles := auth.RoleMapping{Admin: []string{"admins"}, Rider: []string{"cyclists"}, Viewer: []string{"guests"}}
 	switch mode {
 	case auth.ModeProxy:
@@ -133,6 +135,9 @@ func newMSHarness(t *testing.T, mode auth.Mode, dsn string, opts msOpts) *msHarn
 			t.Fatal(err)
 		}
 		a.UseSessions(sess)
+		if ids, err = identities.UseDB(db.Conn(), db.DSN(), box); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	logs := &lockedBuffer{}
@@ -144,7 +149,7 @@ func newMSHarness(t *testing.T, mode auth.Mode, dsn string, opts msOpts) *msHarn
 		cfg.Notifications.SMTP = config.SMTPConfig{Host: "smtp.example.com", Port: 587, Security: "starttls", From: "Domestique <d@example.com>"}
 	}
 	srv := &api.Server{
-		Auth: a, Training: training, MorningSummaries: ms, Links: links, Config: cfg,
+		Auth: a, Training: training, MorningSummaries: ms, Links: links, Config: cfg, Identities: ids,
 		Log:             slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Clock:           func() time.Time { return h.clock },
 		TestMailLimiter: api.NewTestMailLimiter(),
@@ -170,6 +175,7 @@ func (h *msHarness) identifyAs(req *http.Request, user, email string, verified b
 			req.Header.Set(auth.HeaderEmail, email)
 		}
 	case auth.ModeOIDC:
+		h.bindSession(user)
 		tok, _, err := h.sessions.Create(auth.Identity{User: user, Sub: "auth0|" + user, Email: email, EmailVerified: verified,
 			Groups: append([]string{"gate"}, groups...)}, time.Hour)
 		if err != nil {
