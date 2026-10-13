@@ -313,12 +313,28 @@ func (c *Client) CreateRoute(ctx context.Context, accessToken string, route Rout
 // Unlike Garmin's course service, Wahoo's routes are a real REST resource —
 // a PUT here is what it says it is, not an import-then-delete dance.
 func (c *Client) UpdateRoute(ctx context.Context, accessToken, id string, route RouteRequest) (string, error) {
-	return c.routeRequest(ctx, http.MethodPut, c.APIBase+"/v1/routes/"+id, accessToken, route)
+	return c.routeRequest(ctx, http.MethodPut, c.routeURL(id), accessToken, route)
+}
+
+// routeURL is the URL of one route. The id is a path segment taken from a
+// request and used with the rider's own Wahoo token, so it is escaped into
+// exactly one segment: "5/../../user" must not become another endpoint, and
+// "5?x=1" must not grow a query. The dot segments need their own case, since
+// an unescaped "." or ".." is a path operator, not a name.
+func (c *Client) routeURL(id string) string {
+	seg := url.PathEscape(id)
+	switch seg {
+	case ".":
+		seg = "%2E"
+	case "..":
+		seg = "%2E%2E"
+	}
+	return c.APIBase + "/v1/routes/" + seg
 }
 
 // DeleteRoute removes a route from the account.
 func (c *Client) DeleteRoute(ctx context.Context, accessToken, id string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.APIBase+"/v1/routes/"+id, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.routeURL(id), nil)
 	if err != nil {
 		return err
 	}
