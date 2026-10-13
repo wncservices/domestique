@@ -247,22 +247,22 @@ func (s *Store) Seen(ctx context.Context, issuer, sub, emailMAC string) error {
 }
 
 // RidersByEmail is the distinct riders that have an account bound with this
-// email MAC, sorted. Empty for an empty MAC, which matches nothing.
-func (s *Store) RidersByEmail(ctx context.Context, emailMAC string) ([]string, error) {
+// email MAC under this issuer, sorted. Empty for an empty MAC, which matches nothing.
+func (s *Store) RidersByEmail(ctx context.Context, issuer, emailMAC string) ([]string, error) {
 	if emailMAC == "" {
 		return nil, nil
 	}
-	return s.riders(ctx, `SELECT DISTINCT rider FROM rider_identities WHERE email_mac = ?`, emailMAC)
+	return s.riders(ctx, `SELECT DISTINCT rider FROM rider_identities WHERE issuer = ? AND email_mac = ?`, issuer, emailMAC)
 }
 
-// RidersOfSub is every rider an issuer sub is bound to, under any issuer.
-func (s *Store) RidersOfSub(ctx context.Context, sub string) ([]string, error) {
-	return s.riders(ctx, `SELECT DISTINCT rider FROM rider_identities WHERE sub = ?`, strings.TrimSpace(sub))
+// RidersOfSub is every rider a sub is bound to under this issuer.
+func (s *Store) RidersOfSub(ctx context.Context, issuer, sub string) ([]string, error) {
+	return s.riders(ctx, `SELECT DISTINCT rider FROM rider_identities WHERE issuer = ? AND sub = ?`, issuer, strings.TrimSpace(sub))
 }
 
-func (s *Store) riders(ctx context.Context, query string, arg string) ([]string, error) {
+func (s *Store) riders(ctx context.Context, query string, args ...any) ([]string, error) {
 	// #nosec G701 -- constant statements from this file, bound parameter.
-	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(query), arg)
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("identities: listing riders: %w", err)
 	}
