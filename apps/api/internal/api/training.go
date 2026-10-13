@@ -849,7 +849,12 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		fromDate = today
 	}
 
-	created := make([]workout.Workout, 0, len(requests))
+	// The sessions and the filled-week marker are stored in one transaction:
+	// a failure part-way leaves nothing behind, so the next pass fills the
+	// week from scratch. Recording the marker after a partial fill would make
+	// the season pass adopt the half-built week as a legacy one (see
+	// planSeason) and the rest of it would never be made.
+	var fresh []workout.CreateWorkoutRequest
 	skipped := 0
 	for _, req := range requests {
 		if req.Date < fromDate {
@@ -859,19 +864,11 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 			skipped++
 			continue
 		}
-		wk, err := s.Training.CreateWorkout(ctx, req)
-		if err != nil {
-			return created, skipped, err
-		}
-		created = append(created, wk)
+		fresh = append(fresh, req)
 	}
-	if err := s.Training.MarkWeekScheduled(ctx, g.ID, week.StartDate); err != nil {
-		return created, skipped, err
-	}
-	if week.StartDate <= s.refreshHorizon() {
-		if err := s.Training.MarkWeekRefreshed(ctx, g.ID, week.StartDate); err != nil {
-			return created, skipped, err
-		}
+	created, err := s.Training.FillWeek(ctx, g.ID, week.StartDate, fresh, week.StartDate <= s.refreshHorizon())
+	if err != nil {
+		return nil, skipped, err
 	}
 	return created, skipped, nil
 }
