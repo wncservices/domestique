@@ -223,7 +223,9 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if blocked {
-			s.logger().Info("blocked email tried to sign in", "email", identity.Email, "user", identity.User)
+			// No email and no name here: an address next to a name is exactly
+			// what a log should not hold.
+			s.logger().Info("blocked email tried to sign in")
 			returnTo := st.ReturnTo
 			if returnTo == "" {
 				returnTo = "/"
@@ -232,6 +234,15 @@ func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
+	// identity.User is what the claims suggest. Who this actually is comes from
+	// the binding (see riderForSignIn): nothing a holder can edit at the issuer
+	// chooses a rider that already exists.
+	rider, ok := s.riderForSignIn(r.Context(), w, identity)
+	if !ok {
+		return
+	}
+	identity.User = rider
 
 	token, expiresAt, err := s.Sessions.Create(identity, sessionTTL)
 	if err != nil {
@@ -300,6 +311,12 @@ func (s *Server) handleSSOLogout(w http.ResponseWriter, r *http.Request) {
 
 // identityFromToken builds an Identity from a verified ID token's claims.
 //
+// User is only a suggestion. These claims are what the holder of an account
+// can edit (a Google display name is whatever its owner types), so they never
+// choose a rider that already exists: riderForSignIn replaces User with the
+// rider the account is bound to, and uses this value only to name a rider
+// for an account that has no binding yet.
+//
 // User is preferred_username, falling back to name, falling back to
 // nickname, falling back to sub. Auth0's database connection never
 // populates preferred_username, but does send both name and nickname
@@ -324,8 +341,8 @@ func (s *Server) identityFromToken(idToken *oidc.IDToken) (auth.Identity, error)
 		return auth.Identity{}, err
 	}
 
-	user := strings.ToLower(strings.TrimSpace(stringClaim(claims, "preferred_username")))
-	for _, claim := range []string{"name", "nickname"} {
+	user := ""
+	for _, claim := range []string{"preferred_username", "name", "nickname"} {
 		if user != "" {
 			break
 		}

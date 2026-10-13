@@ -20,6 +20,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
@@ -159,7 +160,16 @@ type ssoHarness struct {
 	client *http.Client
 	base   string
 	issuer *fakeIssuer
+	// db and srv let a test seed what a rider owns and read what the server
+	// holds; ids is the identity store every oidc sign-in goes through.
+	db  *source.DB
+	srv *api.Server
+	ids *identities.Store
 }
+
+// ssoNow is the harness's fixed clock. An explicit zone, so what it stamps
+// means the same under any TZ.
+var ssoNow = time.Date(2026, 10, 13, 9, 30, 0, 0, time.FixedZone("CEST", 2*3600))
 
 // newSSOHarness builds a working ModeOIDC server against the fake issuer.
 // opts can set additional Server fields (People, for the self-service
@@ -167,6 +177,18 @@ type ssoHarness struct {
 // side of httptest.NewServer, since Handler() reads srv's fields per
 // request off the same pointer, not a snapshot taken at construction.
 func newSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
+	t.Helper()
+	return buildSSOHarness(t, true, opts...)
+}
+
+// newGatedSSOHarness is newSSOHarness before the startup step that binds the
+// riders that already exist has finished: an unbound account is refused.
+func newGatedSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
+	t.Helper()
+	return buildSSOHarness(t, false, opts...)
+}
+
+func buildSSOHarness(t *testing.T, bindingsReady bool, opts ...func(*api.Server)) *ssoHarness {
 	t.Helper()
 	issuer := newFakeIssuer(t)
 
@@ -210,7 +232,23 @@ func newSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
 		t.Fatal(err)
 	}
 
-	srv := &api.Server{Auth: authenticator, OIDC: flow, Sessions: sessionStore, Box: box}
+	// Under mode oidc a rider is whoever the issuer account is bound to, so the
+	// store is part of the harness, not an option a test can forget.
+	ids, err := identities.UseDB(db.Conn(), db.DSN(), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids.Clock = func() time.Time { return ssoNow }
+
+	srv := &api.Server{
+		Auth: authenticator, OIDC: flow, Sessions: sessionStore, Box: box,
+		Identities: ids, Clock: func() time.Time { return ssoNow },
+	}
+	// The startup bootstrap has nothing to do in most tests; the gated harness
+	// is for the ones about it.
+	if bindingsReady {
+		srv.MarkBindingsReady()
+	}
 	for _, opt := range opts {
 		opt(srv)
 	}
@@ -246,7 +284,7 @@ func newSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
-	return &ssoHarness{t: t, client: client, base: server.URL, issuer: issuer}
+	return &ssoHarness{t: t, client: client, base: server.URL, issuer: issuer, db: db, srv: srv, ids: ids}
 }
 
 func (h *ssoHarness) get(path string) *http.Response {

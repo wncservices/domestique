@@ -1134,6 +1134,17 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 			})
 			log.Info("auth0 management api access configured", "domain", domain)
 		}
+
+		// Until the riders that already exist are bound, an account that has no
+		// binding is refused at sign-in. With the Management API configured
+		// that is opened by the bootstrap (a later change in this stack); with
+		// none there is nothing to bind them from, so it opens now and the
+		// existing riders have to be bound by hand.
+		if srv.People == nil {
+			srv.MarkBindingsReady()
+			log.Warn("no auth0 management api access: riders that existed before identity binding are not bound automatically",
+				"hint", "bind each with `domestique bind-identity <issuer> <sub> <rider>` or they sign in as a new, suffixed rider")
+		}
 	}
 
 	// Garmin needs no config of its own: a rider signs in from the UI, and the

@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -232,6 +233,12 @@ type Server struct {
 	// other way to pick a rider is an editable name claim, which is the hole
 	// this store closes.
 	Identities *identities.Store
+	// bindingsReady is set once every rider that existed before bindings has
+	// one (or there is nothing to bind them from). Until then an oidc sign-in
+	// that has no binding of its own is refused rather than resolved by name,
+	// because "by name" is exactly how an existing rider gets claimed. See
+	// MarkBindingsReady.
+	bindingsReady atomic.Bool
 	// Box seals the short-lived OIDC state cookie (PKCE verifier, nonce,
 	// CSRF state) between /sso/login and /sso/callback. The same key as
 	// Links/Settings/Sessions — one key, everything this app keeps sealed.
