@@ -46,6 +46,9 @@ func newSessionHarness(t *testing.T) *sessionHarness {
 // some device, and returns the cookie value.
 func (h *sessionHarness) cookieFor(user, sub string, groups ...string) string {
 	h.t.Helper()
+	if _, err := h.ids.Bind(h.t.Context(), h.issuer.server.URL, sub, user, ""); err != nil {
+		h.t.Fatal(err)
+	}
 	tok, _, err := h.srv.Sessions.Create(auth.Identity{User: user, Sub: sub, Groups: append([]string{"gate"}, groups...)}, time.Hour)
 	if err != nil {
 		h.t.Fatal(err)

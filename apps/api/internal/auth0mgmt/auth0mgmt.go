@@ -78,9 +78,19 @@ type Person struct {
 	// API the same way CreatedAt/LastLogin are (see lastSeen) since, like
 	// those two, the role-members endpoint ListPeople otherwise uses does
 	// not return it.
-	Blocked   bool
-	CreatedAt time.Time
-	LastLogin time.Time
+	Blocked bool
+	// EmailVerified is Auth0's email_verified for this identity: whether the
+	// issuer vouches that Email belongs to whoever holds the account. Only a
+	// verified address may stand for a person (see internal/identities), so
+	// this is false until proven, including when Auth0 sent nothing.
+	EmailVerified bool
+	// ProfileKnown is whether the Users Search had this person at all. When it
+	// did not, EmailVerified, CreatedAt and the rest are missing, not false:
+	// nothing may be decided from them (the identity bootstrap treats such a
+	// person as unknown, never as unverified).
+	ProfileKnown bool
+	CreatedAt    time.Time
+	LastLogin    time.Time
 }
 
 // Client talks to one Auth0 tenant's Management API.
@@ -305,13 +315,14 @@ func (c *Client) roleID(ctx context.Context, name string) (string, error) {
 // just leaves CreatedAt/LastLogin blank, which lastSeen then fills in
 // separately rather than trusting the role listing for them.
 type roleUser struct {
-	UserID    string `json:"user_id"`
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	Nickname  string `json:"nickname"`
-	Blocked   bool   `json:"blocked"`
-	CreatedAt string `json:"created_at"`
-	LastLogin string `json:"last_login"`
+	UserID        string `json:"user_id"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	Nickname      string `json:"nickname"`
+	Blocked       bool   `json:"blocked"`
+	EmailVerified bool   `json:"email_verified"`
+	CreatedAt     string `json:"created_at"`
+	LastLogin     string `json:"last_login"`
 }
 
 func parseTime(s string) time.Time {
@@ -332,26 +343,55 @@ func (c *Client) lastSeen(ctx context.Context, userIDs []string) (map[string]rol
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
-	terms := make([]string, len(userIDs))
-	for i, id := range userIDs {
-		terms[i] = fmt.Sprintf("user_id:%q", id)
-	}
-	q := url.Values{
-		"search_engine":  {"v3"},
-		"q":              {strings.Join(terms, " OR ")},
-		"fields":         {"user_id,created_at,last_login,nickname,blocked"},
-		"include_fields": {"true"},
-	}
-
-	var users []roleUser
-	if err := c.do(ctx, http.MethodGet, "/api/v2/users?"+q.Encode(), nil, &users); err != nil {
-		return nil, fmt.Errorf("looking up sign-in history: %w", err)
-	}
-	out := make(map[string]roleUser, len(users))
-	for _, u := range users {
-		out[u.UserID] = u
+	out := make(map[string]roleUser, len(userIDs))
+	// The search answers one page at a time and a query that ORs in more ids than
+	// a page holds silently loses the rest, so ids go in chunks that always fit
+	// in one page. per_page is set to the most Auth0 allows, with room to spare.
+	for start := 0; start < len(userIDs); start += searchChunk {
+		chunk := userIDs[start:min(start+searchChunk, len(userIDs))]
+		terms := make([]string, len(chunk))
+		for i, id := range chunk {
+			terms[i] = fmt.Sprintf("user_id:%q", id)
+		}
+		q := url.Values{
+			"search_engine":  {"v3"},
+			"q":              {strings.Join(terms, " OR ")},
+			"per_page":       {"100"},
+			"fields":         {"user_id,created_at,last_login,nickname,blocked,email_verified"},
+			"include_fields": {"true"},
+		}
+		var users []roleUser
+		if err := c.do(ctx, http.MethodGet, "/api/v2/users?"+q.Encode(), nil, &users); err != nil {
+			return nil, fmt.Errorf("looking up sign-in history: %w", err)
+		}
+		for _, u := range users {
+			out[u.UserID] = u
+		}
 	}
 	return out, nil
+}
+
+// searchChunk is how many ids one Users Search query carries: comfortably under
+// its page size, and short enough for a URL.
+const searchChunk = 50
+
+// roleMembers lists everyone holding a role, a page at a time. The endpoint
+// returns 50 by default and says nothing when there are more.
+func (c *Client) roleMembers(ctx context.Context, roleID string) ([]roleUser, error) {
+	const perPage = 100
+	var all []roleUser
+	for page := 0; page < 1000; page++ {
+		var batch []roleUser
+		path := fmt.Sprintf("/api/v2/roles/%s/users?per_page=%d&page=%d", roleID, perPage, page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < perPage {
+			break
+		}
+	}
+	return all, nil
 }
 
 // ListPeople lists everyone in gateRole (the "allowed in at all" role —
@@ -365,8 +405,8 @@ func (c *Client) ListPeople(ctx context.Context, gateRole string, permissionRole
 	if err != nil {
 		return nil, err
 	}
-	var gateMembers []roleUser
-	if err := c.do(ctx, http.MethodGet, "/api/v2/roles/"+gateID+"/users", nil, &gateMembers); err != nil {
+	gateMembers, err := c.roleMembers(ctx, gateID)
+	if err != nil {
 		return nil, fmt.Errorf("listing %s: %w", gateRole, err)
 	}
 
@@ -380,8 +420,8 @@ func (c *Client) ListPeople(ctx context.Context, gateRole string, permissionRole
 		if err != nil {
 			return nil, err
 		}
-		var members []roleUser
-		if err := c.do(ctx, http.MethodGet, "/api/v2/roles/"+roleID+"/users", nil, &members); err != nil {
+		members, err := c.roleMembers(ctx, roleID)
+		if err != nil {
 			return nil, fmt.Errorf("listing %s: %w", roleName, err)
 		}
 		for _, m := range members {
@@ -400,16 +440,18 @@ func (c *Client) ListPeople(ctx context.Context, gateRole string, permissionRole
 
 	out := make([]Person, 0, len(gateMembers))
 	for _, m := range gateMembers {
-		s := seen[m.UserID]
+		s, known := seen[m.UserID]
 		out = append(out, Person{
-			UserID:    m.UserID,
-			Email:     m.Email,
-			Name:      m.Name,
-			Nickname:  s.Nickname,
-			Roles:     memberOf[m.UserID],
-			Blocked:   s.Blocked,
-			CreatedAt: parseTime(s.CreatedAt),
-			LastLogin: parseTime(s.LastLogin),
+			ProfileKnown:  known,
+			UserID:        m.UserID,
+			Email:         m.Email,
+			Name:          m.Name,
+			Nickname:      s.Nickname,
+			Roles:         memberOf[m.UserID],
+			Blocked:       s.Blocked,
+			EmailVerified: s.EmailVerified,
+			CreatedAt:     parseTime(s.CreatedAt),
+			LastLogin:     parseTime(s.LastLogin),
 		})
 	}
 	return out, nil
@@ -433,13 +475,14 @@ func (c *Client) FindByEmail(ctx context.Context, email string) ([]Person, error
 	out := make([]Person, 0, len(users))
 	for _, u := range users {
 		out = append(out, Person{
-			UserID:    u.UserID,
-			Email:     u.Email,
-			Name:      u.Name,
-			Nickname:  u.Nickname,
-			Blocked:   u.Blocked,
-			CreatedAt: parseTime(u.CreatedAt),
-			LastLogin: parseTime(u.LastLogin),
+			UserID:        u.UserID,
+			Email:         u.Email,
+			Name:          u.Name,
+			Nickname:      u.Nickname,
+			Blocked:       u.Blocked,
+			EmailVerified: u.EmailVerified,
+			CreatedAt:     parseTime(u.CreatedAt),
+			LastLogin:     parseTime(u.LastLogin),
 		})
 	}
 	return out, nil

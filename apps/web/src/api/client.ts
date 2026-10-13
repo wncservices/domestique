@@ -51,6 +51,7 @@ import type {
   InvitePersonRequest,
   LibraryResponse,
   Person,
+  RiderInfo,
   Poi,
   PlanResponse,
   PushResponse,
@@ -741,6 +742,19 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ blocked, email, reason }),
     }),
+  /** Points a person's sign-in at a rider (admin only, never one's own).
+   *  Creates the binding if the account has none; ends that account's
+   *  sessions, which hold the old rider. */
+  setPersonBinding: (id: string, rider: string) =>
+    request<{ boundRider: string }>(`/api/people/${encodeURIComponent(id)}/binding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rider }),
+    }),
+  /** Whether a rider has data and how many accounts are bound to it. */
+  riderInfo: (rider: string) => request<RiderInfo>(`/api/people/riders/${encodeURIComponent(rider)}`),
+  /** Riders that have data here but no account in the gate role and no binding. */
+  orphanRiders: () => request<{ riders: string[] }>('/api/people/orphans'),
   /** Deletes a person entirely: their local data for the given rider
    *  identity (best-effort — see Person.likelyRider), then their Auth0
    *  identity. Irreversible. Pass no rider to delete only the Auth0
