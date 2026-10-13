@@ -35,7 +35,7 @@ func (d *DB) UpsertSession(ctx context.Context, req UpsertSessionRequest) (Compl
             avg_hr = excluded.avg_hr, avg_power_watts = excluded.avg_power_watts,
             training_load = excluded.training_load`),
 		id, rider, req.Provider, req.ExternalID, req.Sport, req.Date,
-		req.DurationSeconds, req.DistanceM, req.AvgHR, req.AvgPowerWatts, req.TrainingLoad, timestamp())
+		req.DurationSeconds, req.DistanceM, req.AvgHR, req.AvgPowerWatts, req.TrainingLoad, d.timestamp())
 	if err != nil {
 		return CompletedSession{}, err
 	}
@@ -108,7 +108,7 @@ func (d *DB) RecomputeFitnessSnapshots(ctx context.Context, rider string) error 
 			maxDate = s.Date
 		}
 	}
-	today := time.Now().UTC().Format("2006-01-02")
+	today := d.now().UTC().Format("2006-01-02")
 	if today > maxDate {
 		maxDate = today
 	}

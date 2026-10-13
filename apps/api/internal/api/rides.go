@@ -457,7 +457,7 @@ func (s *Server) handleDeleteRideSeries(w http.ResponseWriter, r *http.Request) 
 
 	from := r.URL.Query().Get("from")
 	if from == "" {
-		from = time.Now().UTC().Format("2006-01-02")
+		from = s.now().UTC().Format("2006-01-02")
 	} else if _, err := time.Parse("2006-01-02", from); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be a date in YYYY-MM-DD form"})
 		return
@@ -504,7 +504,7 @@ func (s *Server) handleUpcomingRides(w http.ResponseWriter, r *http.Request) {
 
 	from := r.URL.Query().Get("from")
 	if from == "" {
-		from = time.Now().UTC().Format("2006-01-02")
+		from = s.now().UTC().Format("2006-01-02")
 	} else if _, err := time.Parse("2006-01-02", from); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be a date in YYYY-MM-DD form"})
 		return

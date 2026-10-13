@@ -44,7 +44,7 @@ func (d *DB) SaveWellness(ctx context.Context, w DailyWellness) error {
 
 	updatedAt := w.UpdatedAt
 	if updatedAt == "" {
-		updatedAt = timestamp()
+		updatedAt = d.timestamp()
 	}
 
 	_, err := d.db.ExecContext(ctx, d.query(`

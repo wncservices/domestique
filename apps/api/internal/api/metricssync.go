@@ -141,7 +141,7 @@ func (s *Server) garminBiometrics(ctx context.Context, rider string, session gar
 	consumer, _ := s.garminConsumer()
 	out := cachedBiometrics{at: time.Now()}
 
-	b, err := s.Garmin.Biometrics(ctx, consumer, session, time.Now())
+	b, err := s.Garmin.Biometrics(ctx, consumer, session, s.now())
 	if err != nil {
 		s.logger().Warn("garmin biometrics lookup incomplete", "rider", rider, "err", err)
 	}
@@ -158,7 +158,7 @@ func (s *Server) garminBiometrics(ctx context.Context, rider string, session gar
 		ctx, diag := garmin.WithRHRDiagnostics(ctx)
 		lookupFailed := false
 		for daysAgo := 0; daysAgo < 3 && out.restingHR == 0; daysAgo++ {
-			bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, time.Now().AddDate(0, 0, -daysAgo))
+			bpm, err := s.Garmin.RestingHeartRate(ctx, consumer, session, s.now().AddDate(0, 0, -daysAgo))
 			if err != nil {
 				s.logger().Warn("garmin resting heart rate lookup failed", "rider", rider, "err", err)
 				lookupFailed = true
@@ -385,11 +385,11 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// before the cruder EstimateFTP fallback below, whose own condition
 	// reads tdr.HasFTPPowerCurve to decide whether Detect already had
 	// something better to say about FTP.
-	testRides, err := s.readFTPTestRides(ctx, rider, sessions, time.Now())
+	testRides, err := s.readFTPTestRides(ctx, rider, sessions, s.now())
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
-	tdr, err := s.detectThresholdsFresh(ctx, rider, profile, sessions, time.Now(), freshTestSessions(testRides))
+	tdr, err := s.detectThresholdsFresh(ctx, rider, profile, sessions, s.now(), freshTestSessions(testRides))
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
@@ -403,7 +403,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 			history.FTPWatts = watts
 		}
 	}
-	if pattern, ok := autoprofile.Infer(sessions, time.Now()); ok {
+	if pattern, ok := autoprofile.Infer(sessions, s.now()); ok {
 		history.AvailableDays = pattern.AvailableDays
 		history.HoursPerAvailableDay = pattern.HoursPerAvailableDay
 		history.ExperienceLevel = pattern.ExperienceLevel

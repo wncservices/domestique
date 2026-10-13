@@ -363,7 +363,7 @@ func (d *DB) MarkWeekScheduled(ctx context.Context, goalID, weekStart string) er
 	_, err := d.db.ExecContext(ctx, d.query(`
 INSERT INTO scheduled_weeks (goal_id, week_start, created_at) VALUES (?, ?, ?)
 ON CONFLICT (goal_id, week_start) DO NOTHING`),
-		goalID, weekStart, time.Now().UTC().Format(time.RFC3339))
+		goalID, weekStart, d.now().UTC().Format(time.RFC3339))
 	return err
 }
 
@@ -406,7 +406,7 @@ func (d *DB) DeleteScheduledWeeksAfter(ctx context.Context, goalID, lastWeekStar
 func (d *DB) MarkWeekRefreshed(ctx context.Context, goalID, weekStart string) error {
 	_, err := d.db.ExecContext(ctx, d.query(
 		`UPDATE scheduled_weeks SET refreshed_at = ? WHERE goal_id = ? AND week_start = ? AND refreshed_at = ''`),
-		time.Now().UTC().Format(time.RFC3339), goalID, weekStart)
+		d.now().UTC().Format(time.RFC3339), goalID, weekStart)
 	return err
 }
 
@@ -469,6 +469,24 @@ func (d *DB) addPushOriginColumn() error {
 type DB struct {
 	db      *sql.DB
 	dialect dbx.Dialect
+
+	// Clock is where this store reads "now" for every date or timestamp it
+	// stamps (created_at/updated_at, scheduled weeks, the FTP-verified date,
+	// fitness snapshots up to today, adjustment and suggestion times). Nil
+	// means the real time, which is what production uses. A test that fixes
+	// Server.Clock must point this at the same clock: business logic compares
+	// these stamps with dates the server derives from its own clock (an
+	// untouched plan session, how current a "why" is, a goal's plan anchor), so
+	// two clocks make the outcome depend on the day the suite runs.
+	Clock func() time.Time
+}
+
+// now is the store's current time, from Clock when one is set.
+func (d *DB) now() time.Time {
+	if d.Clock != nil {
+		return d.Clock()
+	}
+	return time.Now()
 }
 
 // UseDB migrates this package's tables onto an already-open connection and
@@ -878,7 +896,7 @@ func (d *DB) CreateGoal(ctx context.Context, req CreateGoalRequest) (Goal, error
 		return Goal{}, err
 	}
 
-	ts := timestamp()
+	ts := d.timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO goals (id, rider, name, sport, event_date, priority,
                             target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at)
@@ -930,7 +948,7 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
                target_distance_m=?, target_elevation_m=?, notes=?, route_slug=?, pacing_if=?, updated_at=?
         WHERE id=?`),
 		current.Name, string(current.Sport), current.EventDate, string(current.Priority),
-		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, timestamp(), id)
+		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, d.timestamp(), id)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -1014,7 +1032,7 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 		return RiderProfile{}, errors.New("workout: no rider — whose profile is this?")
 	}
 	profile.Rider = rider
-	profile.UpdatedAt = timestamp()
+	profile.UpdatedAt = d.timestamp()
 
 	// Whether this save changes FTP is decided against what is stored now,
 	// before the upsert overwrites it.
@@ -1052,7 +1070,7 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	// established the number. ftp_verified_at is not part of the upsert above
 	// so an old copy of the profile cannot overwrite a newer date.
 	if profile.FTPWatts > 0 && profile.FTPWatts != previous.FTPWatts {
-		if err := d.MarkFTPVerified(ctx, rider, time.Now().UTC().Format("2006-01-02")); err != nil {
+		if err := d.MarkFTPVerified(ctx, rider, d.now().UTC().Format("2006-01-02")); err != nil {
 			return RiderProfile{}, err
 		}
 	}
@@ -1087,7 +1105,7 @@ func (d *DB) SetWeight(ctx context.Context, rider string, kg float64) error {
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, weight_kg, updated_at) VALUES (?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET weight_kg = excluded.weight_kg`),
-		rider, kg, timestamp())
+		rider, kg, d.timestamp())
 	return err
 }
 
@@ -1100,7 +1118,7 @@ func (d *DB) SnoozeFTPTest(ctx context.Context, rider, until string) error {
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_test_snoozed_until, updated_at) VALUES (?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET ftp_test_snoozed_until = excluded.ftp_test_snoozed_until`),
-		normalizeRider(rider), until, timestamp())
+		normalizeRider(rider), until, d.timestamp())
 	return err
 }
 
@@ -1225,7 +1243,7 @@ func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Worko
 		return Workout{}, err
 	}
 
-	ts := timestamp()
+	ts := d.timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -1333,7 +1351,7 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
 		steps, string(current.Zone), current.Level, current.Indoor, outdoor, planned,
-		current.RouteSlug, current.RouteSeconds, timestamp(), id)
+		current.RouteSlug, current.RouteSeconds, d.timestamp(), id)
 	if err != nil {
 		return Workout{}, err
 	}
@@ -1427,7 +1445,7 @@ func slugify(name string) string {
 	return strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "-"), "-")
 }
 
-func timestamp() string { return time.Now().UTC().Format(time.RFC3339) }
+func (d *DB) timestamp() string { return d.now().UTC().Format(time.RFC3339) }
 
 func normalizeRider(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 

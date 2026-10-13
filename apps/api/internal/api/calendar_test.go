@@ -166,6 +166,7 @@ func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *
 		CalendarLimiter:     api.NewCalendarLimiter(),
 		CalendarMissLimiter: api.NewCalendarMissLimiter(),
 	}
+	followServerClock(srv, training)
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 	return &calHarness{t: t, mode: mode, base: server.URL, client: server.Client(), srv: srv,

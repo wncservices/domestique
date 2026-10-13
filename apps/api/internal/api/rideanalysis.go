@@ -97,7 +97,7 @@ func (s *Server) analyseNewSessions(
 		return nil, err
 	}
 
-	sinceDate := time.Now().Add(-rideAnalysisWindow).Format("2006-01-02")
+	sinceDate := s.now().Add(-rideAnalysisWindow).Format("2006-01-02")
 	analyzed, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
 		return nil, err
