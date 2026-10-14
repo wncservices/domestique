@@ -28,7 +28,8 @@ import (
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 // EnvClientSecret is where the OIDC client secret comes from. Never the
@@ -73,7 +74,7 @@ type Flow struct {
 // (New's caller bounds ctx with a timeout but startup has no parent request;
 // Exchange and VerifyIDToken run inside /sso/callback's).
 var instrumentedClient = &http.Client{
-	Transport: otelhttp.NewTransport(http.DefaultTransport),
+	Transport: telemetry.OutboundTransport(http.DefaultTransport),
 }
 
 // New runs discovery against cfg.Issuer — the one network call in this

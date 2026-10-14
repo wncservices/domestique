@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 // DefaultBaseURL is the free public Open-Meteo API: non-commercial use only,
@@ -124,7 +124,7 @@ func New(baseURL, apiKey string, clock func() time.Time) *Client {
 		cache:   map[string]cacheEntry{},
 		http: &http.Client{
 			Timeout:   requestTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 	}
 }

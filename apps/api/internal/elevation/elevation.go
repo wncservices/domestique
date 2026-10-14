@@ -18,12 +18,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 // DefaultURL is the public Open-Elevation instance — free, no API key, no
@@ -61,7 +63,7 @@ func New(url string) *Client {
 	}
 	return &Client{url: url, httpClient: &http.Client{
 		Timeout:   requestTimeout,
-		Transport: otelhttp.NewTransport(http.DefaultTransport),
+		Transport: telemetry.OutboundTransport(http.DefaultTransport),
 	}}
 }
 
@@ -121,7 +123,11 @@ func (c *Client) lookupBatch(ctx context.Context, points []Point) ([]float64, er
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("elevation: request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

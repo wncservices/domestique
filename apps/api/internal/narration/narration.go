@@ -41,9 +41,8 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -83,7 +82,7 @@ func New(apiKey string) *Client {
 		APIBase: DefaultAPIBase,
 		httpClient: &http.Client{
 			Timeout:   requestTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 	}
 }

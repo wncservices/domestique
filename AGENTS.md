@@ -888,7 +888,7 @@ cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
 - **Outbound HTTP calls carry spans too**, on the same principle: every one of this app's seven
   outbound clients — `oidcflow`, `komoot.Client`, `garmin.Client`, `wahoo.Client`,
   `auth0mgmt.Client`, `basemap`'s pmtiles client, and `elevation.Client` — wraps its `http.Client`'s
-  `Transport` in `otelhttp.NewTransport`, and (`oidcflow` aside, which already threaded
+  `Transport` in `telemetry.OutboundTransport`, and (`oidcflow` aside, which already threaded
   `context.Context` everywhere) each needed the same context-threading treatment as the DB before
   that Transport had a real parent to attach to. `garmin.Client`'s threading runs through
   `internal/targets` (`Target`/`Courses` interfaces, the `Garmin`/`Wahoo` adapters) and
@@ -927,8 +927,14 @@ What is **not** automatic, and has shipped missing before — twice, in `pmtiles
 in `elevation.Client`, per their own comments:
 
 1. **A new outbound HTTP client** (a new package like `elevation.Client`, or a new method added to
-   an existing one) needs its own `http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}`,
-   and every call it makes needs `http.NewRequestWithContext` with a `ctx` that actually descends
+   an existing one) needs its own `http.Client{Transport: telemetry.OutboundTransport(http.DefaultTransport)}`
+   — never `otelhttp.NewTransport` directly: otelhttp records the full request URL, query string
+   included (weather API key, coordinates, typed addresses, SSO tickets), and
+   `telemetry.RedactingExporter`, which `Setup` puts in front of the OTLP exporter, is what rewrites
+   it to scheme, host and a redacted path; a test fails if a client builds its own. And never put a
+   secret or an address into an error you return: `*url.Error` repeats the URL, so unwrap it
+   (`errors.As`, keep `.Err`) as `weather`, `geocoding`, `elevation`, `routing` and `auth0mgmt` do.
+   Every call it makes needs `http.NewRequestWithContext` with a `ctx` that actually descends
    from the inbound request — not a freshly-built `context.Background()`, which produces a
    disconnected root span nobody can trace back to the request that triggered it. Every one of
    this app's seven outbound clients (`oidcflow`, `komoot.Client`, `garmin.Client`,

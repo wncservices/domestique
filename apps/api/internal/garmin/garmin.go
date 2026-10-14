@@ -40,7 +40,7 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 const (
@@ -137,7 +137,7 @@ func New() *Client {
 		HTTP: &http.Client{
 			Timeout:   defaultTimeout,
 			Jar:       jar,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 			// A redirect would carry the Authorization header to wherever it
 			// points, which is the same credential-disclosure problem
 			// allowedHost exists to prevent. The SSO flow is followed

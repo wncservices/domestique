@@ -30,17 +30,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 // DefaultURL is the public OpenRouteService instance — free (with a signup
@@ -170,7 +171,7 @@ func New(url, apiKey string) *ORSClient {
 		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout:   requestTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 		cache: newResponseCache(),
 	}
@@ -617,7 +618,11 @@ func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body di
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return Path{}, err
+		var ue *neturl.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return Path{}, fmt.Errorf("routing: request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

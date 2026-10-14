@@ -2841,7 +2841,9 @@ func (s *Server) handleGeocodeSearch(w http.ResponseWriter, r *http.Request) {
 
 	results, err := s.Geocoder.Search(r.Context(), query)
 	if err != nil {
-		s.logger().Error("location search failed", "err", err, "by", rider)
+		// failUpstream logs the failure once, at Warn: Nominatim being down is
+		// not a fault in this app, and the rider's search text is nowhere in
+		// the error.
 		recordRouteBuilderError(r.Context(), "geocode")
 		s.failUpstream(w, "The location search", err)
 		return
