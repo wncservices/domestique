@@ -156,7 +156,14 @@ rider's verified email matched. Things that are easy to break:
   the real work in the transaction and rolls it back, so its counts are exact.
   A new registered table needs nothing extra unless its rename rule is
   `Bespoke` (then `mergeBespoke` in `ridermerge.go` needs code for it:
-  `TestEveryRegisteredTableHasAMergeRule`). The real merge is logged at Warn.
+  `TestEveryRegisteredTableHasAMergeRule`) or the table has a unique index that
+  includes the rider beyond the `Unique`/`With` key: list it in `Also`
+  (`TestEveryUniqueIndexOnARiderKeyedTableIsInTheRegistry` compares the registry
+  with the schema's real indexes). Crew memberships keep the strongest row;
+  training is concatenated, not merged (the dry run warns). A real merge takes the
+  scheduling and background-sync advisory locks (409 while a tick holds one),
+  rebuilds the target's fitness history, and after the commit never fails: a
+  step that does is a warning. It is logged at Warn.
 - **`PATCH /api/me` renames the display name only.** It cannot change who
   anyone is, so it needs no collision check.
 - **Never log an email or a `sub` next to a rider name.**

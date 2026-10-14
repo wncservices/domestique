@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch, computed } from 'vue'
+import { nextTick, onMounted, ref, watch, computed } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type { AssignableRole, Person, RiderInfo, RiderMerge } from '@/api/types'
@@ -221,6 +221,8 @@ function flagLabel(reason: NonNullable<Person['flagReason']>): string {
       return 'joined after the data'
     case 'conflict':
       return 'accounts disagree'
+    case 'admin-bound-elsewhere':
+      return 'not on your own rider'
     default:
       return 'unverified claimant'
   }
@@ -351,6 +353,8 @@ function openMerge(rider: string) {
   // "wilant.nackaerts" is almost always a split of "wilant".
   const base = rider.split(/[.@|]/)[0] ?? ''
   mergeInto.value = base && base !== rider ? base : ''
+  // Prefilled with the likely target: look straight away. Typed: on blur/Enter.
+  if (mergeInto.value) void nextTick(runMergePreview)
 }
 
 function closeMerge() {
@@ -361,33 +365,37 @@ function closeMerge() {
   mergeError.value = ''
 }
 
-let mergeTimer: ReturnType<typeof setTimeout> | undefined
+// The dry run is a real round trip that does the whole merge and rolls it back,
+// so it runs when the admin finishes typing (blur or Enter) or asks for it, not
+// on every keystroke. Changing the name clears the old preview, so a stale one
+// can never be confirmed against a different target.
 watch([mergeFrom, mergeInto], () => {
   mergeConfirmed.value = false
   mergePreview.value = null
   mergeTarget.value = null
   mergeError.value = ''
-  clearTimeout(mergeTimer)
+})
+
+async function runMergePreview() {
   const from = mergeFrom.value
   const into = mergeInto.value.trim().toLowerCase()
-  if (!from || !into || into === from) return
+  if (!from || !into || into === from || mergePreviewing.value) return
   mergePreviewing.value = true
-  mergeTimer = setTimeout(async () => {
-    try {
-      const [preview, info] = await Promise.all([api.mergeRider(from, into, true), api.riderInfo(into)])
-      if (from === mergeFrom.value && into === mergeInto.value.trim().toLowerCase()) {
-        mergePreview.value = preview
-        mergeTarget.value = info
-      }
-    } catch (err) {
-      if (from === mergeFrom.value && into === mergeInto.value.trim().toLowerCase()) {
-        mergeError.value = describeError(err)
-      }
-    } finally {
-      mergePreviewing.value = false
+  mergeError.value = ''
+  try {
+    const [preview, info] = await Promise.all([api.mergeRider(from, into, true), api.riderInfo(into)])
+    if (from === mergeFrom.value && into === mergeInto.value.trim().toLowerCase()) {
+      mergePreview.value = preview
+      mergeTarget.value = info
     }
-  }, 300)
-})
+  } catch (err) {
+    if (from === mergeFrom.value && into === mergeInto.value.trim().toLowerCase()) {
+      mergeError.value = describeError(err)
+    }
+  } finally {
+    mergePreviewing.value = false
+  }
+}
 
 const canMerge = computed(() => !!mergePreview.value && !mergeError.value && mergeConfirmed.value && !merging.value)
 
@@ -400,9 +408,11 @@ async function confirmMerge() {
     const done = await api.mergeRider(from, into, false)
     toast.add({
       title: `Merged ${from} into ${done.into}`,
-      description: `${done.moved} moved, ${done.droppedSource} dropped where ${done.into} already had one. Both riders' sign-ins ended; they sign in again.`,
+      description:
+        `${done.moved} moved, ${done.merged} memberships merged, ${done.droppedSource} dropped where ${done.into} already had one.` +
+        (done.warnings.length ? ` ${done.warnings.join(' ')}` : " Both riders' sign-ins ended; they sign in again."),
       icon: 'i-lucide-git-merge',
-      color: 'success',
+      color: done.warnings.length ? 'warning' : 'success',
     })
     closeMerge()
     await load()
@@ -815,11 +825,30 @@ async function confirmDeletePerson() {
         <p class="text-sm text-toned">
           Moves everything <span class="text-highlighted">{{ mergeFrom }}</span> owns (routes, devices, training,
           crews, sign-in bindings) onto the rider below. Where both have a row on the same key the target's is
-          kept and {{ mergeFrom }}'s is dropped. This cannot be undone.
+          kept and {{ mergeFrom }}'s is dropped. Training goals and plans are added together, not merged. This cannot
+          be undone.
         </p>
         <UFormField label="Merge into" hint="the rider that keeps the data" class="mt-3">
-          <UInput v-model="mergeInto" placeholder="wilant" class="w-full" />
+          <UInput
+            v-model="mergeInto"
+            placeholder="wilant"
+            class="w-full"
+            @blur="runMergePreview"
+            @keydown.enter.prevent="runMergePreview"
+          />
         </UFormField>
+        <UButton
+          v-if="!mergePreview && mergeInto.trim()"
+          class="mt-2"
+          size="xs"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-search"
+          :loading="mergePreviewing"
+          @click="runMergePreview"
+        >
+          Check what would happen
+        </UButton>
         <p v-if="mergePreviewing" class="mt-3 text-sm text-muted">Checking what would happen…</p>
         <UAlert v-if="mergeError" class="mt-3" color="error" variant="subtle" icon="i-lucide-triangle-alert" :description="mergeError" />
         <template v-if="mergePreview">
@@ -831,9 +860,29 @@ async function confirmDeletePerson() {
             icon="i-lucide-triangle-alert"
             :description="`${mergeTarget.rider} has no data yet. Check the name: this would move everything onto a rider that does not exist.`"
           />
+          <UAlert
+            v-for="w in mergePreview.warnings"
+            :key="w"
+            class="mt-3"
+            color="warning"
+            variant="solid"
+            icon="i-lucide-triangle-alert"
+            title="Read this before merging"
+            :description="w"
+          />
+          <div v-if="mergePreview.dropped.length" class="mt-3 rounded-md bg-warning/10 p-3 ring ring-warning/40">
+            <p class="text-sm font-medium text-highlighted">These are dropped, and the merge cannot bring them back:</p>
+            <ul class="mt-1 flex list-disc flex-col gap-1 pl-5 text-xs text-toned">
+              <li v-for="(d, i) in mergePreview.dropped" :key="i">
+                <span class="font-mono text-highlighted">{{ d.table }}<template v-if="d.what"> ({{ d.what }})</template></span>:
+                {{ d.consequence }}
+              </li>
+            </ul>
+          </div>
           <p class="mt-3 text-sm text-highlighted">
             {{ mergePreview.moved }} moved · {{ mergePreview.keptTarget }} kept from {{ mergePreview.into }} ·
-            {{ mergePreview.droppedSource }} dropped from {{ mergePreview.from }}
+            {{ mergePreview.droppedSource }} dropped from {{ mergePreview.from }} ·
+            {{ mergePreview.merged }} merged
           </p>
           <div class="mt-2 max-h-56 overflow-auto rounded-md ring ring-default">
             <table class="w-full text-left text-xs">
@@ -843,6 +892,7 @@ async function confirmDeletePerson() {
                   <th class="p-2 text-right font-normal">Moved</th>
                   <th class="p-2 text-right font-normal">Kept</th>
                   <th class="p-2 text-right font-normal">Dropped</th>
+                  <th class="p-2 text-right font-normal">Merged</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-default">
@@ -851,9 +901,10 @@ async function confirmDeletePerson() {
                   <td class="p-2 text-right">{{ t.moved }}</td>
                   <td class="p-2 text-right">{{ t.keptTarget }}</td>
                   <td class="p-2 text-right" :class="t.droppedSource ? 'text-warning' : ''">{{ t.droppedSource }}</td>
+                  <td class="p-2 text-right">{{ t.merged }}</td>
                 </tr>
                 <tr v-if="!mergePreview.tables.length">
-                  <td class="p-2 text-muted" colspan="4">Nothing to move.</td>
+                  <td class="p-2 text-muted" colspan="5">Nothing to move.</td>
                 </tr>
               </tbody>
             </table>

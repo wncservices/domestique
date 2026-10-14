@@ -321,7 +321,7 @@ export interface Person {
   /** Why the startup bootstrap left this account unbound, kept after a restart
    *  and after the account signed in as another rider. Absent when it was not
    *  held back, or an admin has settled it. */
-  flagReason?: 'newer-than-data' | 'conflict' | 'needs-attention'
+  flagReason?: 'newer-than-data' | 'conflict' | 'needs-attention' | 'admin-bound-elsewhere'
   /** flagReason in words, for the rider it was held back from. */
   flagText?: string
   /** Set when the account is bound to a suffixed fallback ("name-2") while
@@ -337,11 +337,18 @@ export interface RiderMerge {
   /** Per table, only those with something in them. Where both riders had a row
    *  on the same key, the target's was kept (keptTarget) and the merged-away
    *  rider's dropped (droppedSource). */
-  tables: { table: string; moved: number; keptTarget: number; droppedSource: number }[]
+  tables: { table: string; moved: number; keptTarget: number; droppedSource: number; merged: number }[]
   moved: number
   keptTarget: number
   droppedSource: number
+  /** Crew memberships that kept the stronger of the two rows: not a loss. */
+  merged: number
   sessionsEnded: number
+  /** What is dropped and costs something, by name, with the consequence. */
+  dropped: { table: string; what?: string; consequence: string }[]
+  /** What the merge cannot sort out (two plans that overlap), and, after a real
+   *  merge, a follow-up step that failed. Read these before confirming. */
+  warnings: string[]
 }
 
 /** What an admin should know about a rider before binding an account to it. */
