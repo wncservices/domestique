@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -524,7 +525,18 @@ func fetchWahooRoutes(ctx context.Context, client WahooDownloader, token string,
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			gpxBytes, err := downloadAndRenderWahooRoute(ctx, client, token, routesByID[id])
+			gpxBytes, err := func() (b []byte, err error) {
+				// This goroutine is not a request goroutine, so net/http would
+				// not catch a panic from decoding a provider's file: it would
+				// end the process.
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("wahoo route: decoding the course file panicked", "route", id, "panic", recoveredPanic(r))
+						b, err = nil, errAnalysisPanicked
+					}
+				}()
+				return downloadAndRenderWahooRoute(ctx, client, token, routesByID[id])
+			}()
 
 			mu.Lock()
 			out[id] = wahooRouteDownload{gpx: gpxBytes, err: err}
