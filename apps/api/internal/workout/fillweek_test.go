@@ -1,6 +1,7 @@
 package workout
 
 import (
+	"context"
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -104,5 +105,31 @@ func TestDeleteGoalIsAllOrNothing(t *testing.T) {
 	}
 	if weeks, _ := db.ScheduledWeeks(ctx, again.ID); len(weeks) != 0 {
 		t.Errorf("a re-created goal inherited filled weeks: %v", weeks)
+	}
+}
+
+// Once the transaction has committed the week exists. A failure to read the
+// sessions back (here, the context ends right after the commit) must not turn
+// into an error that makes the caller treat a stored week as unfilled.
+func TestFillWeekReturnsTheCommittedWeekEvenIfTheContextEndsAfterTheCommit(t *testing.T) {
+	db := openTestDB(t)
+	goal, err := db.CreateGoal(t.Context(), CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", Sport: model.SportCycling, EventDate: "2027-06-01", Priority: PriorityA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	fillWeekAfterCommit = cancel
+	defer func() { fillWeekAfterCommit = func() {} }()
+
+	created, err := db.FillWeek(ctx, goal.ID, "2026-10-12", weekRequests(goal.ID, "Endurance ride", "Long ride"), false)
+	if err != nil {
+		t.Fatalf("FillWeek = %v after a successful commit", err)
+	}
+	if len(created) != 2 {
+		t.Errorf("created = %d sessions, want the 2 that were committed", len(created))
+	}
+	if done, _ := db.WeekScheduled(t.Context(), goal.ID, "2026-10-12"); !done {
+		t.Error("the week was not recorded")
 	}
 }
