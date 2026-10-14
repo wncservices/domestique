@@ -52,6 +52,7 @@ func UsePreviewImageCacheDB(db *sql.DB, dsn string) (*PreviewImageCache, error) 
 // basemapUpdateID — same "anything else is a miss, not an error" idiom as
 // PreviewCache.Get.
 func (c *PreviewImageCache) Get(slug, theme, basemapUpdateID string) (imageData []byte, found bool, err error) {
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	row := c.db.QueryRow(c.dialect.Rebind(
 		`SELECT image_data FROM track_preview_images WHERE slug = ? AND theme = ? AND basemap_update_id = ?`),
 		slug, theme, basemapUpdateID)
@@ -70,6 +71,7 @@ func (c *PreviewImageCache) Get(slug, theme, basemapUpdateID string) (imageData 
 // one alone since this is a genuinely separate table or a rider would keep
 // seeing the pre-edit card image even once the JSON layers were fresh.
 func (c *PreviewImageCache) Delete(slug string) error {
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := c.db.Exec(c.dialect.Rebind(`DELETE FROM track_preview_images WHERE slug = ?`), slug)
 	return err
 }
@@ -80,6 +82,7 @@ func (c *PreviewImageCache) Delete(slug string) error {
 // basemap's version.
 func (c *PreviewImageCache) Put(slug, theme, basemapUpdateID string, imageData []byte) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := c.db.Exec(c.dialect.Rebind(`
 INSERT INTO track_preview_images (slug, theme, basemap_update_id, image_data, computed_at)
 VALUES (?, ?, ?, ?, ?)
