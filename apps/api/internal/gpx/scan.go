@@ -26,7 +26,7 @@ const (
 	MaxDepth = 32
 	// MaxElements bounds every element of any kind, so a file cannot cost CPU
 	// by being made of things nothing reads.
-	MaxElements = 2_000_000
+	MaxElements = 5_000_000
 
 	// Elevation limits for an uploaded point, metres. Wider than any road.
 	minElevation = -1000.0
