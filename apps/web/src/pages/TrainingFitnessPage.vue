@@ -26,6 +26,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
 import { ftpTestToast } from '@/utils/ftpTests'
 import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
+import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
 const { canSyncGarmin } = useLibrary()
@@ -36,10 +37,6 @@ const { replanAction, announceRecalibration } = useRecalibration()
 // own doc comment on the server for why this is the established shape for
 // every optional feature flag, not just auth. ---
 const me = ref<Me | null>(null)
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 // --- rider profile ---
 
@@ -79,7 +76,7 @@ async function loadProfile() {
     profile.value = await api.riderProfile()
     savedProfile.value = cloneProfile(profile.value)
   } catch (err) {
-    toast.add({ title: 'Could not load your training profile', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not load your training profile', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     loadingProfile.value = false
   }
@@ -115,7 +112,7 @@ async function saveProfile() {
     // The Progression card carries the per-zone Reason for an adjustment.
     if (levelsRecalibrated) await loadProgression()
   } catch (err) {
-    toast.add({ title: 'Could not save your training profile', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not save your training profile', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     savingProfile.value = false
   }
@@ -205,7 +202,7 @@ async function proposeProfileChange() {
     proposalExplanation.value = proposal.explanation ?? ''
     toast.add({ title: 'Suggested a profile change', description: 'Review the fields below, then Save profile if this looks right.', icon: 'i-lucide-sparkles' })
   } catch (err) {
-    toast.add({ title: 'Could not suggest a change', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not suggest a change', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     proposingProfileChange.value = false
   }
@@ -223,7 +220,7 @@ async function buildFTPTest() {
     await api.buildFTPTest()
     toast.add({ title: 'Built an FTP test workout', description: "Find it in the Plan page's workout library.", icon: 'i-lucide-gauge' })
   } catch (err) {
-    toast.add({ title: 'Could not build the FTP test', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not build the FTP test', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     buildingFTPTest.value = false
   }
@@ -239,7 +236,7 @@ async function buildMaxHRTest() {
     await api.buildMaxHRTest('cycling')
     toast.add({ title: 'Built a max heart rate test workout', description: "Find it in the Plan page's workout library.", icon: 'i-lucide-heart-pulse' })
   } catch (err) {
-    toast.add({ title: 'Could not build the max heart rate test', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not build the max heart rate test', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     buildingMaxHRTest.value = false
   }
@@ -256,7 +253,7 @@ async function loadFitness() {
   try {
     fitness.value = await api.fitness()
   } catch (err) {
-    toast.add({ title: 'Could not load fitness history', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not load fitness history', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     loadingFitness.value = false
   }
@@ -325,7 +322,7 @@ async function syncMetrics() {
     // so the Recovery card needs a reload too, not just the fitness history.
     await loadReadiness()
   } catch (err) {
-    toast.add({ title: 'Sync failed', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Sync failed', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     syncingMetrics.value = false
   }

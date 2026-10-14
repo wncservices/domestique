@@ -11,6 +11,7 @@ import type { TrainNowKind, TrainNowResponse, TrainNowSuggestion, WeekDay } from
 import { todayISO } from '@/utils/rideDates'
 import { formatDuration, isUntouchedPlanSession } from '@/utils/workoutMath'
 import DifficultyChip from './DifficultyChip.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -56,7 +57,7 @@ async function load(n: number) {
   } catch (err) {
     if (id === request) {
       result.value = null
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = describeError(err)
     }
   } finally {
     if (id === request) loading.value = false
@@ -104,10 +105,6 @@ const applyNote = computed(() => {
   return 'Use this adds a session to today. Nothing you planned or rode is replaced.'
 })
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 async function use(s: TrainNowSuggestion) {
   const n = minutes.value
   if (n === null || applying.value) return
@@ -127,7 +124,7 @@ async function use(s: TrainNowSuggestion) {
       toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
       await load(n)
     } else {
-      toast.add({ title: 'Could not put that on today', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: 'Could not put that on today', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   } finally {
     applying.value = ''

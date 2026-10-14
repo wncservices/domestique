@@ -192,6 +192,7 @@ func (s *Store) Create(bbox BBox, maxZoom int, buildDate, requestedBy string) (s
 		return "", err
 	}
 	now := time.Now().UTC().Format(timestampFormat)
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	if _, err := s.db.Exec(s.dialect.Rebind(`
 INSERT INTO basemap_updates (id, west, south, east, north, max_zoom, build_date, status, requested_by, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -219,6 +220,7 @@ func isUniqueViolation(err error) bool {
 // includes a generated suffix) is only known after the Kubernetes API
 // accepts the create call.
 func (s *Store) SetJobName(id, jobName string) error {
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := s.db.Exec(s.dialect.Rebind(
 		`UPDATE basemap_updates SET status = ?, job_name = ? WHERE id = ?`),
 		StatusRunning, jobName, id)
@@ -228,6 +230,7 @@ func (s *Store) SetJobName(id, jobName string) error {
 // MarkSucceeded completes a record with the resulting archive size.
 func (s *Store) MarkSucceeded(id string, sizeBytes int64) error {
 	now := time.Now().UTC().Format(timestampFormat)
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := s.db.Exec(s.dialect.Rebind(
 		`UPDATE basemap_updates SET status = ?, size_bytes = ?, completed_at = ? WHERE id = ?`),
 		StatusSucceeded, sizeBytes, now, id)
@@ -237,6 +240,7 @@ func (s *Store) MarkSucceeded(id string, sizeBytes int64) error {
 // MarkFailed completes a record with why.
 func (s *Store) MarkFailed(id, errMsg string) error {
 	now := time.Now().UTC().Format(timestampFormat)
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := s.db.Exec(s.dialect.Rebind(
 		`UPDATE basemap_updates SET status = ?, error = ?, completed_at = ? WHERE id = ?`),
 		StatusFailed, errMsg, now, id)
@@ -250,6 +254,7 @@ var ErrNoRecord = errors.New("no basemap update has been triggered")
 // the UI's own job is to show a pending/running one as in-progress and a
 // succeeded/failed one as the last completed update.
 func (s *Store) Latest() (Record, error) {
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	row := s.db.QueryRow(s.dialect.Rebind(`
 SELECT id, west, south, east, north, max_zoom, build_date, status, error, job_name, size_bytes, requested_by, created_at, completed_at
 FROM basemap_updates ORDER BY created_at DESC LIMIT 1`))

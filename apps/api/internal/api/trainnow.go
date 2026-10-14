@@ -337,11 +337,11 @@ func (s *Server) handleTrainNowApply(w http.ResponseWriter, r *http.Request) {
 }
 
 // untouchedToday is today's plan-made session that a suggestion may replace in
-// place: generated and not adjusted or swapped (scheduler.IsGenerated), not an
+// place: generated and not adjusted or swapped (scheduler.IsPlanSession: a rider-kept one too, as this is the rider asking), not an
 // FTP test, and not ridden. Anything else on today is only ever added to.
 func untouchedToday(res trainNowResult, today string) (workout.Workout, bool) {
 	for _, wk := range res.workouts {
-		if wk.Date == today && scheduler.IsGenerated(wk) && wk.TestProtocol == "" && !res.ridden[wk.ID] {
+		if wk.Date == today && scheduler.IsPlanSession(wk) && wk.TestProtocol == "" && !res.ridden[wk.ID] {
 			return wk, true
 		}
 	}

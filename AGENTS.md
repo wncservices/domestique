@@ -885,16 +885,16 @@ cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
   `accounts.Store` (a separate package) is **not** included — deliberately out of scope, so its
   queries still show up as disconnected root spans; a real gap, not an oversight, and a candidate
   for its own follow-up if it matters.
-- **Outbound HTTP calls carry spans too**, on the same principle: every one of this app's seven
-  outbound clients — `oidcflow`, `komoot.Client`, `garmin.Client`, `wahoo.Client`,
-  `auth0mgmt.Client`, `basemap`'s pmtiles client, and `elevation.Client` — wraps its `http.Client`'s
+- **Outbound HTTP calls carry spans too**, on the same principle: every one of this app's outbound
+  HTTP clients — `oidcflow`, `komoot`, `garmin`, `wahoo`, `auth0mgmt`, `elevation`, `weather`,
+  `routing`, `geocoding`, `narration`, and `basemap`'s pmtiles/job/preview code — wraps its `http.Client`'s
   `Transport` in `otelhttp.NewTransport`, and (`oidcflow` aside, which already threaded
   `context.Context` everywhere) each needed the same context-threading treatment as the DB before
   that Transport had a real parent to attach to. `garmin.Client`'s threading runs through
   `internal/targets` (`Target`/`Courses` interfaces, the `Garmin`/`Wahoo` adapters) and
   `internal/sync` (`BuildPlan`, `Apply`), since the push path is the same call chain `state.Store`
   already required touching. `auth0mgmt.Client`'s threading runs through `api.PeopleConnector` and
-  every People-page handler. Two of these seven — the pmtiles client and `elevation.Client` —
+  every People-page handler. Two of them — the pmtiles client and `elevation.Client` —
   shipped once *without* this wrapping and were fixed after the fact, each with a comment on the
   fix explaining what a trace was missing until then; see the checklist below for what that means
   for the next one.
@@ -930,11 +930,10 @@ in `elevation.Client`, per their own comments:
    an existing one) needs its own `http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}`,
    and every call it makes needs `http.NewRequestWithContext` with a `ctx` that actually descends
    from the inbound request — not a freshly-built `context.Background()`, which produces a
-   disconnected root span nobody can trace back to the request that triggered it. Every one of
-   this app's seven outbound clients (`oidcflow`, `komoot.Client`, `garmin.Client`,
-   `auth0mgmt.Client`, `wahoo.Client`, `basemap`'s pmtiles client, `elevation.Client`) does this
-   today — a new eighth one is the thing to get right on the way in, not fix reactively once a
-   trace turns up a mysteriously untraced gap in the middle of it.
+   disconnected root span nobody can trace back to the request that triggered it. Every
+   outbound HTTP client in `internal/` (the list in the Observability section above) does this
+   today — a new one is the thing to get right on the way in, not fix reactively once a trace
+   turns up a mysteriously untraced gap in the middle of it.
 1a. **A new outbound client that is not HTTP** has no `otelhttp` to wrap. `internal/mailer` (SMTP)
    is the first: it opens one manual span, `smtp send`, from the caller's `ctx`, with `smtp.host`
    and `smtp.port` as its only attributes (never the recipient, the subject or the body), puts a
@@ -1116,6 +1115,14 @@ state file ──────Open────> state.Store ───┘
   in the `adjustments` table and are shown only while they still describe their subject. `threshold_auto`
   rows (subject `profile:<field>`) are stored for history and nothing renders them yet.
 - `internal/api` — JSON API plus the built SPA.
+- The training domain, each package one concern: `workout` (goals, sessions, rider profile, fitness
+  snapshots; `FillWeek` stores a plan week and its filled marker in one transaction),
+  `periodization` and `scheduler` (the plan and the sessions built from it), `adapter` (automatic
+  easing, swaps, step-downs), `lifeevents` and `crewplan` (illness/travel ramps and crew-ride
+  easing), `readiness`, `alternates`, `testschedule`/`fitnesstest` (FTP tests), `weather`,
+  `routing`, `loops`, `trainnow`, `pacing`. Eligibility to be changed automatically is decided by
+  the predicates in `scheduler/adapt.go` (`IsGenerated`, `IsPlanMade`, `AutoReplaceable`,
+  `RiderKept`): add a new automatic path by calling them, not by matching description text.
 
 `model.Route` carries **no file paths**. A route is a row; fetch its track through the library.
 
@@ -1142,8 +1149,8 @@ Every backend package has tests, and `go test ./apps/api/...` is the gate.
 Two things make the suite worth trusting, and both are easy to lose:
 
 1. **`Server.TargetFactory`** exists so acceptance tests can substitute fake adapters. The real
-   ones are stubs that always error, so without it no successful push is reachable and the entire
-   create/update/delete path would be untested. Do not inline `targets.Build` back into `handlePush`.
+   ones talk to Garmin and Wahoo, so without it no successful push is reachable in a test and the
+   entire create/update/delete path would be untested. Do not inline `targets.Build` back into `handlePush`.
 2. **`TestEachEngine` runs the behavioural suites against SQLite *and* PostgreSQL.**
    They differ in placeholders, the boolean column, the blob type and the upsert,
    so passing on one says nothing about the other — and PostgreSQL is what a
@@ -1194,7 +1201,9 @@ will not accept GPX at all. See `docs/plan.md`.
 
 - Go: standard library first. The dependencies are `gopkg.in/yaml.v3`, `modernc.org/sqlite`
   (pure Go, so no cgo), `github.com/jackc/pgx/v5`, `github.com/muktihari/fit`,
-  `github.com/coreos/go-oidc/v3` and the `go.opentelemetry.io/otel` family. That is the budget —
+  `github.com/coreos/go-oidc/v3`, the `go.opentelemetry.io/otel` family (with `XSAM/otelsql`),
+  `prometheus/client_golang`, and, for the basemap preview and update job only, `paulmach/orb`,
+  `fogleman/gg` and `k8s.io/client-go`. That is the budget —
   add to it only for something genuinely hard, as FIT encoding was, and as OIDC discovery/JWKS/
   ID-token verification is: a spec where writing it yourself means writing the vulnerabilities
   yourself. `golang.org/x/oauth2` appears in `go.sum` only as go-oidc's own indirect dependency —
@@ -1204,7 +1213,7 @@ will not accept GPX at all. See `docs/plan.md`.
   exactly the kind of thing worth not hand-rolling and getting subtly wrong under load — see
   **Observability** below for how tracing and metrics are actually wired.
 - `gofmt` is the formatter; `go vet` must be clean.
-- Vue: `<script setup lang="ts">`, no state-management library — the app is one screen and
+- Vue: `<script setup lang="ts">`, no state-management library —
   `ref`/`computed` cover it.
 - **UI is [Nuxt UI](https://ui.nuxt.com) (MIT), used standalone in Vite.** Its components are
   auto-imported by the Vite plugin, so `UCard`/`UButton`/`UTable` need no import statement.
@@ -1218,10 +1227,10 @@ will not accept GPX at all. See `docs/plan.md`.
   - `src/color-mode.ts` puts the `dark` class on `<html>` from the OS preference. Outside Nuxt
     nothing does this for you, and without it the app is permanently light.
   - `App.vue` must stay wrapped in `<UApp>` — toasts, tooltips and modals need it.
-  - `vue-router` is a dependency only because Nuxt UI's link components import it
-    unconditionally. The app is still one screen; do not build routing on it without a reason.
-- The frontend has `maplibre-gl`, but only for `RouteMap.vue`'s real interactive map, and only
-  ever loaded via dynamic `import()` — never a top-level import, so it stays out of the `main`
+  - `vue-router` routes the app's pages (`src/main.ts` lists them; `src/pages/` holds
+    them) and is also what Nuxt UI's link components import. Pages are lazy-loaded; keep it that way.
+- The frontend has `maplibre-gl`, used by the interactive maps (`RouteMap.vue`, `RouteBuilderMap.vue`)
+  and only ever loaded via dynamic `import()` (top-level imports are `import type` only) — never a top-level import, so it stays out of the `main`
   bundle for anyone who never opens a map, and out of `landing`'s bundle entirely. `TrackPreview.vue`
   still exists and still draws its own inline SVG on purpose for the card-grid thumbnail, a much
   cheaper render than mounting a full map per card. The original no-third-party-tile-server rule
@@ -1230,9 +1239,12 @@ will not accept GPX at all. See `docs/plan.md`.
   `domestique-infra`), never a third-party tile host. Style/sprite/glyphs load from Protomaps'
   public CDN — those aren't location-sensitive (identical for every request, no route coordinates
   in them), so self-hosting them would add nothing.
-- Route geometry reaches the frontend exclusively via `GET /api/tracks/{slug}`
-  (`handleTrack`/`api.track`) — never add a second endpoint for it. `TrackPreview.vue`,
-  `RouteDetailModal.vue`, and `LibraryPage.vue`'s map view all call this same one.
+- A library route's full geometry reaches the frontend via `GET /api/tracks/{slug}`
+  (`handleTrack`/`api.track`); `TrackPreview.vue`, `RouteDetailModal.vue` and `LibraryPage.vue`'s
+  map view call it. The other geometry endpoints are special cases with their own reason:
+  `/api/track-preview/{slug}` and `/api/track-preview-image/{slug}` (cached thumbnails),
+  `/api/shares/{token}/track` (a share link's recipient) and `/api/routebuilder/preview` (a route
+  not yet saved). Add another only for a case like those.
 - DTOs in `apps/api/internal/api/server.go` and `apps/web/src/api/types.ts` mirror each other by
   hand. Change them together.
 - Comments explain *why*. The code already says what.

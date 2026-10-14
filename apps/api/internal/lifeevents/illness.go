@@ -2,7 +2,6 @@ package lifeevents
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -208,10 +207,6 @@ func (p *planner) ramp(events []Event) {
 				// Only a session nobody has touched: not one a ramp (or anything
 				// else) already changed, so it is changed once.
 				if p.changed[w.ID] || w.TestProtocol != "" || p.in.Ridden[w.ID] || !scheduler.IsGenerated(w) {
-					continue
-				}
-				// A session the rider unticked in an earlier preview stays as it is.
-				if strings.Contains(w.Description, KeptMarker) {
 					continue
 				}
 				before := len(p.diff.Changes)
