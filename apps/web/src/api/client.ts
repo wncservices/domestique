@@ -1107,7 +1107,7 @@ export const api = {
       xhr.upload.onprogress = (e: ProgressEvent) => {
         if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total)
       }
-      xhr.onerror = () => reject(new ApiError('The upload could not be sent. Check your connection and try again.', 0))
+      xhr.onerror = () => reject(new NetworkError(new Error('upload failed')))
       xhr.onload = () => {
         let body: Record<string, unknown> = {}
         try {
