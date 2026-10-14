@@ -213,6 +213,53 @@ function isOwn(person: Person): boolean {
   return !!myRider.value && person.boundRider === myRider.value
 }
 
+// Why the startup bootstrap held an account back, as a badge. The sentence
+// behind it (flagText) comes from the server, which knows the rider.
+function flagLabel(reason: NonNullable<Person['flagReason']>): string {
+  switch (reason) {
+    case 'newer-than-data':
+      return 'joined after the data'
+    case 'conflict':
+      return 'accounts disagree'
+    default:
+      return 'unverified claimant'
+  }
+}
+
+// The one-click way back from a suffixed fallback ("wilant-2") to the rider
+// with the data ("wilant"). Your own row goes straight through: the server lets
+// an account with no one else on the target take it. Someone else's goes via
+// the bind dialog, which asks for the confirmation that handing over data needs.
+async function linkSuggested(person: Person) {
+  const rider = person.suggestRider
+  if (!rider) return
+  if (!isOwn(person)) {
+    openBind(person)
+    bindRider.value = rider
+    return
+  }
+  binding.value = person.id
+  try {
+    const result = await api.setPersonBinding(person.id, rider)
+    toast.add({
+      title: `You now sign in as ${result.boundRider}`,
+      description: 'Your current sign-ins were ended; sign in again to see your data.',
+      icon: 'i-lucide-link',
+      color: 'success',
+    })
+    await load()
+  } catch (err) {
+    toast.add({
+      title: `Could not link to ${rider}`,
+      description: describeError(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    binding.value = ''
+  }
+}
+
 function openBind(person: Person) {
   bindTarget.value = person
   // Prefilled with the account's own rider, except for a conflict: there the
@@ -418,7 +465,7 @@ async function confirmDeletePerson() {
             :key="person.id"
             class="flex flex-wrap items-center gap-3 py-2 first:pt-0 last:pb-0"
           >
-            <div class="min-w-0 flex-1">
+            <div class="min-w-0 flex-1 basis-full sm:basis-0">
               <p class="truncate text-sm text-highlighted">{{ person.name || person.email }}</p>
               <p class="truncate text-xs text-dimmed">{{ person.email }} · {{ lastSeen(person) }}</p>
             </div>
@@ -426,7 +473,16 @@ async function confirmDeletePerson() {
               {{ person.boundRider }}
             </UBadge>
             <UBadge
-              v-else-if="person.bindingStatus === 'needs-attention'"
+              v-if="person.flagReason"
+              color="warning"
+              variant="subtle"
+              size="sm"
+              icon="i-lucide-triangle-alert"
+            >
+              {{ flagLabel(person.flagReason) }}
+            </UBadge>
+            <UBadge
+              v-if="person.bindingStatus === 'needs-attention' && !person.flagReason"
               color="error"
               variant="subtle"
               size="sm"
@@ -435,7 +491,7 @@ async function confirmDeletePerson() {
               needs attention: {{ person.likelyRider }}
             </UBadge>
             <UBadge
-              v-else-if="person.bindingStatus === 'conflict'"
+              v-if="person.bindingStatus === 'conflict' && !person.flagReason"
               color="warning"
               variant="subtle"
               size="sm"
@@ -443,7 +499,7 @@ async function confirmDeletePerson() {
             >
               conflict: {{ person.likelyRider }}
             </UBadge>
-            <UBadge v-else-if="person.bindingStatus === 'unbound'" color="neutral" variant="outline" size="sm">
+            <UBadge v-if="person.bindingStatus === 'unbound'" color="neutral" variant="outline" size="sm">
               not bound
             </UBadge>
             <UBadge v-if="person.blocked" color="error" variant="subtle" size="sm">blocked</UBadge>
@@ -494,6 +550,21 @@ async function confirmDeletePerson() {
                 @click="openDeleteConfirm(person)"
               />
             </UTooltip>
+            <div v-if="person.flagText || person.suggestRider" class="flex basis-full flex-col items-start gap-2">
+              <p v-if="person.flagText" class="text-xs text-warning">{{ person.flagText }}</p>
+              <UButton
+                v-if="person.suggestRider"
+                size="xs"
+                icon="i-lucide-link"
+                :loading="binding === person.id"
+                @click="linkSuggested(person)"
+              >
+                {{ isOwn(person) ? 'This is me: link to' : 'Link to' }} {{ person.suggestRider }}
+              </UButton>
+              <p v-if="person.suggestRider" class="text-xs text-dimmed">
+                Signed in as {{ person.boundRider }}, but {{ person.suggestRider }} has data and nobody is bound to it.
+              </p>
+            </div>
           </div>
         </div>
 

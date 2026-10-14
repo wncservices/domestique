@@ -83,6 +83,12 @@ var riderTables = map[string]riderTable{
 	"rider_identities": {Purged: true, Note: "Identities.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
 
+	// internal/identities: the accounts the startup bootstrap held back, and the
+	// rider each was held back from, so the People page can still say why after
+	// a restart. It names a rider, so a purge and a rename follow it.
+	"bootstrap_flags": {Purged: true, Note: "Identities.DeleteRider",
+		Rename: renameRule{Columns: []string{"rider"}}},
+
 	// internal/garminmfa
 	"garmin_mfa_challenges": {Purged: true, Note: "GarminMFA.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},

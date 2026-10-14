@@ -154,7 +154,15 @@ design. This is the order to deploy it in.
     Auth0 *after that data existed* (Auth0 `created_at` against the earliest
     `created_at`/`updated_at` in the rider's tables; a rough comparison, a likely
     renamer is indistinguishable from a real owner who joined later), and anyone
-    the Auth0 search had no profile for.
+    the Auth0 search had no profile for. **An admin is the exception to the
+    "joined after" hold:** an admin can already bind their own account to any
+    unbound rider from the People page, so holding them back protects nothing and
+    only locks the owner out. The bootstrap binds them anyway (Info:
+    `identity bootstrap bound an admin whose account is newer than the rider's
+    data`) and a non-admin in the same position stays held back;
+  - **why an account was held back is kept** (table `bootstrap_flags`, rebuilt at
+    every start) and shown on that person's People row as a badge with the reason
+    in words, even after they signed in as another rider.
 
 ### Before the deploy
 
@@ -167,9 +175,10 @@ design. This is the order to deploy it in.
    - no one else has a name that equals an existing rider's;
    - each existing rider has one account, or accounts with the same verified email.
 
-   Expect the owner to be flagged if their Auth0 account is newer than their
-   data (data from the Authelia days predates it). That is fine; step 3 of "After"
-   fixes it in one click.
+   The owner's Auth0 account is usually newer than their data (data from the
+   Authelia days predates it). As an admin they are bound to their rider anyway;
+   anyone else in that position is held back and shows why on the People page.
+   Either way, step 3 of "After" fixes a wrong landing in one click.
 2. **Know the exact issuer string.** It is `auth.oidc.issuer` as configured
    (Auth0 has a trailing slash: `https://<tenant>.auth0.com/`). Bindings are
    looked up under exactly that string, and `bind-identity` refuses any other
@@ -195,8 +204,11 @@ design. This is the order to deploy it in.
 2. **Sign in as the owner first, before anyone else,** and open the People page.
    Confirm the owner's own row shows the owner's real rider (the link badge reads
    `wilant`, not `wilant-2`).
-3. **If the owner is on a suffixed rider** (`wilant-2`, no data): on the People
-   page use the link button on your own row and bind yourself to `wilant`. An
+3. **If the owner is on a suffixed rider** (`wilant-2`, no data): your own row
+   on the People page says so and offers **This is me: link to `wilant`** (it
+   appears whenever a `name-N` rider sits next to a `name` that has data and no
+   binding; other people's rows offer **Link to `name`**, which opens the bind
+   dialog). Or use the link button on your own row. An
    admin may bind their own account to a rider that nobody is bound to (logged at
    Warn); onto a rider that has any binding it is refused. Your sign-in then
    ends and you sign in again. If the page is not reachable, use the CLI below.

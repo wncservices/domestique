@@ -359,6 +359,10 @@ func riderSeeds() []seed {
 			rec := why.NewRecord(why.MissedMoved, "moved", why.MissedMovedInputs{})
 			return e.srv.Training.RecordAdjustment(context.Background(), rider, workout.SubjectWorkout, "workout-"+id, rec, "2026-01-02")
 		}, "rider", byRider},
+		{"bootstrap_flags", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO bootstrap_flags (issuer, sub, rider, reason, flagged_at) VALUES (?, ?, ?, 'conflict', ?)`,
+				"https://issuer.test/", "flagged|"+rider, rider, ts)
+		}, "rider", byRider},
 		{"rider_identities", func(e *riderDataEnv, rider, id string) error {
 			// Two accounts, as a rider who signs in with Google and a password has.
 			for _, sub := range []string{"google-oauth2|" + rider, "auth0|" + rider} {
