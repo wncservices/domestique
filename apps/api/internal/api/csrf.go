@@ -62,7 +62,7 @@ func (s *Server) csrfGuard(next http.Handler) http.Handler {
 
 		if r.ContentLength != 0 {
 			mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if mt != "application/json" && !(mt == "multipart/form-data" && isUploadRoute(r)) {
+			if mt != "application/json" && (mt != "multipart/form-data" || !isUploadRoute(r)) {
 				writeJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "request body must be application/json"})
 				return
 			}
