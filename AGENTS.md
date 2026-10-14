@@ -587,6 +587,33 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
   by `easeBeforeFTPTests`, inside `adaptRider`, so it follows every replan.
 - No watts (FTP, test result) in log lines next to a rider name.
 
+## Best efforts
+
+`internal/bestefforts` (pure) decides what a record is and when a ride set one;
+`best_efforts` (`workout/besteffort_db.go`) holds one row per ride per metric
+(`power_5/60/300/480/1200/3600` cycling, `speed_1200/1800` running, `max_hr`).
+Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
+
+- **Derived, rebuildable.** `session_analyses` stays the source of truth.
+  `RebuildBestEfforts` runs at start only on an empty table; `BackfillEfforts`
+  (one rider) is how an import reaches the book. Raw rows, no "current record"
+  row: a rider merge moves every row and the better value per metric is
+  whichever `BestIn` finds, so `best_efforts` needs no bespoke merge rule
+  (`TestMergeRiderKeepsTheBetterBestEffortPerMetric`).
+- **An award is written once**, at the row's first insert, and never moved or
+  removed; a re-analysis updates value and date and keeps it. It is decided only
+  after every ride of a pass is stored, against all other stored values in
+  scope, so sync order cannot hand a record to the older of two rides.
+- **Never for history.** A ride earns an award only when it is not an import and
+  is analysed within 3 days of its date (`effortAwardDays`). Imported and
+  late-analysed rides still count towards bests. A ride whose file had no usable
+  second (`SamplesUnreadable`) contributes nothing.
+- **Told once.** An award is stored `announced = false`; the rider's own "Sync
+  now" returns every unannounced award in `bestEfforts` and marks them told. The
+  unattended loop never marks, so an award made while nobody looked is still
+  announced at the next visit.
+- **No value in a log line next to a rider**: rider, metric and scope only.
+
 ## Fixed-time metrics sync
 
 `RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and

@@ -334,6 +334,9 @@ func riderSeeds() []seed {
 		{"session_analyses", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO session_analyses (session_id, rider, analysed_at) VALUES (?, ?, ?)`, "session-"+id, rider, ts)
 		}, "rider", byRider},
+		{"best_efforts", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO best_efforts (rider, session_id, metric, sport, date, value, created_at) VALUES (?, ?, 'power_1200', 'cycling', '2026-01-02', 280, ?)`, rider, "session-"+id, ts)
+		}, "rider", byRider},
 		{"ride_imports", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO ride_imports (id, rider, state, started_at, updated_at) VALUES (?, ?, 'done', ?, ?)`, "import-"+id, rider, ts, ts)
 		}, "rider", byRider},

@@ -142,6 +142,9 @@ func (s *Server) analyseNewSessions(
 	}
 
 	var loadChanged bool
+	// The rides whose efforts this pass added to the record book; awards are
+	// decided once all of them are in (awardNewEfforts).
+	var addedEfforts []newEfforts
 	analyzedCount := map[string]int{}
 	downloadFailed := 0
 	for _, sess := range candidates {
@@ -273,6 +276,19 @@ func (s *Server) analyseNewSessions(
 			continue
 		}
 
+		// The ride's bests go into the record book. A file with no usable second
+		// has no samples to take a best from, so it contributes nothing, however
+		// the summary scored it. A failure is a Warn: the record book is derived
+		// from the analysis just saved and the ride is not retried for it.
+		if !analysis.SamplesUnreadable {
+			ne, err := s.storeEfforts(ctx, sess, sa)
+			if err != nil {
+				s.logger().Warn("ride analysis: recording the ride's best efforts failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", err)
+			} else if len(ne.values) > 0 {
+				addedEfforts = append(addedEfforts, ne)
+			}
+		}
+
 		// A level move only happens here, right after an analysis is saved
 		// for the first time — analyseNewSessions' own candidates filter
 		// (analyzedIDs) never re-analyses a session that already has one, so
@@ -298,6 +314,7 @@ func (s *Server) analyseNewSessions(
 			return nil, err
 		}
 	}
+	s.awardNewEfforts(ctx, rider, addedEfforts)
 
 	if len(candidates) > 0 {
 		s.logger().Info("ride analysis: sync complete", "rider", rider, "analyzed", analyzedCount, "downloadFailures", downloadFailed)

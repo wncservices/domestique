@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/bestefforts"
 	"github.com/wncservices/domestique/apps/api/internal/rideimport"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -638,6 +639,14 @@ func (s *Server) importJob(ctx context.Context, rider, id string, spools []spool
 		}
 		if err := s.Training.RecomputeFitnessSnapshots(final, rider); err != nil {
 			s.logger().Error("ride import: recomputing the fitness history failed", "rider", rider, "job", id, "err", err)
+			return "internal"
+		}
+		// The imported rides reach the record book here, once, with no award:
+		// an import is history, not news, and the book is derived from the
+		// analyses just saved. A failure leaves rides out of it, which no later
+		// pass repairs on its own, so it fails the job like the step above.
+		if _, err := s.Training.BackfillEfforts(final, rider, bestefforts.Efforts); err != nil {
+			s.logger().Error("ride import: recording best efforts failed", "rider", rider, "job", id, "err", err)
 			return "internal"
 		}
 		if err := s.detectAfterImport(final, rider); err != nil {
