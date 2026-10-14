@@ -318,6 +318,15 @@ export interface Person {
    *  has data, and a claimant is unverified or unknown). Absent when this
    *  deployment keeps no bindings. */
   bindingStatus?: 'bound' | 'unbound' | 'conflict' | 'needs-attention'
+  /** Why the startup bootstrap left this account unbound, kept after a restart
+   *  and after the account signed in as another rider. Absent when it was not
+   *  held back, or an admin has settled it. */
+  flagReason?: 'newer-than-data' | 'conflict' | 'needs-attention'
+  /** flagReason in words, for the rider it was held back from. */
+  flagText?: string
+  /** Set when the account is bound to a suffixed fallback ("name-2") while
+   *  "name" has data and nobody is bound to it: very likely who they are. */
+  suggestRider?: string
 }
 
 /** What an admin should know about a rider before binding an account to it. */

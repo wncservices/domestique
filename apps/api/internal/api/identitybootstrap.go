@@ -39,6 +39,9 @@ type bootstrapBind struct {
 	// Verified is whether Email is vouched for. An unverified address is never
 	// kept: the binding is made without it.
 	Verified bool
+	// AdminOverride is true when the usual "joined after the data" hold was set
+	// aside because the account is an admin's; see planBootstrap.
+	AdminOverride bool
 }
 
 // bootstrapPlan is what to do about the people the Management API lists. The
@@ -54,6 +57,15 @@ type bootstrapPlan struct {
 	// Orphans is riders with data that no listed person claims and no binding
 	// covers, sorted.
 	Orphans []string
+	// Flags is, per account left unbound, why: what the People page shows and
+	// the store keeps so the reason survives a restart.
+	Flags []bootstrapFlag
+}
+
+// bootstrapFlag is one account the plan left unbound, and why. Reason is one of
+// the identities.Flag* constants.
+type bootstrapFlag struct {
+	Sub, Rider, Reason string
 }
 
 // planBootstrap decides, for every rider the people would sign in as under
@@ -71,7 +83,11 @@ type bootstrapPlan struct {
 //     whose address was never confirmed. The address is kept (as a MAC) only if
 //     it is verified. The exception: a rider with data whose only claimant
 //     joined the tenant after that data existed is likely someone who renamed
-//     themselves, so it is flagged as a conflict and left for an admin.
+//     themselves, so it is flagged as a conflict and left for an admin. The
+//     exception to the exception: an admin's account is bound anyway. An admin
+//     can already bind their own account to any unbound rider from the People
+//     page, so holding them back adds no safety, and it is what left an owner
+//     signing in as an empty "name-2" with nothing to say why.
 //   - Several claimants are bound only when every one has a verified email and
 //     they are all the same address (one person, two ways to sign in). A
 //     disagreement is a conflict; an unverified claimant leaves the rider
@@ -81,7 +97,9 @@ type bootstrapPlan struct {
 // data but no usable time); see identities.Store.RidersWithData for how rough
 // that is. A rider that already has a binding is skipped, so an admin's
 // resolution is not reported again at every start.
-func planBootstrap(people []auth0mgmt.Person, alreadyBound func(rider string) bool, data map[string]time.Time) bootstrapPlan {
+//
+// isAdmin says whether a listed person holds the admin role (nil: nobody does).
+func planBootstrap(people []auth0mgmt.Person, alreadyBound func(rider string) bool, data map[string]time.Time, isAdmin func(auth0mgmt.Person) bool) bootstrapPlan {
 	plan := bootstrapPlan{
 		Conflicts: map[string]int{}, Unverified: map[string]int{},
 		Unknown: map[string]int{}, NeedsAttention: map[string]int{},
@@ -116,19 +134,24 @@ func planBootstrap(people []auth0mgmt.Person, alreadyBound func(rider string) bo
 			plan.Unknown[rider] = unknown
 			if hasData {
 				plan.NeedsAttention[rider] = len(group)
+				plan.flag(group, rider, identities.FlagNeedsAttention)
 			}
 			continue
 		}
 
 		if len(group) == 1 {
 			p := group[0]
-			if hasData && !since.IsZero() && !p.CreatedAt.IsZero() && p.CreatedAt.After(since) {
+			newer := hasData && !since.IsZero() && !p.CreatedAt.IsZero() && p.CreatedAt.After(since)
+			override := newer && isAdmin != nil && isAdmin(p)
+			if newer && !override {
 				plan.Conflicts[rider] = 1
+				plan.flag(group, rider, identities.FlagNewerThanData)
 				continue
 			}
 			email := strings.ToLower(strings.TrimSpace(p.Email))
 			plan.Binds = append(plan.Binds, bootstrapBind{
 				Sub: p.UserID, Rider: rider, Email: email, Verified: p.EmailVerified && email != "",
+				AdminOverride: override,
 			})
 			continue
 		}
@@ -148,9 +171,11 @@ func planBootstrap(people []auth0mgmt.Person, alreadyBound func(rider string) bo
 			plan.Unverified[rider] = unverified
 			if hasData {
 				plan.NeedsAttention[rider] = len(group)
+				plan.flag(group, rider, identities.FlagNeedsAttention)
 			}
 		case len(emails) > 1:
 			plan.Conflicts[rider] = len(group)
+			plan.flag(group, rider, identities.FlagConflict)
 		default:
 			for _, p := range group {
 				plan.Binds = append(plan.Binds, bootstrapBind{
@@ -169,12 +194,26 @@ func planBootstrap(people []auth0mgmt.Person, alreadyBound func(rider string) bo
 	return plan
 }
 
+// flag records why every account of group was left unbound.
+func (p *bootstrapPlan) flag(group []auth0mgmt.Person, rider, reason string) {
+	for _, person := range group {
+		p.Flags = append(p.Flags, bootstrapFlag{Sub: person.UserID, Rider: rider, Reason: reason})
+	}
+}
+
+// isAdminPerson is whether the Management API's roles for a person resolve to
+// the admin role under this deployment's mapping: the same computation sign-in
+// makes, so the bootstrap and the People page agree on who is one.
+func (s *Server) isAdminPerson(p auth0mgmt.Person) bool {
+	return s.authenticator().ResolveRole(p.Roles).AtLeast(auth.RoleAdmin)
+}
+
 // riderDataColumns is the registry's rider columns without the tables that
-// are not a rider's data: the bindings themselves, and the deployment-wide
-// settings whose updated_by is attribution only.
+// are not a rider's data: the bindings and the flags about them, and the
+// deployment-wide settings whose updated_by is attribution only.
 func riderDataColumns() identities.TakenColumns {
 	cols := riderNameColumns()
-	for _, t := range []string{"rider_identities", "settings", "flags"} {
+	for _, t := range []string{"rider_identities", "bootstrap_flags", "settings", "flags"} {
 		delete(cols, t)
 	}
 	return cols
@@ -237,7 +276,7 @@ func (s *Server) BootstrapIdentities(ctx context.Context) (BootstrapResult, erro
 		return res, fmt.Errorf("reading which riders have data: %w", err)
 	}
 
-	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] }, data)
+	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] }, data, s.isAdminPerson)
 	for _, b := range plan.Binds {
 		mac := ""
 		if b.Verified {
@@ -249,7 +288,21 @@ func (s *Server) BootstrapIdentities(ctx context.Context) (BootstrapResult, erro
 		}
 		if added {
 			res.Bound++
+			if b.AdminOverride {
+				// The rider name only: nothing that identifies the account.
+				s.logger().Info("identity bootstrap bound an admin whose account is newer than the rider's data; an admin can bind their own account to any unbound rider anyway",
+					"rider", b.Rider)
+			}
 		}
+	}
+	flags := make([]identities.Flag, 0, len(plan.Flags))
+	for _, f := range plan.Flags {
+		flags = append(flags, identities.Flag{Sub: f.Sub, Rider: f.Rider, Reason: f.Reason})
+	}
+	if err := s.Identities.ReplaceFlags(ctx, issuer, flags); err != nil {
+		// The People page loses the reason, nothing else: not worth failing the
+		// bootstrap and keeping sign-in closed.
+		s.logger().Warn("identity bootstrap could not save why accounts were held back", "err", err)
 	}
 
 	for rider, n := range plan.Conflicts {
