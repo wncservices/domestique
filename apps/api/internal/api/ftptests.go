@@ -605,7 +605,7 @@ func (s *Server) ftpTestResults(rider string, rides []ftpTestRide, tdr threshold
 // workouts is adaptRider's own snapshot, and alreadyChanged the ids that pass
 // has already changed, so a workout is never adjusted twice in one pass.
 func (s *Server) easeBeforeFTPTests(ctx context.Context, rider string, workouts []workout.Workout, profile workout.RiderProfile, alreadyChanged map[string]bool) {
-	today := s.now().Format(dateLayout)
+	today := s.localToday()
 	var ridden map[string]bool
 	for _, wk := range workouts {
 		if alreadyChanged[wk.ID] || wk.Date < today || !scheduler.NeedsEasingBeforeTest(wk, workouts) {

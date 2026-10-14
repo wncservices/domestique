@@ -98,7 +98,7 @@ func (s *Server) writeReplanLocked(w http.ResponseWriter, rider string) {
 // replanRider does the actual work, separate from the handler so it runs
 // entirely inside withDBLock's closure with nothing left to do outside it.
 func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO, error) {
-	now := s.now()
+	now := s.localNow()
 	today := now.Format(dateLayout)
 	weekStart := periodization.MondayOf(now)
 	weekEnd := weekStart.AddDate(0, 0, 6).Format(dateLayout)

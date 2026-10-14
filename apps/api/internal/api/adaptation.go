@@ -84,7 +84,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 	// (its 14-day struggled-key-session check) — anything analysed further
 	// back cannot affect a decision made today, so there is no reason to ask
 	// the store for more.
-	sinceDate := s.now().AddDate(0, 0, -14).Format("2006-01-02")
+	sinceDate := s.localNow().AddDate(0, 0, -14).Format("2006-01-02")
 	analyses, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
 		s.logger().Warn("adapt: reading ride analyses failed", "rider", rider, "err", err)
@@ -338,7 +338,7 @@ const readinessHistoryDays = 29
 // whatever else is available) rather than aborting the whole adaptation pass
 // for a rider whose only problem is an unreadable wellness table.
 func (s *Server) assessReadiness(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot) readiness.Assessment {
-	return s.assessReadinessAt(ctx, rider, sessions, latest, s.now())
+	return s.assessReadinessAt(ctx, rider, sessions, latest, s.localNow())
 }
 
 // assessReadinessAt is assessReadiness for a caller-chosen "now": the
