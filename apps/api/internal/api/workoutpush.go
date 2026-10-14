@@ -194,13 +194,21 @@ func (s *Server) withdrawFromGarmin(ctx context.Context, session garmin.Session,
 // server's own zone only when the configured one cannot be loaded, which
 // config validation already refuses.
 func (s *Server) localToday() string {
+	return s.localNow().Format(dateLayout)
+}
+
+// localNow is s.now() in training.timezone. Every background pass that derives
+// a date or a week from "now" (the tick, the season fill, adaptation) uses it,
+// so between midnight in the rider's zone and midnight UTC they agree with the
+// day the rider is living in, not the pod's.
+func (s *Server) localNow() time.Time {
 	now := s.now()
 	if sched, err := s.syncSchedule(); err == nil {
 		if loc := sched.Location(); loc != nil {
 			now = now.In(loc)
 		}
 	}
-	return now.Format(dateLayout)
+	return now
 }
 
 // localDate is the calendar date of t in training.timezone: what a UTC

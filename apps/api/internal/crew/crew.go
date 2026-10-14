@@ -394,18 +394,28 @@ func (s *Store) Create(ctx context.Context, name, owner string) (Crew, error) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+	// One transaction: a crew with no owner membership is not something a
+	// failed create may leave behind.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Crew{}, fmt.Errorf("create crew: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`
         INSERT INTO crews (id, name, owner, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)`),
 		id, name, owner, now, now); err != nil {
 		return Crew{}, fmt.Errorf("create crew: %w", err)
 	}
 
-	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`
         INSERT INTO crew_members (crew_id, rider, status, origin, requested_at, decided_by, decided_at, is_owner)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		id, owner, string(StatusApproved), string(OriginSelf), now, owner, now, true); err != nil {
 		return Crew{}, fmt.Errorf("enroll crew owner: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Crew{}, fmt.Errorf("create crew: %w", err)
 	}
 
 	return s.Get(ctx, id)
@@ -945,15 +955,23 @@ func (s *Store) delete(ctx context.Context, crewID, rider, status string) error 
 // reused, so the API layer's handleDeleteCrew strips the id from every
 // route's targets as well.
 func (s *Store) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crews WHERE id = ?`), id)
+	// The crew and its membership go together: members of a crew that no longer
+	// exists, or a crew with nobody in it, is what a failure between the two
+	// statements used to leave.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete crew: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crews WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return ErrNotFound
 	}
-	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_members WHERE crew_id = ?`), id); err != nil {
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(`DELETE FROM crew_members WHERE crew_id = ?`), id); err != nil {
 		return fmt.Errorf("delete crew membership: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }

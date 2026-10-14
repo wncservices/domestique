@@ -157,7 +157,7 @@ func (s *Server) inReducedWeek(ctx context.Context, wk workout.Workout, profile 
 		}
 		return false
 	}
-	plan, err := periodization.Build(g, profile, s.now())
+	plan, err := periodization.Build(g, profile, s.localNow())
 	if err != nil {
 		return false
 	}

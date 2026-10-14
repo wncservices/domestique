@@ -301,7 +301,7 @@ func (s *Server) fixedSessionFor(ctx context.Context, rider, rideID string) (*wo
 // automatic rule off it, and it names no rider.
 func (s *Server) fixedSessionRequest(ctx context.Context, in goingInput) (workout.CreateWorkoutRequest, error) {
 	est := crewplan.EstimateRoute(in.route.Stats)
-	_, focus, _, err := s.focusPlan(ctx, in.rider, s.now())
+	_, focus, _, err := s.focusPlan(ctx, in.rider, s.localNow())
 	if err != nil {
 		return workout.CreateWorkoutRequest{}, err
 	}

@@ -307,7 +307,7 @@ func (s *suggester) chooseDay(from, to time.Time) (date, replaces string, ok boo
 		}
 		riderBuilt, planMade := false, ""
 		for _, w := range byDate[key] {
-			if IsPlanMade(w) {
+			if scheduler.AutoReplaceable(w) {
 				if planMade == "" {
 					planMade = w.ID
 				}
@@ -338,18 +338,6 @@ func (s *suggester) available(d time.Time) bool {
 		}
 	}
 	return false
-}
-
-// IsPlanMade mirrors internal/api's own definition of a session the scheduler
-// generated, adjusted or not: the only kind a test may replace. One the rider
-// swapped for an alternate is theirs now, so it is not (a pin test in
-// internal/api keeps the two definitions equal).
-func IsPlanMade(w workout.Workout) bool {
-	// A routed ride is the rider's own choice for its day (see internal/api).
-	return w.RouteSlug == "" && w.CrewRideID == "" &&
-		w.GoalID != "" &&
-		strings.HasPrefix(w.Description, scheduler.GeneratedDescription) &&
-		!strings.Contains(w.Description, scheduler.SwappedMarker)
 }
 
 func (s *suggester) build(reason, date, replaces string) *Suggestion {

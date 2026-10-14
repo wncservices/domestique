@@ -84,7 +84,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 	// (its 14-day struggled-key-session check) — anything analysed further
 	// back cannot affect a decision made today, so there is no reason to ask
 	// the store for more.
-	sinceDate := s.now().AddDate(0, 0, -14).Format("2006-01-02")
+	sinceDate := s.localNow().AddDate(0, 0, -14).Format("2006-01-02")
 	analyses, err := s.Training.ListAnalyses(ctx, rider, sinceDate)
 	if err != nil {
 		s.logger().Warn("adapt: reading ride analyses failed", "rider", rider, "err", err)
@@ -123,7 +123,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 	// that bookkeeping cannot silently apply two Changes to the same workout
 	// — first one wins, and a second is loud rather than a quiet clobber.
 	appliedFor := map[string]bool{}
-	for _, c := range adapter.AdaptSessionsAround(workouts, sessions, profile, s.now(), byWorkout, assessment, blackout) {
+	for _, c := range adapter.AdaptSessionsAround(workouts, sessions, profile, s.localNow(), byWorkout, assessment, blackout) {
 		if appliedFor[c.WorkoutID] {
 			s.logger().Warn("adapt: a second change was produced for the same workout in one pass; ignoring it", "workout", c.WorkoutID, "rider", rider)
 			continue
@@ -254,7 +254,7 @@ func (s *Server) recordAdjustment(ctx context.Context, rider, workoutID string, 
 // or fitness values) and nothing else, because the change it explains has
 // already landed and stands.
 func (s *Server) recordSubjectAdjustment(ctx context.Context, rider, kind, subjectID string, rec why.Record) {
-	day := s.now().Format("2006-01-02")
+	day := s.localToday()
 	if err := s.Training.RecordAdjustment(ctx, rider, kind, subjectID, rec, day); err != nil {
 		s.logger().Warn("could not record why a change was made", "kind", kind, "subject", subjectID, "rider", rider, "rule", string(rec.Rule), "err", err)
 	}
@@ -338,7 +338,7 @@ const readinessHistoryDays = 29
 // whatever else is available) rather than aborting the whole adaptation pass
 // for a rider whose only problem is an unreadable wellness table.
 func (s *Server) assessReadiness(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot) readiness.Assessment {
-	return s.assessReadinessAt(ctx, rider, sessions, latest, s.now())
+	return s.assessReadinessAt(ctx, rider, sessions, latest, s.localNow())
 }
 
 // assessReadinessAt is assessReadiness for a caller-chosen "now": the

@@ -69,7 +69,7 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 		return res, err
 	}
 	horizon := s.refreshHorizon()
-	today := s.now().Format(dateLayout)
+	today := s.localToday()
 
 	for _, week := range sc.plan.Weeks {
 		if err := ctx.Err(); err != nil {
@@ -124,6 +124,15 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 // not had that week filled.
 func hasPlanSessions(existing []workout.Workout, g workout.Goal, week periodization.Week) bool {
 	start, end := weekBounds(week)
+	return hasPlanSessionsBetween(existing, g, start, end)
+}
+
+// hasPlanSessionsBetween is hasPlanSessions for a week given as its first and
+// last date. It is the one definition of "this week was already filled":
+// autoScheduleGoalWeek used to keep its own copy, which missed the routed-ride
+// exclusion below and recorded a week as filled around a ride the rider had put
+// on it, without making the plan's sessions.
+func hasPlanSessionsBetween(existing []workout.Workout, g workout.Goal, start, end string) bool {
 	for _, wk := range existing {
 		// Neither is a ride the rider put on the day with a route and no plan
 		// description ("new" in routeschedule.go): it carries the goal id so the
@@ -238,6 +247,10 @@ func (s *Server) recordSeasonRefresh(ctx context.Context, rider string, was work
 
 func levelString(l float64) string { return strconv.FormatFloat(l, 'f', -1, 64) }
 
+// untouchedPlanSession is a plan session nothing has changed since it was made:
+// the season refresh may rebuild it. A swap for an alternate, an adjustment and
+// a rider's "kept as planned" all append to the description, which the exact
+// match below refuses, so none needs a clause of its own.
 func untouchedPlanSession(wk workout.Workout) bool {
 	return scheduler.IsGenerated(wk) &&
 		wk.Description == scheduler.GeneratedDescription &&
@@ -250,10 +263,6 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		// silently drop it or swap the content under a route chosen for the
 		// old one. It already moves UpdatedAt, but the guarantee is stated here.
 		wk.RouteSlug == "" &&
-		// A swap for an alternate is the rider's choice. It already fails the
-		// description and timestamp tests, but the guarantee is stated here
-		// rather than left to those.
-		!strings.Contains(wk.Description, scheduler.SwappedMarker) &&
 		wk.PlannedSnapshot == nil &&
 		wk.UpdatedAt == wk.CreatedAt
 }
@@ -302,7 +311,7 @@ func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
 	}
 	lastStart := sc.plan.Weeks[len(sc.plan.Weeks)-1].StartDate
 	_, lastEnd := weekBounds(sc.plan.Weeks[len(sc.plan.Weeks)-1])
-	today := s.now().Format(dateLayout)
+	today := s.localToday()
 
 	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
 	if err != nil {
@@ -386,7 +395,7 @@ func (s *Server) fillThisWeek(ctx context.Context, g workout.Goal) {
 	withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
 		s.seasonMu.Lock()
 		defer s.seasonMu.Unlock()
-		_, _, err = s.autoScheduleGoalWeek(ctx, g, periodization.MondayOf(s.now()))
+		_, _, err = s.autoScheduleGoalWeek(ctx, g, periodization.MondayOf(s.localNow()))
 	})
 	if err != nil && !errors.Is(err, periodization.ErrNoEventDate) && !errors.Is(err, periodization.ErrEventInThePast) {
 		// The response still goes out and the background pass tries again.

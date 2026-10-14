@@ -165,7 +165,7 @@ func (s *Server) attachTogether(ctx context.Context, dto *crewDTO) {
 
 // rideTogetherWeeks are the weeks proposals are made for: this one and next.
 func (s *Server) rideTogetherWeeks() []string {
-	monday := periodization.MondayOf(s.now())
+	monday := periodization.MondayOf(s.localNow())
 	return []string{monday.Format(dateLayout), monday.AddDate(0, 0, 7).Format(dateLayout)}
 }
 
@@ -343,7 +343,7 @@ func (s *Server) togetherCandidates(ctx context.Context, riders map[string]bool,
 		names = append(names, r)
 	}
 	sort.Strings(names)
-	today := s.now().Format(dateLayout)
+	today := s.localToday()
 	var out []crewplan.Candidate
 	for _, rider := range names {
 		workouts, err := s.Training.ListWorkouts(ctx, rider)

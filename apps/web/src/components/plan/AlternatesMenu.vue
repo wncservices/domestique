@@ -12,6 +12,7 @@ import type { AlternateKind, AlternateOption, Workout } from '@/api/types'
 import { todayISO } from '@/utils/rideDates'
 import { formatDuration } from '@/utils/workoutMath'
 import DifficultyChip from './DifficultyChip.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{
   workout: Workout
@@ -70,10 +71,6 @@ watch(() => [props.workout.id, props.workout.updatedAt, props.canOffer], load, {
 
 const visible = computed(() => options.value.length > 0 || hasSnapshot.value)
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 async function swap(o: AlternateOption) {
   busy.value = true
   try {
@@ -89,7 +86,7 @@ async function swap(o: AlternateOption) {
       // The session or the rider's level moved since the menu opened.
       toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
     } else {
-      toast.add({ title: 'Could not swap the session', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: 'Could not swap the session', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   } finally {
     busy.value = false
@@ -107,7 +104,7 @@ async function revert() {
     if (err instanceof ApiError && err.status === 409) {
       toast.add({ title: err.message, icon: 'i-lucide-clock', color: 'warning' })
     } else {
-      toast.add({ title: 'Could not go back', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      toast.add({ title: 'Could not go back', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     }
   } finally {
     busy.value = false

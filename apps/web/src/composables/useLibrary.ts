@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { api } from '@/api/client'
 import type { Account, AppConfig, Crew, Me, Permission, PlanResponse, Route } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 /**
  * The state every page shares.
@@ -92,7 +93,7 @@ async function load(background: boolean): Promise<void> {
     crews.value = crewList.crews
     crewsTotal.value = crewList.total
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     loading.value = false
   }

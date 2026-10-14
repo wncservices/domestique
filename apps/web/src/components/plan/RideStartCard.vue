@@ -8,6 +8,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { RideStart } from '@/api/types'
 import RideStartPicker from './RideStartPicker.vue'
+import { describeError } from '@/utils/errorMessage'
 
 defineProps<{ routingConfigured: boolean }>()
 
@@ -47,7 +48,7 @@ async function remove() {
   } catch (err) {
     toast.add({
       title: 'Could not remove it',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
