@@ -129,13 +129,14 @@ func TestLastOwnerCannotLeaveACrew(t *testing.T) {
 
 // Any approved member can press "sync now", and each press pushes through
 // every member's own stored provider session (N13).
-func TestCrewSyncNowIsRateLimitedPerCrew(t *testing.T) {
+func TestCrewSyncNowIsRateLimitedPerRide(t *testing.T) {
 	h := newCrewPlanHarness(t)
 	crewID := h.seedCrew("Club", "wilant", "sam")
-	otherCrew := h.seedCrew("Other", "wilant", "sam")
-	route := h.seedRoute("Loop", "wilant", 50, 300, crewID, otherCrew)
+	route := h.seedRoute("Loop", "wilant", 50, 300, crewID)
 	ride := h.seedRide(crewID, route.Slug, cpSaturday, "wilant")
-	otherRide := h.seedRide(otherCrew, route.Slug, cpSaturday, "wilant")
+	// A second ride of the same crew: pressing Sync on one ride must not
+	// lock the crew's other rides out.
+	otherRide := h.seedRide(crewID, route.Slug, cpSunday, "wilant")
 	h.srv.CrewSyncLimiter = ratelimit.New(2, time.Hour)
 
 	var logs strings.Builder
@@ -152,8 +153,18 @@ func TestCrewSyncNowIsRateLimitedPerCrew(t *testing.T) {
 	if got := sync("sam", crewID, ride.ID); got != http.StatusTooManyRequests {
 		t.Errorf("third sync (a different member, same crew) = %d, want 429", got)
 	}
-	if got := sync("wilant", otherCrew, otherRide.ID); got != http.StatusOK {
-		t.Errorf("another crew shares no budget: got %d, want 200", got)
+	if got := sync("sam", crewID, ride.ID); got != http.StatusTooManyRequests {
+		t.Errorf("a refused press must not extend the window or count: got %d, want 429", got)
+	}
+	if got := sync("wilant", crewID, otherRide.ID); got != http.StatusOK {
+		t.Errorf("another ride of the same crew has its own budget: got %d, want 200", got)
+	}
+	// An outsider's refused request (403) never touches the budget.
+	if got := h.code("mallory", "POST", "/api/crews/"+crewID+"/rides/"+otherRide.ID+"/sync", ""); got != http.StatusForbidden && got != http.StatusNotFound {
+		t.Errorf("outsider = %d", got)
+	}
+	if got := sync("wilant", crewID, otherRide.ID); got != http.StatusOK {
+		t.Errorf("the outsider consumed the budget: got %d, want the second press to pass", got)
 	}
 	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "crew sync") {
 		t.Errorf("logs = %q, want a Warn for the limit hit", logs.String())

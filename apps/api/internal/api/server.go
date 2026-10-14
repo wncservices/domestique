@@ -424,11 +424,12 @@ type Server struct {
 	// how much text is requested rather than a sign-in attempt.
 	NarrationLimiter *ratelimit.Limiter
 
-	// CrewSyncLimiter throttles a crew's "Sync now", keyed by crew id rather
-	// than rider: any approved member may press it, and each press pushes
-	// through every member's own stored Garmin/Wahoo session, so the budget
-	// that matters is how often one crew's members' accounts are touched,
-	// however many of the crew press the button. Nil is unlimited (tests).
+	// CrewSyncLimiter throttles a crew ride's "Sync now", keyed by ride id:
+	// any approved member may press it, and each press pushes through every
+	// member's own stored Garmin/Wahoo session, so the budget that matters is
+	// how often one ride's push is repeated, however many of the crew press the
+	// button. Keyed per ride so one busy ride does not lock the crew's others.
+	// Nil is unlimited (tests).
 	CrewSyncLimiter *ratelimit.Limiter
 
 	// UploadLimiter throttles GPX uploads by rider. Each one is a 20 MiB body

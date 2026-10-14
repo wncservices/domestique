@@ -98,6 +98,10 @@ type Input struct {
 // of whether a plan exists) plus, when Planned was set, the per-step
 // comparison and the session's Outcome.
 type Analysis struct {
+	// SamplesUnreadable is set when a FIT was supplied but no usable second of
+	// it could be laid out; the figures then come from the provider summary.
+	SamplesUnreadable bool
+
 	Outcome    Outcome
 	LoadSource LoadSource
 	Load       float64
@@ -542,7 +546,18 @@ func Analyze(in Input) Analysis {
 
 	if in.Activity != nil {
 		samples = Resample(in.Activity.Records)
-		rideSeconds = float64(len(samples))
+		if len(samples) == 0 {
+			// A file that yields no usable second (every timestamp bad, or an
+			// impossible span) says nothing about the ride; the provider's own
+			// summary, duration included, still does. Never score it as a
+			// zero-length ride.
+			a.SamplesUnreadable = true
+		} else {
+			rideSeconds = float64(len(samples))
+		}
+	}
+
+	if in.Activity != nil && !a.SamplesUnreadable {
 
 		a.NormalizedPower = NormalizedPower(samples)
 		if in.Profile.FTPWatts > 0 {
@@ -576,11 +591,11 @@ func Analyze(in Input) Analysis {
 	// TSS -> provider TSS (summary) -> FIT HR load -> the existing
 	// workout.TrainingLoad estimate."
 	switch {
-	case in.Activity != nil && a.NormalizedPower > 0 && in.Profile.FTPWatts > 0:
+	case in.Activity != nil && !a.SamplesUnreadable && a.NormalizedPower > 0 && in.Profile.FTPWatts > 0:
 		a.LoadSource, a.Load = LoadSourceFITPower, a.TSS
 	case in.Summary.TSS > 0:
 		a.LoadSource, a.Load = LoadSourceProviderTSS, in.Summary.TSS
-	case in.Activity != nil && hasHRData(samples) && in.Profile.MaxHR > 0:
+	case in.Activity != nil && !a.SamplesUnreadable && hasHRData(samples) && in.Profile.MaxHR > 0:
 		a.LoadSource = LoadSourceFITHR
 		a.Load = HRLoad(samples, in.Profile.MaxHR, in.Profile.RestingHR)
 	default:
