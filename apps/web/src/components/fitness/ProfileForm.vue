@@ -293,7 +293,7 @@ const experienceItems = computed(() => {
           above for you to review. Nothing is saved until you press Save profile.
         </p>
         <div class="flex gap-2">
-          <UInput v-model="note" class="w-full" placeholder="I'm traveling next week..." />
+          <UInput v-model="note" :maxlength="500" class="w-full" placeholder="I'm traveling next week..." />
           <UButton
             icon="i-lucide-sparkles"
             color="neutral"

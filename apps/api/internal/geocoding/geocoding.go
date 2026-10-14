@@ -18,6 +18,7 @@ package geocoding
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 // DefaultURL is the public Nominatim instance.
@@ -88,7 +89,7 @@ func New(rawURL string) *NominatimClient {
 		url: strings.TrimSuffix(rawURL, "/"),
 		httpClient: &http.Client{
 			Timeout:   requestTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 		cache: newResponseCache(),
 	}
@@ -125,13 +126,19 @@ func (c *NominatimClient) fetchSearch(ctx context.Context, query string) ([]Resu
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		// url.Error's text embeds the URL, and the URL carries what the rider
+		// typed (a home address, say). Keep only the underlying cause.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("geocoding: search request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return nil, fmt.Errorf("geocoding service returned %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		// Status only: an error body can quote the query it refused.
+		return nil, fmt.Errorf("geocoding service returned %s", resp.Status)
 	}
 
 	var raw []searchResult

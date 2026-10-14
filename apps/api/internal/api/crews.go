@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
+	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
 type crewMemberDTO struct {
@@ -189,6 +194,17 @@ func (s *Server) canManageCrew(ctx context.Context, identity auth.Identity, crew
 	return s.Crew.IsOwner(ctx, crewID, identity.User)
 }
 
+const (
+	// maxCrewsPerCreator is how many crews one rider may create.
+	maxCrewsPerCreator = 5
+	// maxCrewNameRunes bounds a crew name, which every rider sees.
+	maxCrewNameRunes = 80
+	// defaultCrewListLimit and maxCrewListLimit bound GET /api/crews, which
+	// costs queries per crew returned.
+	defaultCrewListLimit = 200
+	maxCrewListLimit     = 500
+)
+
 // handleCreateCrew makes a new crew. The caller becomes its owner and its
 // first approved member, in one step (crew.Store.Create does both).
 func (s *Server) handleCreateCrew(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +227,30 @@ func (s *Server) handleCreateCrew(w http.ResponseWriter, r *http.Request) {
 	if rider == "" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "no rider in the session"})
 		return
+	}
+
+	if utf8.RuneCountInString(strings.TrimSpace(body.Name)) > maxCrewNameRunes {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("a crew name may be at most %d characters", maxCrewNameRunes),
+		})
+		return
+	}
+	// Every rider sees every crew and each one costs queries on every list and
+	// poll, so creating them is bounded per creator. An admin is not held to
+	// it, and deleting a crew frees a slot.
+	if !auth.FromContext(r.Context()).Role.Can(auth.PermEditAny) {
+		created, err := s.Crew.CountCreatedBy(r.Context(), rider)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if created >= maxCrewsPerCreator {
+			s.logger().Warn("crew creation limit hit", "rider", rider, "limit", maxCrewsPerCreator)
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("you have created %d crews already, the most one rider may — delete one first", created),
+			})
+			return
+		}
 	}
 
 	c, err := s.Crew.Create(r.Context(), body.Name, rider)
@@ -244,6 +284,13 @@ func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	limit, offset, ok := pageParams(w, r, defaultCrewListLimit, maxCrewListLimit)
+	if !ok {
+		return
+	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(len(crews)))
+	crews = crews[min(offset, len(crews)):]
+	crews = crews[:min(limit, len(crews))]
 
 	identity := auth.FromContext(r.Context())
 	out := make([]crewDTO, 0, len(crews))
@@ -287,6 +334,12 @@ func (s *Server) handleDeleteCrew(w http.ResponseWriter, r *http.Request) {
 		s.failCrewLookup(w, err)
 		return
 	}
+
+	// A route that named this crew in its targets must stop naming it: crew
+	// ids are the lowest free slug of the name, so the next "Club" gets this
+	// same id, and a stale target would share the route with that stranger
+	// crew the moment the route's owner joins it.
+	s.stripCrewTarget(r.Context(), id)
 
 	// Best-effort, not part of the response either way: the crew is already
 	// gone by this point, which is what the caller asked for. Left
@@ -672,6 +725,13 @@ func (s *Server) handleRemoveCrewMember(w http.ResponseWriter, r *http.Request) 
 	if errors.Is(err, crew.ErrNotFound) {
 		err = s.Crew.Remove(r.Context(), id, rider)
 	}
+	if errors.Is(err, crew.ErrLastOwner) {
+		s.logger().Info("crew member removal refused: last owner", "crew", id, "by", identity.User)
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "this is the crew's last owner: make someone else an owner first, or delete the crew",
+		})
+		return
+	}
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -705,4 +765,56 @@ func (s *Server) failCrewLookup(w http.ResponseWriter, err error) {
 		return
 	}
 	s.fail(w, err)
+}
+
+// stripCrewTarget removes crewID from every route's explicit targets. Failures
+// are logged and do not fail the delete: the crew is already gone, and the
+// worst case is the stale target this exists to prevent.
+func (s *Server) stripCrewTarget(ctx context.Context, crewID string) {
+	if s.Source == nil {
+		return
+	}
+	routes, _, err := s.Source.List(ctx)
+	if err != nil {
+		s.logger().Error("could not list routes to clear a deleted crew's targets", "crew", crewID, "err", err)
+		return
+	}
+	for _, route := range routes {
+		if route.Targets == nil || !slices.Contains(*route.Targets, crewID) {
+			continue
+		}
+		kept := slices.DeleteFunc(slices.Clone(*route.Targets), func(t string) bool { return t == crewID })
+		req := source.UpdateRequest{Targets: &kept}
+		if len(kept) == 0 {
+			// Back to the owner-only default, not an explicit empty list:
+			// that would mean "nowhere", the owner's own devices included.
+			req = source.UpdateRequest{ClearTargets: true}
+		}
+		if _, err := s.Source.Update(ctx, route.Slug, req); err != nil {
+			s.logger().Error("could not clear a deleted crew from a route's targets", "crew", crewID, "slug", route.Slug, "err", err)
+		}
+	}
+}
+
+// pageParams reads ?limit= and ?offset=, answering the 400 itself. An absent
+// limit is def; a limit over max is max.
+func pageParams(w http.ResponseWriter, r *http.Request, def, max int) (limit, offset int, ok bool) {
+	limit = def
+	read := func(name string, dst *int) bool {
+		raw := r.URL.Query().Get(name)
+		if raw == "" {
+			return true
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": name + " must be a non-negative number"})
+			return false
+		}
+		*dst = n
+		return true
+	}
+	if !read("limit", &limit) || !read("offset", &offset) {
+		return 0, 0, false
+	}
+	return min(limit, max), offset, true
 }

@@ -943,6 +943,13 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// for a profile suggestion is an occasional action, not a sign-in
 		// retry loop.
 		NarrationLimiter: ratelimit.New(20, 15*time.Minute),
+		// A crew ride's "Sync now" pushes through every member's own provider
+		// session, so it is budgeted per ride: three presses in ten
+		// minutes, however many members press them.
+		CrewSyncLimiter: ratelimit.New(3, 10*time.Minute),
+		// An upload is a body of up to 20 MiB and a parse, and the stored
+		// track is re-read on every view; see NewUploadLimiter.
+		UploadLimiter: api.NewUploadLimiter(),
 	}
 
 	// No config toggle, no credential — geocoding.NominatimClient needs

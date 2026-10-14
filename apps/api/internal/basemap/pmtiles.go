@@ -29,7 +29,7 @@ import (
 	"net/http"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 const pmtilesHeaderSize = 127
@@ -80,7 +80,7 @@ func newPMTilesClient(url string) *pmtilesClient {
 			// request invisible in a trace: only the inbound
 			// /api/track-preview HTTP span existed, with no breakdown of
 			// where its time actually went.
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 	}
 }

@@ -375,3 +375,8 @@ func (s *Server) handleRevokeCalendar(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("calendar link revoked", "rider", rider)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// NewUploadLimiter is the per-rider budget for GPX uploads: sixty in ten
+// minutes. Importing a folder of thirty routes by hand must work; this stops a
+// loop, and gpx.ParseUpload's process-wide parse slots bound the concurrency.
+func NewUploadLimiter() *ratelimit.Limiter { return ratelimit.New(60, 10*time.Minute) }

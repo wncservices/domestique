@@ -60,9 +60,10 @@ var ErrConfirmationRequired = errors.New("crew: this is an invite — only the i
 var ErrNoInvite = errors.New("crew: no pending invite for that rider")
 
 // ErrLastOwner is returned by SetOwner when asked to revoke the crew's last
-// remaining owner grant. Every crew keeps at least one owner able to manage
+// remaining owner grant, and by Remove when asked to take that owner out of
+// the crew. Every crew keeps at least one owner able to manage
 // it directly — short of an admin's own override (see the API package's
-// canManageCrew) — so the caller must promote someone else first.
+// canManageCrew) — so the caller must promote someone else first (or delete the crew).
 var ErrLastOwner = errors.New("crew: cannot remove the last owner")
 
 // MemberStatus is where a rider stands with a crew.
@@ -473,6 +474,20 @@ func (s *Store) List(ctx context.Context) ([]Crew, error) {
 	return out, rows.Err()
 }
 
+// CountCreatedBy is how many crews rider created. It counts the crews.owner
+// column (who created it, which handing ownership over does not change)
+// rather than current owner grants, so a cap on it cannot be shed by
+// transferring a crew away and creating another.
+func (s *Store) CountCreatedBy(ctx context.Context, rider string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(
+		`SELECT COUNT(1) FROM crews WHERE owner = ?`), normalizeRider(rider)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count crews: %w", err)
+	}
+	return n, nil
+}
+
 // SetAutoShare flips whether this crew is a default target for its
 // members' future uploads. Existing routes are never touched by this call —
 // it only changes what an upload with no explicit target choice defaults
@@ -861,7 +876,64 @@ func (s *Store) Deny(ctx context.Context, crewID, rider string) error {
 // the store's point of view; the API layer decides who may call it for
 // whom.
 func (s *Store) Remove(ctx context.Context, crewID, rider string) error {
-	return s.delete(ctx, crewID, rider, string(StatusApproved))
+	rider = normalizeRider(rider)
+	// The last owner cannot be removed, whether they leave or someone else
+	// removes them: SetOwner already refuses to revoke it, and leaving would
+	// otherwise get round that and strand the crew with no owner but an admin.
+	//
+	// Check and delete are one transaction that first locks the crew's owner
+	// rows (SELECT ... FOR UPDATE). Without the lock, two owners leaving at once
+	// each count the other under PostgreSQL's READ COMMITTED snapshot and both
+	// delete. SQLite has no row locks and needs none: it admits one writer at a
+	// time, so the second transaction waits and then sees the first's delete.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lock := ""
+	if s.dialect.Name == "postgres" {
+		lock = " FOR UPDATE"
+	}
+	rows, err := tx.QueryContext(ctx, s.dialect.Rebind(`
+        SELECT rider FROM crew_members
+        WHERE crew_id = ? AND status = ? AND is_owner = ?`+lock),
+		crewID, string(StatusApproved), true)
+	if err != nil {
+		return fmt.Errorf("lock crew owners: %w", err)
+	}
+	owners, isOwner := 0, false
+	for rows.Next() {
+		var who string
+		if err := rows.Scan(&who); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		owners++
+		if who == rider {
+			isOwner = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+
+	if isOwner && owners <= 1 {
+		return ErrLastOwner
+	}
+	result, err := tx.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM crew_members WHERE crew_id = ? AND rider = ? AND status = ?`),
+		crewID, rider, string(StatusApproved))
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func (s *Store) delete(ctx context.Context, crewID, rider, status string) error {
@@ -878,9 +950,10 @@ func (s *Store) delete(ctx context.Context, crewID, rider, status string) error 
 	return nil
 }
 
-// Delete removes a crew and its membership. A route that named this crew
-// in its targets simply stops resolving anywhere beyond the route owner's
-// own accounts on the next push — nothing else to clean up.
+// Delete removes a crew and its membership. It does not touch routes: one
+// that named this crew in its targets would resolve again if the id is
+// reused, so the API layer's handleDeleteCrew strips the id from every
+// route's targets as well.
 func (s *Store) Delete(ctx context.Context, id string) error {
 	// The crew and its membership go together: members of a crew that no longer
 	// exists, or a crew with nobody in it, is what a failure between the two

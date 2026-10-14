@@ -34,7 +34,7 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 const (
@@ -112,7 +112,7 @@ func New(cfg Config) *Client {
 		cfg: cfg,
 		http: &http.Client{
 			Timeout:   defaultTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 		roleIDs: map[string]string{},
 	}
@@ -214,7 +214,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		return nil
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("auth0mgmt: unreadable response from %s: %s", path, snippet(raw))
+		return fmt.Errorf("auth0mgmt: unreadable response from %s: %s", strings.SplitN(path, "?", 2)[0], snippet(raw))
 	}
 	return nil
 }
@@ -222,6 +222,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 func (c *Client) doRaw(req *http.Request) ([]byte, int, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// net/http's error text repeats the request URL, and a lookup puts the
+		// person's email address in its query string. The callers log this.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = fmt.Errorf("auth0mgmt: %s request failed: %w", req.Method, ue.Err)
+		}
 		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -470,7 +476,9 @@ func (c *Client) ListPeople(ctx context.Context, gateRole string, permissionRole
 func (c *Client) FindByEmail(ctx context.Context, email string) ([]Person, error) {
 	var users []roleUser
 	if err := c.do(ctx, http.MethodGet, "/api/v2/users-by-email?email="+url.QueryEscape(email), nil, &users); err != nil {
-		return nil, fmt.Errorf("looking up %s: %w", email, err)
+		// Not the address: the caller logs this, and an invitee's email is
+		// not something to put in a log line.
+		return nil, fmt.Errorf("looking up an account by email: %w", err)
 	}
 	out := make([]Person, 0, len(users))
 	for _, u := range users {

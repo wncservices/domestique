@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -359,6 +361,16 @@ func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) ma
 // role, and sends the invite email — three steps against two different
 // APIs (see auth0mgmt's own package doc), surfaced here as one request
 // since a caller has no reasonable use for succeeding at only part of it.
+// emailRef is a short, stable stand-in for an email address in a log line, so
+// two lines about the same person can be matched without the address itself
+// being written anywhere (the mailer package keeps the same policy). The Auth0
+// user id is better where there is one; this is for the paths that fail before
+// one exists.
+func emailRef(email string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return hex.EncodeToString(sum[:4])
+}
+
 func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManagePeople) {
 		return
@@ -401,7 +413,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	// role yet.
 	existing, err := s.People.FindByEmail(r.Context(), body.Email)
 	if err != nil {
-		s.logger().Warn("checking for an existing account failed", "email", body.Email, "err", err)
+		s.logger().Warn("checking for an existing account failed", "ref", emailRef(body.Email), "err", err)
 		s.failUpstream(w, "Auth0", err)
 		return
 	}
@@ -413,11 +425,11 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(existing) == 1 {
 		if err := s.People.SetRoles(r.Context(), existing[0].UserID, roleNames); err != nil {
-			s.logger().Warn("granting access to an existing account failed", "email", body.Email, "err", err)
+			s.logger().Warn("granting access to an existing account failed", "ref", emailRef(body.Email), "err", err)
 			s.failUpstream(w, "Auth0", err)
 			return
 		}
-		s.logger().Info("access granted to existing account", "email", body.Email, "role", body.Role, "by", auth.FromContext(r.Context()).User)
+		s.logger().Info("access granted to existing account", "ref", emailRef(body.Email), "role", body.Role, "by", auth.FromContext(r.Context()).User)
 		granted := existing[0]
 		granted.Roles = roleNames
 		writeJSON(w, http.StatusOK, map[string]any{"person": s.personDTO(granted), "granted": true})
@@ -426,7 +438,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 
 	person, err := s.People.Invite(r.Context(), body.Email, body.Name, roleNames)
 	if err != nil {
-		s.logger().Warn("inviting a person failed", "email", body.Email, "err", err)
+		s.logger().Warn("inviting a person failed", "ref", emailRef(body.Email), "err", err)
 		s.failUpstream(w, "Auth0", err)
 		return
 	}
@@ -434,7 +446,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	// The account and its access both exist at this point — a failure past
 	// here means the invite email needs resending, not starting over.
 	if err := s.People.SendInviteEmail(r.Context(), body.Email); err != nil {
-		s.logger().Warn("sending the invite email failed", "email", body.Email, "err", err)
+		s.logger().Warn("sending the invite email failed", "ref", emailRef(body.Email), "err", err)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"person": s.personDTO(person),
 			"error":  "The account was created, but the invite email could not be sent",
@@ -442,7 +454,7 @@ func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.logger().Info("person invited", "email", body.Email, "role", body.Role, "by", auth.FromContext(r.Context()).User)
+	s.logger().Info("person invited", "ref", emailRef(body.Email), "role", body.Role, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusCreated, map[string]any{"person": s.personDTO(person)})
 }
 
@@ -573,7 +585,7 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 			err = s.Blocklist.Unblock(r.Context(), body.Email)
 		}
 		if err != nil {
-			s.logger().Warn("updating the local blocklist failed", "email", body.Email, "err", err)
+			s.logger().Warn("updating the local blocklist failed", "ref", emailRef(body.Email), "err", err)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status": "updated",
 				"error":  "Auth0 was updated, but the local blocklist could not be",
@@ -582,7 +594,7 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	s.logger().Info("person blocked status changed", "id", id, "email", body.Email, "blocked", body.Blocked, "by", auth.FromContext(r.Context()).User)
+	s.logger().Info("person blocked status changed", "id", id, "blocked", body.Blocked, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 

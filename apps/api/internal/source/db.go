@@ -361,6 +361,9 @@ func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.
 	if req.Targets != nil {
 		current.Targets = req.Targets
 	}
+	if req.ClearTargets {
+		current.Targets = nil
+	}
 	if req.Enabled != nil {
 		current.Enabled = req.Enabled
 	}
@@ -510,8 +513,13 @@ func (d *DB) analyse(ctx context.Context, raw []byte) ([]gpx.Point, model.RouteS
 		return nil, model.RouteStats{}, invalid(fmt.Errorf("GPX is %d bytes, over the %d byte limit",
 			len(raw), maxGPXBytes))
 	}
-	points, err := gpx.ParsePoints(raw)
+	points, err := gpx.ParseUpload(ctx, raw)
 	if err != nil {
+		if ctx.Err() != nil {
+			// The request gave up while waiting for a parse slot: not the
+			// file's fault.
+			return nil, model.RouteStats{}, err
+		}
 		return nil, model.RouteStats{}, invalid(err)
 	}
 	if gpx.NeedsElevation(points) {

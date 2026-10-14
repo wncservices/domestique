@@ -40,7 +40,7 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 const (
@@ -137,7 +137,7 @@ func New() *Client {
 		HTTP: &http.Client{
 			Timeout:   defaultTimeout,
 			Jar:       jar,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 			// A redirect would carry the Authorization header to wherever it
 			// points, which is the same credential-disclosure problem
 			// allowedHost exists to prevent. The SSO flow is followed
@@ -547,7 +547,7 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, stripURL(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -558,4 +558,15 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader
 		return nil, resp.StatusCode, err
 	}
 	return raw, resp.StatusCode, nil
+}
+
+// stripURL drops the request URL net/http puts in a transport error's text:
+// the single-use SSO ticket is in the query string of the exchange URL, and
+// callers log the error. The underlying cause is kept.
+func stripURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("garmin: %s request failed: %w", ue.Op, ue.Err)
+	}
+	return err
 }

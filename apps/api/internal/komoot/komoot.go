@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 const (
@@ -105,7 +105,7 @@ func New() *Client {
 	return &Client{
 		HTTP: &http.Client{
 			Timeout:   defaultTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 			// Do not follow redirects. A redirect would carry the
 			// Authorization header to wherever it points.
 			CheckRedirect: func(*http.Request, []*http.Request) error {
