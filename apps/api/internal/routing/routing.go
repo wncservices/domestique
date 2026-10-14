@@ -627,12 +627,10 @@ func (c *ORSClient) fetchDirections(ctx context.Context, profile string, body di
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		// The url is operator config, not attacker input — but a self-hosted
-		// instance an operator points this at is still a third party from
-		// this process's own point of view, so the error body is capped the
-		// same way elevation.Client's own response reading is.
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return Path{}, fmt.Errorf("routing service returned %s: %s", resp.Status, bytes.TrimSpace(msg))
+		// Status only. The engine's message echoes the point it could not
+		// route (a rider's start or waypoint) and this error is logged;
+		// loops.FailureClass reads the status out of this text.
+		return Path{}, fmt.Errorf("routing service returned %s", resp.Status)
 	}
 
 	var out directionsResponse

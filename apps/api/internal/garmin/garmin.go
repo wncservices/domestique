@@ -547,7 +547,7 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, stripURL(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -558,4 +558,15 @@ func (c *Client) do(ctx context.Context, method, endpoint string, body io.Reader
 		return nil, resp.StatusCode, err
 	}
 	return raw, resp.StatusCode, nil
+}
+
+// stripURL drops the request URL net/http puts in a transport error's text:
+// the single-use SSO ticket is in the query string of the exchange URL, and
+// callers log the error. The underlying cause is kept.
+func stripURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("garmin: %s request failed: %w", ue.Op, ue.Err)
+	}
+	return err
 }
