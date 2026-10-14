@@ -9,6 +9,7 @@ import { cumulativeDistancesM, positionAtDistanceM } from '@/utils/routeCursor'
 import { poiLabel } from '@/utils/poi'
 import type { Map as MapLibreMap, Marker, MapMouseEvent } from 'maplibre-gl'
 import type { Poi, RouteBuilderPreview } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{
   /** Switches the map's click behaviour from "append a drawn waypoint" to
@@ -295,7 +296,7 @@ async function requestPreview() {
     emit('update:preview', preview)
   } catch (err) {
     if (seq !== requestSeq) return
-    emit('error', err instanceof Error ? err.message : String(err))
+    emit('error', describeError(err))
   }
 }
 

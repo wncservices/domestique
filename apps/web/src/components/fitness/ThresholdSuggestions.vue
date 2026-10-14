@@ -17,6 +17,7 @@ import { api, ApiError } from '@/api/client'
 import type { ThresholdSuggestion } from '@/api/types'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
 import { formatThresholdNumber, formatThresholdValue, thresholdFieldLabel, thresholdFieldTitle } from '@/utils/fitnessMath'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{ suggestions: ThresholdSuggestion[] }>()
 
@@ -27,10 +28,6 @@ const emit = defineEmits<{ resolved: [profileChanged: boolean] }>()
 
 const toast = useToast()
 const { replanAction } = useRecalibration()
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 function isDown(s: ThresholdSuggestion): boolean {
   return s.direction === 'down'
@@ -98,7 +95,7 @@ async function acceptSuggestion(s: ThresholdSuggestion) {
     } else {
       toast.add({
         title: `Could not update ${thresholdFieldLabel(s.field)}`,
-        description: errorMessage(err),
+        description: describeError(err),
         icon: 'i-lucide-triangle-alert',
         color: 'error',
       })
@@ -119,7 +116,7 @@ async function dismissSuggestion(s: ThresholdSuggestion) {
     } else {
       toast.add({
         title: 'Could not dismiss suggestion',
-        description: errorMessage(err),
+        description: describeError(err),
         icon: 'i-lucide-triangle-alert',
         color: 'error',
       })

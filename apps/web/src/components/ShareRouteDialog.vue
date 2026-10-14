@@ -13,6 +13,7 @@ import { computed, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { CreateRouteShareResponse, Route, RouteShare, RouteShareTTLDays } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{ route: Route }>()
 const open = defineModel<boolean>('open', { default: false })
@@ -66,7 +67,7 @@ async function createShare() {
   } catch (err) {
     toast.add({
       title: 'Could not create the link',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -98,7 +99,7 @@ async function revoke(share: RouteShare) {
   } catch (err) {
     toast.add({
       title: 'Could not revoke that link',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

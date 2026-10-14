@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ApiError, api, garminMFABody } from '@/api/client'
 import type { GarminConnection } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 /**
  * Signing in to Garmin, in a dialog off the Head units card.
@@ -115,7 +116,7 @@ async function connect() {
       if (mfa) kind.value = 'mfa'
       else if (err instanceof ApiError && err.body.blocked === true) kind.value = 'blocked'
       if (kind.value !== 'error') password.value = ''
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = describeError(err)
     }
   } finally {
     busy.value = false
@@ -130,7 +131,7 @@ async function verify() {
     finish(await api.garminConnectMFA(challenge.value, code.value.trim()))
   } catch (err) {
     if (!(err instanceof ApiError)) {
-      error.value = err instanceof Error ? err.message : String(err)
+      error.value = describeError(err)
     } else if (err.status === 422 && err.body.mfaInvalid === true) {
       // Wrong code: same challenge, field stays open.
       const body = garminMFABody(err)

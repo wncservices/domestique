@@ -602,7 +602,7 @@ func (s *Server) easeAroundCrewRides(ctx context.Context, rider string, workouts
 	if !any {
 		return
 	}
-	today := s.now().Format(dateLayout)
+	today := s.localToday()
 	ridden, err := s.riddenToday(ctx, rider, today, workouts)
 	if err != nil {
 		s.logger().Warn("adapt: could not tell what was ridden today, crew ride easing was skipped", "rider", rider, "err", err)

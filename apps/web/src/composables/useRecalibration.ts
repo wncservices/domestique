@@ -8,6 +8,7 @@
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type { LevelsRecalibrated } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 /** "Levels adjusted for your new FTP (255 → 268 W)." */
 export function levelsRecalibratedText(r: LevelsRecalibrated): string {
@@ -29,7 +30,7 @@ export function useRecalibration() {
       } else {
         toast.add({
           title: 'Could not replan this week',
-          description: err instanceof Error ? err.message : String(err),
+          description: describeError(err),
           icon: 'i-lucide-triangle-alert',
           color: 'error',
         })
