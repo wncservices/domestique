@@ -174,7 +174,7 @@ func (r *reader) entry(f *zip.File, depth int) error {
 // fit reads one FIT (or gzipped FIT) from src, whose compressed size is comp,
 // and emits it if the header confirms it.
 func (r *reader) fit(src io.Reader, comp int64, gzipped bool) error {
-	var buf bytes.Buffer
+	var buf chunks
 	res, err := r.pump(&buf, src, comp, gzipped, r.l.MaxEntryBytes)
 	if err != nil {
 		return err
@@ -314,4 +314,42 @@ func (r *reader) pump(dst io.Writer, src io.Reader, comp int64, gzipped bool, li
 			return unreadable, nil
 		}
 	}
+}
+
+// chunks collects an entry in fixed-size pieces and joins them only when the
+// entry is kept. A bytes.Buffer doubles as it grows, so reading a bomb up to
+// the ratio guard (about 20 MiB) used to allocate over 60 MiB on the way; in
+// pieces it costs what was read, and a refused entry is never joined at all.
+type chunks struct {
+	parts [][]byte
+	n     int
+}
+
+const chunkSize = 1 << 20
+
+func (c *chunks) Write(p []byte) (int, error) {
+	written := len(p)
+	for len(p) > 0 {
+		if len(c.parts) == 0 || len(c.parts[len(c.parts)-1]) == chunkSize {
+			c.parts = append(c.parts, make([]byte, 0, chunkSize))
+		}
+		last := &c.parts[len(c.parts)-1]
+		k := min(chunkSize-len(*last), len(p))
+		*last = append(*last, p[:k]...)
+		p = p[k:]
+	}
+	c.n += written
+	return written, nil
+}
+
+// Bytes joins the pieces into one slice.
+func (c *chunks) Bytes() []byte {
+	if len(c.parts) == 1 {
+		return c.parts[0]
+	}
+	out := make([]byte, 0, c.n)
+	for _, part := range c.parts {
+		out = append(out, part...)
+	}
+	return out
 }
