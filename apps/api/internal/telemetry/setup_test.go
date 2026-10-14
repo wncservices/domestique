@@ -39,8 +39,8 @@ func TestSetupsProviderRedactsBeforeExporting(t *testing.T) {
 	}
 	for _, s := range spans {
 		for _, a := range s.Attributes {
-			if strings.Contains(a.Value.Emit(), "home") {
-				t.Errorf("exported span carries %s=%s", a.Key, a.Value.Emit())
+			if strings.Contains(a.Value.String(), "home") {
+				t.Errorf("exported span carries %s=%s", a.Key, a.Value.String())
 			}
 		}
 	}
