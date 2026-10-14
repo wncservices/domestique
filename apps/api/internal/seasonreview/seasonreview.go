@@ -296,6 +296,12 @@ func ftp(in Input, end string) *FTP {
 	if last != nil {
 		f.EndWatts = ptr(last.To)
 	}
+	if f.StartWatts == nil && f.EndWatts == nil {
+		// The period is entirely before the first recorded change: there is
+		// nothing to say about it, and saying when history starts would be an
+		// answer to a question the period did not ask.
+		return nil
+	}
 	return &f
 }
 

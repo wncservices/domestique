@@ -1105,6 +1105,17 @@ export interface SessionAnalysis {
    *  "heavy" and "low" | "normal" | "high"; absent when unanswered. */
   legs?: string
   stress?: string
+  /** The records this ride set when it was first analysed, in display order;
+   *  absent when it set none. Mirrors internal/api's sessionAwardDTO. */
+  awards?: SessionAward[]
+}
+
+/** A record a ride set: a new season or all-time best. */
+export interface SessionAward {
+  metric: string
+  /** "20-min power". */
+  label: string
+  scope: BestEffortScope
 }
 
 /** One rider's current level in one sport/zone — mirrors
@@ -1299,6 +1310,10 @@ export interface FtpTests {
 
 export interface SyncMetricsResult {
   synced: number
+  /** Every new best the rider has not been told about yet: this sync's own and
+   *  any a background pass made since they last looked. A second sync lists
+   *  none. An import never produces one. */
+  bestEfforts?: BestEffortAward[]
   levelsRecalibrated?: LevelsRecalibrated
   warnings?: string[]
   /** Present only when this sync just produced a fresh FTP estimate and
@@ -2063,4 +2078,170 @@ export interface RideImport {
   earliestDate?: string
   /** When the next import may start, while one is held back. */
   cooldownUntil?: string
+}
+
+// ---------- Best efforts and the season review ----------
+//
+// Mirrors apps/api/internal/api's bestefforts.go and seasonreview.go and
+// internal/seasonreview. Change them together.
+
+export type BestEffortScope = 'season' | 'all_time'
+
+/** A new best a sync tells the rider about. */
+export interface BestEffortAward {
+  sessionId: string
+  metric: string
+  /** "20-min power". */
+  label: string
+  /** "W", "m/s" or "bpm". */
+  unit: string
+  scope: BestEffortScope
+  value: number
+  /** The best this one beat. */
+  previous: number
+}
+
+/** One best: its value, the ride's date and the ride. */
+export interface EffortCell {
+  value: number
+  date: string
+  sessionId: string
+}
+
+/** One metric of the Best efforts card. A scope with no value is null. */
+export interface EffortRow {
+  metric: string
+  label: string
+  unit: string
+  allTime: EffortCell | null
+  season: EffortCell | null
+  last42: EffortCell | null
+}
+
+export interface CurvePoint {
+  seconds: number
+  watts: number
+}
+
+/** The power-duration chart: the best at each standard window. */
+export interface PowerCurves {
+  season: CurvePoint[]
+  lastSeason: CurvePoint[]
+  allTime: CurvePoint[]
+}
+
+export type EffortSport = 'cycling' | 'running'
+
+export interface BestEffortsResponse {
+  sport: EffortSport
+  metrics: EffortRow[]
+  curve: PowerCurves
+  /** Awards the rider has not been told about; toast them, then announce. */
+  newBests: BestEffortAward[]
+}
+
+export type SeasonPeriodKind = 'year' | 'goal'
+
+export interface SeasonPeriod {
+  kind: SeasonPeriodKind
+  label: string
+  from: string
+  to: string
+}
+
+export interface SeasonVolume {
+  rides: number
+  seconds: number
+  distanceM: number
+  /** Total climbing of the rides that reported any; `ascentRides` says how
+   *  many did. 0 rides = not available, never "flat". */
+  ascentM: number
+  ascentRides: number
+  tss: number
+}
+
+export interface SeasonFitness {
+  startCtl?: number
+  peakCtl: number
+  peakDate: string
+  endCtl?: number
+  endDate?: string
+}
+
+export type FtpChangeSource = 'manual' | 'detection' | 'test'
+
+export interface SeasonFtpChange {
+  date: string
+  from: number
+  to: number
+  source: FtpChangeSource
+}
+
+export interface SeasonFtp {
+  startWatts?: number
+  endWatts?: number
+  changes: SeasonFtpChange[]
+  /** When recording began, for a period that starts before it. */
+  historyStarts?: string
+  /** True when the profile's current FTP stands in because none was ever
+   *  recorded as changing. */
+  fromProfile?: boolean
+}
+
+export interface SeasonPlan {
+  planned: number
+  done: number
+  /** Absent under four planned sessions. */
+  compliancePct?: number
+}
+
+export interface SeasonAward {
+  sessionId: string
+  metric: string
+  label: string
+  unit: string
+  scope: BestEffortScope
+  value: number
+  previous: number
+  date: string
+}
+
+export interface SeasonEventRide {
+  sessionId: string
+  sport: Sport
+  seconds: number
+  distanceM: number
+  tss: number
+}
+
+export interface SeasonGoal {
+  id: string
+  name: string
+  eventDate: string
+  priority: string
+  ctl?: number
+  tsb?: number
+  ride?: SeasonEventRide
+  /** Reserved for race-day projection; never sent today. */
+  projectedCtl?: number
+}
+
+/** A goal that has a season of its own. */
+export interface SeasonGoalPeriod {
+  id: string
+  name: string
+  from: string
+  to: string
+}
+
+export interface SeasonReview {
+  period: SeasonPeriod
+  /** A section the data cannot speak to is absent, never zeros. */
+  volume?: SeasonVolume
+  fitness?: SeasonFitness
+  ftp?: SeasonFtp
+  plan?: SeasonPlan
+  bestEfforts: SeasonAward[]
+  goals: SeasonGoal[]
+  available: { years: string[]; goals: SeasonGoalPeriod[] }
 }

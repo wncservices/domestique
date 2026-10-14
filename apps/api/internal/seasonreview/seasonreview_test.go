@@ -154,8 +154,8 @@ func TestFTPUsesTheProfileOnlyWhenThereHasNeverBeenAChange(t *testing.T) {
 	// With a change recorded anywhere, a missing earlier value stays missing.
 	later := Compute(Input{Period: year("2026"), Today: "2026-12-31", ProfileFTP: 250,
 		FTPChanges: []workout.FTPChange{{Date: "2027-02-01", To: 250, Source: "manual"}}}).FTP
-	if later != nil && later.StartWatts != nil {
-		t.Errorf("a year before the first change has a start of %v", *later.StartWatts)
+	if later != nil {
+		t.Errorf("a year entirely before the first recorded change has an FTP section: %+v", later)
 	}
 	if none := Compute(Input{Period: year("2026"), Today: "2026-12-31"}).FTP; none != nil {
 		t.Errorf("no FTP at all produced a section: %+v", none)

@@ -1597,6 +1597,9 @@ type sessionAnalysisDTO struct {
 	// omitted when unanswered.
 	Legs   string `json:"legs,omitempty"`
 	Stress string `json:"stress,omitempty"`
+	// Awards are the records this ride set when it was first analysed (a new
+	// season or all-time best), in display order; omitted when it set none.
+	Awards []sessionAwardDTO `json:"awards,omitempty"`
 }
 
 func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
@@ -1610,7 +1613,7 @@ func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
 // completedSessionDTOFrom attaches sess's analysis, if any, from analyses —
 // a map built once per request (see analysesSince) rather than a per-session
 // store lookup, since a fitness/week response can list dozens of sessions.
-func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]workout.SessionAnalysis) completedSessionDTO {
+func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]workout.SessionAnalysis, awards map[string][]sessionAwardDTO) completedSessionDTO {
 	dto := completedSessionDTO{
 		ID: sess.ID, Provider: sess.Provider, Sport: sess.Sport, Date: sess.Date,
 		DurationSeconds: sess.DurationSeconds, DistanceM: sess.DistanceM,
@@ -1618,6 +1621,7 @@ func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]
 	}
 	if a, ok := analyses[sess.ID]; ok {
 		sa := sessionAnalysisDTOFrom(a)
+		sa.Awards = awards[sess.ID]
 		dto.Analysis = &sa
 	}
 	return dto
@@ -1689,6 +1693,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 	// date about to be returned — see analysesSince's own doc comment on why
 	// a failure here degrades rather than failing the request.
 	var analyses map[string]workout.SessionAnalysis
+	var awards map[string][]sessionAwardDTO
 	if len(sessions) > 0 {
 		sinceDate := sessions[0].Date
 		for _, sess := range sessions[1:] {
@@ -1697,6 +1702,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		analyses = s.analysesSince(r.Context(), rider, sinceDate)
+		awards = s.awardsSince(r.Context(), rider, sinceDate)
 	}
 
 	dto := fitnessResponseDTO{
@@ -1707,7 +1713,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 		dto.Snapshots = append(dto.Snapshots, fitnessSnapshotDTO{Date: snap.Date, CTL: snap.CTL, ATL: snap.ATL, TSB: snap.TSB})
 	}
 	for _, sess := range sessions {
-		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess, analyses))
+		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess, analyses, awards))
 	}
 	writeJSON(w, http.StatusOK, dto)
 }

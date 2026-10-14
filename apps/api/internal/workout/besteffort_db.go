@@ -216,6 +216,28 @@ func (d *DB) DeleteEffortsForSession(ctx context.Context, sessionID string) erro
 	return err
 }
 
+// ListAwards returns a rider's awarded rows dated between two dates, both
+// inclusive (an empty bound is open), oldest first.
+func (d *DB) ListAwards(ctx context.Context, rider, from, to string) ([]BestEffort, error) {
+	args := []any{normalizeRider(rider)}
+	clause, args := scopeClause(from, to, args)
+	rows, err := d.db.QueryContext(ctx, d.query(`SELECT `+effortColumns+` FROM best_efforts
+        WHERE rider = ? AND award <> ''`+clause+` ORDER BY date, session_id, metric`), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []BestEffort
+	for rows.Next() {
+		e, err := scanEffort(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // UnannouncedAwards lists the awards a rider has not been told about yet,
 // oldest ride first.
 func (d *DB) UnannouncedAwards(ctx context.Context, rider string) ([]BestEffort, error) {
