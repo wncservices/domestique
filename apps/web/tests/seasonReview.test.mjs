@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ascentText, ftpStartText, hoursText, periodValue, parsePeriodValue } from '../src/utils/seasonReview.ts'
+import { ascentText, ftpChangeText, ftpStartText, hoursText, periodValue, parsePeriodValue } from '../src/utils/seasonReview.ts'
 
 test('hours read as hours and minutes, without a zero minute', () => {
   assert.equal(hoursText(3600 * 142 + 1800), '142 h 30 min')
@@ -19,6 +19,11 @@ test('FTP start says where history starts instead of inventing a start', () => {
   assert.equal(ftpStartText({ changes: [], historyStarts: '2026-05-04' }, new Date(2026, 9, 1)), 'FTP history starts 4 May')
   assert.equal(ftpStartText({ changes: [], historyStarts: '2025-05-04' }, new Date(2026, 9, 1)), 'FTP history starts 4 May 2025')
   assert.equal(ftpStartText({ changes: [] }), 'n/a')
+})
+
+test('the first FTP change reads as set, not as a move from zero', () => {
+  assert.equal(ftpChangeText({ from: 0, to: 250 }), 'set to 250 W')
+  assert.equal(ftpChangeText({ from: 250, to: 262 }), '250 to 262 W')
 })
 
 test('a picker value round-trips a year or a goal', () => {

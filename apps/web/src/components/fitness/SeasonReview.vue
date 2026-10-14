@@ -7,7 +7,7 @@
 import { computed } from 'vue'
 import type { FtpChangeSource, SeasonReview } from '@/api/types'
 import { awardChipText, formatEffortDate, formatEffortValue } from '@/utils/bestEfforts'
-import { ascentText, ftpStartText, hoursText } from '@/utils/seasonReview'
+import { ascentText, ftpChangeText, ftpStartText, hoursText } from '@/utils/seasonReview'
 import { formatDuration } from '@/utils/workoutMath'
 
 const props = defineProps<{ review: SeasonReview }>()
@@ -82,7 +82,7 @@ function todayYmd(): string {
       <ul v-if="review.ftp.changes.length" class="mt-3 flex flex-col gap-1 text-sm">
         <li v-for="c in review.ftp.changes" :key="`${c.date}-${c.to}`" class="flex flex-wrap gap-x-2">
           <span class="text-muted">{{ formatEffortDate(c.date, today) }}</span>
-          <span class="font-mono tabular-nums">{{ round(c.from) }} to {{ round(c.to) }} W</span>
+          <span class="font-mono tabular-nums">{{ ftpChangeText(c) }}</span>
           <UBadge color="neutral" variant="subtle" size="sm">{{ SOURCES[c.source] }}</UBadge>
         </li>
       </ul>

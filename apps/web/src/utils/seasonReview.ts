@@ -1,15 +1,6 @@
 // Display helpers for the Season tab. Pure, so node:test pins the copy.
 import type { SeasonFtp, SeasonVolume } from '@/api/types'
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// "4 May", or "4 May 2025" outside the current year; read from the string, no timezone.
-function formatEffortDate(ymd: string, now: Date): string {
-  const [y, m, d] = ymd.split('-').map(Number)
-  if (!y || !m || !d) return ymd
-  const day = `${d} ${MONTHS[m - 1] ?? ''}`
-  return y === now.getFullYear() ? day : `${day} ${y}`
-}
+import { formatEffortDate } from './bestEfforts.ts'
 
 /** "142 h 30 min", "2 h", "25 min". */
 export function hoursText(seconds: number): string {
@@ -34,6 +25,12 @@ export function ftpStartText(ftp: Pick<SeasonFtp, 'startWatts' | 'historyStarts'
   if (ftp.startWatts !== undefined) return `${Math.round(ftp.startWatts)} W`
   if (ftp.historyStarts) return `FTP history starts ${formatEffortDate(ftp.historyStarts, now)}`
   return 'n/a'
+}
+
+/** One FTP change in a list: "set to 250 W" for the first (from 0 means there
+ *  was nothing before), "250 to 262 W" after that. */
+export function ftpChangeText(c: { from: number; to: number }): string {
+  return c.from > 0 ? `${Math.round(c.from)} to ${Math.round(c.to)} W` : `set to ${Math.round(c.to)} W`
 }
 
 export type PeriodChoice = { year: string } | { goal: string }
