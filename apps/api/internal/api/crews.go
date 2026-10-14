@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
+	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
 type crewMemberDTO struct {
@@ -287,6 +289,12 @@ func (s *Server) handleDeleteCrew(w http.ResponseWriter, r *http.Request) {
 		s.failCrewLookup(w, err)
 		return
 	}
+
+	// A route that named this crew in its targets must stop naming it: crew
+	// ids are the lowest free slug of the name, so the next "Club" gets this
+	// same id, and a stale target would share the route with that stranger
+	// crew the moment the route's owner joins it.
+	s.stripCrewTarget(r.Context(), id)
 
 	// Best-effort, not part of the response either way: the crew is already
 	// gone by this point, which is what the caller asked for. Left
@@ -672,6 +680,13 @@ func (s *Server) handleRemoveCrewMember(w http.ResponseWriter, r *http.Request) 
 	if errors.Is(err, crew.ErrNotFound) {
 		err = s.Crew.Remove(r.Context(), id, rider)
 	}
+	if errors.Is(err, crew.ErrLastOwner) {
+		s.logger().Info("crew member removal refused: last owner", "crew", id, "by", identity.User)
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "this is the crew's last owner: make someone else an owner first, or delete the crew",
+		})
+		return
+	}
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -705,4 +720,33 @@ func (s *Server) failCrewLookup(w http.ResponseWriter, err error) {
 		return
 	}
 	s.fail(w, err)
+}
+
+// stripCrewTarget removes crewID from every route's explicit targets. Failures
+// are logged and do not fail the delete: the crew is already gone, and the
+// worst case is the stale target this exists to prevent.
+func (s *Server) stripCrewTarget(ctx context.Context, crewID string) {
+	if s.Source == nil {
+		return
+	}
+	routes, _, err := s.Source.List(ctx)
+	if err != nil {
+		s.logger().Error("could not list routes to clear a deleted crew's targets", "crew", crewID, "err", err)
+		return
+	}
+	for _, route := range routes {
+		if route.Targets == nil || !slices.Contains(*route.Targets, crewID) {
+			continue
+		}
+		kept := slices.DeleteFunc(slices.Clone(*route.Targets), func(t string) bool { return t == crewID })
+		req := source.UpdateRequest{Targets: &kept}
+		if len(kept) == 0 {
+			// Back to the owner-only default, not an explicit empty list:
+			// that would mean "nowhere", the owner's own devices included.
+			req = source.UpdateRequest{ClearTargets: true}
+		}
+		if _, err := s.Source.Update(ctx, route.Slug, req); err != nil {
+			s.logger().Error("could not clear a deleted crew from a route's targets", "crew", crewID, "slug", route.Slug, "err", err)
+		}
+	}
 }

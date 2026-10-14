@@ -65,7 +65,12 @@ type UpdateRequest struct {
 	Descript *string
 	Tags     *[]string
 	Targets  *[]string
-	Enabled  *bool
+	// ClearTargets resets the route to "no explicit sharing" (targets NULL,
+	// the owner-only default) — which Targets cannot express, since a nil
+	// pointer there means "leave alone" and an empty list means "nowhere,
+	// not even the owner". Wins over Targets when both are set.
+	ClearTargets bool
+	Enabled      *bool
 	// Owner is set only for the narrow claim-an-orphan case (see the API
 	// package's handleUpdate) — Update itself does not decide who may claim
 	// what, it just writes the value it is given.

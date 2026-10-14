@@ -83,20 +83,28 @@ type crewAuthority struct {
 	canSchedule bool
 }
 
-func crewAuthorityFor(identity auth.Identity, c crew.Crew, members []crew.Member) crewAuthority {
-	a := crewAuthority{mine: identity.CanEditRoute(c.Owner)}
-	if a.mine {
-		a.approved = true
-		a.canSchedule = true
-		return a
-	}
+// crewAuthorityFor resolves what identity may do from the crew's live
+// membership list, never from crew.Crew.Owner: that column only records who
+// created the crew and is not an authorization input, so a creator who was
+// demoted or removed loses owner powers the moment the grant goes. An admin
+// keeps the usual override.
+func crewAuthorityFor(identity auth.Identity, members []crew.Member) crewAuthority {
+	var a crewAuthority
 	for _, m := range members {
 		if m.Status != crew.StatusApproved || !strings.EqualFold(m.Rider, identity.User) {
 			continue
 		}
 		a.approved = true
 		a.canSchedule = m.CanSchedule
+		a.mine = m.IsOwner
 		break
+	}
+	if identity.Role.Can(auth.PermEditAny) {
+		a.mine = true
+	}
+	if a.mine {
+		a.approved = true
+		a.canSchedule = true
 	}
 	return a
 }
@@ -115,7 +123,7 @@ func (s *Server) handleListRides(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	c, err := s.Crew.Get(r.Context(), id)
+	_, err := s.Crew.Get(r.Context(), id)
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -126,7 +134,7 @@ func (s *Server) handleListRides(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	if authority := crewAuthorityFor(identity, c, members); !authority.approved {
+	if authority := crewAuthorityFor(identity, members); !authority.approved {
 		s.forbidCrew(w, r)
 		return
 	}
@@ -201,7 +209,7 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := r.PathValue("id")
-	c, err := s.Crew.Get(r.Context(), id)
+	_, err := s.Crew.Get(r.Context(), id)
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -212,7 +220,7 @@ func (s *Server) handleCreateRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	authority := crewAuthorityFor(identity, c, members)
+	authority := crewAuthorityFor(identity, members)
 	if !authority.canSchedule {
 		s.forbidCrew(w, r)
 		return
@@ -341,7 +349,7 @@ func (s *Server) handleCreateRideSeries(w http.ResponseWriter, r *http.Request) 
 	}
 
 	id := r.PathValue("id")
-	c, err := s.Crew.Get(r.Context(), id)
+	_, err := s.Crew.Get(r.Context(), id)
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -352,7 +360,7 @@ func (s *Server) handleCreateRideSeries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	authority := crewAuthorityFor(identity, c, members)
+	authority := crewAuthorityFor(identity, members)
 	if !authority.canSchedule {
 		s.forbidCrew(w, r)
 		return
@@ -416,7 +424,7 @@ func (s *Server) handleDeleteRideSeries(w http.ResponseWriter, r *http.Request) 
 	}
 
 	id, seriesID := r.PathValue("id"), r.PathValue("seriesId")
-	c, err := s.Crew.Get(r.Context(), id)
+	_, err := s.Crew.Get(r.Context(), id)
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -427,7 +435,7 @@ func (s *Server) handleDeleteRideSeries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	authority := crewAuthorityFor(identity, c, members)
+	authority := crewAuthorityFor(identity, members)
 
 	// A series has no CreatedBy of its own to check the way one ride
 	// does — created_by is identical across every ride it generated — so
@@ -565,7 +573,7 @@ func (s *Server) handleDeleteRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, rideID := r.PathValue("id"), r.PathValue("rideId")
-	c, err := s.Crew.Get(r.Context(), id)
+	_, err := s.Crew.Get(r.Context(), id)
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -586,7 +594,7 @@ func (s *Server) handleDeleteRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	identity := auth.FromContext(r.Context())
-	authority := crewAuthorityFor(identity, c, members)
+	authority := crewAuthorityFor(identity, members)
 	if !authority.mine && (!authority.approved || !strings.EqualFold(ride.CreatedBy, identity.User)) {
 		s.forbidCrew(w, r)
 		return
@@ -637,7 +645,7 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id, rideID := r.PathValue("id"), r.PathValue("rideId")
-	c, err := s.Crew.Get(r.Context(), id)
+	_, err := s.Crew.Get(r.Context(), id)
 	if err != nil {
 		s.failCrewLookup(w, err)
 		return
@@ -648,7 +656,7 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	if authority := crewAuthorityFor(identity, c, members); !authority.approved {
+	if authority := crewAuthorityFor(identity, members); !authority.approved {
 		s.forbidCrew(w, r)
 		return
 	}
@@ -677,6 +685,16 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 	}
 	if idx == -1 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "this ride's route no longer exists"})
+		return
+	}
+
+	// After the membership check, so an outsider cannot burn a crew's budget,
+	// and before any provider is touched.
+	if s.CrewSyncLimiter != nil && !s.CrewSyncLimiter.Allow(id) {
+		s.logger().Warn("crew sync rate limit hit", "crew", id, "by", identity.User)
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "this crew was synced a moment ago — wait a few minutes and try again",
+		})
 		return
 	}
 

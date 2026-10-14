@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ type crewHarness struct {
 	t      *testing.T
 	client *http.Client
 	base   string
+	store  *crew.Store
 }
 
 func newCrewHarness(t *testing.T) *crewHarness {
@@ -46,7 +48,7 @@ func newCrewHarness(t *testing.T) *crewHarness {
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
-	return &crewHarness{t: t, client: server.Client(), base: server.URL}
+	return &crewHarness{t: t, client: server.Client(), base: server.URL, store: crewStore}
 }
 
 func (h *crewHarness) as(user, groups, method, path, body string) *http.Response {
@@ -471,18 +473,20 @@ func TestSecondOwnerCanManageAfterFirstOwnerLeaves(t *testing.T) {
 	}
 }
 
-// A crew whose only owner leaves (self-removal skips SetOwner's own
-// last-owner guard, the same way a deleted rider's RemoveRiderEverywhere
-// does — see crew.Store's own doc comment on that method) is left with zero
-// owners, on purpose. It must not vanish, and an admin must still be able
-// to manage it via canManageCrew's own override — the accepted outcome the
-// user-deletion feature is built around.
+// The last owner cannot leave (audit N12): self-removal used to skip
+// SetOwner's last-owner guard and strand the crew. The ownerless state that
+// remains is the user-deletion path (RemoveRiderEverywhere, an accepted
+// outcome), where the crew must not vanish and an admin must still be able to
+// manage it via canManageCrew's own override.
 func TestDeletingAnOwnerLeavesTheCrewIntact(t *testing.T) {
 	h := newCrewHarness(t)
 	created := decodeCrew(t, h.as("wilant", "cyclists", http.MethodPost, "/api/crews", `{"name":"Family"}`))
 
-	if resp := h.as("wilant", "cyclists", http.MethodDelete, "/api/crews/"+created.ID+"/members/wilant", ""); resp.StatusCode != http.StatusOK {
-		t.Fatalf("owner leaving status = %d, want 200", resp.StatusCode)
+	if resp := h.as("wilant", "cyclists", http.MethodDelete, "/api/crews/"+created.ID+"/members/wilant", ""); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("last owner leaving status = %d, want 409", resp.StatusCode)
+	}
+	if _, err := h.store.RemoveRiderEverywhere(context.Background(), "wilant"); err != nil {
+		t.Fatal(err)
 	}
 
 	// The crew is still there, just with no owners left.

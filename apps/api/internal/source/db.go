@@ -361,6 +361,9 @@ func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.
 	if req.Targets != nil {
 		current.Targets = req.Targets
 	}
+	if req.ClearTargets {
+		current.Targets = nil
+	}
 	if req.Enabled != nil {
 		current.Enabled = req.Enabled
 	}

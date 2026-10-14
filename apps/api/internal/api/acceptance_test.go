@@ -1481,12 +1481,11 @@ func TestClaimOwnerFailsOnAnAlreadyOwnedRoute(t *testing.T) {
 
 func ptr[T any](v T) *T { return &v }
 
-// A crew reference that was valid when a route was shared to it can go
-// stale later — the crew gets deleted — without the route itself ever
-// being touched. UnknownTargets is what tells a rider their route quietly
-// stopped syncing anywhere, rather than leaving it silent — the same
-// contract an unlinked account used to give before crews existed.
-func TestUnknownTargetsSurfaceAfterACrewIsDeleted(t *testing.T) {
+// A crew reference that was valid when a route was shared to it must not
+// outlive the crew: ids are reused, so a stale one would share the route again
+// with an unrelated crew of the same name (audit N11). Deleting the crew
+// clears it from the route's targets.
+func TestDeletingACrewClearsItFromARoutesTargets(t *testing.T) {
 	h := newHarness(t)
 
 	resp := h.upload(map[string]string{
@@ -1510,8 +1509,10 @@ func TestUnknownTargetsSurfaceAfterACrewIsDeleted(t *testing.T) {
 	if len(library.Routes) != 1 {
 		t.Fatal("route missing")
 	}
-	if len(library.Routes[0].UnknownTargets) != 1 || library.Routes[0].UnknownTargets[0] != "crew:soloone" {
-		t.Errorf("unknownTargets = %v, want [crew:soloone] once its crew is gone",
+	// A deleted crew's id is free to be reused by a stranger's crew of the same
+	// name, so the route stops naming it rather than keeping a dangling share.
+	if len(library.Routes[0].UnknownTargets) != 0 {
+		t.Errorf("unknownTargets = %v, want none: the deleted crew is cleared from the route",
 			library.Routes[0].UnknownTargets)
 	}
 

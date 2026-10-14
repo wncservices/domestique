@@ -424,6 +424,13 @@ type Server struct {
 	// how much text is requested rather than a sign-in attempt.
 	NarrationLimiter *ratelimit.Limiter
 
+	// CrewSyncLimiter throttles a crew's "Sync now", keyed by crew id rather
+	// than rider: any approved member may press it, and each press pushes
+	// through every member's own stored Garmin/Wahoo session, so the budget
+	// that matters is how often one crew's members' accounts are touched,
+	// however many of the crew press the button. Nil is unlimited (tests).
+	CrewSyncLimiter *ratelimit.Limiter
+
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
 	pushMu sync.Mutex
