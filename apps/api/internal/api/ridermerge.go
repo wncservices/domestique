@@ -249,6 +249,7 @@ func mergeAccounts(tx *sql.Tx, d dbx.Dialect, from, into string, sum *MergeSumma
 		return fmt.Errorf("merge-rider: reading the sync_state schema: %w", err)
 	}
 
+	// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 	rows, err := tx.Query(d.Rebind(`SELECT id, provider FROM accounts WHERE rider = ? ORDER BY id`), from)
 	if err != nil {
 		return fmt.Errorf("merge-rider: reading %s's accounts: %w", from, err)
@@ -273,6 +274,7 @@ func mergeAccounts(tx *sql.Tx, d dbx.Dialect, from, into string, sum *MergeSumma
 		if len(haveState) == 0 {
 			return 0, nil
 		}
+		// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 		err = tx.QueryRow(d.Rebind(`SELECT COUNT(*) FROM sync_state WHERE account_id = ?`), id).Scan(&n)
 		return n, err
 	}
@@ -280,6 +282,7 @@ func mergeAccounts(tx *sql.Tx, d dbx.Dialect, from, into string, sum *MergeSumma
 	for _, p := range pairs {
 		newID := accounts.ID(model.Provider(p.provider), into)
 		var clash int
+		// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 		if err := tx.QueryRow(d.Rebind(`SELECT COUNT(*) FROM accounts WHERE id = ?`), newID).Scan(&clash); err != nil {
 			return err
 		}
@@ -294,10 +297,12 @@ func mergeAccounts(tx *sql.Tx, d dbx.Dialect, from, into string, sum *MergeSumma
 				return err
 			}
 			if len(haveState) > 0 {
+				// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 				if _, err := tx.Exec(d.Rebind(`DELETE FROM sync_state WHERE account_id = ?`), p.oldID); err != nil {
 					return fmt.Errorf("merge-rider: dropping %s's sync state: %w", p.oldID, err)
 				}
 			}
+			// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 			if _, err := tx.Exec(d.Rebind(`DELETE FROM accounts WHERE id = ?`), p.oldID); err != nil {
 				return fmt.Errorf("merge-rider: dropping account %s: %w", p.oldID, err)
 			}
@@ -311,20 +316,24 @@ func mergeAccounts(tx *sql.Tx, d dbx.Dialect, from, into string, sum *MergeSumma
 		var droppedState, keptState int
 		if len(haveState) > 0 {
 			slugs := `FROM sync_state WHERE account_id = ? AND slug IN (SELECT slug FROM sync_state WHERE account_id = ?)`
+			// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 			if err := tx.QueryRow(d.Rebind(`SELECT COUNT(*) `+slugs), p.oldID, newID).Scan(&droppedState); err != nil {
 				return err
 			}
 			keptState = droppedState
 			if droppedState > 0 {
+				// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 				if _, err := tx.Exec(d.Rebind(`DELETE `+slugs), p.oldID, newID); err != nil {
 					return fmt.Errorf("merge-rider: dropping %s's sync state that %s already has: %w", p.oldID, newID, err)
 				}
 			}
 		}
+		// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 		if _, err := tx.Exec(d.Rebind(`UPDATE accounts SET id = ?, rider = ? WHERE id = ?`), newID, into, p.oldID); err != nil {
 			return fmt.Errorf("merge-rider: moving account %s: %w", p.oldID, err)
 		}
 		if len(haveState) > 0 {
+			// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 			if _, err := tx.Exec(d.Rebind(`UPDATE sync_state SET account_id = ? WHERE account_id = ?`), newID, p.oldID); err != nil {
 				return fmt.Errorf("merge-rider: moving sync state of %s: %w", p.oldID, err)
 			}
@@ -347,6 +356,7 @@ func mergeProviderLinks(tx *sql.Tx, d dbx.Dialect, from, into string, sum *Merge
 		return nil
 	}
 	var moved, clash int
+	// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 	if err := tx.QueryRow(d.Rebind(`SELECT COUNT(*) FROM provider_links WHERE rider = ?`), from).Scan(&moved); err != nil {
 		return err
 	}
@@ -354,14 +364,17 @@ func mergeProviderLinks(tx *sql.Tx, d dbx.Dialect, from, into string, sum *Merge
 		return nil
 	}
 	const colliding = `FROM provider_links WHERE rider = ? AND provider IN (SELECT provider FROM provider_links WHERE rider = ?)`
+	// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 	if err := tx.QueryRow(d.Rebind(`SELECT COUNT(*) `+colliding), from, into).Scan(&clash); err != nil {
 		return err
 	}
 	if clash > 0 {
+		// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 		if _, err := tx.Exec(d.Rebind(`DELETE `+colliding), from, into); err != nil {
 			return fmt.Errorf("merge-rider: dropping %s's provider sign-ins that %s already has: %w", from, into, err)
 		}
 	}
+	// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 	if _, err := tx.Exec(d.Rebind(`UPDATE provider_links SET rider = ? WHERE rider = ?`), into, from); err != nil {
 		return fmt.Errorf("merge-rider: moving provider sign-ins: %w", err)
 	}
