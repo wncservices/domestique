@@ -938,6 +938,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		// session, so it is budgeted per crew: three presses in ten
 		// minutes, however many members press them.
 		CrewSyncLimiter: ratelimit.New(3, 10*time.Minute),
+		// An upload is a body of up to 20 MiB and a parse, and the stored
+		// track is re-read on every view. Twenty in ten minutes covers
+		// importing a folder of routes by hand; gpx.ParseUpload's own
+		// process-wide slots bound how many parse at once.
+		UploadLimiter: ratelimit.New(20, 10*time.Minute),
 	}
 
 	// No config toggle, no credential — geocoding.NominatimClient needs

@@ -31,19 +31,6 @@ type Point struct {
 	HasEle   bool
 }
 
-// gpxDoc mirrors just enough of the GPX schema to read a planned route.
-type gpxDoc struct {
-	XMLName xml.Name `xml:"gpx"`
-	Tracks  []struct {
-		Segments []struct {
-			Points []gpxPoint `xml:"trkpt"`
-		} `xml:"trkseg"`
-	} `xml:"trk"`
-	Routes []struct {
-		Points []gpxPoint `xml:"rtept"`
-	} `xml:"rte"`
-}
-
 type gpxPoint struct {
 	Lat float64 `xml:"lat,attr"`
 	Lon float64 `xml:"lon,attr"`
@@ -64,33 +51,13 @@ func (p gpxPoint) toPoint() Point {
 // ParsePoints flattens GPX bytes into a single ordered point list.
 //
 // It accepts tracks or routes: planners disagree about which element a planned
-// route belongs in, and we treat both as the same thing.
+// route belongs in, and we treat both as the same thing. It reads what is
+// stored, so it only bounds the pathological; ParseUpload is the gate for a
+// file someone has just sent.
 func ParsePoints(raw []byte) ([]Point, error) {
-	var doc gpxDoc
-	if err := xml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("could not parse GPX: %w", err)
-	}
-
-	var points []Point
-	for _, track := range doc.Tracks {
-		for _, seg := range track.Segments {
-			for _, p := range seg.Points {
-				points = append(points, p.toPoint())
-			}
-		}
-	}
-	if len(points) == 0 {
-		for _, route := range doc.Routes {
-			for _, p := range route.Points {
-				points = append(points, p.toPoint())
-			}
-		}
-	}
-
-	if len(points) < 2 {
-		return nil, fmt.Errorf("needs at least 2 track points, found %d", len(points))
-	}
-	return points, nil
+	return scanPoints(raw, scanLimits{
+		points: readMaxPoints, waypoints: readMaxPoints, depth: readMaxDepth, elements: readMaxElements,
+	})
 }
 
 // Cue is a single turn-by-turn instruction embedded in the GPX itself by
