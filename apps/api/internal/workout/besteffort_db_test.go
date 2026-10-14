@@ -201,7 +201,7 @@ func TestRebuildRecreatesEveryRowWithNoAwardAndRunsOnlyOnAnEmptyTable(t *testing
 		seedAnalysed(t, db, "wilant", "2", "2026-04-08", map[string]float64{"300": 320}, 0)
 		seedAnalysed(t, db, "jonas", "3", "2026-04-09", map[string]float64{"300": 400}, 175)
 
-		n, err := db.RebuildBestEfforts(ctx, effortsOf)
+		n, err := db.RebuildBestEfforts(ctx, effortsOf, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,15 +216,18 @@ func TestRebuildRecreatesEveryRowWithNoAwardAndRunsOnlyOnAnEmptyTable(t *testing
 			t.Errorf("another rider's row = %+v", other)
 		}
 
-		// A second run does nothing: the table is not empty. A new analysis is
-		// not picked up by it either; that is BackfillEfforts' job.
+		// A rebuild is idempotent at every start: a second run adds what is
+		// missing (a new analysis here) and leaves what is there alone.
 		seedAnalysed(t, db, "wilant", "4", "2026-04-10", map[string]float64{"300": 500}, 0)
-		n, err = db.RebuildBestEfforts(ctx, effortsOf)
-		if err != nil || n != 0 {
-			t.Errorf("second rebuild = %d, %v; want 0", n, err)
+		n, err = db.RebuildBestEfforts(ctx, effortsOf, nil)
+		if err != nil || n != 1 {
+			t.Errorf("second rebuild = %d, %v; want 1 (only the new analysis)", n, err)
 		}
-		if got, _, _ := db.BestIn(ctx, "wilant", "power_300", "", ""); got.Value != 320 {
-			t.Errorf("a non-empty table was rebuilt: best = %v", got.Value)
+		if got, _, _ := db.BestIn(ctx, "wilant", "power_300", "", ""); got.Value != 500 {
+			t.Errorf("the new analysis was not picked up: best = %v", got.Value)
+		}
+		if n, _ = db.RebuildBestEfforts(ctx, effortsOf, nil); n != 0 {
+			t.Errorf("third rebuild wrote %d rows, want 0", n)
 		}
 		_ = a
 	})
@@ -336,6 +339,32 @@ func TestBestEffortsStampFromTheStoreClock(t *testing.T) {
 		got, _, _ := db.BestIn(ctx, "wilant", "power_300", "", "")
 		if got.CreatedAt != "2031-03-18T09:30:00Z" {
 			t.Errorf("created_at = %q, want the store clock", got.CreatedAt)
+		}
+	})
+}
+
+func TestAHalfDoneRebuildCompletesOnTheNextStartInChunks(t *testing.T) {
+	eachEffortEngine(t, func(t *testing.T, db *DB) {
+		ctx := t.Context()
+		for i := 1; i <= 7; i++ {
+			seedAnalysed(t, db, "wilant", string(rune('a'+i)), "2026-04-0"+string(rune('0'+i)), map[string]float64{"300": float64(300 + i)}, 170+i)
+		}
+		var calls []int
+		db.EffortChunk = 3
+		n, err := db.RebuildBestEfforts(ctx, effortsOf, func(written int) { calls = append(calls, written) })
+		if err != nil || n != 14 {
+			t.Fatalf("rebuild = %d, %v; want 14 rows", n, err)
+		}
+		if len(calls) < 4 || calls[len(calls)-1] != 14 {
+			t.Errorf("progress = %v, want several chunks of 3 ending at 14", calls)
+		}
+		// A crash part-way: some sessions have rows and some do not.
+		if _, err := db.db.Exec(db.query(`DELETE FROM best_efforts WHERE session_id IN (?, ?, ?)`), "garmin:c", "garmin:e", "garmin:h"); err != nil {
+			t.Fatal(err)
+		}
+		n, err = db.RebuildBestEfforts(ctx, effortsOf, nil)
+		if err != nil || n != 6 {
+			t.Errorf("completing rebuild = %d, %v; want the 6 missing rows", n, err)
 		}
 	})
 }

@@ -503,6 +503,10 @@ type DB struct {
 	// untouched plan session, how current a "why" is, a goal's plan anchor), so
 	// two clocks make the outcome depend on the day the suite runs.
 	Clock func() time.Time
+
+	// EffortChunk is how many best_efforts rows one transaction of a backfill
+	// writes; 0 means DefaultEffortChunk. Tests shrink it.
+	EffortChunk int
 }
 
 // now is the store's current time, from Clock when one is set.
