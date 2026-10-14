@@ -47,11 +47,12 @@ func RiderKept(description string) bool {
 	return strings.Contains(description, CrewKeptMarker) || strings.Contains(description, LifeKeptMarker)
 }
 
-// IsPlanSession reports whether w is a session the scheduler made and the rider
-// has not swapped, adjusted-or-not aside: a goal, the generated description,
-// no crew ride, not swapped. It says nothing about whether the rider asked for
-// it to be left alone (RiderKept), so it is for the places that must still
-// *move* such a session out of a day a life event took, not change its content.
+// IsPlanSession reports whether w is a session the scheduler made and nothing
+// has changed since: a goal, the generated description, no crew ride, and
+// neither AdjustedMarker nor SwappedMarker. It says nothing about whether the
+// rider asked for it to be left alone (RiderKept), so it is for the places that
+// must still *move* such a session out of a day a life event took, or replace
+// it at the rider's own request, not change its content automatically.
 func IsPlanSession(w workout.Workout) bool {
 	return w.GoalID != "" && w.CrewRideID == "" &&
 		strings.HasPrefix(w.Description, GeneratedDescription) &&
