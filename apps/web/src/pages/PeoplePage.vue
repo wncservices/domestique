@@ -2,7 +2,7 @@
 import { onMounted, ref, watch, computed } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
-import type { AssignableRole, Person, RiderInfo } from '@/api/types'
+import type { AssignableRole, Person, RiderInfo, RiderMerge } from '@/api/types'
 import { roleColor } from '@/utils/role'
 import { usePagedList } from '@/composables/usePagedList'
 import { describeError } from '@/utils/errorMessage'
@@ -328,6 +328,96 @@ async function confirmBind() {
   }
 }
 
+// --- merge a rider into another ---
+//
+// A person who ended up as two riders (an old name-derived one, and the one
+// their account is bound to) has their data split across both. Merging moves
+// everything from the orphan onto the other rider; where both have a row on
+// the same key the target's is kept. It cannot be undone, so the dialog shows a
+// dry run first (the server does the real work and rolls it back) and asks.
+
+const mergeFrom = ref('')
+const mergeInto = ref('')
+const mergePreview = ref<RiderMerge | null>(null)
+const mergeTarget = ref<RiderInfo | null>(null)
+const mergeError = ref('')
+const mergePreviewing = ref(false)
+const merging = ref(false)
+const mergeConfirmed = ref(false)
+
+function openMerge(rider: string) {
+  mergeFrom.value = rider
+  mergeConfirmed.value = false
+  // "wilant.nackaerts" is almost always a split of "wilant".
+  const base = rider.split(/[.@|]/)[0] ?? ''
+  mergeInto.value = base && base !== rider ? base : ''
+}
+
+function closeMerge() {
+  mergeFrom.value = ''
+  mergeInto.value = ''
+  mergePreview.value = null
+  mergeTarget.value = null
+  mergeError.value = ''
+}
+
+let mergeTimer: ReturnType<typeof setTimeout> | undefined
+watch([mergeFrom, mergeInto], () => {
+  mergeConfirmed.value = false
+  mergePreview.value = null
+  mergeTarget.value = null
+  mergeError.value = ''
+  clearTimeout(mergeTimer)
+  const from = mergeFrom.value
+  const into = mergeInto.value.trim().toLowerCase()
+  if (!from || !into || into === from) return
+  mergePreviewing.value = true
+  mergeTimer = setTimeout(async () => {
+    try {
+      const [preview, info] = await Promise.all([api.mergeRider(from, into, true), api.riderInfo(into)])
+      if (from === mergeFrom.value && into === mergeInto.value.trim().toLowerCase()) {
+        mergePreview.value = preview
+        mergeTarget.value = info
+      }
+    } catch (err) {
+      if (from === mergeFrom.value && into === mergeInto.value.trim().toLowerCase()) {
+        mergeError.value = describeError(err)
+      }
+    } finally {
+      mergePreviewing.value = false
+    }
+  }, 300)
+})
+
+const canMerge = computed(() => !!mergePreview.value && !mergeError.value && mergeConfirmed.value && !merging.value)
+
+async function confirmMerge() {
+  const from = mergeFrom.value
+  const into = mergeInto.value.trim().toLowerCase()
+  if (!from || !into || !canMerge.value) return
+  merging.value = true
+  try {
+    const done = await api.mergeRider(from, into, false)
+    toast.add({
+      title: `Merged ${from} into ${done.into}`,
+      description: `${done.moved} moved, ${done.droppedSource} dropped where ${done.into} already had one. Both riders' sign-ins ended; they sign in again.`,
+      icon: 'i-lucide-git-merge',
+      color: 'success',
+    })
+    closeMerge()
+    await load()
+  } catch (err) {
+    toast.add({
+      title: `Could not merge ${from} into ${into}`,
+      description: describeError(err),
+      icon: 'i-lucide-triangle-alert',
+      color: 'error',
+    })
+  } finally {
+    merging.value = false
+  }
+}
+
 // --- delete ---
 //
 // likelyRider is only a guess at this person's local rider identity (see
@@ -447,9 +537,23 @@ async function confirmDeletePerson() {
         variant="subtle"
         icon="i-lucide-user-x"
         title="Riders with data but no account"
-        :description="`${orphanRiders.join(', ')} — nobody can sign in as ${orphanRiders.length === 1 ? 'this rider' : 'these riders'}. Bind an account to one from its row, or remove the data.`"
         class="mb-4"
-      />
+      >
+        <template #description>
+          <p>
+            Nobody can sign in as {{ orphanRiders.length === 1 ? 'this rider' : 'these riders' }}. Bind an
+            account to one from its row, merge it into another rider, or remove the data.
+          </p>
+          <ul class="mt-2 flex flex-col gap-2">
+            <li v-for="rider in orphanRiders" :key="rider" class="flex flex-wrap items-center gap-2">
+              <code class="text-highlighted">{{ rider }}</code>
+              <UButton size="xs" color="neutral" variant="outline" icon="i-lucide-git-merge" @click="openMerge(rider)">
+                Merge into…
+              </UButton>
+            </li>
+          </ul>
+        </template>
+      </UAlert>
 
       <UEmpty
         v-if="unavailable"
@@ -701,6 +805,71 @@ async function confirmDeletePerson() {
           <UButton color="neutral" variant="ghost" :disabled="!!binding" @click="bindTarget = null">Cancel</UButton>
           <UButton icon="i-lucide-link" :loading="!!binding" :disabled="!canBind" @click="confirmBind">
             Bind
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal :open="!!mergeFrom" :title="`Merge ${mergeFrom} into another rider`" @update:open="closeMerge">
+      <template #body>
+        <p class="text-sm text-toned">
+          Moves everything <span class="text-highlighted">{{ mergeFrom }}</span> owns (routes, devices, training,
+          crews, sign-in bindings) onto the rider below. Where both have a row on the same key the target's is
+          kept and {{ mergeFrom }}'s is dropped. This cannot be undone.
+        </p>
+        <UFormField label="Merge into" hint="the rider that keeps the data" class="mt-3">
+          <UInput v-model="mergeInto" placeholder="wilant" class="w-full" />
+        </UFormField>
+        <p v-if="mergePreviewing" class="mt-3 text-sm text-muted">Checking what would happen…</p>
+        <UAlert v-if="mergeError" class="mt-3" color="error" variant="subtle" icon="i-lucide-triangle-alert" :description="mergeError" />
+        <template v-if="mergePreview">
+          <UAlert
+            v-if="mergeTarget && !mergeTarget.hasData"
+            class="mt-3"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="`${mergeTarget.rider} has no data yet. Check the name: this would move everything onto a rider that does not exist.`"
+          />
+          <p class="mt-3 text-sm text-highlighted">
+            {{ mergePreview.moved }} moved · {{ mergePreview.keptTarget }} kept from {{ mergePreview.into }} ·
+            {{ mergePreview.droppedSource }} dropped from {{ mergePreview.from }}
+          </p>
+          <div class="mt-2 max-h-56 overflow-auto rounded-md ring ring-default">
+            <table class="w-full text-left text-xs">
+              <thead class="text-dimmed">
+                <tr>
+                  <th class="p-2 font-normal">Table</th>
+                  <th class="p-2 text-right font-normal">Moved</th>
+                  <th class="p-2 text-right font-normal">Kept</th>
+                  <th class="p-2 text-right font-normal">Dropped</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-default">
+                <tr v-for="t in mergePreview.tables" :key="t.table">
+                  <td class="p-2 font-mono">{{ t.table }}</td>
+                  <td class="p-2 text-right">{{ t.moved }}</td>
+                  <td class="p-2 text-right">{{ t.keptTarget }}</td>
+                  <td class="p-2 text-right" :class="t.droppedSource ? 'text-warning' : ''">{{ t.droppedSource }}</td>
+                </tr>
+                <tr v-if="!mergePreview.tables.length">
+                  <td class="p-2 text-muted" colspan="4">Nothing to move.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <UCheckbox
+            v-model="mergeConfirmed"
+            class="mt-3"
+            :label="`Merge ${mergePreview.from} into ${mergePreview.into}, and sign both riders out`"
+          />
+        </template>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="merging" @click="closeMerge">Cancel</UButton>
+          <UButton icon="i-lucide-git-merge" color="error" :loading="merging" :disabled="!canMerge" @click="confirmMerge">
+            Merge
           </UButton>
         </div>
       </template>

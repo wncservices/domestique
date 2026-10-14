@@ -90,6 +90,13 @@ commands:
                 training data) to a new identity
                 (see docs/rider-migration.md before running this for real;
                 --replace resolves a conflict by keeping the old rider's row)
+  merge-rider   <from> <into>   move everything one rider owns onto another that
+                already has data (a person who ended up as two riders, e.g.
+                wilant.nackaerts and wilant). Where both have a row on one key
+                the target's is kept and the source's dropped. --dry-run prints
+                what would move, be kept and be dropped per table, and writes
+                nothing; a real run ends both riders' sessions
+                (see docs/rider-migration.md)
   bind-identity   <issuer> <sub> <rider>   (auth.mode oidc) make an issuer account
                   sign in as a rider, or move it to another; ends that account's
                   sessions. --dry-run says what it would do and writes nothing.
@@ -181,7 +188,7 @@ func run(args []string) error {
 	var positional []string
 
 	switch cmd {
-	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "bind-identity", "unbind-identity", "keygen":
+	case "validate", "plan", "push", "state", "serve", "import", "komoot", "fit", "fit-workout", "rename-rider", "merge-rider", "bind-identity", "unbind-identity", "keygen":
 		// Go's flag package stops at the first positional argument, so
 		// `fit <slug> --cues` would silently ignore --cues. Parse in a loop,
 		// peeling off positionals, so flags and arguments can interleave in
@@ -255,6 +262,8 @@ func run(args []string) error {
 		return runFITWorkout(src, positional, *out)
 	case "rename-rider":
 		return runRenameRider(src, positional, *dryRun, *replace)
+	case "merge-rider":
+		return runMergeRider(src, positional, *dryRun)
 	case "bind-identity":
 		return runBindIdentity(src, positional, *dryRun, cfg.Auth.OIDC.Issuer, *force)
 	case "unbind-identity":

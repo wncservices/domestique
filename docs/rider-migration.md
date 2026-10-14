@@ -251,6 +251,69 @@ own (`wilant-2` while `wilant` still has data); that is expected, and binding
 the account to `wilant` is the fix. `rename-rider` is still there for genuinely
 renaming a rider, and it moves the bindings along with everything else.
 
+## Merging a split rider
+
+A person can end up as two riders. The usual cause: an older rider was derived
+from the Auth0 *nickname* and the current one from the *name* (or the old
+deployment used another name altogether), so their data sits under
+`wilant.nackaerts` while they sign in as `wilant`. `rename-rider` cannot fix
+that, because the target already has data and it refuses a collision. **Merge**
+moves one rider's data onto another and keeps the target's row wherever both
+have one on the same key.
+
+What it does, in one transaction (a failure leaves the database as it was):
+
+- every table in the rider registry (`riderTables`) is walked with its rename
+  rule: plain tables have their rows moved; tables whose key includes the rider
+  (a profile, a wellness day, a crew membership, a calendar feed...) have their
+  rows moved **except where the target already has one on that key, which is
+  kept and the source's dropped**;
+- accounts, their sync state and the provider sign-ins follow the same
+  one-per-provider rule: the target's Garmin/Wahoo account is kept, the
+  source's goes with the sync state that described it, and an account on a
+  provider the target lacks moves across;
+- identity bindings of the source move to the target, so the accounts that
+  signed in as the source now sign in as the target;
+- the sessions of **both** riders end (they hold the rider they were made with);
+  everyone signs in again.
+
+It cannot be undone, so look first:
+
+```bash
+kubectl exec -it deploy/domestique -- domestique merge-rider --dry-run wilant.nackaerts wilant
+kubectl exec -it deploy/domestique -- domestique merge-rider wilant.nackaerts wilant
+```
+
+The dry run does the real work and rolls it back, so its table is exactly what
+the real run does: per table, how many rows **moved**, how many of the target's
+were **kept-target** and how many of the source's were **dropped-source**. Read
+the dropped column: that is the only thing a merge loses (two wellness rows for
+one day, say: the target's wins). `DOMESTIQUE_ENCRYPTION_KEY` must be set in
+the pod for the sessions to be found and ended; without it the command says so
+and they expire on their own.
+
+On the People page an admin does the same from the *Riders with data but no
+account* alert: **Merge into...** on the orphan rider shows the dry-run table
+first and asks for a confirmation. It is admin-only (`people:manage`) and is
+logged at Warn with the two rider names and the counts (never an email or a
+sub).
+
+### If you land on `name-2`
+
+You signed in, and the People page (or the app) shows you as `wilant-2` with no
+data, while `wilant` (and maybe an older split like `wilant.nackaerts`) holds it.
+In order:
+
+1. **Link yourself to the real rider.** Your own row says *This is me: link to
+   `wilant`* whenever `wilant` has data and nobody is bound to it. Click it; you
+   are signed out, sign in again, and the data is there. (A rider nobody is
+   bound to is the one thing an admin may bind their own account to; onto a
+   bound rider it is refused, and `bind-identity` on the server is the way.)
+2. **Merge any split.** If the *Riders with data but no account* alert still
+   lists `wilant.nackaerts`, merge it into `wilant` (dry run first).
+3. **Tidy the empty one.** `wilant-2` now has nothing bound to it and nothing in
+   it; nothing needs doing, and a purge removes it if you want it gone.
+
 ## Admin bootstrapping
 
 Every OIDC login lands as `default_role: viewer` until an Auth0 Action adds a

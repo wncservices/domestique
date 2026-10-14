@@ -329,6 +329,21 @@ export interface Person {
   suggestRider?: string
 }
 
+/** What merging one rider into another did, or on a dry run would do. */
+export interface RiderMerge {
+  from: string
+  into: string
+  dryRun: boolean
+  /** Per table, only those with something in them. Where both riders had a row
+   *  on the same key, the target's was kept (keptTarget) and the merged-away
+   *  rider's dropped (droppedSource). */
+  tables: { table: string; moved: number; keptTarget: number; droppedSource: number }[]
+  moved: number
+  keptTarget: number
+  droppedSource: number
+  sessionsEnded: number
+}
+
 /** What an admin should know about a rider before binding an account to it. */
 export interface RiderInfo {
   rider: string
