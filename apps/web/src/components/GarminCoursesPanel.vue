@@ -5,6 +5,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import { usePagedList } from '@/composables/usePagedList'
 import type { GarminConnection, GarminCourse } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const emit = defineEmits<{ imported: [] }>()
 
@@ -110,7 +111,7 @@ async function loadConnection() {
   try {
     connection.value = await api.garminConnection()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   }
 }
 
@@ -120,7 +121,7 @@ async function load() {
   try {
     courses.value = await api.garminCourses()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     loading.value = false
   }
@@ -161,7 +162,7 @@ async function runImport() {
     await load()
     emit('imported')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     importing.value = false
   }

@@ -299,7 +299,7 @@ const rampNotePrefix = "Life event:"
 // KeptMarker is written into a session whose ease or shortening the rider
 // unticked in a preview. The return ramp reads it and leaves the session alone,
 // so a skip sticks instead of being redone by the next adaptation pass.
-const KeptMarker = "Kept as planned by you through the return to training."
+const KeptMarker = scheduler.LifeKeptMarker
 
 // Touched reports whether a life event has changed this description, or the
 // rider has chosen to keep it through one: a move, an ease, a shortening or a

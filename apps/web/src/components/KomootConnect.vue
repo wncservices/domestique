@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { api } from '@/api/client'
 import type { KomootConnection } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{ connection: KomootConnection }>()
 const emit = defineEmits<{ changed: [KomootConnection] }>()
@@ -22,7 +23,7 @@ async function connect() {
     password.value = ''
     emit('changed', connection)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     busy.value = false
   }
@@ -34,7 +35,7 @@ async function disconnect() {
   try {
     emit('changed', await api.komootDisconnect())
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     busy.value = false
   }

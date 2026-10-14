@@ -403,7 +403,7 @@ func (s *Server) biasFor(ctx context.Context, g workout.Goal, rp *routeProfile, 
 		out.SustainedSec, out.ShortSec = demand.Sustained, demand.Short
 	}
 	if plan, _, err := s.reconciledPeriodizationPlan(ctx, g, g.Rider); err == nil {
-		today := s.now().Format(dateLayout)
+		today := s.localToday()
 		for _, wk := range plan.Weeks {
 			if start, end := weekBounds(wk); today >= start && today <= end {
 				out.Phase = string(wk.Phase)
@@ -481,7 +481,7 @@ func (s *Server) handleRouteDemands(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	longest, zone := longestSustained(workouts, g, s.now().Format(dateLayout))
+	longest, zone := longestSustained(workouts, g, s.localToday())
 	for i := range cl {
 		cl[i].Covered = climbCovered(longest, cl[i].DurationSec)
 	}

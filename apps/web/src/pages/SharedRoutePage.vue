@@ -14,6 +14,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { ApiError, api } from '@/api/client'
 import type { Me, SharedRoute } from '@/api/types'
 import RouteMap from '@/components/RouteMap.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
 
@@ -53,7 +54,7 @@ async function loadSharedRoute() {
       errorKind.value = 'expired'
     } else {
       errorKind.value = 'other'
-      errorMessage.value = err instanceof Error ? err.message : String(err)
+      errorMessage.value = describeError(err)
     }
   } finally {
     loadingRoute.value = false
@@ -109,7 +110,7 @@ async function importToLibrary() {
     } else {
       toast.add({
         title: 'Could not import this route',
-        description: err instanceof Error ? err.message : String(err),
+        description: describeError(err),
         icon: 'i-lucide-triangle-alert',
         color: 'error',
       })

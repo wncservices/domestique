@@ -955,8 +955,19 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 	return d.GetGoal(ctx, id)
 }
 
+// DeleteGoal removes a goal, unlinks its workouts and forgets its filled-week
+// markers as one transaction: a failure part-way leaves everything as it was.
+// Goal ids are slugs of the name, so a marker that survived a half-finished
+// delete would be inherited by the next goal made under the same name and
+// leave its weeks looking filled.
 func (d *DB) DeleteGoal(ctx context.Context, id string) error {
-	result, err := d.db.ExecContext(ctx, d.query(`DELETE FROM goals WHERE id = ?`), id)
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("workout: delete goal: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	result, err := tx.ExecContext(ctx, d.query(`DELETE FROM goals WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -967,13 +978,15 @@ func (d *DB) DeleteGoal(ctx context.Context, id string) error {
 	// planned session stays real even if the race it was built for falls
 	// through — just unlinked, the same "make it orphaned, not gone"
 	// choice routes make when the crew they were shared to disappears.
-	if _, err = d.db.ExecContext(ctx, d.query(`UPDATE workouts SET goal_id = '' WHERE goal_id = ?`), id); err != nil {
+	if _, err = tx.ExecContext(ctx, d.query(`UPDATE workouts SET goal_id = '' WHERE goal_id = ?`), id); err != nil {
 		return err
 	}
 	// Its filled-week markers go too: they mean nothing without the goal, and
 	// a later goal that reuses the id must start with every week unfilled.
-	_, err = d.db.ExecContext(ctx, d.query(`DELETE FROM scheduled_weeks WHERE goal_id = ?`), id)
-	return err
+	if _, err = tx.ExecContext(ctx, d.query(`DELETE FROM scheduled_weeks WHERE goal_id = ?`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- Rider profile ---
@@ -1216,16 +1229,32 @@ func scanWorkout(row rowScanner) (Workout, error) {
 }
 
 func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Workout, error) {
+	id, err := d.insertWorkout(ctx, d.db, req)
+	if err != nil {
+		return Workout{}, err
+	}
+	return d.GetWorkout(ctx, id)
+}
+
+// sqlRunner is what insertWorkout needs from a *sql.DB or a *sql.Tx, so the
+// same insert serves a single create and a whole week inside one transaction.
+type sqlRunner interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// insertWorkout validates req and inserts it through q, returning the new id.
+func (d *DB) insertWorkout(ctx context.Context, q sqlRunner, req CreateWorkoutRequest) (string, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return Workout{}, errors.New("workout: name is required")
+		return "", errors.New("workout: name is required")
 	}
 	rider := normalizeRider(req.Rider)
 	if rider == "" {
-		return Workout{}, errors.New("workout: no rider — who is this workout for?")
+		return "", errors.New("workout: no rider — who is this workout for?")
 	}
 	if err := validateSteps(req.Steps); err != nil {
-		return Workout{}, err
+		return "", err
 	}
 
 	sport := req.Sport
@@ -1235,16 +1264,16 @@ func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Worko
 
 	steps, err := json.Marshal(req.Steps)
 	if err != nil {
-		return Workout{}, fmt.Errorf("workout: encode steps: %w", err)
+		return "", fmt.Errorf("workout: encode steps: %w", err)
 	}
 
-	id, err := d.uniqueID(ctx, "workouts", slugify(name))
+	id, err := d.uniqueIDIn(ctx, q, "workouts", slugify(name))
 	if err != nil {
-		return Workout{}, err
+		return "", err
 	}
 
 	ts := d.timestamp()
-	_, err = d.db.ExecContext(ctx, d.query(`
+	_, err = q.ExecContext(ctx, d.query(`
         INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, req.CrewRideID, ts, ts)
@@ -1252,11 +1281,11 @@ func (d *DB) CreateWorkout(ctx context.Context, req CreateWorkoutRequest) (Worko
 		// The partial unique index is what makes "one row per rider and ride"
 		// true even for two requests that raced past the caller's own check.
 		if req.CrewRideID != "" && isUniqueViolation(err) {
-			return Workout{}, ErrCrewRideExists
+			return "", ErrCrewRideExists
 		}
-		return Workout{}, err
+		return "", err
 	}
-	return d.GetWorkout(ctx, id)
+	return id, nil
 }
 
 func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequest) (Workout, error) {
@@ -1419,6 +1448,12 @@ func validateStepDepth(steps []WorkoutStep, depth int) error {
 // source's copy: three near-identical, single-table-scoped functions cost
 // less to keep separate than the coupling a shared one would add.
 func (d *DB) uniqueID(ctx context.Context, table, base string) (string, error) {
+	return d.uniqueIDIn(ctx, d.db, table, base)
+}
+
+// uniqueIDIn is uniqueID through q, so ids chosen inside a transaction see the
+// rows that same transaction has already inserted.
+func (d *DB) uniqueIDIn(ctx context.Context, q sqlRunner, table, base string) (string, error) {
 	if base == "" {
 		base = "item"
 	}
@@ -1427,8 +1462,8 @@ func (d *DB) uniqueID(ctx context.Context, table, base string) (string, error) {
 		var exists int
 		// #nosec G201 -- table is one of two fixed string literals this
 		// package passes in, never external input.
-		q := fmt.Sprintf(`SELECT COUNT(1) FROM %s WHERE id = ?`, table)
-		if err := d.db.QueryRowContext(ctx, d.query(q), candidate).Scan(&exists); err != nil {
+		stmt := fmt.Sprintf(`SELECT COUNT(1) FROM %s WHERE id = ?`, table)
+		if err := q.QueryRowContext(ctx, d.query(stmt), candidate).Scan(&exists); err != nil {
 			return "", err
 		}
 		if exists == 0 {

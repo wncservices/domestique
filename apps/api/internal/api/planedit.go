@@ -222,7 +222,7 @@ func (s *Server) buildPlanView(ctx context.Context, rider string, today time.Tim
 			// A plan-made session the rider renamed is described, not named: the
 			// description stays the generated one, so the name is the only thing
 			// that says it is theirs.
-			RiderBuilt: wk.TestProtocol == "" && (!isPlanMade(wk) || !generatedName(wk)),
+			RiderBuilt: wk.TestProtocol == "" && (!scheduler.IsPlanMade(wk) || !generatedName(wk)),
 		}
 		switch {
 		case wk.TestProtocol != "":
@@ -344,7 +344,7 @@ func (pv planView) resolve(handle, intentType string) (workout.Workout, string) 
 		return workout.Workout{}, planEditRiddenNote
 	case wk.TestProtocol != "" && intentType != narration.IntentMoveWorkout:
 		return workout.Workout{}, planEditFTPTestNote
-	case wk.TestProtocol == "" && !isPlanMade(wk):
+	case wk.TestProtocol == "" && !scheduler.IsPlanMade(wk):
 		return workout.Workout{}, planEditNotPlanMadeNote
 	}
 	return wk, ""

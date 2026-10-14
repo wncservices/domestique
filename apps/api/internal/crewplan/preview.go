@@ -25,7 +25,7 @@ const (
 // KeptMarker is written into a session whose ease the rider unticked in a
 // preview. The easing rules read it and leave the session alone, so a skip
 // sticks instead of being redone by the next adaptation pass.
-const KeptMarker = "Kept as planned by you around your crew ride."
+const KeptMarker = scheduler.CrewKeptMarker
 
 const (
 	dateLayout = "2006-01-02"
@@ -289,7 +289,7 @@ func (p *previewer) replacedEnduranceOnItsDay() bool {
 // eligible is whether the plan may change w on its own: it made it, nobody has
 // touched it, it has not been ridden and it is not in the past.
 func (p *previewer) eligible(w workout.Workout) bool {
-	return scheduler.IsGenerated(w) && !p.in.Ridden[w.ID] && w.Date >= p.today && !strings.Contains(w.Description, KeptMarker)
+	return scheduler.IsGenerated(w) && !p.in.Ridden[w.ID] && w.Date >= p.today
 }
 
 // removeOrLeave removes w when the plan may, and otherwise says why not.
@@ -451,7 +451,7 @@ func Eases(workouts []workout.Workout, profile workout.RiderProfile, ridden map[
 		}
 		free := func(w workout.Workout) bool {
 			return !done[w.ID] && w.CrewRideID == "" && w.Date >= today && !ridden[w.ID] &&
-				scheduler.IsGenerated(w) && !strings.Contains(w.Description, KeptMarker)
+				scheduler.IsGenerated(w)
 		}
 		for _, w := range byDate[addDays(row.Date, -1)] {
 			if free(w) && scheduler.IsHardSession(w) {

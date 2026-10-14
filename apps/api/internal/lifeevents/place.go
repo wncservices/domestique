@@ -328,7 +328,7 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 		return ineligibleRidden
 	case w.TestProtocol != "":
 		return eligible
-	case scheduler.IsGenerated(w):
+	case scheduler.IsPlanSession(w):
 		return eligible
 	case lifeRamped(w):
 		// Only a life event's own ramp touched it, and the rider has since
@@ -602,7 +602,7 @@ func movedDescription(w workout.Workout, from, reason string) string {
 		d += "\n\n"
 	}
 	d += note
-	if scheduler.IsGenerated(w) {
+	if scheduler.IsPlanSession(w) {
 		d += " " + scheduler.AdjustedMarker + " " + lifeNote(reason)
 	}
 	return d

@@ -53,6 +53,7 @@ func UsePreviewCacheDB(db *sql.DB, dsn string) (*PreviewCache, error) {
 // same idiom as ErrNoRecord elsewhere in this package: the caller's job is
 // just to recompute on a miss.
 func (c *PreviewCache) Get(slug, basemapUpdateID string) (layersJSON string, found bool, err error) {
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	row := c.db.QueryRow(c.dialect.Rebind(
 		`SELECT layers_json FROM track_preview_cache WHERE slug = ? AND basemap_update_id = ?`),
 		slug, basemapUpdateID)
@@ -76,6 +77,7 @@ func (c *PreviewCache) Get(slug, basemapUpdateID string) (layersJSON string, fou
 // as the background of the next route to take the name, and would keep the
 // deleted route's area on disk after the rider asked for it to be erased.
 func (c *PreviewCache) Delete(slug string) error {
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := c.db.Exec(c.dialect.Rebind(`DELETE FROM track_preview_cache WHERE slug = ?`), slug)
 	return err
 }
@@ -86,6 +88,7 @@ func (c *PreviewCache) Delete(slug string) error {
 // version of a route's preview.
 func (c *PreviewCache) Put(slug, basemapUpdateID, layersJSON string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// #nosec G701 -- constant statement, bound parameters; the dialect only picks placeholders.
 	_, err := c.db.Exec(c.dialect.Rebind(`
 INSERT INTO track_preview_cache (slug, basemap_update_id, layers_json, computed_at)
 VALUES (?, ?, ?, ?)

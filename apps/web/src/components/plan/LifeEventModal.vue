@@ -37,6 +37,7 @@ import {
   shiftYMD,
   skipAndInclude,
 } from './lifeEvents'
+import { describeError } from '@/utils/errorMessage'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -95,7 +96,7 @@ const title = computed(() => {
 })
 
 function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return describeError(err)
 }
 
 function reset() {

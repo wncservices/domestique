@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { api } from '@/api/client'
 import type { GarminConsumer } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 /**
  * The one-off deployment setup Garmin needs before anyone can sign in.
@@ -32,7 +33,7 @@ async function save() {
     open.value = false
     emit('changed')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     busy.value = false
   }
@@ -46,7 +47,7 @@ async function clear() {
     await api.clearGarminConsumer()
     emit('changed')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     busy.value = false
   }

@@ -6,6 +6,7 @@ import { api } from '@/api/client'
 import ColorModeToggle from '@/components/ColorModeToggle.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { roleColor } from '@/utils/role'
+import { describeError } from '@/utils/errorMessage'
 
 const {
   me,
@@ -45,7 +46,7 @@ async function signOut() {
     signingOut.value = false
     toast.add({
       title: 'Sign out failed',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
