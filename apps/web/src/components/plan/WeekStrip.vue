@@ -8,6 +8,7 @@ import type { AnalysisStep, CompletedSession, RiderProfile, SessionAnalysis, Tra
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import CrewRideBadge from './CrewRideBadge.vue'
+import ExportMenu from './ExportMenu.vue'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
@@ -289,6 +290,7 @@ watch(
         >
           <span class="hidden sm:inline">FTP test</span>
         </UButton>
+        <ExportMenu :week="week" label="Export" size="sm" label-from-sm />
         <UButton
           v-if="isCurrentWeek"
           color="neutral"
