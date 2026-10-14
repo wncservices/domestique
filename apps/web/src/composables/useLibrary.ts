@@ -20,6 +20,8 @@ const routes = ref<Route[]>([])
 const problems = ref<string[]>([])
 const plan = ref<PlanResponse | null>(null)
 const crews = ref<Crew[]>([])
+/** How many crews exist in all, when the server truncated the list; null otherwise. */
+const crewsTotal = ref<number | null>(null)
 
 const loading = ref(true)
 const error = ref('')
@@ -72,7 +74,7 @@ async function load(background: boolean): Promise<void> {
       identity.permissions.includes('routes:read')
         ? Promise.all([api.accounts(), api.routes(), api.plan()])
         : null,
-      identity.permissions.includes('crews:manage') ? api.crews() : [],
+      identity.permissions.includes('crews:manage') ? api.crewsWithTotal() : { crews: [], total: null },
     ])
 
     if (library) {
@@ -87,7 +89,8 @@ async function load(background: boolean): Promise<void> {
       problems.value = []
       plan.value = null
     }
-    crews.value = crewList
+    crews.value = crewList.crews
+    crewsTotal.value = crewList.total
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -141,6 +144,7 @@ export function useLibrary() {
     problems,
     plan,
     crews,
+    crewsTotal,
     loading,
     error,
     refresh,

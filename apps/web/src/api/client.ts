@@ -1,3 +1,4 @@
+import { totalFromHeader } from '@/utils/pagination'
 import { useToast } from '@nuxt/ui/composables'
 import type {
   Account,
@@ -139,6 +140,11 @@ export function garminMFABody(err: ApiError): GarminConnectMFA {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await requestWithResponse<T>(path, init)).data
+}
+
+/** request(), also handing back the Response for a caller that needs a header. */
+async function requestWithResponse<T>(path: string, init?: RequestInit): Promise<{ data: T; response: Response }> {
   const response = await fetch(path, {
     headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
     ...init,
@@ -171,8 +177,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(detail || `request to ${path} failed`, response.status, body)
   }
 
-  if (response.status === 204) return undefined as T
-  return (await response.json()) as T
+  if (response.status === 204) return { data: undefined as T, response }
+  return { data: (await response.json()) as T, response }
 }
 
 /** Slug segments are URL-safe already, but encode them so a stray space cannot break the path. */
@@ -573,6 +579,11 @@ export const api = {
   routeDuplicates: () => request<RouteDuplicateGroup[]>('/api/routes/duplicates'),
 
   crews: () => request<Crew[]>('/api/crews'),
+  /** The crews, and how many exist in all: the server returns at most 200 and says so in X-Total-Count. */
+  crewsWithTotal: async (): Promise<{ crews: Crew[]; total: number | null }> => {
+    const { data, response } = await requestWithResponse<Crew[]>('/api/crews')
+    return { crews: data, total: totalFromHeader(response.headers.get('X-Total-Count')) }
+  },
   /** Says which weekdays you are open to a shared ride with this crew; an empty
    *  list opts out. Writes your own row only. */
   setTogetherDays: (crewId: string, days: WeekdayCode[]) =>

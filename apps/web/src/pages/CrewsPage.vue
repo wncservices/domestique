@@ -5,13 +5,14 @@ import { api } from '@/api/client'
 import type { Crew, Person, Ride, RideSeriesInterval, RideSync, UpcomingRide } from '@/api/types'
 import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
+import { truncationNote } from '@/utils/pagination'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
 import CrewRideGoing from '@/components/CrewRideGoing.vue'
 import CrewTogetherDays from '@/components/CrewTogetherDays.vue'
 import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import TrackPreview from '@/components/TrackPreview.vue'
 
-const { crews, accounts, routes, me, loading, error, refresh, can } = useLibrary()
+const { crews, crewsTotal, accounts, routes, me, loading, error, refresh, can } = useLibrary()
 const toast = useToast()
 
 // The page's own list is only crews the rider is actually in — an owner's
@@ -22,6 +23,8 @@ const toast = useToast()
 // to find their own.
 const myCrews = computed(() => crews.value.filter((c) => c.membershipStatus === 'approved'))
 const otherCrews = computed(() => crews.value.filter((c) => c.membershipStatus !== 'approved'))
+
+const crewsTruncated = computed(() => truncationNote(crews.value.length, crewsTotal.value, 'crews'))
 
 const { page: crewsPage, paged: pagedCrews, pageSize: crewsPageSize } = usePagedList(myCrews, 24)
 
@@ -780,6 +783,15 @@ async function saveShare() {
         variant="subtle"
         icon="i-lucide-triangle-alert"
         :description="error"
+        class="mb-4"
+      />
+
+      <UAlert
+        v-if="crewsTruncated"
+        color="warning"
+        variant="subtle"
+        icon="i-lucide-info"
+        :description="`${crewsTruncated} Search for the crew you want by name.`"
         class="mb-4"
       />
 
