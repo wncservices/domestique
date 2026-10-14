@@ -2,6 +2,7 @@ package seasonreview
 
 import (
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -273,7 +274,7 @@ func TestGoalsInThePeriodCarryEventDayFormAndTheLongestRide(t *testing.T) {
 
 func TestGoalPeriodRunsFromTheGoalsCreationToItsEvent(t *testing.T) {
 	g := workout.Goal{ID: "g1", Name: "Gran Fondo", EventDate: "2026-06-14", CreatedAt: "2026-01-20T08:30:00Z"}
-	p, ok := GoalPeriod(g)
+	p, ok := GoalPeriod(g, nil)
 	if !ok || p.Kind != KindGoal || p.From != "2026-01-20" || p.To != "2026-06-14" || p.Label != "Gran Fondo" {
 		t.Errorf("period = %+v %v", p, ok)
 	}
@@ -283,7 +284,7 @@ func TestGoalPeriodRunsFromTheGoalsCreationToItsEvent(t *testing.T) {
 		"no creation time":        {EventDate: "2026-06-14"},
 		"unparseable event":       {EventDate: "June", CreatedAt: "2026-01-20T08:30:00Z"},
 	} {
-		if _, ok := GoalPeriod(bad); ok {
+		if _, ok := GoalPeriod(bad, nil); ok {
 			t.Errorf("%s gave a period", name)
 		}
 	}
@@ -291,7 +292,7 @@ func TestGoalPeriodRunsFromTheGoalsCreationToItsEvent(t *testing.T) {
 
 func TestAGoalPeriodIsReviewedLikeAYear(t *testing.T) {
 	g := workout.Goal{ID: "g1", Name: "Gran Fondo", EventDate: "2026-06-14", CreatedAt: "2026-01-20T08:30:00Z"}
-	p, _ := GoalPeriod(g)
+	p, _ := GoalPeriod(g, nil)
 	got := Compute(Input{Period: p, Today: "2026-12-31", Goals: []workout.Goal{g}, Sessions: []workout.CompletedSession{
 		ride("a", "2026-01-19", 3600, 1, 0, 1), ride("b", "2026-01-20", 3600, 1, 0, 1), ride("c", "2026-06-14", 3600, 1, 0, 1), ride("d", "2026-06-15", 3600, 1, 0, 1)}})
 	if got.Volume.Rides != 2 {
@@ -313,5 +314,22 @@ func TestAnEmptyPeriodHasEmptySectionsNotZeros(t *testing.T) {
 	}
 	if got.Period.Label != "2019" {
 		t.Errorf("period = %+v", got.Period)
+	}
+}
+
+// A goal created at 23:30 UTC on 31 December was created on 1 January in the
+// rider's Brussels: its season starts on the rider's day, not UTC's.
+func TestAGoalSeasonStartsOnTheRidersLocalDay(t *testing.T) {
+	brussels, err := time.LoadLocation("Europe/Brussels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := workout.Goal{Name: "Spring", EventDate: "2027-05-01", CreatedAt: "2026-12-31T23:30:00Z"}
+	p, ok := GoalPeriod(g, brussels)
+	if !ok || p.From != "2027-01-01" {
+		t.Errorf("local start = %+v %v, want 2027-01-01", p, ok)
+	}
+	if p, _ := GoalPeriod(g, nil); p.From != "2026-12-31" {
+		t.Errorf("no zone reads the stamp as UTC: %q", p.From)
 	}
 }

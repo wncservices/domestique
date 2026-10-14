@@ -595,8 +595,12 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
 Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
 
 - **Derived, rebuildable.** `session_analyses` stays the source of truth.
-  `RebuildBestEfforts` runs at start only on an empty table; `BackfillEfforts`
-  (one rider) is how an import reaches the book. Raw rows, no "current record"
+  `RebuildBestEfforts` runs at every start, idempotently (it writes the rows of
+  analyses that have none, in chunks of 500), so one cut short is finished by the
+  next. It runs in a goroutine and the three unattended loops start after it
+  (`StartAfterBestEffortsRebuild`), so listening is never delayed. A curve the
+  provider supplied in place of one read from the file is in the analysis and so
+  in a rebuild. `BackfillEfforts` (one rider) is how an import reaches the book. Raw rows, no "current record"
   row: a rider merge moves every row and the better value per metric is
   whichever `BestIn` finds, so `best_efforts` needs no bespoke merge rule
   (`TestMergeRiderKeepsTheBetterBestEffortPerMetric`).
@@ -612,6 +616,10 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
   now" returns every unannounced award in `bestEfforts` and marks them told. The
   unattended loop never marks, so an award made while nobody looked is still
   announced at the next visit.
+- **Awards are decided before the fitness recompute** in `analyseNewSessions`:
+  a recompute that fails returns early and the ride is never analysed again, so an
+  award decided after it would be lost. A max HR above `thresholds.MaxHRSpikeThreshold`
+  (230) is a sensor spike, not an effort.
 - **No value in a log line next to a rider**: rider, metric and scope only.
 
 ### FTP history and ride ascent

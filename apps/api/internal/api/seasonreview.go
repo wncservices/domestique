@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/seasonreview"
@@ -83,7 +84,7 @@ func (s *Server) handleSeasonReview(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such goal"})
 			return
 		}
-		p, ok := seasonreview.GoalPeriod(goal)
+		p, ok := seasonreview.GoalPeriod(goal, s.trainingLocation())
 		if !ok {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this goal has no season: it needs an event date after the day it was created"})
 			return
@@ -142,10 +143,10 @@ func (s *Server) handleSeasonReview(w http.ResponseWriter, r *http.Request) {
 		Period: period, Today: today, Sessions: sessions, Snapshots: snapshots,
 		FTPChanges: changes, ProfileFTP: profile.FTPWatts, Workouts: workouts, Efforts: awards, Goals: goals,
 	})
-	writeJSON(w, http.StatusOK, seasonResponseDTO{Review: review, Available: seasonAvailable(sessions, goals, todayTime.Year())})
+	writeJSON(w, http.StatusOK, seasonResponseDTO{Review: review, Available: seasonAvailable(sessions, goals, todayTime.Year(), s.trainingLocation())})
 }
 
-func seasonAvailable(sessions []workout.CompletedSession, goals []workout.Goal, currentYear int) seasonAvailableDTO {
+func seasonAvailable(sessions []workout.CompletedSession, goals []workout.Goal, currentYear int, loc *time.Location) seasonAvailableDTO {
 	years := map[string]bool{strconv.Itoa(currentYear): true}
 	for _, sess := range sessions {
 		if len(sess.Date) >= 4 {
@@ -158,10 +159,19 @@ func seasonAvailable(sessions []workout.CompletedSession, goals []workout.Goal, 
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(out.Years)))
 	for _, g := range goals {
-		if p, ok := seasonreview.GoalPeriod(g); ok {
+		if p, ok := seasonreview.GoalPeriod(g, loc); ok {
 			out.Goals = append(out.Goals, seasonPeriodDTO{ID: g.ID, Name: g.Name, From: p.From, To: p.To})
 		}
 	}
 	sort.SliceStable(out.Goals, func(i, j int) bool { return out.Goals[i].To > out.Goals[j].To })
 	return out
+}
+
+// trainingLocation is the rider's calendar: the training timezone, or nil (UTC
+// reading) when the schedule cannot be read.
+func (s *Server) trainingLocation() *time.Location {
+	if sched, err := s.syncSchedule(); err == nil {
+		return sched.Location()
+	}
+	return nil
 }
