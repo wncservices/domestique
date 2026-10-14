@@ -9,6 +9,7 @@
 // 2026-09-29-export-and-import-design.md's "UI".
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, ApiError } from '@/api/client'
+import { describeError } from '@/utils/errorMessage'
 import type { RideImport } from '@/api/types'
 import { parseLocalDate } from '@/utils/fitnessMath'
 
@@ -155,7 +156,7 @@ async function onPick(event: Event) {
   } catch (err) {
     // 409 (one is running), 413 (too big) and 429 (too soon) carry a message
     // written for the rider, so it is shown as it is.
-    problem.value = err instanceof ApiError || err instanceof Error ? err.message : String(err)
+    problem.value = describeError(err)
     // A 409 or 429 means the status on screen is stale: look again.
     if (err instanceof ApiError && (err.status === 409 || err.status === 429)) await refresh()
     if (running.value) startPolling()
