@@ -309,12 +309,15 @@ func (s *Server) analyseNewSessions(
 		analyzedCount[sess.Provider]++
 	}
 
+	// Before the recompute, not after: a decision about an award is made once, at
+	// the ride's first analysis, and a recompute that fails returns early and
+	// the ride is never analysed again. Decided after, the award would be lost.
+	s.awardNewEfforts(ctx, rider, addedEfforts)
 	if loadChanged {
 		if err := s.Training.RecomputeFitnessSnapshots(ctx, rider); err != nil {
 			return nil, err
 		}
 	}
-	s.awardNewEfforts(ctx, rider, addedEfforts)
 
 	if len(candidates) > 0 {
 		s.logger().Info("ride analysis: sync complete", "rider", rider, "analyzed", analyzedCount, "downloadFailures", downloadFailed)

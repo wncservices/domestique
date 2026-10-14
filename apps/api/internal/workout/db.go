@@ -505,6 +505,10 @@ type DB struct {
 	// untouched plan session, how current a "why" is, a goal's plan anchor), so
 	// two clocks make the outcome depend on the day the suite runs.
 	Clock func() time.Time
+
+	// EffortChunk is how many best_efforts rows one transaction of a backfill
+	// writes; 0 means DefaultEffortChunk. Tests shrink it.
+	EffortChunk int
 }
 
 // now is the store's current time, from Clock when one is set.
@@ -1105,6 +1109,14 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 // is written with the change when FTP differs from what was stored. It is the
 // one write path for FTP, so every change is recorded exactly once.
 func (d *DB) SaveProfileFrom(ctx context.Context, profile RiderProfile, source string) (RiderProfile, error) {
+	return d.SaveProfileOn(ctx, profile, source, "")
+}
+
+// SaveProfileOn is SaveProfileFrom told which local day a change to FTP is
+// filed under: the rider's own calendar day, which only the caller (who knows
+// the training timezone) can say. An empty date is the store clock's UTC day,
+// right for tests and tools that have no rider's timezone.
+func (d *DB) SaveProfileOn(ctx context.Context, profile RiderProfile, source, date string) (RiderProfile, error) {
 	if !validFTPSource(source) {
 		return RiderProfile{}, fmt.Errorf("workout: %q is not an FTP change source", source)
 	}
@@ -1154,7 +1166,7 @@ func (d *DB) SaveProfileFrom(ctx context.Context, profile RiderProfile, source s
 		if err := d.MarkFTPVerified(ctx, rider, d.now().UTC().Format("2006-01-02")); err != nil {
 			return RiderProfile{}, err
 		}
-		if err := d.appendFTPChange(ctx, rider, previous.FTPWatts, profile.FTPWatts, source); err != nil {
+		if err := d.appendFTPChange(ctx, rider, previous.FTPWatts, profile.FTPWatts, source, date); err != nil {
 			return RiderProfile{}, err
 		}
 	}

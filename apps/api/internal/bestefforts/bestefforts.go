@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/thresholds"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -93,7 +94,7 @@ func Efforts(a workout.SessionAnalysis, sport string) map[string]float64 {
 			out["speed_1800"] = a.BestSpeed1800
 		}
 	}
-	if (sport == string(model.SportCycling) || sport == string(model.SportRunning)) && a.MaxHR > 0 {
+	if (sport == string(model.SportCycling) || sport == string(model.SportRunning)) && a.MaxHR > 0 && a.MaxHR <= thresholds.MaxHRSpikeThreshold {
 		out["max_hr"] = float64(a.MaxHR)
 	}
 	return out

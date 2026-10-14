@@ -61,12 +61,15 @@ type FTPChange struct {
 	Source    string
 }
 
-func (d *DB) appendFTPChange(ctx context.Context, rider string, from, to float64, source string) error {
+func (d *DB) appendFTPChange(ctx context.Context, rider string, from, to float64, source, date string) error {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return fmt.Errorf("generate ftp change id: %w", err)
 	}
 	now := d.now().UTC()
+	if date == "" {
+		date = now.Format("2006-01-02")
+	}
 	// The id sorts in the order changes were made even when two share an
 	// instant (a clock that is fixed, or two replicas in one nanosecond): a
 	// counter before the random part. Changes are read in (date, changed_at, id)
@@ -75,7 +78,7 @@ func (d *DB) appendFTPChange(ctx context.Context, rider string, from, to float64
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO ftp_changes (id, rider, changed_at, date, from_watts, to_watts, source)
         VALUES (?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, now.Format(time.RFC3339Nano), now.Format("2006-01-02"), from, to, source)
+		id, rider, now.Format(time.RFC3339Nano), date, from, to, source)
 	return err
 }
 

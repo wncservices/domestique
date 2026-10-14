@@ -410,16 +410,19 @@ func goals(in Input) []GoalResult {
 }
 
 // GoalPeriod is a goal's own season: from the day it was created, the anchor of
-// its plan, to its event. ok is false for a goal that has no event date, was
-// created after it, or whose dates cannot be read.
-func GoalPeriod(g workout.Goal) (Period, bool) {
-	if len(g.CreatedAt) < len(dateLayout) {
+// its plan, to its event. The creation stamp is an instant, so loc (the rider's
+// training timezone; nil is UTC) says which calendar day it was. ok is false for
+// a goal that has no event date, was created after it, or whose dates cannot be
+// read.
+func GoalPeriod(g workout.Goal, loc *time.Location) (Period, bool) {
+	created, err := time.Parse(time.RFC3339, g.CreatedAt)
+	if err != nil {
 		return Period{}, false
 	}
-	from := g.CreatedAt[:len(dateLayout)]
-	if _, err := time.Parse(dateLayout, from); err != nil {
-		return Period{}, false
+	if loc != nil {
+		created = created.In(loc)
 	}
+	from := created.Format(dateLayout)
 	if _, err := time.Parse(dateLayout, g.EventDate); err != nil {
 		return Period{}, false
 	}
