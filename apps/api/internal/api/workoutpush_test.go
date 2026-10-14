@@ -51,7 +51,17 @@ func (h *pushHarness) push(id string) {
 // calls is what the fake Garmin was asked to do since the last reset.
 func (h *pushHarness) calls() string { return strings.Join(h.garmin.workoutCalls, "; ") }
 
-func tomorrow() string { return time.Now().AddDate(0, 0, 1).Format("2006-01-02") }
+// tomorrow is the day after today in the training zone (Europe/Brussels by
+// default), which is what the server's localToday compares against. The
+// machine's own zone would make this "today" for the server between local
+// midnight in Brussels and midnight in the test's zone.
+func tomorrow() string {
+	loc, err := time.LoadLocation("Europe/Brussels")
+	if err != nil {
+		panic(err)
+	}
+	return time.Now().In(loc).AddDate(0, 0, 1).Format("2006-01-02")
+}
 
 func TestPushingTwiceNeverMakesASecondCopy(t *testing.T) {
 	h := newPushHarness(t)
