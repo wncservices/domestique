@@ -183,6 +183,13 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"session_analyses": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
+	"ride_imports": {Purged: true, Note: "Training.DeleteRider: the counts of the rider's own history imports",
+		// ride_imports_one_running_idx is unique on rider where state = 'running',
+		// which uniqueKey cannot say, so it is stated as the whole rider: on a
+		// merge, if the target has any import row the source's are dropped. They
+		// are only progress counts, and a running row on each side would
+		// otherwise abort the merge.
+		Rename: renameRule{Columns: []string{"rider"}, Also: []uniqueKey{{Columns: []string{"rider"}}}}},
 	"session_links": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"fitness_snapshots": {Purged: true, Note: "Training.DeleteRider",
