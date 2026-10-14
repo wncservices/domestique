@@ -152,7 +152,7 @@ func (s *Server) handlePeopleMergeRider(w http.ResponseWriter, r *http.Request) 
 	}
 	out.Warnings = append(out.Warnings, sum.Warnings...)
 	for _, dr := range sum.Dropped {
-		out.Dropped = append(out.Dropped, mergeDropDTO{Table: dr.Table, What: dr.What, Consequence: dr.Consequence})
+		out.Dropped = append(out.Dropped, mergeDropDTO(dr))
 	}
 	for _, table := range sum.TableNames() {
 		c := sum.Tables[table]
