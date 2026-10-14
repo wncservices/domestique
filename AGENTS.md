@@ -1008,6 +1008,23 @@ in `elevation.Client`, per their own comments:
   Iconify API hosts (runtime icons, since the build ships no icon CSS). **A new third-party host
   in the frontend means a CSP change in `securityheaders.go`, and the symptom is a console
   violation, not a build error**; check the app in a browser after touching it.
+- **`csrfGuard` sits just inside `securityHeaders`** and refuses a POST/PUT/PATCH/DELETE a
+  browser is making for another site: `Sec-Fetch-Site` must be `same-origin` or `none`; without
+  it, an `Origin` must be this deployment's own (request Host, `public_url`, the OIDC redirect
+  hosts) and `null` is refused; a request with neither header is not a browser (curl, forwardAuth,
+  tests) and passes. A body must be `application/json`, except the one multipart route
+  (`POST /api/routes`). GETs are unguarded, which is why the OIDC and Wahoo callbacks and the
+  calendar feed need no exemption — **a new endpoint that changes state must be a non-GET**, and a
+  new cross-site POST receiver (an OIDC `form_post`, a webhook) must be exempted deliberately.
+- **Resource bounds on rider-supplied input**: `gpx.ParseUpload` (the only gate for a file just
+  sent; `DB.analyse` calls it, so every ingest path is covered) caps points, waypoints, elements
+  and nesting, refuses non-finite or off-Earth coordinates, and holds one of two process-wide
+  parse slots; `UploadLimiter` is per rider; `CrewSyncLimiter` is per crew; crews are 5 per
+  creator, `GET /api/crews` is paginated, and a ride-together poll refreshes at most 10 crews;
+  the proposal notes sent to the narration model are 500 characters. Stored routes are read with
+  `gpx.ParsePoints`, which is deliberately looser, so tightening a cap never makes a saved route
+  unreadable. Panics: the metrics sync scores each ride behind a `recover` (`guardedAnalyze`),
+  because a background goroutine's panic ends the process.
 
 ## Security guardrails
 

@@ -464,6 +464,20 @@ func (s *Store) List(ctx context.Context) ([]Crew, error) {
 	return out, rows.Err()
 }
 
+// CountCreatedBy is how many crews rider created. It counts the crews.owner
+// column (who created it, which handing ownership over does not change)
+// rather than current owner grants, so a cap on it cannot be shed by
+// transferring a crew away and creating another.
+func (s *Store) CountCreatedBy(ctx context.Context, rider string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(
+		`SELECT COUNT(1) FROM crews WHERE owner = ?`), normalizeRider(rider)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count crews: %w", err)
+	}
+	return n, nil
+}
+
 // SetAutoShare flips whether this crew is a default target for its
 // members' future uploads. Existing routes are never touched by this call —
 // it only changes what an upload with no explicit target choice defaults

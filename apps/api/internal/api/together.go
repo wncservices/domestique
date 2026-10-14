@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -192,6 +193,25 @@ func (s *Server) handleRideTogether(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rideTogetherListDTO{Proposals: out})
 }
 
+// maxTogetherCrews is how many of a rider's crews one poll refreshes. A poll is
+// a GET that reloads every member's plan to work out a shared day, so its cost
+// grows with crews times members; the first few (in id order, so the same ones
+// every time) are what the page can usefully show anyway.
+const maxTogetherCrews = 10
+
+// crewsToRefresh is the crews rider is a current member of, at most
+// maxTogetherCrews of them, in a stable order.
+func crewsToRefresh(snap crew.Snapshot, rider string) []crew.Crew {
+	var mine []crew.Crew
+	for _, c := range snap.Crews {
+		if snap.ApprovedRiders.Has(c.ID, rider) {
+			mine = append(mine, c)
+		}
+	}
+	slices.SortFunc(mine, func(a, b crew.Crew) int { return strings.Compare(a.ID, b.ID) })
+	return mine[:min(maxTogetherCrews, len(mine))]
+}
+
 // rideTogetherFor refreshes the proposals of every crew rider is in and returns
 // the caller's own.
 func (s *Server) rideTogetherFor(ctx context.Context, rider string) ([]rideTogetherDTO, error) {
@@ -200,10 +220,7 @@ func (s *Server) rideTogetherFor(ctx context.Context, rider string) ([]rideToget
 		return nil, err
 	}
 	weeks := s.rideTogetherWeeks()
-	for _, c := range snap.Crews {
-		if !snap.ApprovedRiders.Has(c.ID, rider) {
-			continue
-		}
+	for _, c := range crewsToRefresh(snap, rider) {
 		for _, week := range weeks {
 			if err := s.refreshProposal(ctx, snap, c, week); err != nil {
 				return nil, err
