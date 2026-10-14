@@ -42,6 +42,7 @@ type harness struct {
 	base   string
 	store  state.Store
 	source *source.DB
+	srv    *api.Server
 	// pushed records what the fake adapters were asked to do.
 	pushed *fakeLedger
 }
@@ -201,6 +202,7 @@ func newHarness(t *testing.T) *harness {
 		base:   server.URL,
 		store:  store,
 		source: src,
+		srv:    srv,
 		pushed: ledger,
 	}
 }

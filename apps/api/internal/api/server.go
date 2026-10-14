@@ -432,6 +432,13 @@ type Server struct {
 	// Nil is unlimited (tests).
 	CrewSyncLimiter *ratelimit.Limiter
 
+	// UploadLimiter throttles GPX uploads by rider. Each one is a 20 MiB body
+	// and a parse, and the stored track is re-read on every view, so the cost
+	// of a route is paid again and again; the global parse slots in
+	// gpx.ParseUpload bound concurrency, this bounds one rider's rate. Nil is
+	// unlimited (tests).
+	UploadLimiter *ratelimit.Limiter
+
 	// pushMu serialises pushes: two concurrent reconciles against the same
 	// account would race on remote ids and on the state file.
 	pushMu sync.Mutex
@@ -682,13 +689,13 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return securityHeaders(s.extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
+	return securityHeaders(s.csrfGuard(s.extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
 		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(withRoutePattern(mux)))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + redactPath(r.URL.Path)
 		}),
-	))))
+	)))))
 }
 
 // authenticate resolves the identity once per request and puts it on the
@@ -2148,6 +2155,16 @@ func readPushSelection(w http.ResponseWriter, r *http.Request) (map[model.PlanKe
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermUploadRoute) {
+		return
+	}
+
+	// Before the body is read: a rider over budget costs a header check, not
+	// a 20 MiB read and a parse.
+	if rider := auth.FromContext(r.Context()).User; s.UploadLimiter != nil && !s.UploadLimiter.Allow(rider) {
+		s.logger().Warn("upload rate limit hit", "rider", rider)
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "too many uploads — wait a few minutes and try again",
+		})
 		return
 	}
 

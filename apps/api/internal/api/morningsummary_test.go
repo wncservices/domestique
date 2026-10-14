@@ -167,6 +167,10 @@ func newMSHarness(t *testing.T, mode auth.Mode, dsn string, opts msOpts) *msHarn
 
 // identifyAs signs req in as user with this address, vouched for or not.
 func (h *msHarness) identifyAs(req *http.Request, user, email string, verified bool, groups ...string) {
+	// Every body this app takes is JSON, and the CSRF guard refuses any other.
+	if req.Body != nil && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	switch h.mode {
 	case auth.ModeProxy:
 		req.Header.Set(auth.HeaderUser, user)
@@ -540,6 +544,7 @@ func TestOIDCEmailVerifiedClaimDecidesWhetherARiderCanOptIn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			put.Header.Set("Content-Type", "application/json")
 			pr, err := h.client.Do(put)
 			if err != nil {
 				t.Fatal(err)

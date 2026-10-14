@@ -184,11 +184,11 @@ func (c *Client) complete(ctx context.Context, prompt string, maxTokens int) (st
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		// Capped the same way elevation.Client caps an error body: an
-		// operator-configured (here, Anthropic's own) endpoint is still a
-		// third party from this process's point of view.
+		// Status and the API's error type only, never the body: an error body
+		// can quote the request, and the request holds the rider's own note
+		// (which may say they are ill). The callers log this error.
 		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("narration: anthropic api returned %s: %s", resp.Status, strings.TrimSpace(string(detail)))
+		return "", fmt.Errorf("narration: anthropic api returned %s%s", resp.Status, errorType(detail))
 	}
 
 	var out messageResponse
@@ -403,4 +403,23 @@ func parseGoalProposal(text string, today time.Time) (GoalProposal, error) {
 		p.TargetElevationM = raw.TargetElevationM
 	}
 	return p, nil
+}
+
+// errorType is " (invalid_request_error)" from an Anthropic error body, or ""
+// if it has none: the one field of the body that is safe to log.
+func errorType(body []byte) string {
+	var e struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &e) != nil || e.Error.Type == "" || len(e.Error.Type) > 64 {
+		return ""
+	}
+	for _, r := range e.Error.Type {
+		if r != '_' && (r < 'a' || r > 'z') {
+			return ""
+		}
+	}
+	return " (" + e.Error.Type + ")"
 }
