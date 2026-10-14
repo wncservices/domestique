@@ -221,6 +221,12 @@ func (s *Server) analyseNewSessions(
 		if scorePanicked {
 			act = nil
 		}
+		if analysis.SamplesUnreadable {
+			// The file decoded but not one record had a usable time. The ride
+			// stays scored from the provider's summary, duration included.
+			s.logger().Warn("ride analysis: the FIT has no usable timestamps, using the provider summary", "rider", rider, "provider", sess.Provider, "session", sess.ID)
+			act = nil
+		}
 		if act == nil && len(analysis.PowerCurve) == 0 && len(fallbackCurve) > 0 {
 			analysis.PowerCurve = fallbackCurve
 		}
