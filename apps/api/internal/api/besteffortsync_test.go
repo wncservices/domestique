@@ -39,9 +39,14 @@ type effortSyncResult struct {
 // can fill, so a new best is possible (a scope needs three prior values).
 func newEffortHarness(t *testing.T, acts []garmin.Activity, fits map[string][]byte) (*metricsSyncHarness, *bytes.Buffer) {
 	t.Helper()
+	return newEffortHarnessAt(t, acts, fits, effortClock)
+}
+
+func newEffortHarnessAt(t *testing.T, acts []garmin.Activity, fits map[string][]byte, now time.Time) (*metricsSyncHarness, *bytes.Buffer) {
+	t.Helper()
 	h := newMetricsSyncHarness(t, &fakeGarmin{activities: acts, fitByID: fits})
 	h.seedGarminSession("wilant")
-	h.srv.Clock = func() time.Time { return effortClock }
+	h.srv.Clock = func() time.Time { return now }
 	followServerClock(h.srv, h.training)
 	logs := &bytes.Buffer{}
 	h.srv.Log = slog.New(slog.NewTextHandler(logs, nil))
@@ -148,15 +153,31 @@ func TestSyncStoresALateAnalysedRideWithoutAnAward(t *testing.T) {
 	}
 }
 
+// A ride can be awarded for three days after its date, counted on the rider's
+// local calendar (the training timezone, Europe/Brussels by default), not UTC.
+// The dates come from the clock, and a late-evening clock is the case that
+// differs: at 23:30 UTC the rider's day has already turned over.
 func TestTheFourthDayIsTheLastDayARideCanBeAwarded(t *testing.T) {
-	for date, want := range map[string]int{"2026-09-07": 3, "2026-09-06": 0} {
-		start, _ := time.Parse("2006-01-02", date)
-		start = start.Add(8 * time.Hour)
-		act, fit := rideAt(t, "7010", start, 317)
-		h, _ := newEffortHarness(t, []garmin.Activity{act}, map[string][]byte{"7010": fit})
-		if got := len(h.syncEfforts().BestEfforts); got != want {
-			t.Errorf("a ride on %s (clock 2026-09-10) got %d awards, want %d", date, got, want)
-		}
+	brussels, err := time.LoadLocation("Europe/Brussels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, now := range map[string]time.Time{
+		"morning":      time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC),
+		"late evening": time.Date(2026, 9, 10, 23, 30, 0, 0, time.UTC),
+	} {
+		t.Run(name, func(t *testing.T) {
+			today := now.In(brussels)
+			for days, want := range map[int]int{3: 3, 4: 0} {
+				day := time.Date(today.Year(), today.Month(), today.Day()-days, 8, 0, 0, 0, time.UTC)
+				act, fit := rideAt(t, "7010", day, 317)
+				h, _ := newEffortHarnessAt(t, []garmin.Activity{act}, map[string][]byte{"7010": fit}, now)
+				if got := len(h.syncEfforts().BestEfforts); got != want {
+					t.Errorf("a ride %d days before the rider's today (%s, clock %s) got %d awards, want %d",
+						days, day.Format("2006-01-02"), now.Format(time.RFC3339), got, want)
+				}
+			}
+		})
 	}
 }
 

@@ -105,7 +105,11 @@ const maxHRUpDelta = 1
 // been through that filter before it reaches here, but this package treats
 // an untrusted-looking input the same way regardless of who built it,
 // rather than assuming the caller got it right.
-const maxHRSpikeThreshold = 230
+const maxHRSpikeThreshold = MaxHRSpikeThreshold
+
+// MaxHRSpikeThreshold is the highest heart rate treated as real, exported so
+// the record book applies the same ceiling detection does.
+const MaxHRSpikeThreshold = 230
 
 // thresholdHRUpDelta is the flat +1 bpm threshold-HR threshold, max HR's own
 // reasoning: a percentage means nothing for a small integer.
