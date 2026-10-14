@@ -1279,6 +1279,9 @@ personal location and health data, so:
   sport, day plus or minus one, duration within max(60 s, 2 %), power within 3 %).
   A rename or key rotation changes the MAC, so a re-upload then relies on that
   tolerance dedupe.
+- `POST /api/training/import` is a multipart upload. When the CSRF guard (#451)
+  lands, it must be on that guard's multipart allowlist alongside `POST
+  /api/routes`, or every import is refused.
 - A job stops writing when its `ride_imports` row is gone (the rider was purged),
   and `Finish`/`Update` only touch a still-running row. Detection reads the
   profile fresh just before it runs, through `inferFromHistory`, the tail shared
