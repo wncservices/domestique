@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
 
 const (
@@ -116,7 +116,7 @@ func New(cfg Config) *Client {
 	return &Client{
 		HTTP: &http.Client{
 			Timeout:   defaultTimeout,
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
 		cfg:     cfg,
 		APIBase: apiBase,

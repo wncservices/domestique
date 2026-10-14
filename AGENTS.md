@@ -888,7 +888,7 @@ cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
 - **Outbound HTTP calls carry spans too**, on the same principle: every one of this app's outbound
   HTTP clients — `oidcflow`, `komoot`, `garmin`, `wahoo`, `auth0mgmt`, `elevation`, `weather`,
   `routing`, `geocoding`, `narration`, and `basemap`'s pmtiles/job/preview code — wraps its `http.Client`'s
-  `Transport` in `otelhttp.NewTransport`, and (`oidcflow` aside, which already threaded
+  `Transport` in `telemetry.OutboundTransport`, and (`oidcflow` aside, which already threaded
   `context.Context` everywhere) each needed the same context-threading treatment as the DB before
   that Transport had a real parent to attach to. `garmin.Client`'s threading runs through
   `internal/targets` (`Target`/`Courses` interfaces, the `Garmin`/`Wahoo` adapters) and
@@ -927,8 +927,14 @@ What is **not** automatic, and has shipped missing before — twice, in `pmtiles
 in `elevation.Client`, per their own comments:
 
 1. **A new outbound HTTP client** (a new package like `elevation.Client`, or a new method added to
-   an existing one) needs its own `http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}`,
-   and every call it makes needs `http.NewRequestWithContext` with a `ctx` that actually descends
+   an existing one) needs its own `http.Client{Transport: telemetry.OutboundTransport(http.DefaultTransport)}`
+   — never `otelhttp.NewTransport` directly: otelhttp records the full request URL, query string
+   included (weather API key, coordinates, typed addresses, SSO tickets), and
+   `telemetry.RedactingExporter`, which `Setup` puts in front of the OTLP exporter, is what rewrites
+   it to scheme, host and a redacted path; a test fails if a client builds its own. And never put a
+   secret or an address into an error you return: `*url.Error` repeats the URL, so unwrap it
+   (`errors.As`, keep `.Err`) as `weather`, `geocoding`, `elevation`, `routing` and `auth0mgmt` do.
+   Every call it makes needs `http.NewRequestWithContext` with a `ctx` that actually descends
    from the inbound request — not a freshly-built `context.Background()`, which produces a
    disconnected root span nobody can trace back to the request that triggered it. Every
    outbound HTTP client in `internal/` (the list in the Observability section above) does this
@@ -1001,6 +1007,23 @@ in `elevation.Client`, per their own comments:
   Iconify API hosts (runtime icons, since the build ships no icon CSS). **A new third-party host
   in the frontend means a CSP change in `securityheaders.go`, and the symptom is a console
   violation, not a build error**; check the app in a browser after touching it.
+- **`csrfGuard` sits just inside `securityHeaders`** and refuses a POST/PUT/PATCH/DELETE a
+  browser is making for another site: `Sec-Fetch-Site` must be `same-origin` or `none`; without
+  it, an `Origin` must be this deployment's own (request Host, `public_url`, the OIDC redirect
+  hosts) and `null` is refused; a request with neither header is not a browser (curl, forwardAuth,
+  tests) and passes. A body must be `application/json`, except the one multipart route
+  (`POST /api/routes`). GETs are unguarded, which is why the OIDC and Wahoo callbacks and the
+  calendar feed need no exemption — **a new endpoint that changes state must be a non-GET**, and a
+  new cross-site POST receiver (an OIDC `form_post`, a webhook) must be exempted deliberately.
+- **Resource bounds on rider-supplied input**: `gpx.ParseUpload` (the only gate for a file just
+  sent; `DB.analyse` calls it, so every ingest path is covered) caps points, waypoints, elements
+  and nesting, refuses non-finite or off-Earth coordinates, and holds one of two process-wide
+  parse slots; `UploadLimiter` is per rider; `CrewSyncLimiter` is per crew; crews are 5 per
+  creator, `GET /api/crews` is paginated, and a ride-together poll refreshes at most 10 crews;
+  the proposal notes sent to the narration model are 500 characters. Stored routes are read with
+  `gpx.ParsePoints`, which is deliberately looser, so tightening a cap never makes a saved route
+  unreadable. Panics: the metrics sync scores each ride behind a `recover` (`guardedAnalyze`),
+  because a background goroutine's panic ends the process.
 
 ## Security guardrails
 

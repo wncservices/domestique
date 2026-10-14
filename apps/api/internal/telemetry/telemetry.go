@@ -67,14 +67,21 @@ func Setup(ctx context.Context, serviceName, version string) (Shutdown, error) {
 	if err != nil {
 		return noop, fmt.Errorf("otlp trace exporter: %w", err)
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exp),
-		sdktrace.WithResource(res),
-	)
+	tp := newProvider(exp, res)
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
 	return tp.Shutdown, nil
+}
+
+// newProvider batches spans to exp, with URLs redacted on the way out — see
+// OutboundTransport for why. The redaction wraps the exporter, not the
+// provider, because it has to see the span after otelhttp has added its URL.
+func newProvider(exp sdktrace.SpanExporter, res *resource.Resource) *sdktrace.TracerProvider {
+	return sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(RedactingExporter(exp)),
+		sdktrace.WithResource(res),
+	)
 }
 
 func tracingConfigured() bool {

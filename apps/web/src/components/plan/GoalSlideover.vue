@@ -74,7 +74,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
             e.g. "gran fondo, 180 km, 2400 m of climbing, mid June" — fills in the fields below for you to review.
           </p>
           <div class="flex gap-2">
-            <UInput v-model="note" class="w-full" placeholder="What are you training for?" @keydown.enter.prevent="emit('propose')" />
+            <UInput v-model="note" :maxlength="500" class="w-full" placeholder="What are you training for?" @keydown.enter.prevent="emit('propose')" />
             <UButton
               icon="i-lucide-sparkles"
               color="neutral"

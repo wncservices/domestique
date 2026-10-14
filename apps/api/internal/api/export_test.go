@@ -6,6 +6,7 @@ import (
 
 	"github.com/muktihari/fit/profile/filedef"
 
+	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 )
 
@@ -35,4 +36,15 @@ func HoldSchedulingLockForTest(ctx context.Context, db *sql.DB, fn func()) bool 
 func (s *Server) PurgeRiderDataForTest(ctx context.Context, rider string) (int, error) {
 	sum, err := s.purgeRiderData(ctx, rider)
 	return sum.CrewMemberships, err
+}
+
+// Limits the tests assert against.
+const (
+	MaxCrewsPerCreator = maxCrewsPerCreator
+	MaxTogetherCrews   = maxTogetherCrews
+)
+
+// CrewsToRefreshForTest exposes which crews one ride-together poll refreshes.
+func CrewsToRefreshForTest(snap crew.Snapshot, rider string) []crew.Crew {
+	return crewsToRefresh(snap, rider)
 }

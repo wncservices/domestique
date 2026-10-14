@@ -61,7 +61,7 @@ func (c *Client) ActivityFIT(ctx context.Context, activityID string) ([]byte, er
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("garmin: downloading activity FIT: %w", err)
+		return nil, fmt.Errorf("garmin: downloading activity FIT: %w", stripURL(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
