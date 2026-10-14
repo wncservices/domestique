@@ -125,6 +125,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A fetch that never got a response (offline, DNS, the server down). Typed so
+ * describeError can tell it from a TypeError thrown by our own code; an aborted
+ * request is not one and is rethrown untouched.
+ */
+export class NetworkError extends Error {
+  readonly network = true
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : 'network error')
+    this.name = 'NetworkError'
+    this.cause = cause
+  }
+}
+
 /** The two-factor fields of a failed Garmin sign-in, typed; the ApiError body is untyped JSON. */
 export function garminMFABody(err: ApiError): GarminConnectMFA {
   const { mfa, challenge, method, mfaInvalid, attemptsRemaining } = err.body
@@ -138,10 +152,16 @@ export function garminMFABody(err: ApiError): GarminConnectMFA {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
-    ...init,
-  })
+  let response: Response
+  try {
+    response = await fetch(path, {
+      headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+      ...init,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    throw new NetworkError(err)
+  }
 
   if (!response.ok) {
     // The API returns {"error": "..."} on failure; fall back to the status text

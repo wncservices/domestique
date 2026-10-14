@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
-import { api, ApiError } from '@/api/client'
+import { api } from '@/api/client'
 import type {
   AutoScheduleSetting,
   AutoSyncSetting,
@@ -85,7 +85,7 @@ async function sendPasswordReset() {
   } catch (err) {
     toast.add({
       title: 'Could not send the reset email',
-      description: err instanceof ApiError ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -132,7 +132,7 @@ async function loadMfa() {
   } catch (err) {
     toast.add({
       title: 'Could not load two-factor authentication',
-      description: err instanceof ApiError ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -171,7 +171,7 @@ async function startMfaEnroll() {
   } catch (err) {
     toast.add({
       title: 'Could not start enrollment',
-      description: err instanceof ApiError ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -193,7 +193,7 @@ async function removeMfaFactor() {
   } catch (err) {
     toast.add({
       title: 'Could not remove it',
-      description: err instanceof ApiError ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -220,7 +220,7 @@ async function deleteMyAccount() {
   } catch (err) {
     toast.add({
       title: 'Could not delete your account',
-      description: err instanceof ApiError ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

@@ -36,7 +36,7 @@ async function load() {
   } catch (err) {
     plan.value = null
     if (err instanceof ApiError && err.status === 404) hidden.value = true
-    else failed.value = err instanceof Error ? err.message : 'Could not load the pacing plan'
+    else failed.value = err instanceof Error ? describeError(err) : 'Could not load the pacing plan'
   } finally {
     loading.value = false
   }
