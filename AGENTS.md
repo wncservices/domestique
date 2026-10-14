@@ -147,6 +147,23 @@ rider's verified email matched. Things that are easy to break:
   out of a lockout. The CLI (`bind-identity`, `unbind-identity`, `--dry-run`,
   and `--force` for an issuer other than `auth.oidc.issuer`) is the fallback.
   Moving or removing a binding ends that account's sessions.
+- **A rider split in two is merged, not renamed.** `rename-rider` refuses a
+  target that already has data; `domestique merge-rider [--dry-run] <from>
+  <into>` (and `POST /api/people/riders/{rider}/merge`, admin only, with
+  `dryRun`) moves everything across `riderTables`, keeping the **target's** row
+  wherever both riders have one on the same key, one account/sign-in per
+  provider, bindings following, and ends the sessions of both. A dry run does
+  the real work in the transaction and rolls it back, so its counts are exact.
+  A new registered table needs nothing extra unless its rename rule is
+  `Bespoke` (then `mergeBespoke` in `ridermerge.go` needs code for it:
+  `TestEveryRegisteredTableHasAMergeRule`) or the table has a unique index that
+  includes the rider beyond the `Unique`/`With` key: list it in `Also`
+  (`TestEveryUniqueIndexOnARiderKeyedTableIsInTheRegistry` compares the registry
+  with the schema's real indexes). Crew memberships keep the strongest row;
+  training is concatenated, not merged (the dry run warns). A real merge takes the
+  scheduling and background-sync advisory locks (409 while a tick holds one),
+  rebuilds the target's fitness history, and after the commit never fails: a
+  step that does is a warning. It is logged at Warn.
 - **`PATCH /api/me` renames the display name only.** It cannot change who
   anyone is, so it needs no collision check.
 - **Never log an email or a `sub` next to a rider name.**
@@ -1016,7 +1033,7 @@ This repository is **public**. Everything below assumes a reader who is not you.
 - `domestique.yaml` holds account **ids and labels only**, and is gitignored anyway;
   `domestique.example.yaml` is the committed template.
 - If a credential is ever committed, rotate it. Removing the commit is not enough.
-- **Every new table that holds rider data (a `rider`/`created_by` column, or keyed through a workout, session, goal or account id) must be registered in `riderTables` (`internal/api/riderdata.go`) and deleted by `purgeRiderData`** — health and location data must not outlive the rider. `TestEveryRiderKeyedTableIsRegistered` and `TestPurgeRemovesEveryRidersData` fail until it is. The same entry carries a `Rename` rule that `domestique rename-rider` (`api.RenameRider`) runs in one transaction; `TestEveryRegisteredTableHasARenameRule` fails if it misses a rider column.
+- **Every new table that holds rider data (a `rider`/`created_by` column, or keyed through a workout, session, goal or account id) must be registered in `riderTables` (`internal/api/riderdata.go`) and deleted by `purgeRiderData`** — health and location data must not outlive the rider. `TestEveryRiderKeyedTableIsRegistered` and `TestPurgeRemovesEveryRidersData` fail until it is. The same entry carries a `Rename` rule that `domestique rename-rider` (`api.RenameRider`) runs in one transaction; `TestEveryRegisteredTableHasARenameRule` fails if it misses a rider column. `merge-rider` (`api.MergeRider`) walks the same rules.
 - **GPX files are personal location data** — a route usually starts at somebody's front door.
   They belong in a private source, never in this repo. `examples/routes/` holds one synthetic
   route and must stay that way.
@@ -1032,7 +1049,8 @@ just demo         # serve a local SQLite library with the example route loaded
 just api          # run the API on :8080, serving apps/web/dist if built
 just web          # Vite dev server on :5173, proxying /api to :8080
 just import DIR   # load a folder of .gpx files into the database
-# also: domestique bind-identity <issuer> <sub> <rider> [--dry-run], unbind-identity <issuer> <sub>
+# also: domestique bind-identity <issuer> <sub> <rider> [--dry-run], unbind-identity <issuer> <sub>,
+#       merge-rider [--dry-run] <from> <into>
 just komoot ARGS  # list or import Komoot routes (needs KOMOOT_* env vars)
 just fit SLUG     # write a route out as a FIT course for a real device
 ```

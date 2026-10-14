@@ -52,6 +52,7 @@ import type {
   LibraryResponse,
   Person,
   RiderInfo,
+  RiderMerge,
   Poi,
   PlanResponse,
   PushResponse,
@@ -775,6 +776,15 @@ export const api = {
   riderInfo: (rider: string) => request<RiderInfo>(`/api/people/riders/${encodeURIComponent(rider)}`),
   /** Riders that have data here but no account in the gate role and no binding. */
   orphanRiders: () => request<{ riders: string[] }>('/api/people/orphans'),
+  /** Merges one rider's data into another (admin only). With dryRun the same
+   *  work is done and rolled back, so the page can show what would happen
+   *  first; a real merge cannot be undone and ends both riders' sessions. */
+  mergeRider: (from: string, into: string, dryRun: boolean) =>
+    request<RiderMerge>(`/api/people/riders/${encodeURIComponent(from)}/merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ into, dryRun }),
+    }),
   /** Deletes a person entirely: their local data for the given rider
    *  identity (best-effort — see Person.likelyRider), then their Auth0
    *  identity. Irreversible. Pass no rider to delete only the Auth0

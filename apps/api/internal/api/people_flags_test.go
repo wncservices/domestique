@@ -130,3 +130,30 @@ func TestPeopleListOffersAnAdminTheirOwnRiderBack(t *testing.T) {
 		t.Errorf("suggestRider = %q, want wilant", row.SuggestRider)
 	}
 }
+
+// The admin override binds an account that has no binding. The owner who
+// already signed in as "wilant-2" has one, so nothing is bound, and without a
+// flag their row would say nothing about why they are not on "wilant".
+func TestBootstrapFlagsAnAdminItCouldNotBindBecauseTheyWereAlreadyBoundElsewhere(t *testing.T) {
+	owner := withRoles(at(person("auth0|owner", "Wilant", "owner@example.com", true), afterData), "admins")
+	h := newBindingHarness(t, owner)
+	h.dataFor(t, "wilant", dataTime)
+	bindTo(t, h.ssoHarness, "auth0|owner", "wilant-2", "owner@example.com")
+	if _, err := h.srv.BootstrapIdentities(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	row := peopleRows(t, h)["auth0|owner"]
+	if row.BoundRider != "wilant-2" {
+		t.Fatalf("the bootstrap moved an existing binding: %+v", row)
+	}
+	if row.FlagReason != "admin-bound-elsewhere" {
+		t.Errorf("flagReason = %q, want admin-bound-elsewhere so the owner's badge shows", row.FlagReason)
+	}
+	if !strings.Contains(row.FlagText, "wilant") {
+		t.Errorf("flagText = %q, want it to name the rider", row.FlagText)
+	}
+	if row.SuggestRider != "wilant" {
+		t.Errorf("suggestRider = %q, want wilant", row.SuggestRider)
+	}
+}

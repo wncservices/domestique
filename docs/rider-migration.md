@@ -251,6 +251,109 @@ own (`wilant-2` while `wilant` still has data); that is expected, and binding
 the account to `wilant` is the fix. `rename-rider` is still there for genuinely
 renaming a rider, and it moves the bindings along with everything else.
 
+## Merging a split rider
+
+A person can end up as two riders. The usual cause: an older rider was derived
+from the Auth0 *nickname* and the current one from the *name* (or the old
+deployment used another name altogether), so their data sits under
+`wilant.nackaerts` while they sign in as `wilant`. `rename-rider` cannot fix
+that, because the target already has data and it refuses a collision. **Merge**
+moves one rider's data onto another.
+
+**It cannot be undone, and it is not a smart merge.** Two things happen to data
+both riders have, and you should know both before you run it.
+
+1. **Rows that share a key: the target's wins, the source's is deleted.** Where
+   the rider is part of a unique key (a profile, a wellness day, a calendar link,
+   a morning summary, a provider sign-in, a crew ride's fixed session...) the
+   target's row stays and the source's is dropped. Which of the two is right is not
+   something the merge can know; the target's is the one the person is signed in
+   to. The dry run lists what this costs, **by name**:
+   - the source's `provider_links` row for a provider the target also has: the
+     target's is kept; if it has expired, **reconnect Garmin** (or Wahoo, Komoot);
+   - an `accounts` (head unit) on a provider both have: the target's is kept and
+     the source's is unlinked together with its sync state;
+   - `calendar_feeds`: the source's **calendar link stops working**;
+   - `morning_summaries` and `rider_profiles` (FTP and test dates): the source's
+     is gone;
+   - `workouts` with the same crew ride: a rider has one fixed session per crew
+     ride, so the source's is dropped (with its push record; a copy already on a
+     device stays there).
+2. **Training is concatenated, not merged.** Goals and planned workouts do not
+   share a key, so both riders' sets survive side by side under the target. The
+   dry run warns when both have goals or future workouts: *two plans will overlap
+   on N days*. After the merge those days have **two** workouts each and the
+   target has **both** riders' goals, which means two periodisation plans pushing
+   at once. Tidy up on the training page: keep one goal and delete the other (its
+   workouts go with it), then delete the duplicate workouts on the overlapping
+   days. Do that before the next auto-schedule pass if you can.
+
+What it does, in one transaction (a failure leaves the database as it was):
+
+- every table in the rider registry (`riderTables`) is walked with its rename
+  rule; plain tables have their rows moved, and **every unique key** the registry
+  states (`Unique`/`With`, and `Also` for further and partial indexes) is checked
+  for collisions. `TestEveryUniqueIndexOnARiderKeyedTableIsInTheRegistry` compares
+  those keys with the schema's real indexes, so a new unique index cannot be
+  missed;
+- crew memberships on a crew both belong to keep the **strongest** row: approved
+  beats pending, `is_owner` and `can_schedule` are each the OR of the two. Counted
+  as *merged*, not dropped, so a crew's owner is never lost by merging them;
+- identity bindings of the source move to the target, so the accounts that signed
+  in as the source now sign in as the target;
+- once the data has committed: the target's fitness history (CTL/ATL/TSB) is
+  rebuilt from the sessions it now has (and deleted if it has none), and the
+  sessions (logins) of **both** riders end. Everyone signs in again. If either
+  step fails the merge is **not** rolled back (it has committed); the command and
+  the page say so as a warning.
+
+**Run it at a quiet time.** A real merge takes the same advisory locks as the
+scheduling and background-sync ticks, so neither can write in the middle of it
+(on PostgreSQL; SQLite has one writer). If a tick is running, it refuses ("a
+background job is running; try again in a minute", HTTP 409): wait and run it
+again. It also does not stop a rider using the app while it runs, so still pick a
+moment when nobody is in the middle of a push.
+
+Look first:
+
+```bash
+kubectl exec -it deploy/domestique -- domestique merge-rider --dry-run wilant.nackaerts wilant
+kubectl exec -it deploy/domestique -- domestique merge-rider wilant.nackaerts wilant
+```
+
+The dry run does the real work and rolls it back, so its table is exactly what
+the real run does: per table, how many rows **moved**, how many of the target's
+were **kept-target**, how many of the source's were **dropped-source**, and how
+many memberships were **merged**. It prints the warnings and the named drops
+above it, and a real run prints the same before it writes anything.
+`DOMESTIQUE_ENCRYPTION_KEY` must be set in the pod for the sessions to be found
+and ended; without it the command says so and they expire on their own.
+
+On the People page an admin does the same from the *Riders with data but no
+account* alert: **Merge into...** on the orphan rider shows the warnings, the
+named drops and the table (checked when you leave the field or press Enter) and
+asks for a confirmation. It is admin-only (`people:manage`) and is logged at
+Warn with the two rider names and the counts (never an email or a sub).
+
+### If you land on `name-2`
+
+You signed in, and the People page (or the app) shows you as `wilant-2` with no
+data, while `wilant` (and maybe an older split like `wilant.nackaerts`) holds it.
+In order:
+
+1. **Link yourself to the real rider.** Your own row says *This is me: link to
+   `wilant`* whenever `wilant` has data and nobody is bound to it. Click it; you
+   are signed out, sign in again, and the data is there. (A rider nobody is
+   bound to is the one thing an admin may bind their own account to; onto a
+   bound rider it is refused, and `bind-identity` on the server is the way.)
+2. **Merge any split.** If the *Riders with data but no account* alert still
+   lists `wilant.nackaerts`, merge it into `wilant`: dry run first, read the
+   warnings and the dropped list, then confirm. Pick a quiet moment.
+3. **Tidy the training.** If both had a plan, remove the duplicate goal and the
+   duplicate days (see above).
+4. **Tidy the empty one.** `wilant-2` now has nothing bound to it and nothing in
+   it; nothing needs doing, and a purge removes it if you want it gone.
+
 ## Admin bootstrapping
 
 Every OIDC login lands as `default_role: viewer` until an Auth0 Action adds a
