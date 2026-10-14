@@ -27,7 +27,7 @@ func spanValues(exp *tracetest.InMemoryExporter) []string {
 	for _, s := range exp.GetSpans() {
 		out = append(out, s.Name)
 		for _, a := range s.Attributes {
-			out = append(out, string(a.Key)+"="+a.Value.Emit())
+			out = append(out, string(a.Key)+"="+a.Value.String())
 		}
 	}
 	return out
