@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
@@ -1101,6 +1103,40 @@ type profileProposalDTO struct {
 	Explanation          string   `json:"explanation,omitempty"`
 }
 
+// maxNarrationNoteRunes bounds the free text sent to the paid model by the
+// profile and goal proposal endpoints. A sentence or two; the plan-edit
+// endpoint's typed sentence is capped at 300, and these notes get a little
+// more room because they describe a whole event or a week.
+const maxNarrationNoteRunes = 500
+
+// maxNarrationBodyBytes is the request body cap that goes with it: room for a
+// note of that many characters escaped as JSON, and not a byte more.
+const maxNarrationBodyBytes = 8 << 10
+
+type narrationNote struct {
+	Note string `json:"note"`
+}
+
+// decodeNarrationNote reads and bounds a proposal request's note, answering
+// the 400 itself. The body is read through a small cap and the note counted in
+// characters (not bytes), so what reaches the model is bounded however large a
+// body was sent.
+func decodeNarrationNote(w http.ResponseWriter, r *http.Request) (narrationNote, bool) {
+	var body narrationNote
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxNarrationBodyBytes)).Decode(&body); err != nil || strings.TrimSpace(body.Note) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a note is required"})
+		return body, false
+	}
+	body.Note = strings.TrimSpace(body.Note)
+	if utf8.RuneCountInString(body.Note) > maxNarrationNoteRunes {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("keep the note under %d characters", maxNarrationNoteRunes),
+		})
+		return body, false
+	}
+	return body, true
+}
+
 // handleProposeProfileChange turns a rider's free-text note (e.g. "I'm
 // traveling next week") into a suggested edit to their own profile —
 // Phase E's other half. Deliberately never writes the stored profile
@@ -1122,11 +1158,8 @@ func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var body struct {
-		Note string `json:"note"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil || strings.TrimSpace(body.Note) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a note is required"})
+	body, ok := decodeNarrationNote(w, r)
+	if !ok {
 		return
 	}
 
@@ -1182,11 +1215,8 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Note string `json:"note"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil || strings.TrimSpace(body.Note) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a note is required"})
+	body, ok := decodeNarrationNote(w, r)
+	if !ok {
 		return
 	}
 
