@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -34,6 +35,13 @@ type mergeTableDTO struct {
 	Moved         int    `json:"moved"`
 	KeptTarget    int    `json:"keptTarget"`
 	DroppedSource int    `json:"droppedSource"`
+	Merged        int    `json:"merged"`
+}
+
+type mergeDropDTO struct {
+	Table       string `json:"table"`
+	What        string `json:"what,omitempty"`
+	Consequence string `json:"consequence"`
 }
 
 type mergeDTO struct {
@@ -46,7 +54,13 @@ type mergeDTO struct {
 	Moved         int             `json:"moved"`
 	KeptTarget    int             `json:"keptTarget"`
 	DroppedSource int             `json:"droppedSource"`
+	Merged        int             `json:"merged"`
 	SessionsEnded int             `json:"sessionsEnded"`
+	// Dropped names the rows that cost something to lose, and Warnings is what to
+	// read before confirming (two plans that overlap) or after (a follow-up step
+	// that failed once the data had moved). Both are always arrays.
+	Dropped  []mergeDropDTO `json:"dropped"`
+	Warnings []string       `json:"warnings"`
 }
 
 // handlePeopleMergeRider moves everything one rider owns onto another, for a
@@ -93,11 +107,21 @@ func (s *Server) handlePeopleMergeRider(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	opt := MergeOptions{DryRun: body.DryRun}
-	if !body.DryRun && s.Sessions != nil {
-		opt.EndSessions = s.Sessions.DeleteRider
+	opt := MergeOptions{DryRun: body.DryRun, Now: s.now}
+	if !body.DryRun {
+		if s.Sessions != nil {
+			opt.EndSessions = s.Sessions.DeleteRider
+		}
+		if s.Training != nil {
+			opt.RecomputeFitness = s.Training.RecomputeFitnessSnapshots
+		}
 	}
 	sum, err := MergeRider(r.Context(), db, d, from, into, opt)
+	if errors.Is(err, ErrMergeBusy) {
+		s.logger().Warn("rider merge refused: a background job holds the lock", "from", from, "into", into)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a background job is running just now; try again in a minute"})
+		return
+	}
 	if err != nil {
 		s.logger().Error("merging riders failed; nothing was changed unless the error says only the sessions were not ended",
 			"from", from, "into", into, "dryRun", body.DryRun, "err", err)
@@ -111,23 +135,28 @@ func (s *Server) handlePeopleMergeRider(w http.ResponseWriter, r *http.Request) 
 		s.logger().Info("rider merge previewed", "from", from, "into", into,
 			"moved", totals.Moved, "keptTarget", totals.KeptTarget, "droppedSource", totals.DroppedSource, "by", caller)
 	} else {
-		// Generated loops held in memory for either rider describe data that has
-		// just moved.
+		// From here the data has moved: this is a 200 whatever else happened, with
+		// the warnings telling the admin what still needs doing. Generated loops
+		// held in memory for either rider describe data that has just moved.
 		s.candidateStore().Forget(from)
 		s.candidateStore().Forget(into)
 		s.logger().Warn("riders merged", "from", from, "into", into,
-			"moved", totals.Moved, "keptTarget", totals.KeptTarget, "droppedSource", totals.DroppedSource,
-			"sessionsEnded", sum.SessionsEnded, "by", caller)
+			"moved", totals.Moved, "keptTarget", totals.KeptTarget, "droppedSource", totals.DroppedSource, "merged", totals.Merged,
+			"sessionsEnded", sum.SessionsEnded, "warnings", len(sum.Warnings), "by", caller)
 	}
 
 	out := mergeDTO{
 		From: from, Into: into, DryRun: body.DryRun, Tables: []mergeTableDTO{},
-		Moved: totals.Moved, KeptTarget: totals.KeptTarget, DroppedSource: totals.DroppedSource,
-		SessionsEnded: sum.SessionsEnded,
+		Moved: totals.Moved, KeptTarget: totals.KeptTarget, DroppedSource: totals.DroppedSource, Merged: totals.Merged,
+		SessionsEnded: sum.SessionsEnded, Dropped: []mergeDropDTO{}, Warnings: []string{},
+	}
+	out.Warnings = append(out.Warnings, sum.Warnings...)
+	for _, dr := range sum.Dropped {
+		out.Dropped = append(out.Dropped, mergeDropDTO{Table: dr.Table, What: dr.What, Consequence: dr.Consequence})
 	}
 	for _, table := range sum.TableNames() {
 		c := sum.Tables[table]
-		out.Tables = append(out.Tables, mergeTableDTO{Table: table, Moved: c.Moved, KeptTarget: c.KeptTarget, DroppedSource: c.DroppedSource})
+		out.Tables = append(out.Tables, mergeTableDTO{Table: table, Moved: c.Moved, KeptTarget: c.KeptTarget, DroppedSource: c.DroppedSource, Merged: c.Merged})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -16,6 +16,15 @@ type riderTable struct {
 	Taken []string
 }
 
+// uniqueKey is one unique index that includes the rider.
+type uniqueKey struct {
+	// Columns are all of the index's columns, the rider's among them.
+	Columns []string
+	// NonEmpty names columns of a partial index (WHERE col <> ''): two rows only
+	// collide when these are not empty.
+	NonEmpty []string
+}
+
 // renameRule says how rename-rider treats one registered table. Exactly one of
 // Columns, Bespoke or Skip is set; TestEveryRegisteredTableHasARenameRule holds
 // every entry to that and to naming every rider column the real schema has.
@@ -33,6 +42,12 @@ type renameRule struct {
 	// is refused, never merged.
 	Unique bool
 	With   []string
+	// Also is every further unique key that includes the rider, beyond the one
+	// Unique/With state (a second unique index, a partial one). A merge has to
+	// know each of them to keep the target's row instead of aborting on a
+	// collision; TestEveryUniqueIndexOnARiderKeyedTableIsInTheRegistry compares
+	// them with the schema's real indexes.
+	Also []uniqueKey
 	// Bespoke tables are renamed by RenameRider's own code: a derived id
 	// ("<provider>:<rider>") and --replace need more than a column rewrite.
 	Bespoke bool
@@ -157,7 +172,9 @@ var riderTables = map[string]riderTable{
 	"rider_profiles": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
 	"workouts": {Purged: true, Note: "Training.DeleteRider",
-		Rename: renameRule{Columns: []string{"rider"}}},
+		// workouts_crew_ride_idx: a rider has one fixed session per crew ride.
+		Rename: renameRule{Columns: []string{"rider"},
+			Also: []uniqueKey{{Columns: []string{"rider", "crew_ride_id"}, NonEmpty: []string{"crew_ride_id"}}}}},
 	"workout_pushes": {Purged: true, Note: "keyed through workout_id; Training.DeleteRider",
 		Rename: renameRule{Skip: "keyed through workout_id, which a rename does not change"}},
 	"scheduled_weeks": {Purged: true, Note: "keyed through goal_id; Training.DeleteRider",

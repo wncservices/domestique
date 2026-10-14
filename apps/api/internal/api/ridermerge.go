@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
@@ -32,6 +34,23 @@ type MergeOptions struct {
 	// bindings. It lives outside MergeRider because a session is found by a keyed
 	// hash of the rider, which needs the deployment's key.
 	EndSessions func(ctx context.Context, rider string) (int, error)
+	// RecomputeFitness, when set, rebuilds a rider's fitness history from their
+	// sessions after a real merge, for the target.
+	RecomputeFitness func(ctx context.Context, rider string) error
+	// Now replaces time.Now (what "future" means to the plan warning), for tests.
+	Now func() time.Time
+}
+
+// ErrMergeBusy means a background job holds a lock the merge needs.
+var ErrMergeBusy = errors.New("merge-rider: a background job is running; try again in a minute")
+
+// MergeDrop is one row the merge deletes because the target has its own, named
+// so the person can see what it costs them before anything is written.
+type MergeDrop struct {
+	Table string
+	// What names the row: a provider, a crew ride.
+	What        string
+	Consequence string
 }
 
 // MergeCounts is what a merge did in one table.
@@ -44,12 +63,20 @@ type MergeCounts struct {
 	// DroppedSource is the merged-away rider's rows that were deleted for the
 	// same reason: two riders cannot both hold one key, and the target wins.
 	DroppedSource int
+	// Merged is the target's rows that took the stronger of the two (crew
+	// membership): not a loss, so not counted as dropped.
+	Merged int
 }
 
 // MergeSummary says, per table, what a merge did (or, on a dry run, would do).
 // Tables with nothing in them are left out.
 type MergeSummary struct {
 	Tables map[string]MergeCounts
+	// Dropped lists, by name, the rows that cost something to lose.
+	Dropped []MergeDrop
+	// Warnings are things to read before (or after) merging: two plans that will
+	// overlap, a follow-up step that failed once the data had moved.
+	Warnings []string
 	// SessionsEnded is what EndSessions reported, summed over both riders.
 	SessionsEnded int
 }
@@ -61,6 +88,7 @@ func (m MergeSummary) Totals() MergeCounts {
 		t.Moved += c.Moved
 		t.KeptTarget += c.KeptTarget
 		t.DroppedSource += c.DroppedSource
+		t.Merged += c.Merged
 	}
 	return t
 }
@@ -83,6 +111,7 @@ func (m *MergeSummary) add(table string, c MergeCounts) {
 	cur.Moved += c.Moved
 	cur.KeptTarget += c.KeptTarget
 	cur.DroppedSource += c.DroppedSource
+	cur.Merged += c.Merged
 	m.Tables[table] = cur
 }
 
@@ -122,42 +151,151 @@ func MergeRider(ctx context.Context, db *sql.DB, d dbx.Dialect, from, into strin
 		return sum, fmt.Errorf("merge-rider: %q has characters that cannot appear in an account id", into)
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
+	// A real merge holds the locks the scheduling and background-sync ticks hold,
+	// so neither can write between the moment the data is read and the commit.
+	// They are try-locks: a tick that is running makes the merge refuse (the
+	// caller says to try again) instead of waiting behind it. A dry run writes
+	// nothing and needs neither. On SQLite there is one writer and no lock.
+	var (
+		err    error
+		locked = true
+	)
+	run := func() { err = mergeInTx(ctx, db, d, from, into, opt, &sum) }
+	if opt.DryRun {
+		run()
+	} else {
+		ranOuter := withDBLock(ctx, db, autoScheduleLockKey, func() {
+			ranInner := withDBLock(ctx, db, backgroundSyncLockKey, run)
+			locked = locked && ranInner
+		})
+		locked = locked && ranOuter
+		if !locked {
+			return sum, ErrMergeBusy
+		}
+	}
 	if err != nil {
 		return sum, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	for _, table := range mergeTables() {
-		c, err := mergeGeneric(tx, d, table, from, into)
-		if err != nil {
-			return sum, err
-		}
-		sum.add(table, c)
-	}
-	if err := mergeAccounts(tx, d, from, into, &sum); err != nil {
-		return sum, err
-	}
-	if err := mergeProviderLinks(tx, d, from, into, &sum); err != nil {
-		return sum, err
-	}
-
 	if opt.DryRun {
-		return sum, nil // rolled back by the deferred Rollback: nothing was written
+		return sum, nil
 	}
-	if err := tx.Commit(); err != nil {
-		return sum, err
+
+	// The data has moved. Nothing below is an error any more: each step that
+	// fails is a warning, because the caller can still tell the person what was
+	// merged and what still needs doing.
+	if opt.RecomputeFitness != nil {
+		if err := opt.RecomputeFitness(ctx, into); err != nil {
+			sum.Warnings = append(sum.Warnings, fmt.Sprintf("the data is merged, but %s's fitness history could not be rebuilt (%v); it is rebuilt the next time a session syncs", into, err))
+		}
 	}
 	if opt.EndSessions != nil {
 		for _, rider := range []string{from, into} {
 			n, err := opt.EndSessions(ctx, rider)
 			if err != nil {
-				return sum, fmt.Errorf("merge-rider: the data is merged, but ending %s's sessions failed: %w", rider, err)
+				sum.Warnings = append(sum.Warnings, fmt.Sprintf("the data is merged, but the sessions of %s could not be ended (%v); they stay signed in until they expire", rider, err))
+				continue
 			}
 			sum.SessionsEnded += n
 		}
 	}
 	return sum, nil
+}
+
+// mergeInTx does the merge in one transaction and commits it unless opt.DryRun.
+func mergeInTx(ctx context.Context, db *sql.DB, d dbx.Dialect, from, into string, opt MergeOptions, sum *MergeSummary) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now
+	if opt.Now != nil {
+		now = opt.Now
+	}
+	// Read before anything moves: it is the state the person is deciding on.
+	if err := planWarnings(tx, d, from, into, now(), sum); err != nil {
+		return err
+	}
+	for _, table := range mergeTables() {
+		c, err := mergeGeneric(tx, d, table, from, into, sum)
+		if err != nil {
+			return err
+		}
+		sum.add(table, c)
+	}
+	if err := mergeAccounts(tx, d, from, into, sum); err != nil {
+		return err
+	}
+	if err := mergeProviderLinks(tx, d, from, into, sum); err != nil {
+		return err
+	}
+	if opt.DryRun {
+		return nil // rolled back by the deferred Rollback: nothing was written
+	}
+	return tx.Commit()
+}
+
+// planWarnings says what a merge cannot sort out by itself. Training data is
+// concatenated, not merged: two riders' goals and planned workouts do not
+// collide on any key, so both sets survive, side by side, and the person has to
+// tidy them up.
+func planWarnings(tx *sql.Tx, d dbx.Dialect, from, into string, now time.Time, sum *MergeSummary) error {
+	countOf := func(table string, extra string, args ...any) (int, error) {
+		have, err := existingColumns(tx, d, table)
+		if err != nil {
+			return 0, err
+		}
+		if len(have) == 0 {
+			return 0, nil
+		}
+		var n int
+		// #nosec G701 -- table and clause are constants in this file; values are bound.
+		err = tx.QueryRow(d.Rebind(`SELECT COUNT(*) FROM `+table+` WHERE `+extra), args...).Scan(&n)
+		return n, err
+	}
+
+	gFrom, err := countOf("goals", `rider = ?`, from)
+	if err != nil {
+		return fmt.Errorf("merge-rider: counting goals: %w", err)
+	}
+	gInto, err := countOf("goals", `rider = ?`, into)
+	if err != nil {
+		return fmt.Errorf("merge-rider: counting goals: %w", err)
+	}
+	if gFrom > 0 && gInto > 0 {
+		sum.Warnings = append(sum.Warnings, fmt.Sprintf(
+			"both riders have training goals (%d for %s, %d for %s): they are concatenated, so %s ends up with %d goals and two training plans; delete the one you do not want after merging",
+			gFrom, from, gInto, into, into, gFrom+gInto))
+	}
+
+	today := now.UTC().Format("2006-01-02")
+	wFrom, err := countOf("workouts", `rider = ? AND date >= ?`, from, today)
+	if err != nil {
+		return fmt.Errorf("merge-rider: counting planned workouts: %w", err)
+	}
+	wInto, err := countOf("workouts", `rider = ? AND date >= ?`, into, today)
+	if err != nil {
+		return fmt.Errorf("merge-rider: counting planned workouts: %w", err)
+	}
+	if wFrom == 0 || wInto == 0 {
+		return nil
+	}
+	var days int
+	// #nosec G701 -- constant statement; values are bound.
+	if err := tx.QueryRow(d.Rebind(`SELECT COUNT(DISTINCT w.date) FROM workouts w WHERE w.rider = ? AND w.date >= ?
+        AND EXISTS (SELECT 1 FROM workouts o WHERE o.rider = ? AND o.date = w.date)`), from, today, into).Scan(&days); err != nil {
+		return fmt.Errorf("merge-rider: comparing the two plans: %w", err)
+	}
+	switch {
+	case days == 1:
+		sum.Warnings = append(sum.Warnings, fmt.Sprintf("two plans will overlap on 1 day (%d planned workouts for %s, %d for %s from %s on): both sets are kept; delete one set after merging", wFrom, from, wInto, into, today))
+	case days > 1:
+		sum.Warnings = append(sum.Warnings, fmt.Sprintf("two plans will overlap on %d days (%d planned workouts for %s, %d for %s from %s on): both sets are kept; delete one set after merging", days, wFrom, from, wInto, into, today))
+	default:
+		sum.Warnings = append(sum.Warnings, fmt.Sprintf("both riders have planned workouts from %s on (%d for %s, %d for %s): they are concatenated, on different days", today, wFrom, from, wInto, into))
+	}
+	return nil
 }
 
 func normalizeRiderName(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
@@ -166,8 +304,40 @@ func normalizeRiderName(s string) string { return strings.ToLower(strings.TrimSp
 // order: every one with rename Columns.
 func mergeTables() []string { return registeredRenames() }
 
+// dropNotes is what a dropped row costs the person, for the tables where it
+// is not nothing. What is the column that names the row, or empty. The target's
+// own row is always the one kept, so each says what stops working with the
+// source's.
+var dropNotes = map[string]struct {
+	What        string
+	Consequence func(from, into string) string
+}{
+	"calendar_feeds": {"", func(from, into string) string {
+		return fmt.Sprintf("the calendar link of %s stops working (%s's own link is kept)", from, into)
+	}},
+	"morning_summaries": {"", func(from, into string) string {
+		return fmt.Sprintf("the morning summary settings of %s are dropped (%s's own are kept)", from, into)
+	}},
+	"rider_profiles": {"", func(from, into string) string {
+		return fmt.Sprintf("the training profile of %s (FTP, test dates) is dropped; %s's own profile is kept", from, into)
+	}},
+	"workouts": {"crew_ride_id", func(from, into string) string {
+		return fmt.Sprintf("the fixed session %s had for this crew ride is dropped (%s's own is kept); a copy already pushed to a device stays there", from, into)
+	}},
+}
+
+// mergeKeys is every unique key of a table that includes the rider: the one
+// Unique/With state and each Also.
+func mergeKeys(rule renameRule) []uniqueKey {
+	var keys []uniqueKey
+	if rule.Unique {
+		keys = append(keys, uniqueKey{Columns: append([]string{rule.Columns[0]}, rule.With...)})
+	}
+	return append(keys, rule.Also...)
+}
+
 // mergeGeneric merges one registry table by its rename rule.
-func mergeGeneric(tx *sql.Tx, d dbx.Dialect, table, from, into string) (MergeCounts, error) {
+func mergeGeneric(tx *sql.Tx, d dbx.Dialect, table, from, into string, sum *MergeSummary) (MergeCounts, error) {
 	var c MergeCounts
 	rule := riderTables[table].Rename
 	have, err := existingColumns(tx, d, table)
@@ -180,34 +350,67 @@ func mergeGeneric(tx *sql.Tx, d dbx.Dialect, table, from, into string) (MergeCou
 	}
 
 	// Table and column names are constants from riderTables, never input.
-	if rule.Unique && have[rule.Columns[0]] {
-		key := rule.Columns[0]
+	for _, key := range mergeKeys(rule) {
+		riderCol, rest, ok := splitKey(key, rule, have)
+		if !ok {
+			continue
+		}
 		same := func(a, b string) string {
 			s := ""
-			for _, w := range rule.With {
+			for _, w := range rest {
 				s += " AND " + a + "." + w + " = " + b + "." + w
 			}
 			return s
 		}
+		// Only rows that take part in a partial index can collide on it.
+		partial := ""
+		for _, col := range key.NonEmpty {
+			partial += " AND " + table + "." + col + " <> ''"
+		}
+		partialN := strings.ReplaceAll(partial, table+".", "n.")
 		// Source rows the target already has a row for, on the whole key.
-		srcCollide := `FROM ` + table + ` WHERE ` + table + `.` + key + ` = ? AND EXISTS (SELECT 1 FROM ` + table +
-			` n WHERE n.` + key + ` = ?` + same("n", table) + `)`
+		srcCollide := `FROM ` + table + ` WHERE ` + table + `.` + riderCol + ` = ?` + partial + ` AND EXISTS (SELECT 1 FROM ` + table +
+			` n WHERE n.` + riderCol + ` = ?` + same("n", table) + `)`
+		var n int
 		// #nosec G701 -- built only from riderTables constants; the riders are bound.
-		if err := tx.QueryRow(d.Rebind(`SELECT COUNT(*) `+srcCollide), from, into).Scan(&c.DroppedSource); err != nil {
+		if err := tx.QueryRow(d.Rebind(`SELECT COUNT(*) `+srcCollide), from, into).Scan(&n); err != nil {
 			return c, fmt.Errorf("merge-rider: counting collisions in %s: %w", table, err)
 		}
-		if c.DroppedSource > 0 {
-			// The target rows those collided with, counted from the target's side.
-			kept := `SELECT COUNT(*) FROM ` + table + ` n WHERE n.` + key + ` = ? AND EXISTS (SELECT 1 FROM ` + table +
-				` o WHERE o.` + key + ` = ?` + same("o", "n") + `)`
-			// #nosec G701 -- built only from riderTables constants; the riders are bound.
-			if err := tx.QueryRow(d.Rebind(kept), into, from).Scan(&c.KeptTarget); err != nil {
-				return c, fmt.Errorf("merge-rider: counting the target's rows in %s: %w", table, err)
+		if n == 0 {
+			continue
+		}
+		// The target rows those collided with, counted from the target's side.
+		var kept int
+		keptQ := `SELECT COUNT(*) FROM ` + table + ` n WHERE n.` + riderCol + ` = ?` + partialN + ` AND EXISTS (SELECT 1 FROM ` + table +
+			` o WHERE o.` + riderCol + ` = ?` + same("o", "n") + `)`
+		// #nosec G701 -- built only from riderTables constants; the riders are bound.
+		if err := tx.QueryRow(d.Rebind(keptQ), into, from).Scan(&kept); err != nil {
+			return c, fmt.Errorf("merge-rider: counting the target's rows in %s: %w", table, err)
+		}
+
+		if table == "crew_members" {
+			// Not a loss: the stronger of the two rows is what is left.
+			if err := strengthenMemberships(tx, d, from, into); err != nil {
+				return c, err
 			}
-			// #nosec G701 -- built only from riderTables constants; the riders are bound.
-			if _, err := tx.Exec(d.Rebind(`DELETE `+srcCollide), from, into); err != nil {
-				return c, fmt.Errorf("merge-rider: dropping %s's colliding rows in %s: %w", from, table, err)
+			c.Merged += n
+		} else {
+			if note, ok := dropNotes[table]; ok {
+				if err := listDrops(tx, d, table, note.What, srcCollide, from, into, note.Consequence(from, into), sum); err != nil {
+					return c, err
+				}
 			}
+			if table == "workouts" {
+				if err := dropPushesOfCollidingWorkouts(tx, d, srcCollide, from, into); err != nil {
+					return c, err
+				}
+			}
+			c.KeptTarget += kept
+			c.DroppedSource += n
+		}
+		// #nosec G701 -- built only from riderTables constants; the riders are bound.
+		if _, err := tx.Exec(d.Rebind(`DELETE `+srcCollide), from, into); err != nil {
+			return c, fmt.Errorf("merge-rider: dropping %s's colliding rows in %s: %w", from, table, err)
 		}
 	}
 
@@ -228,6 +431,93 @@ func mergeGeneric(tx *sql.Tx, d dbx.Dialect, table, from, into string) (MergeCou
 		}
 	}
 	return c, nil
+}
+
+// splitKey is a key's rider column (the one the rename rule rewrites) and the
+// rest of it. False when the table does not have all of the key's columns yet.
+func splitKey(key uniqueKey, rule renameRule, have map[string]bool) (riderCol string, rest []string, ok bool) {
+	for _, col := range key.Columns {
+		if !have[col] {
+			return "", nil, false
+		}
+		if riderCol == "" && slices.Contains(rule.Columns, col) {
+			riderCol = col
+			continue
+		}
+		rest = append(rest, col)
+	}
+	return riderCol, rest, riderCol != ""
+}
+
+// listDrops names, before they are deleted, the source rows that collide.
+func listDrops(tx *sql.Tx, d dbx.Dialect, table, whatCol, srcCollide, from, into, consequence string, sum *MergeSummary) error {
+	sel := `1`
+	if whatCol != "" {
+		sel = table + `.` + whatCol
+	}
+	// #nosec G701 -- built only from constants in this file; the riders are bound.
+	rows, err := tx.Query(d.Rebind(`SELECT `+sel+` `+srcCollide), from, into)
+	if err != nil {
+		return fmt.Errorf("merge-rider: listing what %s drops from %s: %w", from, table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var what any
+		if err := rows.Scan(&what); err != nil {
+			return err
+		}
+		name := ""
+		if whatCol != "" {
+			name = fmt.Sprint(what)
+		}
+		sum.Dropped = append(sum.Dropped, MergeDrop{Table: table, What: name, Consequence: consequence})
+	}
+	return rows.Err()
+}
+
+// dropPushesOfCollidingWorkouts removes the push records of the workouts about
+// to be dropped, which would otherwise point at nothing.
+func dropPushesOfCollidingWorkouts(tx *sql.Tx, d dbx.Dialect, srcCollide, from, into string) error {
+	have, err := existingColumns(tx, d, "workout_pushes")
+	if err != nil {
+		return err
+	}
+	if len(have) == 0 {
+		return nil
+	}
+	// #nosec G701 -- built only from constants in this file; the riders are bound.
+	_, err = tx.Exec(d.Rebind(`DELETE FROM workout_pushes WHERE workout_id IN (SELECT workouts.id `+srcCollide+`)`), from, into)
+	if err != nil {
+		return fmt.Errorf("merge-rider: dropping the push records of dropped workouts: %w", err)
+	}
+	return nil
+}
+
+// strengthenMemberships settles each crew both riders belong to on the stronger
+// of the two rows before the source's is removed: approved beats pending, and
+// is_owner and can_schedule are each the OR of the two. Keeping the target's row
+// as it stood would, for the owner of a crew who signs in as the other rider,
+// leave the crew without an owner nobody can sign in as.
+func strengthenMemberships(tx *sql.Tx, d dbx.Dialect, from, into string) error {
+	for _, col := range []string{"is_owner", "can_schedule"} {
+		// #nosec G701 -- col is one of two constants; values are bound.
+		if _, err := tx.Exec(d.Rebind(`UPDATE crew_members SET `+col+` = ? WHERE rider = ? AND `+col+` = ? AND EXISTS
+            (SELECT 1 FROM crew_members s WHERE s.crew_id = crew_members.crew_id AND s.rider = ? AND s.`+col+` = ?)`),
+			true, into, false, from, true); err != nil {
+			return fmt.Errorf("merge-rider: merging crew memberships (%s): %w", col, err)
+		}
+	}
+	// The decision that made the source approved comes along with its status.
+	// #nosec G701 -- constant statement; values are bound.
+	if _, err := tx.Exec(d.Rebind(`UPDATE crew_members SET status = 'approved',
+            decided_by = (SELECT s.decided_by FROM crew_members s WHERE s.crew_id = crew_members.crew_id AND s.rider = ?),
+            decided_at = (SELECT s.decided_at FROM crew_members s WHERE s.crew_id = crew_members.crew_id AND s.rider = ?)
+        WHERE rider = ? AND status <> 'approved' AND EXISTS
+            (SELECT 1 FROM crew_members s WHERE s.crew_id = crew_members.crew_id AND s.rider = ? AND s.status = 'approved')`),
+		from, from, into, from); err != nil {
+		return fmt.Errorf("merge-rider: merging crew memberships (status): %w", err)
+	}
+	return nil
 }
 
 // mergeAccounts merges the linked head units and their sync state. An account
@@ -306,6 +596,8 @@ func mergeAccounts(tx *sql.Tx, d dbx.Dialect, from, into string, sum *MergeSumma
 			if _, err := tx.Exec(d.Rebind(`DELETE FROM accounts WHERE id = ?`), p.oldID); err != nil {
 				return fmt.Errorf("merge-rider: dropping account %s: %w", p.oldID, err)
 			}
+			sum.Dropped = append(sum.Dropped, MergeDrop{Table: "accounts", What: p.provider,
+				Consequence: fmt.Sprintf("the %s head unit linked as %s is unlinked (%s's own %s account is kept): relink it under %s if it is a different device", p.provider, from, into, p.provider, into)})
 			sum.add("accounts", MergeCounts{KeptTarget: 1, DroppedSource: 1})
 			sum.add("sync_state", MergeCounts{KeptTarget: targetState, DroppedSource: oldState})
 			continue
@@ -369,6 +661,25 @@ func mergeProviderLinks(tx *sql.Tx, d dbx.Dialect, from, into string, sum *Merge
 		return err
 	}
 	if clash > 0 {
+		// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
+		rows, err := tx.Query(d.Rebind(`SELECT provider `+colliding+` ORDER BY provider`), from, into)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var provider string
+			if err := rows.Scan(&provider); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			sum.Dropped = append(sum.Dropped, MergeDrop{Table: "provider_links", What: provider,
+				Consequence: fmt.Sprintf("the %s sign-in of %s is dropped (%s's own is kept): if %s's has expired, reconnect %s", provider, from, into, into, provider)})
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
 		// #nosec G701 -- constant statement or one built from riderTables constants; riders are bound.
 		if _, err := tx.Exec(d.Rebind(`DELETE `+colliding), from, into); err != nil {
 			return fmt.Errorf("merge-rider: dropping %s's provider sign-ins that %s already has: %w", from, into, err)

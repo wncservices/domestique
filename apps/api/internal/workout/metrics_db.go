@@ -94,7 +94,10 @@ func (d *DB) RecomputeFitnessSnapshots(ctx context.Context, rider string) error 
 		return err
 	}
 	if len(sessions) == 0 {
-		return nil
+		// No sessions, no history: whatever snapshots are left describe sessions
+		// that are gone (a merge that left a rider with none, say).
+		_, err := d.db.ExecContext(ctx, d.query(`DELETE FROM fitness_snapshots WHERE rider = ?`), rider)
+		return err
 	}
 
 	byDate := map[string]float64{}

@@ -181,6 +181,11 @@ func TestMergeRiderKeepsTheTargetsRowWhereTheKeyCollides(t *testing.T) {
 			}
 			c := sum.Tables[s.table]
 			switch s.table {
+			case "crew_members":
+				// The stronger of the two rows is kept: merged, not dropped.
+				if c.Moved != 0 || c.Merged != 1 || c.DroppedSource != 0 {
+					t.Errorf("crew_members: summary %+v, want 1 merged and nothing dropped", c)
+				}
 			case "sync_state":
 				// The source's account was dropped along with its state.
 				if c.DroppedSource != 1 {
