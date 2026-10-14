@@ -245,6 +245,8 @@ func flagText(reason, rider string) string {
 		return fmt.Sprintf("Held back at startup: this account joined after the data of rider %q existed, so it may belong to someone who renamed themselves.", rider)
 	case identities.FlagConflict:
 		return fmt.Sprintf("Held back at startup: the accounts claiming rider %q disagree on who they are.", rider)
+	case identities.FlagAdminElsewhere:
+		return fmt.Sprintf("This admin account would have been bound to rider %q at startup, but it was already bound to another rider, and a startup never moves a binding. Link it if %q is yours.", rider, rider)
 	case identities.FlagNeedsAttention:
 		return fmt.Sprintf("Held back at startup: rider %q has data, and an account claiming it has an unverified or unknown email.", rider)
 	}

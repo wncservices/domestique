@@ -277,6 +277,7 @@ func (s *Server) BootstrapIdentities(ctx context.Context) (BootstrapResult, erro
 	}
 
 	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] }, data, s.isAdminPerson)
+	var notMoved []identities.Flag
 	for _, b := range plan.Binds {
 		mac := ""
 		if b.Verified {
@@ -285,6 +286,11 @@ func (s *Server) BootstrapIdentities(ctx context.Context) (BootstrapResult, erro
 		added, err := s.Identities.Bind(ctx, issuer, b.Sub, b.Rider, mac)
 		if err != nil {
 			return res, fmt.Errorf("binding a rider: %w", err)
+		}
+		if !added && b.AdminOverride {
+			// Already bound (the owner signed in as "name-2" before this ran).
+			// A bootstrap never moves a binding; the People page says so instead.
+			notMoved = append(notMoved, identities.Flag{Sub: b.Sub, Rider: b.Rider, Reason: identities.FlagAdminElsewhere})
 		}
 		if added {
 			res.Bound++
@@ -299,6 +305,7 @@ func (s *Server) BootstrapIdentities(ctx context.Context) (BootstrapResult, erro
 	for _, f := range plan.Flags {
 		flags = append(flags, identities.Flag{Sub: f.Sub, Rider: f.Rider, Reason: f.Reason})
 	}
+	flags = append(flags, notMoved...)
 	if err := s.Identities.ReplaceFlags(ctx, issuer, flags); err != nil {
 		// The People page loses the reason, nothing else: not worth failing the
 		// bootstrap and keeping sign-in closed.

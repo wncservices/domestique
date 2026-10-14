@@ -18,6 +18,11 @@ const (
 	// FlagNeedsAttention: the rider has data, and an account claiming it has an
 	// unverified or unknown email.
 	FlagNeedsAttention = "needs-attention"
+	// FlagAdminElsewhere: an admin's account newer than the rider's data, which
+	// the bootstrap would have bound, was already bound to another rider (it
+	// signed in before the bootstrap could). A bootstrap never moves a binding,
+	// so this says why the owner is not on their own rider yet.
+	FlagAdminElsewhere = "admin-bound-elsewhere"
 )
 
 // Flag is one account the bootstrap held back, and the rider it was held back
