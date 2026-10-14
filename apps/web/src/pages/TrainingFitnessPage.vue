@@ -5,15 +5,17 @@
 // history this and TrainingPlanPage.vue split apart; this half owns the
 // synced fitness history (Phase B1) and the rider's own profile (FTP,
 // thresholds, availability — Phase E's free-text suggestion on top of it).
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { DailyWellnessDTO, DetectedThreshold, FitnessResponse, Me, ProgressionLevel,
+import type { BestEffortsResponse, DailyWellnessDTO, DetectedThreshold, EffortSport, FitnessResponse, Me, ProgressionLevel,
   ProgressionPoint, ProjectionResponse, RiderProfile, ThresholdSuggestion } from '@/api/types'
+import BestEffortsCard from '@/components/fitness/BestEffortsCard.vue'
 import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import MorningSummaryCard from '@/components/fitness/MorningSummaryCard.vue'
+import PowerCurveChart from '@/components/fitness/PowerCurveChart.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RaceDayCard from '@/components/fitness/RaceDayCard.vue'
@@ -25,6 +27,7 @@ import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
+import { bestEffortToast } from '@/utils/bestEfforts'
 import { ftpTestToast } from '@/utils/ftpTests'
 import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
 import { describeError } from '@/utils/errorMessage'
@@ -272,6 +275,54 @@ async function loadProjection() {
   }
 }
 
+// --- best efforts: the record book and the power curve. Optional extras like
+// the projection: a failed load hides the cards rather than erroring the page.
+// A visit also tells the rider about any new best a background sync made while
+// they were away, once (the server lists what is unannounced and is told when
+// the page has shown it). ---
+
+const effortSport = ref<EffortSport>('cycling')
+const bestEfforts = ref<BestEffortsResponse | null>(null)
+const loadingEfforts = ref(false)
+
+function toastBestEfforts(awards: BestEffortsResponse['newBests']) {
+  const copy = bestEffortToast(awards)
+  if (copy) toast.add({ title: copy.title, description: copy.description, icon: 'i-lucide-trophy', color: 'success' })
+}
+
+async function loadBestEfforts(announce = false) {
+  loadingEfforts.value = true
+  try {
+    const result = await api.bestEfforts(effortSport.value)
+    bestEfforts.value = result
+    if (announce && result.newBests.length > 0) {
+      toastBestEfforts(result.newBests)
+      // Telling the server is best effort: if it fails the rider is told once
+      // more next visit, which is better than never.
+      api.announceBestEfforts(result.newBests.map((a) => ({ sessionId: a.sessionId, metric: a.metric }))).catch(() => {})
+    }
+  } catch {
+    bestEfforts.value = null
+  } finally {
+    loadingEfforts.value = false
+  }
+}
+
+async function onEffortSport(sport: EffortSport) {
+  effortSport.value = sport
+  await loadBestEfforts()
+}
+
+const recentRides = useTemplateRef<InstanceType<typeof RecentRides>>('recentRides')
+function openRide(sessionId: string) {
+  recentRides.value?.reveal(sessionId)
+}
+
+const hasCurve = computed(() => {
+  const c = bestEfforts.value?.curve
+  return !!c && (c.season.length > 0 || c.lastSeason.length > 0 || c.allTime.length > 0)
+})
+
 async function syncMetrics() {
   syncingMetrics.value = true
   try {
@@ -312,7 +363,11 @@ async function syncMetrics() {
       toast.add({ title: copy.title, icon: copy.icon, color: copy.color })
     }
     announceRecalibration(result.levelsRecalibrated)
+    // A new season or all-time best, once: the server marks it told with this
+    // very response, so a second sync lists none.
+    toastBestEfforts(result.bestEfforts ?? [])
     await loadFitness()
+    await loadBestEfforts()
     // New rides and an FTP change both move the projection.
     await loadProjection()
     if (result.autoFilled?.length || lastDetected.value.length) await loadProfile()
@@ -369,7 +424,7 @@ async function loadReadiness() {
 // finds, so everything those read is fetched again. The profile is taken only
 // when it has no unsaved edits, the same rule a resolved suggestion follows.
 async function onImported() {
-  await Promise.all([loadFitness(), loadProjection(), loadProgression(), loadThresholdSuggestions()])
+  await Promise.all([loadFitness(), loadProjection(), loadProgression(), loadThresholdSuggestions(), loadBestEfforts()])
   if (!dirty.value) await loadProfile()
 }
 
@@ -381,6 +436,7 @@ onMounted(() => {
   loadProgression()
   loadReadiness()
   loadThresholdSuggestions()
+  loadBestEfforts(true)
 })
 </script>
 
@@ -412,11 +468,20 @@ onMounted(() => {
       <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
     </UCard>
 
+    <BestEffortsCard :data="bestEfforts" :loading="loadingEfforts" :sport="effortSport" @update:sport="onEffortSport" @open-ride="openRide" />
+
+    <UCard v-if="effortSport === 'cycling' && hasCurve" variant="outline">
+      <template #header>
+        <h2 class="text-lg font-semibold">Power curve</h2>
+      </template>
+      <PowerCurveChart :curve="bestEfforts!.curve" />
+    </UCard>
+
     <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
       <template #header>
         <h2 class="text-lg font-semibold">Recent rides</h2>
       </template>
-      <RecentRides :sessions="fitness.sessions" />
+      <RecentRides ref="recentRides" :sessions="fitness.sessions" />
     </UCard>
 
     <RideImportCard @done="onImported" />
