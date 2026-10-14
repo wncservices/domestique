@@ -3,6 +3,7 @@ package workout
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -50,14 +51,25 @@ ON CONFLICT (goal_id, week_start) DO NOTHING`), goalID, weekStart, now); err != 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("workout: fill week: %w", err)
 	}
+	fillWeekAfterCommit()
 
+	// The week is stored from here on. Reading the sessions back is only to
+	// tell the caller what was made, so a failure (or a context that ended with
+	// the commit) is logged and what was read is returned: an error here would
+	// make the caller treat a stored week as unfilled.
+	readCtx := context.WithoutCancel(ctx)
 	out := make([]Workout, 0, len(ids))
 	for _, id := range ids {
-		w, err := d.GetWorkout(ctx, id)
+		w, err := d.GetWorkout(readCtx, id)
 		if err != nil {
-			return out, err
+			slog.Warn("fill week: committed, but a session could not be read back", "goal", goalID, "week", weekStart, "workout", id, "err", err)
+			continue
 		}
 		out = append(out, w)
 	}
 	return out, nil
 }
+
+// fillWeekAfterCommit is called right after FillWeek commits. It exists for the
+// test that ends the context at that moment; production leaves it a no-op.
+var fillWeekAfterCommit = func() {}
