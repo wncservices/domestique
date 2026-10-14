@@ -8,6 +8,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import type { RouteDemands, RouteDemandsAvailable } from '@/api/types'
 import ElevationProfile from '@/components/ElevationProfile.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{ goalId: string }>()
 
@@ -22,7 +23,7 @@ async function load(id: string) {
     demands.value = await api.routeDemands(id)
   } catch (err) {
     demands.value = null
-    failed.value = err instanceof Error ? err.message : 'Could not load route demands'
+    failed.value = err instanceof Error ? describeError(err) : 'Could not load route demands'
   } finally {
     loading.value = false
   }

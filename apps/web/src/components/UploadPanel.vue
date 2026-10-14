@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Sport } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const emit = defineEmits<{ uploaded: [] }>()
 
@@ -69,7 +70,7 @@ async function submit() {
   } catch (err) {
     toast.add({
       title: 'Upload failed',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

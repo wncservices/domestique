@@ -98,6 +98,11 @@ func Difficulty(rung, riderLevel float64) string {
 // with a structured zone or zone endurance. Whether it is still ahead of the
 // rider is Available's question.
 func Plannable(w workout.Workout) bool {
+	// A crew ride row is the rider's commitment to a ride the crew set: nothing
+	// swaps it, whatever its description says.
+	if w.CrewRideID != "" {
+		return false
+	}
 	if w.GoalID == "" || !strings.HasPrefix(w.Description, scheduler.GeneratedDescription) {
 		return false
 	}

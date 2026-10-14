@@ -9,6 +9,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Crew, WeekdayCode } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{ crew: Crew; me: string }>()
 const emit = defineEmits<{ saved: [] }>()
@@ -73,7 +74,7 @@ async function save() {
   } catch (err) {
     toast.add({
       title: 'Could not save that',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

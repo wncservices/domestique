@@ -10,6 +10,7 @@ import CrewRideGoing from '@/components/CrewRideGoing.vue'
 import CrewTogetherDays from '@/components/CrewTogetherDays.vue'
 import RouteDetailModal from '@/components/RouteDetailModal.vue'
 import TrackPreview from '@/components/TrackPreview.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const { crews, accounts, routes, me, loading, error, refresh, can } = useLibrary()
 const toast = useToast()
@@ -133,7 +134,7 @@ async function createCrew() {
     createName.value = ''
     await backgroundRefresh()
   } catch (err) {
-    createError.value = err instanceof Error ? err.message : String(err)
+    createError.value = describeError(err)
   } finally {
     creating.value = false
   }
@@ -173,7 +174,7 @@ async function join(crew: Crew) {
   } catch (err) {
     toast.add({
       title: 'Could not request to join',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -192,7 +193,7 @@ async function removeMember(crew: Crew, rider: string) {
   } catch (err) {
     toast.add({
       title: `Could not remove ${rider}`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -227,7 +228,7 @@ async function addMember(crew: Crew) {
   } catch (err) {
     toast.add({
       title: `Could not add ${rider}`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -247,7 +248,7 @@ async function approveMember(crew: Crew, rider: string) {
   } catch (err) {
     toast.add({
       title: `Could not approve ${rider}`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -280,7 +281,7 @@ async function deleteCrew() {
   } catch (err) {
     toast.add({
       title: 'Could not delete the crew',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -332,7 +333,7 @@ async function loadRides(crewId: string) {
   } catch (err) {
     toast.add({
       title: 'Could not load scheduled rides',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -368,7 +369,7 @@ async function toggleAutoShare(crew: Crew, autoShare: boolean) {
   } catch (err) {
     toast.add({
       title: 'Could not change auto-share',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -389,7 +390,7 @@ async function toggleCanSchedule(crew: Crew, rider: string, value: boolean) {
   } catch (err) {
     toast.add({
       title: `Could not change ${rider}'s scheduling permission`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -417,7 +418,7 @@ async function toggleOwner(crew: Crew, rider: string, owner: boolean) {
   } catch (err) {
     toast.add({
       title: `Could not change ${rider}'s ownership`,
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -538,7 +539,7 @@ async function scheduleRide() {
   } catch (err) {
     toast.add({
       title: 'Could not schedule that ride',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -588,7 +589,7 @@ async function deleteRide(ride: Ride) {
   } catch (err) {
     toast.add({
       title: 'Could not remove that ride',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -611,7 +612,7 @@ async function deleteRideSeries(ride: Ride) {
   } catch (err) {
     toast.add({
       title: 'Could not cancel the series',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -664,7 +665,7 @@ async function syncRide(ride: Ride) {
   } catch (err) {
     toast.add({
       title: 'Sync failed',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

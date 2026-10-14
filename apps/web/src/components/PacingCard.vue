@@ -9,6 +9,7 @@ import { computed, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api, ApiError } from '@/api/client'
 import type { Account, PacingAvailable, PacingPlan, PacingSegment } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{
   slug: string
@@ -35,7 +36,7 @@ async function load() {
   } catch (err) {
     plan.value = null
     if (err instanceof ApiError && err.status === 404) hidden.value = true
-    else failed.value = err instanceof Error ? err.message : 'Could not load the pacing plan'
+    else failed.value = err instanceof Error ? describeError(err) : 'Could not load the pacing plan'
   } finally {
     loading.value = false
   }
@@ -94,7 +95,7 @@ async function send(provider: 'garmin' | 'wahoo') {
       color: 'success',
     })
   } catch (err) {
-    const description = err instanceof ApiError || err instanceof Error ? err.message : String(err)
+    const description = describeError(err)
     toast.add({ title: `Could not send to ${providerLabel[provider]}`, description, icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     pushing.value = ''

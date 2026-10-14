@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { GarminConnection, GarminDuplicateGroup } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const emit = defineEmits<{ changed: [] }>()
 
@@ -42,7 +43,7 @@ async function load() {
     groups.value = await api.garminCourseDuplicates()
     toDelete.value = defaultSelection(groups.value)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     loading.value = false
   }
@@ -69,7 +70,7 @@ async function deleteSelected() {
     try {
       await api.garminCourseDelete(id)
     } catch (err) {
-      failures.push(err instanceof Error ? err.message : String(err))
+      failures.push(describeError(err))
     }
   }
   deleting.value = false

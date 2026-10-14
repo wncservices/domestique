@@ -11,6 +11,7 @@ import RouteCandidatePreview from './RouteCandidatePreview.vue'
 import RouteSaveForm from './RouteSaveForm.vue'
 import SurfaceBreakdown from './SurfaceBreakdown.vue'
 import type { Poi, RouteBuilderCandidate, RouteBuilderPreview } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const emit = defineEmits<{ built: [] }>()
 
@@ -61,7 +62,7 @@ async function searchLocation() {
   } catch (err) {
     toast.add({
       title: 'Location search failed',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -173,7 +174,7 @@ onMounted(async () => {
   } catch (err) {
     toast.add({
       title: 'Could not open that route for editing',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -201,7 +202,7 @@ async function saveEdit() {
   } catch (err) {
     toast.add({
       title: 'Could not save changes',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -364,7 +365,7 @@ async function generate() {
   } catch (err) {
     toast.add({
       title: 'Could not generate suggestions',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

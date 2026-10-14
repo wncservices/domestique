@@ -525,7 +525,7 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 		return periodization.Plan{}, workout.RiderProfile{}, err
 	}
 
-	plan, err := periodization.Build(g, profile, s.now())
+	plan, err := periodization.Build(g, profile, s.localNow())
 	if err != nil {
 		// ErrNoEventDate/ErrEventInThePast are the only errors BuildPlan
 		// returns — both are the rider's own data being unsuitable to plan
@@ -538,7 +538,7 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 	if err != nil {
 		return periodization.Plan{}, profile, err
 	}
-	return adapter.Reconcile(g, profile, plan, sessions, s.now()), profile, nil
+	return adapter.Reconcile(g, profile, plan, sessions, s.localNow()), profile, nil
 }
 
 type scheduledWorkoutsDTO struct {
@@ -580,7 +580,7 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	thisMonday := periodization.MondayOf(s.now())
+	thisMonday := periodization.MondayOf(s.localNow())
 	weekStart := thisMonday
 	if body.WeekStart != "" {
 		parsed, err := time.Parse(dateLayout, body.WeekStart)
@@ -680,7 +680,7 @@ func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.Ri
 // AutoScheduleTick both pass "", keeping their own behaviour exactly what
 // it was before this parameter existed.
 func (s *Server) scheduleGoal(ctx context.Context, g workout.Goal, fromDate string) ([]workout.Workout, int, error) {
-	return s.scheduleGoalWeek(ctx, g, periodization.MondayOf(s.now()), fromDate)
+	return s.scheduleGoalWeek(ctx, g, periodization.MondayOf(s.localNow()), fromDate)
 }
 
 // scheduleGoalWeek is scheduleGoal for the plan week starting on weekStart (a
@@ -845,7 +845,7 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 	// skipped days' share of the week's hours is not moved onto the days
 	// left: WeekWorkouts sizes each session from the whole week, so a
 	// mid-week fill is a lighter week, which is what it is.
-	if today := s.now().Format(dateLayout); fromDate < today {
+	if today := s.localToday(); fromDate < today {
 		fromDate = today
 	}
 
@@ -876,7 +876,7 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 // refreshHorizon is the last Monday, "YYYY-MM-DD", whose week counts as close
 // enough to be built from current levels and FTP: next week's.
 func (s *Server) refreshHorizon() string {
-	return periodization.MondayOf(s.now()).AddDate(0, 0, 7).Format(dateLayout)
+	return periodization.MondayOf(s.localNow()).AddDate(0, 0, 7).Format(dateLayout)
 }
 
 // autoScheduleGoalWeek is what the unattended tick calls: it fills a goal's
@@ -901,14 +901,8 @@ func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekS
 		return nil, 0, err
 	}
 	endStr := weekStart.AddDate(0, 0, 6).Format(dateLayout)
-	for _, wk := range existing {
-		// An FTP test is linked to the goal so its day reads as taken, but it
-		// is not a plan-made session: a rider who scheduled a test into a week
-		// the tick has not reached yet has not had that week filled, and
-		// counting the test as "filled" would leave it holding the test alone.
-		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.CrewRideID == "" && wk.Date >= startStr && wk.Date <= endStr {
-			return nil, 0, s.recordLegacyWeek(ctx, g, startStr)
-		}
+	if hasPlanSessionsBetween(existing, g, startStr, endStr) {
+		return nil, 0, s.recordLegacyWeek(ctx, g, startStr)
 	}
 	return s.scheduleGoalWeek(ctx, g, weekStart, "")
 }

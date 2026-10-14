@@ -98,7 +98,7 @@ func (s *Server) writeReplanLocked(w http.ResponseWriter, rider string) {
 // replanRider does the actual work, separate from the handler so it runs
 // entirely inside withDBLock's closure with nothing left to do outside it.
 func (s *Server) replanRider(ctx context.Context, rider string) (replanResultDTO, error) {
-	now := s.now()
+	now := s.localNow()
 	today := now.Format(dateLayout)
 	weekStart := periodization.MondayOf(now)
 	weekEnd := weekStart.AddDate(0, 0, 6).Format(dateLayout)
@@ -199,11 +199,9 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		if lifeevents.Touched(wk.Description) {
 			continue
 		}
-		// A routed session is the rider's own too: rebuilding the day would
-		// drop the link and strand the loop.
-		if wk.RouteSlug != "" {
-			continue
-		}
+		// A routed session is the rider's own too, but needs no check here:
+		// scheduler.AutoReplaceable already refuses one (rebuilding the day
+		// would drop the link and strand the loop).
 		if wk.Date == today && riddenToday[wk.ID] {
 			continue
 		}
