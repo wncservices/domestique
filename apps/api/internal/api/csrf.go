@@ -27,8 +27,8 @@ import (
 //     It cannot be driven cross-site, so it passes. This is why the guard
 //     cannot lock the CLI or a proxy deployment out.
 //
-// Then a body, if there is one, must be application/json (the upload is the
-// one multipart endpoint). That is what turns a cross-site <form
+// Then a body, if there is one, must be application/json (the GPX upload and the
+// ride-history import are the multipart endpoints). That is what turns a cross-site <form
 // enctype="text/plain"> or no-cors fetch, which can only send simple content
 // types, into something no handler would have parsed anyway.
 //
@@ -71,9 +71,10 @@ func (s *Server) csrfGuard(next http.Handler) http.Handler {
 	})
 }
 
-// isUploadRoute is the one endpoint that takes a multipart body: the GPX upload.
+// isUploadRoute is whether a route takes a multipart body: the GPX upload and
+// the ride-history import. Only these two; everything else is JSON.
 func isUploadRoute(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.URL.Path == "/api/routes"
+	return r.Method == http.MethodPost && (r.URL.Path == "/api/routes" || r.URL.Path == "/api/training/import")
 }
 
 // isOwnOrigin reports whether an Origin header names this deployment: the Host

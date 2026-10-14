@@ -46,6 +46,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
+	"github.com/wncservices/domestique/apps/api/internal/rideimport"
 	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
 	"github.com/wncservices/domestique/apps/api/internal/routing"
@@ -98,6 +99,26 @@ type Server struct {
 	// season pass. Tests only: it lets one hold the pass back to observe what
 	// the request had done by the time it answered.
 	BeforeSeasonFill func()
+	// BeforeImportJob, when set, runs at the start of every ride-history import
+	// job. Tests only: a panic from it is how they reach the job's recovery.
+	BeforeImportJob func()
+	// ImportMaxUploadBytes caps one import upload's request body; zero means
+	// the spec's 1 GiB. ImportLimits bounds what is read out of it; the zero
+	// value means rideimport.DefaultLimits. Tests lower both rather than send a
+	// gigabyte.
+	ImportMaxUploadBytes int64
+	ImportLimits         rideimport.Limits
+	// ImportMaxConcurrent caps uploads in flight across all riders (zero means
+	// 4) and ImportReadTimeout how long one has to deliver its body (zero means
+	// 30 minutes). BeforeImportFile runs before each file of a job is filed and
+	// BeforeImportRecompute before the history is recomputed: tests only, to
+	// panic, purge a rider or edit a profile at exactly that moment.
+	ImportMaxConcurrent   int
+	ImportReadTimeout     time.Duration
+	BeforeImportFile      func()
+	BeforeImportRecompute func()
+	// importSlots is the in-memory half of one upload at a time per rider.
+	importSlots importSlots
 	// AfterLifeEventSaved, when set, runs once a life event has been written
 	// and before its diff is applied; an error from it stands in for a failed
 	// write, so tests can reach the rollback. Nil in production.
@@ -612,6 +633,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/training/workouts/{id}", s.handleUpdateWorkout)
 	mux.HandleFunc("DELETE /api/training/workouts/{id}", s.handleDeleteWorkout)
 	mux.HandleFunc("GET /api/training/workouts/{id}/fit", s.handleDownloadWorkoutFIT)
+	mux.HandleFunc("GET /api/training/workouts/{id}/export", s.handleExportWorkout)
+	mux.HandleFunc("POST /api/training/import", s.handleImportUpload)
+	mux.HandleFunc("GET /api/training/import/status", s.handleImportStatus)
+	mux.HandleFunc("GET /api/training/weeks/{monday}/export", s.handleExportWeek)
 	mux.HandleFunc("GET /api/training/workouts/{id}/alternates", s.handleAlternates)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates", s.handleAlternateApply)
 	mux.HandleFunc("POST /api/training/workouts/{id}/alternates/revert", s.handleAlternateRevert)

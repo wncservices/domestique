@@ -1,0 +1,16 @@
+<workout_file>
+  <author>Domestique</author>
+  <name>Over-unders</name>
+  <description>Two by twenty.</description>
+  <sportType>bike</sportType>
+  <tags/>
+  <workout>
+    <Warmup Duration="600" PowerLow="0.400" PowerHigh="0.640">
+      <textevent timeoffset="0" message="Warm up"/>
+    </Warmup>
+    <IntervalsT Repeat="3" OnDuration="240" OffDuration="120" OnPower="1.040" OffPower="0.860"/>
+    <Cooldown Duration="300" PowerLow="0.520" PowerHigh="0.400">
+      <textevent timeoffset="0" message="Cool down"/>
+    </Cooldown>
+  </workout>
+</workout_file>
