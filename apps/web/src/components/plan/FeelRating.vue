@@ -14,6 +14,7 @@ import { ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { SessionAnalysis } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{
   sessionId: string
@@ -68,10 +69,6 @@ const STRESS: { value: string; label: string }[] = [
   { value: 'high', label: 'High' },
 ]
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 // save sends the whole survey and, if that fails, puts every answer back the
 // way it was: the rider must never see a tap that did not stick.
 async function save(next: { feel: number; legs?: string; stress?: string }) {
@@ -89,7 +86,7 @@ async function save(next: { feel: number; legs?: string; stress?: string }) {
     selected.value = previous.feel
     legs.value = previous.legs
     stress.value = previous.stress
-    toast.add({ title: 'Could not save how that felt', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    toast.add({ title: 'Could not save how that felt', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     saving.value = false
   }

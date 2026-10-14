@@ -5,6 +5,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Account, GarminConnection, GarminDevice, Me, WahooConnection } from '@/api/types'
 import GarminSignIn from '@/components/GarminSignIn.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{
   accounts: Account[]
@@ -52,7 +53,7 @@ async function loadDevices() {
   try {
     devices.value = await api.garminDevices()
   } catch (err) {
-    devicesError.value = err instanceof Error ? err.message : String(err)
+    devicesError.value = describeError(err)
   }
 }
 
@@ -76,7 +77,7 @@ async function toggleAutoPush(account: Account, enabled: boolean) {
     await api.setAccountAutoPush(account.id, enabled)
     emit('changed')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     togglingAutoPush.value = ''
   }
@@ -153,7 +154,7 @@ async function unlink(account: Account) {
     toast.add({ title: `${account.label} unlinked`, icon: 'i-lucide-unlink', color: 'success' })
     emit('changed')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     unlinking.value = ''
   }
