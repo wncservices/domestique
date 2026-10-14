@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -144,13 +145,20 @@ func (s *Server) analyseNewSessions(
 		raw, downloadErr := s.fetchSessionFIT(ctx, sess, src, hasSource, consumer, garminSession, garminConnected, wahooToken, wahooConnected)
 		var act *filedef.Activity
 		var fitErr error
+		// panicked is a file that crashed the decoder or the scorer. Unlike a
+		// failed download it will crash again, so it is analysed from the
+		// provider's summary now instead of being retried on every sync.
+		panicked := false
 		switch {
 		case downloadErr != nil:
 			fitErr = downloadErr
 			downloadFailed++
 			s.logger().Warn("ride analysis: fit download failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", downloadErr)
 		default:
-			decoded, decodeErr := decodeFIT(raw)
+			decoded, decodeErr := s.guardedDecode(raw, rider, sess.Provider, sess.ID)
+			if errors.Is(decodeErr, errAnalysisPanicked) {
+				panicked = true
+			}
 			if decodeErr != nil {
 				fitErr = decodeErr
 				s.logger().Warn("ride analysis: fit decode failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", decodeErr)
@@ -193,7 +201,7 @@ func (s *Server) analyseNewSessions(
 		if act == nil && hasSource {
 			fallbackCurve = src.bestPower
 		}
-		if act == nil && isTest {
+		if act == nil && isTest && !panicked {
 			if _, ok := fitnesstest.FTPFromTest(matched.TestProtocol, fallbackCurve); !ok {
 				s.logger().Warn("ride analysis: an FTP test ride has no readable FIT yet, will retry", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", fitErr)
 				// Said out loud as well, with the reason: otherwise the test
@@ -203,13 +211,22 @@ func (s *Server) analyseNewSessions(
 			}
 			s.logger().Info("ride analysis: FTP test read from the provider's best-power figures, the FIT was unreadable", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", fitErr)
 		}
-		analysis := rideanalysis.Analyze(rideanalysis.Input{
+		analysis, scorePanicked := s.guardedAnalyze(rideanalysis.Input{
 			Sport:    sess.Sport,
 			Activity: act,
 			Summary:  summary,
 			Planned:  matched,
 			Profile:  profile,
-		})
+		}, rider, sess.Provider, sess.ID)
+		if scorePanicked {
+			act = nil
+		}
+		if analysis.SamplesUnreadable {
+			// The file decoded but not one record had a usable time. The ride
+			// stays scored from the provider's summary, duration included.
+			s.logger().Warn("ride analysis: the FIT has no usable timestamps, using the provider summary", "rider", rider, "provider", sess.Provider, "session", sess.ID)
+			act = nil
+		}
 		if act == nil && len(analysis.PowerCurve) == 0 && len(fallbackCurve) > 0 {
 			analysis.PowerCurve = fallbackCurve
 		}
@@ -366,6 +383,54 @@ func (s *Server) fetchSessionFIT(
 		return nil, errUnknownProvider
 	}
 }
+
+// analyzeRide and decodeRideFIT are the real scorer and decoder; they are
+// variables only so a test can make either panic the way a malformed file
+// could.
+var (
+	analyzeRide   = rideanalysis.Analyze
+	decodeRideFIT = decodeFIT
+)
+
+// recoveredPanic describes a recovered panic value without leaking content:
+// a runtime error's text is only indexes and sizes, anything else could embed
+// what was being parsed, so only its type is kept.
+func recoveredPanic(r any) string {
+	if e, ok := r.(runtime.Error); ok {
+		return e.Error()
+	}
+	return fmt.Sprintf("%T", r)
+}
+
+// guardedDecode is decodeRideFIT behind a recover. The metrics sync runs on a
+// background goroutine, where a panic is not caught by net/http and ends the
+// process, so a hostile or corrupt FIT must come out as an error.
+func (s *Server) guardedDecode(raw []byte, rider, provider, session string) (act *filedef.Activity, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger().Error("ride analysis: decoding a FIT file panicked", "rider", rider, "provider", provider, "session", session, "panic", recoveredPanic(r))
+			act, err = nil, errAnalysisPanicked
+		}
+	}()
+	return decodeRideFIT(raw)
+}
+
+// guardedAnalyze is analyzeRide behind a recover. A panic is logged at Error
+// with ids only and the ride is scored again from the provider's own summary
+// without the FIT, so the session is saved as analysed and is not downloaded,
+// and panicked, on every later sync.
+func (s *Server) guardedAnalyze(in rideanalysis.Input, rider, provider, session string) (analysis rideanalysis.Analysis, panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger().Error("ride analysis: scoring a ride panicked, using the provider summary", "rider", rider, "provider", provider, "session", session, "panic", recoveredPanic(r))
+			in.Activity = nil
+			analysis, panicked = rideanalysis.Analyze(in), true
+		}
+	}()
+	return analyzeRide(in), false
+}
+
+var errAnalysisPanicked = errors.New("the activity file could not be processed")
 
 // decodeFIT decodes a downloaded FIT body into the same *filedef.Activity
 // shape rideanalysis.Analyze scores — the repo's own decode idiom (see

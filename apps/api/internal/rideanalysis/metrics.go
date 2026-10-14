@@ -12,6 +12,8 @@ package rideanalysis
 
 import (
 	"math"
+	"sort"
+	"time"
 
 	"github.com/muktihari/fit/profile/basetype"
 	"github.com/muktihari/fit/profile/mesgdef"
@@ -31,6 +33,25 @@ type Sample struct {
 	HasSpeed  bool
 }
 
+// MaxRideSamples bounds the one-second samples Resample lays out: about
+// 5.8 days of moving time, past any real ride. It is a count of samples, not a
+// span of wall-clock time, because a multi-day bikepacking file is mostly
+// nights with the device asleep, which cost nothing (see longGapSeconds).
+const MaxRideSamples = 500_000
+
+// longGapSeconds is the pause past which the time between two records is not
+// laid out second by second: an overnight stop becomes a single zero sample,
+// a break, so a four-day trip resamples to the days actually ridden.
+const longGapSeconds = 600
+
+// maxClusterSpan separates records that cannot belong to one ride: a timestamp
+// further than this from its neighbour is a clock fault, not a pause.
+const maxClusterSpan = 7 * 24 * time.Hour
+
+// earliestPlausible is the oldest timestamp taken as real. A FIT file's own
+// epoch is 1989 and a record with no clock set reads as zero or near it.
+var earliestPlausible = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
 // gapRepeatThresholdSeconds is the longest gap between two FIT records that
 // Resample treats as a sensor hiccup worth papering over by repeating the
 // last known sample. Past this, treating it as "still riding at the same
@@ -49,30 +70,39 @@ const gapRepeatThresholdSeconds = 5
 // zero-power, no-HR, no-speed samples (a real pause: coasting to a stop,
 // pausing the device) rather than inventing effort that did not happen.
 func Resample(records []*mesgdef.Record) []Sample {
-	if len(records) == 0 {
+	kept := plausibleRecords(records)
+	if len(kept) == 0 {
 		return nil
 	}
 
-	start := records[0].Timestamp
-	secOf := func(r *mesgdef.Record) int {
-		return int(r.Timestamp.Sub(start).Round(1_000_000_000).Seconds())
+	// Lay the series out by position in time, not in the file: a file may list
+	// records out of order. Long gaps are collapsed to bound the work.
+	recSec := make([]int, len(kept))
+	sec := 0
+	for i := range kept {
+		if i > 0 {
+			gap := int(kept[i].Timestamp.Sub(kept[i-1].Timestamp).Round(time.Second) / time.Second)
+			if gap > longGapSeconds {
+				gap = 2 // one break second, then the next record
+			}
+			sec += gap
+		}
+		if sec >= MaxRideSamples {
+			return nil
+		}
+		recSec[i] = sec
 	}
-
-	total := secOf(records[len(records)-1])
-	samples := make([]Sample, total+1)
+	samples := make([]Sample, sec+1)
 
 	// Place every actual record at its own second first. A later record
 	// landing on the same second (duplicate or sub-second timestamps
 	// rounding together) simply overwrites the earlier one.
-	recSec := make([]int, len(records))
-	for i, r := range records {
-		sec := secOf(r)
-		recSec[i] = sec
-		samples[sec] = sampleFromRecord(r, sec)
+	for i, r := range kept {
+		samples[recSec[i]] = sampleFromRecord(r, recSec[i])
 	}
 
 	// Fill the gaps between consecutive records.
-	for i := 0; i < len(records)-1; i++ {
+	for i := 0; i < len(kept)-1; i++ {
 		gapStart, gapEnd := recSec[i], recSec[i+1]
 		gap := gapEnd - gapStart
 		if gap <= 1 {
@@ -80,18 +110,54 @@ func Resample(records []*mesgdef.Record) []Sample {
 		}
 		prev := samples[gapStart]
 		repeat := gap <= gapRepeatThresholdSeconds
-		for sec := gapStart + 1; sec < gapEnd; sec++ {
+		for s := gapStart + 1; s < gapEnd; s++ {
 			if repeat {
-				s := prev
-				s.Seconds = sec
-				samples[sec] = s
+				p := prev
+				p.Seconds = s
+				samples[s] = p
 			} else {
-				samples[sec] = Sample{Seconds: sec}
+				samples[s] = Sample{Seconds: s}
 			}
 		}
 	}
 
 	return samples
+}
+
+// plausibleRecords drops records with a zero or pre-2000 timestamp (a device
+// whose clock was never set), sorts the rest by time, and keeps the largest
+// run of records whose neighbours are within maxClusterSpan of each other:
+// a timestamp far outside the file's own range is a fault, not part of the
+// ride. When two runs are equally large there is no telling which is right,
+// and nothing is returned.
+func plausibleRecords(records []*mesgdef.Record) []*mesgdef.Record {
+	valid := make([]*mesgdef.Record, 0, len(records))
+	for _, r := range records {
+		if r != nil && !r.Timestamp.Before(earliestPlausible) {
+			valid = append(valid, r)
+		}
+	}
+	sort.SliceStable(valid, func(i, j int) bool { return valid[i].Timestamp.Before(valid[j].Timestamp) })
+
+	bestFrom, bestTo, bestN, tie := 0, 0, 0, false
+	from := 0
+	for i := 1; i <= len(valid); i++ {
+		if i < len(valid) && valid[i].Timestamp.Sub(valid[i-1].Timestamp) <= maxClusterSpan {
+			continue
+		}
+		n := i - from
+		switch {
+		case n > bestN:
+			bestFrom, bestTo, bestN, tie = from, i, n, false
+		case n == bestN:
+			tie = true
+		}
+		from = i
+	}
+	if bestN == 0 || tie {
+		return nil
+	}
+	return valid[bestFrom:bestTo]
 }
 
 // sampleFromRecord reads the three metrics Analyze needs from one FIT
