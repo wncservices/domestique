@@ -11,6 +11,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { GoingResult } from '@/api/types'
 import { weekdayAndDay } from '@/utils/planDates'
+import { describeError } from '@/utils/errorMessage'
 
 const props = withDefaults(
   defineProps<{
@@ -56,7 +57,7 @@ function setOn(id: string, on: boolean | 'indeterminate') {
 }
 
 function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return describeError(err)
 }
 
 async function start(next: boolean) {

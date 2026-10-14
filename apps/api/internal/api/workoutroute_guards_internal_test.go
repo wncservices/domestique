@@ -8,7 +8,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/alternates"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
-	"github.com/wncservices/domestique/apps/api/internal/testschedule"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -38,8 +37,8 @@ func TestARoutedSessionIsNotUntouched(t *testing.T) {
 func TestARoutedSessionIsNotPlanMadeInEitherDefinition(t *testing.T) {
 	routed := generatedSession()
 	routed.RouteSlug = "a-loop"
-	if isPlanMade(routed) || testschedule.IsPlanMade(routed) {
-		t.Errorf("isPlanMade = %v, testschedule.IsPlanMade = %v, want both false", isPlanMade(routed), testschedule.IsPlanMade(routed))
+	if scheduler.IsPlanMade(routed) || scheduler.AutoReplaceable(routed) {
+		t.Errorf("IsPlanMade = %v, AutoReplaceable = %v, want both false", scheduler.IsPlanMade(routed), scheduler.AutoReplaceable(routed))
 	}
 }
 

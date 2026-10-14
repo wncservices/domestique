@@ -116,12 +116,20 @@ const library = computed(() => props.workouts.filter((w) => !w.date))
             target="_blank"
             title="Download as a FIT workout file"
           />
-          <UButton icon="i-lucide-pencil" color="neutral" variant="ghost" size="sm" @click="emit('editWorkout', w)" />
+          <UButton
+            icon="i-lucide-pencil"
+            color="neutral"
+            variant="ghost"
+            size="sm"
+            aria-label="Edit workout"
+            @click="emit('editWorkout', w)"
+          />
           <UButton
             icon="i-lucide-trash-2"
             color="neutral"
             variant="ghost"
             size="sm"
+            aria-label="Delete workout"
             :loading="deletingWorkout === w.id"
             @click="emit('deleteWorkout', w)"
           />

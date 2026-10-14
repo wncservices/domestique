@@ -14,6 +14,7 @@ import { api } from '@/api/client'
 import type { Route, ScheduleSituation } from '@/api/types'
 import { formatDuration } from '@/utils/workoutMath'
 import { todayISO } from '@/utils/rideDates'
+import { describeError } from '@/utils/errorMessage'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ route: Route | null }>()
@@ -47,7 +48,7 @@ async function load() {
   } catch (err) {
     if (mine !== ticket) return
     // 409 carries its own plain words: the day has passed, or you are away (a life event covers it).
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     if (mine === ticket) loading.value = false
   }
@@ -121,7 +122,7 @@ async function schedule() {
   } catch (err) {
     toast.add({
       title: 'Could not schedule the ride',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

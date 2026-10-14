@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Poi, Sport } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 /** The final "review and save" step every route-builder tab converges on —
  *  the manual builder's drawn path, a chosen suggestion, later a chosen AI
@@ -72,7 +73,7 @@ async function submit() {
   } catch (err) {
     toast.add({
       title: 'Could not save the route',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

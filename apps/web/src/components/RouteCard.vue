@@ -7,6 +7,7 @@ import ScheduleRideModal from './ScheduleRideModal.vue'
 import ShareRouteDialog from './ShareRouteDialog.vue'
 import SyncBadge from './SyncBadge.vue'
 import TrackPreview from './TrackPreview.vue'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{
   route: Route
@@ -56,7 +57,7 @@ async function toggleSport() {
   } catch (err) {
     toast.add({
       title: 'Could not change sport',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -114,7 +115,7 @@ async function saveTargets() {
   } catch (err) {
     toast.add({
       title: 'Could not update targets',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -144,7 +145,7 @@ async function claim() {
   } catch (err) {
     toast.add({
       title: 'Could not claim this route',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })
@@ -168,7 +169,7 @@ async function remove() {
   } catch (err) {
     toast.add({
       title: 'Could not delete the route',
-      description: err instanceof Error ? err.message : String(err),
+      description: describeError(err),
       icon: 'i-lucide-triangle-alert',
       color: 'error',
     })

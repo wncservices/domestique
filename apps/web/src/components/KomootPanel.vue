@@ -5,6 +5,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import { usePagedList } from '@/composables/usePagedList'
 import type { KomootConnection, KomootTour } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const props = defineProps<{ state: 'unconfigured' | 'ready' }>()
 const emit = defineEmits<{ imported: [] }>()
@@ -28,7 +29,7 @@ async function loadConnection() {
   try {
     connection.value = await api.komootConnection()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   }
 }
 
@@ -112,7 +113,7 @@ async function load() {
   } catch (err) {
     // Availability now comes from /api/config, so anything reaching here is a
     // real failure rather than the feature being switched off.
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     loading.value = false
   }
@@ -173,7 +174,7 @@ async function runImport() {
     await load()
     emit('imported')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = describeError(err)
   } finally {
     importing.value = false
     progress.value = 0

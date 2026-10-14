@@ -10,6 +10,7 @@ import RouteMap from '@/components/RouteMap.vue'
 import type { Sport, UpcomingRide } from '@/api/types'
 import { formatRideWhen, todayISO } from '@/utils/rideDates'
 import { prefetchTrackPreviewImages } from '@/utils/prefetchPreviewImages'
+import { describeError } from '@/utils/errorMessage'
 
 // Named explicitly for App.vue's <KeepAlive include="LibraryPage">, rather
 // than relying on build-tool filename inference: the whole point of that
@@ -197,7 +198,7 @@ async function push(items: { accountId: string; slug: string }[]) {
     failures.value = result.failures
     await backgroundRefresh()
   } catch (err) {
-    failures.value = [err instanceof Error ? err.message : String(err)]
+    failures.value = [describeError(err)]
   } finally {
     pushing.value = false
   }

@@ -11,6 +11,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { CalendarFeedLink, CalendarFeedStatus } from '@/api/types'
+import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
 
@@ -24,12 +25,8 @@ const confirmingRevoke = ref(false)
 const available = computed(() => !!status.value?.available)
 const active = computed(() => !!status.value?.active)
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 function fail(title: string, err: unknown) {
-  toast.add({ title, description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  toast.add({ title, description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
 }
 
 async function load() {

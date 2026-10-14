@@ -1,4 +1,4 @@
-// Run with: node --test apps/web/tests (Node 24 strips the TypeScript types).
+// Run with: npm --workspace @domestique/web test (Node 24 strips the TypeScript types).
 // There is no JS test runner in this workspace and the brief allows no new
 // dependency, so the pure projection helpers are checked with node:test.
 import assert from 'node:assert/strict'
