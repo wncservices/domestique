@@ -21,8 +21,8 @@ func at(y int, m time.Month, d, h, min int) time.Time {
 var profile = workout.RiderProfile{Rider: "wilant", FTPWatts: 250, MaxHR: 190}
 
 func TestParseReadsTheRideSummary(t *testing.T) {
-	raw := rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 1800, watts: 200, hr: 140, distanceM: 15000, pause: 120,
-		withActivity: true, offset: time.Hour}.build(t)
+	raw := rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 1800, Watts: 200, HR: 140, DistanceM: 15000, Pause: 120,
+		WithActivity: true, Offset: time.Hour}.Build(t)
 
 	r, err := Parse(raw, profile)
 	if err != nil {
@@ -43,7 +43,7 @@ func TestParseReadsTheRideSummary(t *testing.T) {
 }
 
 func TestParseRunsAnalyzeWithNoPlan(t *testing.T) {
-	raw := rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 1500, watts: 250, hr: 150}.build(t)
+	raw := rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 1500, Watts: 250, HR: 150}.Build(t)
 	r, err := Parse(raw, profile)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestParseSports(t *testing.T) {
 		"skiing":          {typedef.SportAlpineSkiing, typedef.SubSportGeneric, "", ErrSport},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw := rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 600, watts: 180, sport: tc.sport, subSport: tc.sub}.build(t)
+			raw := rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 600, Watts: 180, Sport: tc.sport, SubSport: tc.sub}.Build(t)
 			r, err := Parse(raw, profile)
 			if !errors.Is(err, tc.err) {
 				t.Fatalf("err = %v, want %v", err, tc.err)
@@ -115,7 +115,7 @@ func TestParseLocalDate(t *testing.T) {
 		"half hour": {at(2026, 3, 5, 19, 0), 5*time.Hour + 30*time.Minute, true, "2026-03-06"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw := rideSpec{start: tc.start, seconds: 600, watts: 180, withActivity: tc.active, offset: tc.offset}.build(t)
+			raw := rideSpec{Start: tc.start, Seconds: 600, Watts: 180, WithActivity: tc.active, Offset: tc.offset}.Build(t)
 			r, err := Parse(raw, profile)
 			if err != nil {
 				t.Fatal(err)
@@ -132,30 +132,30 @@ func TestParseLocalDate(t *testing.T) {
 
 func TestParseWithoutASessionMessage(t *testing.T) {
 	// Records only, with power: a bike. Without power there is no way to say.
-	r, err := Parse(rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 600, watts: 180, noSession: true}.build(t), profile)
+	r, err := Parse(rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 600, Watts: 180, NoSession: true}.Build(t), profile)
 	if err != nil || r.Sport != "cycling" || r.Duration != 600 || r.AvgPower != 180 {
 		t.Errorf("records-only ride = %+v, %v", r, err)
 	}
-	if _, err := Parse(rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 600, hr: 140, noSession: true}.build(t), profile); !errors.Is(err, ErrSport) {
+	if _, err := Parse(rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 600, HR: 140, NoSession: true}.Build(t), profile); !errors.Is(err, ErrSport) {
 		t.Errorf("no session and no power: err = %v, want ErrSport", err)
 	}
 }
 
 func TestParseRefusesWhatIsNotARide(t *testing.T) {
-	if _, err := Parse(rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 600, noRecords: true}.build(t), profile); !errors.Is(err, ErrUnreadable) {
+	if _, err := Parse(rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 600, NoRecords: true}.Build(t), profile); !errors.Is(err, ErrUnreadable) {
 		t.Errorf("no records: err = %v, want ErrUnreadable", err)
 	}
 	if _, err := Parse([]byte("definitely not a FIT file, just text"), profile); !errors.Is(err, ErrUnreadable) {
 		t.Errorf("garbage: err = %v, want ErrUnreadable", err)
 	}
-	good := rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 600, watts: 200}.build(t)
+	good := rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 600, Watts: 200}.Build(t)
 	if _, err := Parse(good[:len(good)/2], profile); !errors.Is(err, ErrUnreadable) {
 		t.Errorf("truncated: err = %v, want ErrUnreadable", err)
 	}
 }
 
 func TestParseUsesTheProfileForLoadOnly(t *testing.T) {
-	raw := rideSpec{start: at(2026, 3, 5, 9, 0), seconds: 3600, watts: 250}.build(t)
+	raw := rideSpec{Start: at(2026, 3, 5, 9, 0), Seconds: 3600, Watts: 250}.Build(t)
 	a, _ := Parse(raw, workout.RiderProfile{FTPWatts: 250})
 	b, _ := Parse(raw, workout.RiderProfile{FTPWatts: 200})
 	if math.Abs(a.Analysis.TSS-100) > 1 {

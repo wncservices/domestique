@@ -67,7 +67,7 @@ func eachEngine(t *testing.T, run func(t *testing.T, db *workout.DB, rider strin
 
 func parsed(t *testing.T, spec rideSpec) Ride {
 	t.Helper()
-	r, err := Parse(spec.build(t), profile)
+	r, err := Parse(spec.Build(t), profile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestSaveWritesTheSessionAndItsAnalysis(t *testing.T) {
 		ctx := t.Context()
 		// 300 days before the fixed "today" of 2026-10-04: far outside the 42-day
 		// window sync analyses, and the whole point of importing.
-		old := parsed(t, rideSpec{start: at(2025, 12, 8, 9, 0), seconds: 2400, watts: 210, hr: 145, distanceM: 20000})
+		old := parsed(t, rideSpec{Start: at(2025, 12, 8, 9, 0), Seconds: 2400, Watts: 210, HR: 145, DistanceM: 20000})
 
 		out, err := Save(ctx, db, nil, rider, old)
 		if err != nil || out != Added {
@@ -116,7 +116,7 @@ func TestSaveWritesTheSessionAndItsAnalysis(t *testing.T) {
 func TestSaveTwiceIsANoOp(t *testing.T) {
 	eachEngine(t, func(t *testing.T, db *workout.DB, rider string) {
 		ctx := t.Context()
-		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
+		r := parsed(t, rideSpec{Start: at(2026, 2, 1, 9, 0), Seconds: 3000, Watts: 200})
 
 		if out, err := Save(ctx, db, nil, rider, r); err != nil || out != Added {
 			t.Fatalf("first = %v, %v", out, err)
@@ -145,7 +145,7 @@ func TestSaveSkipsARideAlreadySyncedFromAProviderAndLeavesItsRowAlone(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
+		r := parsed(t, rideSpec{Start: at(2026, 2, 1, 9, 0), Seconds: 3000, Watts: 200})
 
 		out, err := Save(ctx, db, nil, rider, r)
 		if err != nil || out != AlreadyHere {
@@ -172,7 +172,7 @@ func TestSaveFindsTheProviderRideOnTheNeighbouringDay(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		r := parsed(t, rideSpec{start: at(2026, 7, 1, 22, 30), seconds: 3000, watts: 200, withActivity: true, offset: 2 * time.Hour})
+		r := parsed(t, rideSpec{Start: at(2026, 7, 1, 22, 30), Seconds: 3000, Watts: 200, WithActivity: true, Offset: 2 * time.Hour})
 		if r.Date != "2026-07-02" {
 			t.Fatalf("fixture date = %s", r.Date)
 		}
@@ -188,7 +188,7 @@ func TestSaveKeepsRidersApart(t *testing.T) {
 		// Two riders on one group ride, both head units started on the same
 		// second: the same start, the same file shape. Neither may take the
 		// other's row.
-		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
+		r := parsed(t, rideSpec{Start: at(2026, 2, 1, 9, 0), Seconds: 3000, Watts: 200})
 		other := rider + "-b"
 		if out, err := Save(ctx, db, nil, rider, r); err != nil || out != Added {
 			t.Fatalf("first rider = %v, %v", out, err)
@@ -217,7 +217,7 @@ func TestSaveNeverMatchesAPlanOrMovesALevel(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
+		r := parsed(t, rideSpec{Start: at(2026, 2, 1, 9, 0), Seconds: 3000, Watts: 200})
 		if _, err := Save(ctx, db, nil, rider, r); err != nil {
 			t.Fatal(err)
 		}
@@ -280,7 +280,7 @@ func TestExternalIDTagIsKeyedAndPurposeBound(t *testing.T) {
 func TestSaveRepairsASessionThatLostItsAnalysis(t *testing.T) {
 	eachEngine(t, func(t *testing.T, db *workout.DB, rider string) {
 		ctx := t.Context()
-		r := parsed(t, rideSpec{start: at(2026, 2, 1, 9, 0), seconds: 3000, watts: 200})
+		r := parsed(t, rideSpec{Start: at(2026, 2, 1, 9, 0), Seconds: 3000, Watts: 200})
 		// What a crash between the two writes leaves: the session, no analysis.
 		if _, err := db.UpsertSession(ctx, workout.UpsertSessionRequest{
 			Rider: rider, Provider: Provider, ExternalID: ExternalID(nil, rider, r.StartUnix), Sport: r.Sport, Date: r.Date,
