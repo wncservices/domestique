@@ -681,13 +681,13 @@ func (s *Server) Handler() http.Handler {
 	// traceparent, e.g. from Traefik) before anything else runs, so
 	// authenticate/logRequests/instrument all execute inside it, and any
 	// outbound call a handler makes has a real parent to attach to.
-	return securityHeaders(s.extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
+	return securityHeaders(s.csrfGuard(s.extendDeadlines(hideSecretPaths(otelhttp.NewHandler(
 		restoreSecretPaths(instrument(logRequests(s.logger(), s.authenticate(compress(withRoutePattern(mux)))))),
 		"domestique",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + redactPath(r.URL.Path)
 		}),
-	))))
+	)))))
 }
 
 // authenticate resolves the identity once per request and puts it on the
