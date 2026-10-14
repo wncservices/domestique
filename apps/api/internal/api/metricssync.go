@@ -57,6 +57,11 @@ type syncMetricsResultDTO struct {
 	// with what came of it. A test is reported once, ever: a second sync
 	// finds the result stored and says nothing.
 	FTPTests []ftpTestResultDTO `json:"ftpTests,omitempty"`
+	// BestEfforts is every new season or all-time best the rider has not been
+	// told about yet: the ones this sync just made and any a background pass
+	// made since they last looked. A rider's own "Sync now" marks them told, so
+	// a second sync lists none. An import never produces one.
+	BestEfforts []bestEffortAwardDTO `json:"bestEfforts,omitempty"`
 }
 
 // handleSyncTrainingMetrics is a rider's own "Sync now" click — a thin HTTP
@@ -79,6 +84,17 @@ func (s *Server) handleSyncTrainingMetrics(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	// The response is about to tell the rider about these awards, so they are
+	// told. The unattended loop never marks anything: nobody read its result.
+	if len(result.BestEfforts) > 0 {
+		told := make([]workout.BestEffort, 0, len(result.BestEfforts))
+		for _, a := range result.BestEfforts {
+			told = append(told, workout.BestEffort{SessionID: a.SessionID, Metric: a.Metric})
+		}
+		if err := s.Training.MarkAwardsAnnounced(r.Context(), rider, told); err != nil {
+			s.logger().Warn("best efforts: marking awards announced failed", "rider", rider, "err", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, result)
 }
@@ -411,7 +427,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	return syncMetricsResultDTO{
 		Synced: synced, Warnings: warnings, EstimatedFTPWatts: estimatedFTP, RestingHRBpm: restingHR,
 		AutoFilled: autoFilled, Detected: tdr.Detected, LevelsRecalibrated: recalibrated,
-		FTPTests: ftpTests,
+		FTPTests: ftpTests, BestEfforts: s.pendingEffortAwards(ctx, rider),
 	}, nil
 }
 

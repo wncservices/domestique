@@ -1332,6 +1332,15 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		log.Info("metrics listener off", "hint", "unset "+config.EnvMetricsAddr+" to get the default :9090")
 	}
 
+	// A deployment that predates the record book gets it built from the ride
+	// analyses, once. Before the loops start, not beside them: a sync that wrote
+	// the first row would make the table look already built, and the rides it
+	// did not cover would never be. A failure is logged and the app carries on
+	// (the book is derived, and a rider's next import fills their own part).
+	if err := srv.RebuildBestEfforts(ctx); err != nil {
+		log.Error("best efforts: the rebuild failed", "err", err)
+	}
+
 	// Polls every connected rider's Wahoo/Komoot/Garmin for new routes and,
 	// if auto-sync is on, imports and pushes them out — the unattended half
 	// of auto-sync, same shutdown signal as the HTTP server above.

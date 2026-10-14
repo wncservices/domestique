@@ -183,6 +183,13 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"session_analyses": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}}},
+	// best_efforts is derived from session_analyses (a rider's best 20 minutes,
+	// their peak heart rate): health data, so a purge removes it. Its key is
+	// (session_id, metric) with no rider in it, so a rename or a merge has no
+	// collision to refuse: a merge moves every row, and the better value per
+	// metric is whichever BestIn finds, not a row to choose between.
+	"best_efforts": {Purged: true, Note: "Training.DeleteRider: per-ride best power, speed and heart rate",
+		Rename: renameRule{Columns: []string{"rider"}}},
 	"ride_imports": {Purged: true, Note: "Training.DeleteRider: the counts of the rider's own history imports",
 		// ride_imports_one_running_idx is unique on rider where state = 'running',
 		// which uniqueKey cannot say, so it is stated as the whole rider: on a

@@ -345,6 +345,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM goals WHERE rider = ?`,
 		`DELETE FROM session_links WHERE rider = ?`,
 		`DELETE FROM life_events WHERE rider = ?`,
+		`DELETE FROM best_efforts WHERE rider = ?`,
 		`DELETE FROM session_analyses WHERE rider = ?`,
 		`DELETE FROM completed_sessions WHERE rider = ?`,
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
@@ -562,6 +563,12 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.backfillFTPVerified(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	// Created after the tables above rather than inside schema(): it is new, so
+	// there is no older table to add a column to, and keeping it apart keeps
+	// the season-review tables (best_efforts, ftp_changes) in one place.
+	if _, err := db.Exec(bestEffortSchema(d.Boolean)); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
