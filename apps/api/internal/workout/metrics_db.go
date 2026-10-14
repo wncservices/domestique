@@ -28,15 +28,16 @@ func (d *DB) UpsertSession(ctx context.Context, req UpsertSessionRequest) (Compl
 
 	_, err := d.db.ExecContext(ctx, d.query(`
         INSERT INTO completed_sessions (id, rider, provider, external_id, sport, date,
-                    duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, ascent_m, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (provider, external_id) DO UPDATE SET
             sport = excluded.sport, date = excluded.date,
             duration_seconds = excluded.duration_seconds, distance_m = excluded.distance_m,
             avg_hr = excluded.avg_hr, avg_power_watts = excluded.avg_power_watts,
-            training_load = excluded.training_load`),
+            training_load = excluded.training_load,
+            ascent_m = CASE WHEN excluded.ascent_m > 0 THEN excluded.ascent_m ELSE completed_sessions.ascent_m END`),
 		id, rider, req.Provider, req.ExternalID, req.Sport, req.Date,
-		req.DurationSeconds, req.DistanceM, req.AvgHR, req.AvgPowerWatts, req.TrainingLoad, d.timestamp())
+		req.DurationSeconds, req.DistanceM, req.AvgHR, req.AvgPowerWatts, req.TrainingLoad, req.AscentM, d.timestamp())
 	if err != nil {
 		return CompletedSession{}, err
 	}
@@ -47,10 +48,10 @@ func (d *DB) getSession(ctx context.Context, id string) (CompletedSession, error
 	var s CompletedSession
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT id, rider, provider, external_id, sport, date,
-               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, created_at
+               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, ascent_m, created_at
         FROM completed_sessions WHERE id = ?`), id).Scan(
 		&s.ID, &s.Rider, &s.Provider, &s.ExternalID, &s.Sport, &s.Date,
-		&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.CreatedAt)
+		&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.AscentM, &s.CreatedAt)
 	return s, err
 }
 
@@ -58,7 +59,7 @@ func (d *DB) getSession(ctx context.Context, id string) (CompletedSession, error
 func (d *DB) ListSessions(ctx context.Context, rider string) ([]CompletedSession, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, provider, external_id, sport, date,
-               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, created_at
+               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, ascent_m, created_at
         FROM completed_sessions WHERE rider = ? ORDER BY date DESC, id`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -69,7 +70,7 @@ func (d *DB) ListSessions(ctx context.Context, rider string) ([]CompletedSession
 	for rows.Next() {
 		var s CompletedSession
 		if err := rows.Scan(&s.ID, &s.Rider, &s.Provider, &s.ExternalID, &s.Sport, &s.Date,
-			&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.CreatedAt); err != nil {
+			&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.AscentM, &s.CreatedAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, s)
@@ -209,7 +210,7 @@ func (d *DB) FindSimilarSession(ctx context.Context, rider, sport string, dates 
 	}
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, provider, external_id, sport, date,
-               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, created_at
+               duration_seconds, distance_m, avg_hr, avg_power_watts, training_load, ascent_m, created_at
         FROM completed_sessions WHERE rider = ? AND sport = ? AND date IN (`+marks+`)
         ORDER BY date, id`), args...)
 	if err != nil {
@@ -221,7 +222,7 @@ func (d *DB) FindSimilarSession(ctx context.Context, rider, sport string, dates 
 	for rows.Next() {
 		var s CompletedSession
 		if err := rows.Scan(&s.ID, &s.Rider, &s.Provider, &s.ExternalID, &s.Sport, &s.Date,
-			&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.CreatedAt); err != nil {
+			&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.AscentM, &s.CreatedAt); err != nil {
 			return nil, err
 		}
 		sessions = append(sessions, s)

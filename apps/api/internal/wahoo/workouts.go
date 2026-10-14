@@ -30,6 +30,8 @@ type Workout struct {
 	DistanceM       float64
 	AvgHR           int
 	AvgPowerWatts   float64
+	// AscentM is workout_summary.ascent_accum in metres; 0 when absent.
+	AscentM float64
 
 	// NormalizedPower and TSS are the summary fallback used when a rider's
 	// FIT file could not be downloaded or decoded — the same role Garmin's
@@ -58,6 +60,9 @@ type workoutSummaryDTO struct {
 	HeartRateAvg       string `json:"heart_rate_avg"`
 	PowerBikeAvg       string `json:"power_bike_avg"`
 	PowerAvg           string `json:"power_avg"`
+	// AscentAccum is the climbing in metres. It decodes through flexibleNumber
+	// because its form (string or number) has not been seen confirmed.
+	AscentAccum flexibleNumber `json:"ascent_accum"`
 	// PowerBikeNPLast and PowerBikeTSSLast were observed to vary between a
 	// JSON string and a bare JSON number — unlike every other field above,
 	// confirmed to always be strings — so they decode through
@@ -189,6 +194,7 @@ func (c *Client) ListWorkouts(ctx context.Context, accessToken string, page, per
 			w.DistanceM = parseFloatOr0(it.WorkoutSummary.DistanceAccum)
 			w.AvgHR = int(parseFloatOr0(it.WorkoutSummary.HeartRateAvg))
 			w.AvgPowerWatts = it.WorkoutSummary.avgPower()
+			w.AscentM = float64(it.WorkoutSummary.AscentAccum)
 			w.NormalizedPower = float64(it.WorkoutSummary.PowerBikeNPLast)
 			w.TSS = float64(it.WorkoutSummary.PowerBikeTSSLast)
 			w.FileURL = it.WorkoutSummary.File.URL

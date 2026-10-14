@@ -181,7 +181,7 @@ func Save(ctx context.Context, st Store, ids MACer, rider string, r Ride) (Outco
 
 	sess, err := st.UpsertSession(ctx, workout.UpsertSessionRequest{
 		Rider: rider, Provider: Provider, ExternalID: id, Sport: r.Sport, Date: r.Date,
-		DurationSeconds: r.Duration, DistanceM: r.Distance, AvgHR: r.AvgHR, AvgPowerWatts: r.AvgPower,
+		DurationSeconds: r.Duration, DistanceM: r.Distance, AvgHR: r.AvgHR, AvgPowerWatts: r.AvgPower, AscentM: r.Ascent,
 		// The load a synced ride settles on once it is analysed, so the
 		// fitness chart does not read an import differently from its neighbours.
 		TrainingLoad: r.Analysis.Load,

@@ -33,6 +33,8 @@ type Spec struct {
 	NoSession    bool
 	NoRecords    bool
 	DistanceM    float64
+	// AscentM is the session's total ascent in metres; 0 writes none.
+	AscentM int
 	// Pause is seconds of the elapsed time the timer was stopped for.
 	Pause int
 	// Marker is written into a string field the importer never keeps, so a
@@ -85,6 +87,9 @@ func (r Spec) Build(t testing.TB) []byte {
 		}
 		if r.DistanceM > 0 {
 			s.SetTotalDistanceScaled(r.DistanceM)
+		}
+		if r.AscentM > 0 {
+			s.SetTotalAscent(uint16(min(r.AscentM, 65534))) // #nosec G115 -- clamped just above the type's maximum.
 		}
 		if r.Marker != "" {
 			s.SetSportProfileName(r.Marker)
