@@ -502,7 +502,7 @@ func (s *Server) inferFromHistory(ctx context.Context, rider string, profile, be
 				source = workout.FTPSourceTest
 			}
 		}
-		if _, err := s.Training.SaveProfileFrom(ctx, profile, source); err != nil {
+		if _, err := s.Training.SaveProfileOn(ctx, profile, source, s.localDate(s.now())); err != nil {
 			return historyInference{}, err
 		}
 		s.logger().Info("training profile auto-filled", "rider", rider, "fields", autoFilled)

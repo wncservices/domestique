@@ -474,7 +474,7 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		if workout.ReasonNamesTest(sug.Reason) {
 			source = workout.FTPSourceTest
 		}
-		if _, err := s.Training.SaveProfileFrom(r.Context(), profile, source); err != nil {
+		if _, err := s.Training.SaveProfileOn(r.Context(), profile, source, s.localDate(s.now())); err != nil {
 			s.fail(w, err)
 			return
 		}

@@ -272,21 +272,24 @@ func (d *DB) MarkAwardsAnnounced(ctx context.Context, rider string, awards []Bes
 	return nil
 }
 
-// RebuildBestEfforts regenerates every row from session_analyses joined to
-// completed_sessions, with no award (it cannot know what was new at the time).
-// It runs only when the table is empty, so a start after the first does
-// nothing, and returns the rows it wrote.
-func (d *DB) RebuildBestEfforts(ctx context.Context, efforts EffortFunc) (int, error) {
-	var one int
-	err := d.db.QueryRowContext(ctx, `SELECT 1 FROM best_efforts LIMIT 1`).Scan(&one)
-	if err == nil {
-		return 0, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
-	}
-	return d.BackfillEfforts(ctx, "", efforts)
+// RebuildBestEfforts brings the record book up to date from session_analyses
+// joined to completed_sessions: it writes the rows of every analysed ride that
+// has none, with no award (it cannot know what was new at the time). It is run
+// at every start and is idempotent, so a rebuild that stopped half-way (a
+// restart, a failed write) is completed by the next one, which is why it does
+// not look at whether the table is empty. progress, when set, is told how many
+// rows have been written so far after each chunk. It returns the rows written.
+//
+// A ride whose analysis carries a curve the provider supplied in place of one
+// read from the file (see analyseNewSessions' fallback) is included: the
+// stored analysis is the source of truth and does not say where a curve came
+// from.
+func (d *DB) RebuildBestEfforts(ctx context.Context, efforts EffortFunc, progress func(written int)) (int, error) {
+	return d.backfill(ctx, "", efforts, progress)
 }
+
+// DefaultEffortChunk is how many rows one transaction of a backfill writes.
+const DefaultEffortChunk = 500
 
 // BackfillEfforts writes the rows of every analysed ride that has none, for one
 // rider ("" for all of them), with no award and already announced. It is how an
@@ -294,6 +297,10 @@ func (d *DB) RebuildBestEfforts(ctx context.Context, efforts EffortFunc) (int, e
 // going through the sync, and an imported ride never earns an award. Rows that
 // exist are left exactly as they are.
 func (d *DB) BackfillEfforts(ctx context.Context, rider string, efforts EffortFunc) (int, error) {
+	return d.backfill(ctx, rider, efforts, nil)
+}
+
+func (d *DB) backfill(ctx context.Context, rider string, efforts EffortFunc, progress func(written int)) (int, error) {
 	rider = normalizeRider(rider)
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT a.session_id, a.rider, s.sport, s.date, a.max_hr, a.best_speed_1200, a.best_speed_1800, a.power_curve
@@ -332,14 +339,35 @@ func (d *DB) BackfillEfforts(ctx context.Context, rider string, efforts EffortFu
 	}
 	_ = rows.Close()
 
+	chunk := d.EffortChunk
+	if chunk <= 0 {
+		chunk = DefaultEffortChunk
+	}
+	now := d.timestamp()
+	written := 0
+	for start := 0; start < len(pending); start += chunk {
+		end := min(start+chunk, len(pending))
+		n, err := d.writeEffortChunk(ctx, pending[start:end], now)
+		if err != nil {
+			return written, err
+		}
+		written += n
+		if progress != nil {
+			progress(written)
+		}
+	}
+	return written, nil
+}
+
+// writeEffortChunk is one transaction of a backfill.
+func (d *DB) writeEffortChunk(ctx context.Context, rows []BestEffort, now string) (int, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	now := d.timestamp()
 	written := 0
-	for _, e := range pending {
+	for _, e := range rows {
 		res, err := tx.ExecContext(ctx, d.query(`
             INSERT INTO best_efforts (rider, session_id, metric, sport, date, value, award, announced, created_at)
             VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)

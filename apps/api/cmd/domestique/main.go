@@ -1332,29 +1332,17 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		log.Info("metrics listener off", "hint", "unset "+config.EnvMetricsAddr+" to get the default :9090")
 	}
 
-	// A deployment that predates the record book gets it built from the ride
-	// analyses, once. Before the loops start, not beside them: a sync that wrote
-	// the first row would make the table look already built, and the rides it
-	// did not cover would never be. A failure is logged and the app carries on
-	// (the book is derived, and a rider's next import fills their own part).
-	if err := srv.RebuildBestEfforts(ctx); err != nil {
-		log.Error("best efforts: the rebuild failed", "err", err)
-	}
-
-	// Polls every connected rider's Wahoo/Komoot/Garmin for new routes and,
-	// if auto-sync is on, imports and pushes them out — the unattended half
-	// of auto-sync, same shutdown signal as the HTTP server above.
-	go srv.RunAutoImportLoop(ctx)
-
-	// Schedules every rider's current plan week into real workout rows, if
-	// auto-schedule is on — the unattended equivalent of a rider clicking
-	// "Schedule this week's workouts" themselves, same shutdown signal.
-	go srv.RunAutoScheduleLoop(ctx)
-
-	// Pulls every connected rider's Garmin/Wahoo activities and wellness at
-	// fixed morning and evening times (config: training.sync_times), whether
-	// or not auto-schedule is on — it only reads, it never changes a workout.
-	go srv.RunMetricsSyncLoop(ctx)
+	// The unattended loops: auto-import (polls each rider's Wahoo/Komoot/Garmin
+	// for new routes and, if auto-sync is on, imports and pushes them),
+	// auto-schedule (schedules each rider's plan week, if on) and the fixed-time
+	// metrics sync (activities and wellness, whether or not auto-schedule is on;
+	// it only reads). Same shutdown signal as the HTTP server above.
+	// The three loops that read and write training data start once the record
+	// book has been brought up to date from the ride analyses (a deployment that
+	// predates it, or a rebuild that was cut short). The rebuild runs in the
+	// background, so listening is never delayed by it, and the loops wait for it
+	// so a sync cannot race it. A failed rebuild is logged and they start anyway.
+	srv.StartAfterBestEffortsRebuild(ctx, srv.RunAutoImportLoop, srv.RunAutoScheduleLoop, srv.RunMetricsSyncLoop)
 
 	// Drops generated route loops nobody came back for, so a rider's location
 	// data does not sit in memory past its 30 minutes.

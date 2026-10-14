@@ -102,6 +102,9 @@ type Server struct {
 	// BeforeImportJob, when set, runs at the start of every ride-history import
 	// job. Tests only: a panic from it is how they reach the job's recovery.
 	BeforeImportJob func()
+	// BeforeBestEffortsRebuild, when set, runs at the start of the startup
+	// rebuild of the record book. For tests: it lets one hold the rebuild open.
+	BeforeBestEffortsRebuild func()
 	// ImportMaxUploadBytes caps one import upload's request body; zero means
 	// the spec's 1 GiB. ImportLimits bounds what is read out of it; the zero
 	// value means rideimport.DefaultLimits. Tests lower both rather than send a

@@ -146,20 +146,41 @@ func (s *Server) pendingEffortAwards(ctx context.Context, rider string) []bestEf
 	return out
 }
 
-// RebuildBestEfforts regenerates the record book from the analyses when the
-// table is empty, which is how a deployment that predates it gets one. It is
-// derived data (session_analyses is the source of truth) and runs once: a table
-// with any row is left alone. The log carries a count and nothing else.
+// RebuildBestEfforts brings the record book up to date from the analyses: the
+// rows of every analysed ride that has none are written, in chunks. It is run
+// at every start and is idempotent, so a rebuild that was cut short is finished
+// by the next one. It is derived data (session_analyses is the source of
+// truth). The log carries counts and nothing else: start, progress, done.
 func (s *Server) RebuildBestEfforts(ctx context.Context) error {
 	if s.Training == nil {
 		return nil
 	}
-	n, err := s.Training.RebuildBestEfforts(ctx, bestefforts.Efforts)
+	if s.BeforeBestEffortsRebuild != nil {
+		s.BeforeBestEffortsRebuild()
+	}
+	s.logger().Info("best efforts rebuild starting")
+	n, err := s.Training.RebuildBestEfforts(ctx, bestefforts.Efforts, func(written int) {
+		s.logger().Info("best efforts rebuild progress", "rows", written)
+	})
 	if err != nil {
 		return fmt.Errorf("rebuild best efforts: %w", err)
 	}
-	if n > 0 {
-		s.logger().Info("best efforts rebuilt", "rows", n)
-	}
+	s.logger().Info("best efforts rebuilt", "rows", n)
 	return nil
+}
+
+// StartAfterBestEffortsRebuild runs the rebuild in the background and starts
+// each of loops, each in its own goroutine, once it has finished, so listening
+// is never delayed by it and nothing that writes to the record book races it.
+// A failed rebuild is logged at Error and the loops start anyway: the book is
+// derived, and the next start completes it.
+func (s *Server) StartAfterBestEffortsRebuild(ctx context.Context, loops ...func(context.Context)) {
+	go func() {
+		if err := s.RebuildBestEfforts(ctx); err != nil {
+			s.logger().Error("best efforts: the rebuild failed", "err", err)
+		}
+		for _, loop := range loops {
+			go loop(ctx)
+		}
+	}()
 }
