@@ -688,12 +688,13 @@ func (s *Server) handleSyncRide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// After the membership check, so an outsider cannot burn a crew's budget,
-	// and before any provider is touched.
-	if s.CrewSyncLimiter != nil && !s.CrewSyncLimiter.Allow(id) {
-		s.logger().Warn("crew sync rate limit hit", "crew", id, "by", identity.User)
+	// Per ride, after the membership check (so an outsider cannot burn the
+	// budget) and before any provider is touched. Allow records a press only
+	// when it lets it through, so a refused one does not count.
+	if s.CrewSyncLimiter != nil && !s.CrewSyncLimiter.Allow(rideID) {
+		s.logger().Warn("crew sync rate limit hit", "crew", id, "ride", rideID, "by", identity.User)
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "this crew was synced a moment ago — wait a few minutes and try again",
+			"error": "this ride was synced a moment ago — wait a few minutes and try again",
 		})
 		return
 	}

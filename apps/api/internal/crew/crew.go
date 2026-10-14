@@ -856,30 +856,60 @@ func (s *Store) Remove(ctx context.Context, crewID, rider string) error {
 	// The last owner cannot be removed, whether they leave or someone else
 	// removes them: SetOwner already refuses to revoke it, and leaving would
 	// otherwise get round that and strand the crew with no owner but an admin.
-	// The guard is inside the DELETE so two owners leaving at once cannot both
-	// pass a check made beforehand.
-	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
-        DELETE FROM crew_members
-        WHERE crew_id = ? AND rider = ? AND status = ?
-          AND NOT (is_owner = ? AND (
-                SELECT COUNT(1) FROM crew_members
-                WHERE crew_id = ? AND status = ? AND is_owner = ?) <= 1)`),
-		crewID, rider, string(StatusApproved), true, crewID, string(StatusApproved), true)
+	//
+	// Check and delete are one transaction that first locks the crew's owner
+	// rows (SELECT ... FOR UPDATE). Without the lock, two owners leaving at once
+	// each count the other under PostgreSQL's READ COMMITTED snapshot and both
+	// delete. SQLite has no row locks and needs none: it admits one writer at a
+	// time, so the second transaction waits and then sees the first's delete.
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if affected, _ := result.RowsAffected(); affected > 0 {
-		return nil
+	defer func() { _ = tx.Rollback() }()
+
+	lock := ""
+	if s.dialect.Name == "postgres" {
+		lock = " FOR UPDATE"
 	}
-	// Nothing deleted: either there was no such member, or they are the last owner.
-	owner, err := s.IsOwner(ctx, crewID, rider)
+	rows, err := tx.QueryContext(ctx, s.dialect.Rebind(`
+        SELECT rider FROM crew_members
+        WHERE crew_id = ? AND status = ? AND is_owner = ?`+lock),
+		crewID, string(StatusApproved), true)
 	if err != nil {
+		return fmt.Errorf("lock crew owners: %w", err)
+	}
+	owners, isOwner := 0, false
+	for rows.Next() {
+		var who string
+		if err := rows.Scan(&who); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		owners++
+		if who == rider {
+			isOwner = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return err
 	}
-	if owner {
+	_ = rows.Close()
+
+	if isOwner && owners <= 1 {
 		return ErrLastOwner
 	}
-	return ErrNotFound
+	result, err := tx.ExecContext(ctx, s.dialect.Rebind(`
+        DELETE FROM crew_members WHERE crew_id = ? AND rider = ? AND status = ?`),
+		crewID, rider, string(StatusApproved))
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrNotFound
+	}
+	return tx.Commit()
 }
 
 func (s *Store) delete(ctx context.Context, crewID, rider, status string) error {
