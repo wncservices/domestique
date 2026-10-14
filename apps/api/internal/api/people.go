@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
+	"github.com/wncservices/domestique/apps/api/internal/identities"
 )
 
 // PeopleConnector is the seam against Auth0's Management API — tests must
@@ -65,6 +68,17 @@ type personDTO struct {
 	// a claimant is unverified or unknown). Empty when this deployment keeps no
 	// bindings (anything but mode oidc).
 	BindingStatus string `json:"bindingStatus,omitempty"`
+	// FlagReason is why the startup bootstrap left this account unbound
+	// ("newer-than-data", "conflict" or "needs-attention"), and FlagText the same
+	// in words. Both stay on the row after the account has signed in as another
+	// rider, which is when it matters most. Empty when it was not held back, or
+	// an admin has since settled it.
+	FlagReason string `json:"flagReason,omitempty"`
+	FlagText   string `json:"flagText,omitempty"`
+	// SuggestRider is set when the account is bound to a suffixed fallback
+	// ("name-2") while "name" has data and nobody is bound to it: very likely the
+	// rider this person actually is. The page offers it as one click.
+	SuggestRider string `json:"suggestRider,omitempty"`
 }
 
 // likelyRider guesses what identityFromToken (sso.go) would resolve this
@@ -211,6 +225,7 @@ func (s *Server) handlePeopleList(w http.ResponseWriter, r *http.Request) {
 		dto := s.personDTO(p)
 		if v, ok := views[p.UserID]; ok {
 			dto.BoundRider, dto.BindingStatus = v.rider, v.status
+			dto.FlagReason, dto.FlagText, dto.SuggestRider = v.flagReason, v.flagText, v.suggest
 		}
 		out = append(out, dto)
 	}
@@ -220,6 +235,37 @@ func (s *Server) handlePeopleList(w http.ResponseWriter, r *http.Request) {
 // bindingView is what the People page shows about one account's binding.
 type bindingView struct {
 	rider, status string
+	// flagReason and flagText say why the bootstrap held the account back;
+	// suggest is the rider it probably meant. See personDTO.
+	flagReason, flagText, suggest string
+}
+
+// flagText is a held-back reason in words, for the rider it was held back from.
+func flagText(reason, rider string) string {
+	switch reason {
+	case identities.FlagNewerThanData:
+		return fmt.Sprintf("Held back at startup: this account joined after the data of rider %q existed, so it may belong to someone who renamed themselves.", rider)
+	case identities.FlagConflict:
+		return fmt.Sprintf("Held back at startup: the accounts claiming rider %q disagree on who they are.", rider)
+	case identities.FlagNeedsAttention:
+		return fmt.Sprintf("Held back at startup: rider %q has data, and an account claiming it has an unverified or unknown email.", rider)
+	}
+	return ""
+}
+
+var suffixedRider = regexp.MustCompile(`^(.+)-([0-9]+)$`)
+
+// suffixedFallbackOf is the plain name a "name-N" fallback (N at least 2) was
+// made from, or "" when rider is not one.
+func suffixedFallbackOf(rider string) string {
+	m := suffixedRider.FindStringSubmatch(rider)
+	if m == nil {
+		return ""
+	}
+	if n, err := strconv.Atoi(m[2]); err != nil || n < 2 {
+		return ""
+	}
+	return m[1]
 }
 
 // bindingViews reads the bindings once and says, for each listed person,
@@ -252,12 +298,44 @@ func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) ma
 	if err != nil {
 		s.logger().Warn("reading which riders have data for the people page failed", "err", err)
 	}
-	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] }, data)
+	plan := planBootstrap(people, func(rider string) bool { return boundRiders[rider] }, data, s.isAdminPerson)
+
+	// Why accounts were held back: what the bootstrap saved when it ran, which
+	// outlives a restart and the conditions that caused it, and for an account
+	// still unbound what the same rule says right now.
+	saved, err := s.Identities.Flags(ctx, issuer)
+	if err != nil {
+		s.logger().Warn("reading why accounts were held back for the people page failed", "err", err)
+	}
+	live := map[string]bootstrapFlag{}
+	for _, f := range plan.Flags {
+		live[f.Sub] = bootstrapFlag{Sub: f.Sub, Rider: f.Rider, Reason: f.Reason}
+	}
+	flagFor := func(sub, boundTo string) (reason, text string) {
+		var rider string
+		if f, ok := saved[sub]; ok {
+			reason, rider = f.Reason, f.Rider
+		} else if f, ok := live[sub]; ok && boundTo == "" {
+			reason, rider = f.Reason, f.Rider
+		}
+		// Settled: the account is on that rider, or somebody is.
+		if reason == "" || rider == boundTo || boundRiders[rider] {
+			return "", ""
+		}
+		return reason, flagText(reason, rider)
+	}
 
 	out := make(map[string]bindingView, len(people))
 	for _, p := range people {
 		if rider, ok := bySub[p.UserID]; ok {
-			out[p.UserID] = bindingView{rider: rider, status: "bound"}
+			v := bindingView{rider: rider, status: "bound"}
+			v.flagReason, v.flagText = flagFor(p.UserID, rider)
+			if base := suffixedFallbackOf(rider); base != "" {
+				if _, hasData := data[base]; hasData && !boundRiders[base] {
+					v.suggest = base
+				}
+			}
+			out[p.UserID] = v
 			continue
 		}
 		status := "unbound"
@@ -270,7 +348,9 @@ func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) ma
 			// unknown claimant among several, or a profile the search lacked.
 			status = "needs-attention"
 		}
-		out[p.UserID] = bindingView{status: status}
+		v := bindingView{status: status}
+		v.flagReason, v.flagText = flagFor(p.UserID, "")
+		out[p.UserID] = v
 	}
 	return out
 }
@@ -675,6 +755,10 @@ func (s *Server) handlePeopleSetBinding(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.endSessionsOf(r.Context(), sub, "identity binding changed")
+	// Settled by hand, so the held-back reason no longer applies.
+	if err := s.Identities.ClearFlag(r.Context(), issuer, sub); err != nil {
+		s.logger().Warn("could not clear why an account was held back", "err", err)
+	}
 
 	if own {
 		s.logger().Warn("admin moved their own identity binding", "rider", rider, "from", from)
@@ -770,7 +854,7 @@ func (s *Server) handlePeopleOrphans(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	plan := planBootstrap(people, func(rider string) bool { return bound[rider] }, data)
+	plan := planBootstrap(people, func(rider string) bool { return bound[rider] }, data, s.isAdminPerson)
 	orphans := plan.Orphans
 	if orphans == nil {
 		orphans = []string{}

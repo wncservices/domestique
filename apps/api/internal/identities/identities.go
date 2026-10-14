@@ -118,7 +118,7 @@ func UseDB(db *sql.DB, dsn string, box *secrets.Box) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, stmt := range schemas(d) {
+	for _, stmt := range append(schemas(d), flagSchemas()...) {
 		if _, err := db.Exec(stmt); err != nil {
 			return nil, fmt.Errorf("identities: migrating: %w", err)
 		}
@@ -401,7 +401,16 @@ func (s *Store) DeleteRider(ctx context.Context, rider string) (int, error) {
 		return 0, fmt.Errorf("identities: removing a rider's bindings: %w", err)
 	}
 	n, err := res.RowsAffected()
-	return int(n), err
+	if err != nil {
+		return 0, err
+	}
+	// A flag names the rider an account was held back from. It goes with the
+	// rider, like the bindings do.
+	if _, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+		`DELETE FROM bootstrap_flags WHERE rider = ?`), normalizeRider(rider)); err != nil {
+		return int(n), fmt.Errorf("identities: removing a rider's flags: %w", err)
+	}
+	return int(n), nil
 }
 
 // ClaimFree binds a sub that has no binding yet to the first free rider among
