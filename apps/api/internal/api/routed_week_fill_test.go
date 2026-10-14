@@ -41,6 +41,10 @@ func TestAGoalEditFillsTheCurrentWeekAroundARoutedRide(t *testing.T) {
 		t.Fatalf("PATCH status %d", resp.StatusCode)
 	}
 
+	// The save also starts the season fill in the background; let it finish so
+	// it is not still writing when the test database goes away.
+	h.srv.WaitForBackground()
+
 	planned := 0
 	for _, w := range h.week(t, h.now.AddDate(0, 0, -2)) {
 		if w.ID != routed.ID && scheduler.IsGenerated(w) {
