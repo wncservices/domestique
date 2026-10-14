@@ -92,6 +92,7 @@ import type {
   SessionAnalysis,
   ReadinessResponse,
   ProjectionResponse,
+  RideImport,
   EaseTomorrowResult,
   IndoorPreview,
   CourseOutcome,
@@ -117,6 +118,9 @@ import type { BasemapLayers } from '@/utils/staticBasemap'
  * password, and matching on the text of an error message across the API
  * boundary is a thing that breaks the next time the wording is improved.
  */
+/** The trainer-app file formats a workout can be exported as. */
+export type ExportFormat = 'zwo' | 'mrc' | 'erg'
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -151,6 +155,44 @@ export function garminMFABody(err: ApiError): GarminConnectMFA {
     method: method === 'email' || method === 'sms' || method === 'totp' ? method : '',
     mfaInvalid: mfaInvalid === true,
     attemptsRemaining: typeof attemptsRemaining === 'number' ? attemptsRemaining : undefined,
+  }
+}
+
+/** The ApiError for a failed response: the API's {"error": "..."} message, or the status text. */
+async function apiErrorFrom(response: Response, path: string): Promise<ApiError> {
+  // The API returns {"error": "..."} on failure; fall back to the status text
+  // when something upstream (a proxy, a crash) returns something else.
+  let detail = response.statusText
+  let body: Record<string, unknown> = {}
+  try {
+    body = (await response.json()) as Record<string, unknown>
+    if (typeof body.error === 'string') detail = body.error
+  } catch {
+    /* not JSON — keep the status text */
+  }
+  return new ApiError(detail || `request to ${path} failed`, response.status, body)
+}
+
+/**
+ * Fetches a file the server builds on request (an export), so a refusal
+ * arrives as an ApiError carrying the server's own message instead of the
+ * browser navigating to a JSON error page.
+ */
+export async function fetchFile(path: string): Promise<{ blob: Blob; filename: string; skippedAll: boolean }> {
+  let response: Response
+  try {
+    response = await fetch(path)
+  } catch (err) {
+    throw new NetworkError(err)
+  }
+  if (!response.ok) throw await apiErrorFrom(response, path)
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^";]+)"?/.exec(disposition)
+  return {
+    blob: await response.blob(),
+    filename: match?.[1] ?? 'download',
+    // A week zip with nothing in it but SKIPPED.txt: not worth saving.
+    skippedAll: response.headers.get('X-Domestique-Skipped') === 'all',
   }
 }
 
@@ -1042,6 +1084,15 @@ export const api = {
    *  comment for why this is the proven path to a real device in this
    *  phase rather than a provider push. */
   workoutFitUrl: (id: string) => `/api/training/workouts/${encodeURIComponent(id)}/fit`,
+  /** A workout as a trainer-app file: .zwo (Zwift), .mrc (TrainerRoad and
+   *  others) or .erg. The server refuses what a trainer cannot hold (heart-rate
+   *  steps, an open step in .mrc/.erg), so callers fetch this and show the
+   *  server's message rather than linking straight to it. */
+  workoutExportUrl: (id: string, format: ExportFormat) =>
+    `/api/training/workouts/${encodeURIComponent(id)}/export?format=${format}`,
+  /** The week containing `monday` (YYYY-MM-DD) as a zip of those files. */
+  weekExportUrl: (monday: string, format: ExportFormat) =>
+    `/api/training/weeks/${encodeURIComponent(monday)}/export?format=${format}`,
   /** Pushes a structured workout straight to the rider's own connected
    *  Garmin account — Connect's own JSON workout schema, not the FIT
    *  bytes workoutFitUrl serves; see internal/garmin's own doc comment.
@@ -1059,6 +1110,41 @@ export const api = {
    *  provider failing (not connected, a stale token) is reported in
    *  `warnings` rather than failing the whole call. */
   syncTrainingMetrics: () => request<SyncMetricsResult>('/api/training/sync', { method: 'POST' }),
+  /** The rider's latest ride-history import, or undefined when they have never
+   *  imported (204). A running job not touched for two minutes reads
+   *  `interrupted`. */
+  rideImportStatus: () => request<RideImport | undefined>('/api/training/import/status'),
+  /** Uploads an export (a Strava or Garmin zip) or loose .fit/.fit.gz files and
+   *  starts the import in the background; resolves when the server has the whole
+   *  upload (202). fetch has no upload progress, hence XMLHttpRequest. The rider
+   *  is the session's: nothing in the body says who it is. */
+  uploadRideImport: (files: File[], onProgress: (fraction: number) => void) =>
+    new Promise<RideImport>((resolve, reject) => {
+      const form = new FormData()
+      for (const file of files) form.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/training/import')
+      xhr.setRequestHeader('Accept', 'application/json')
+      xhr.upload.onprogress = (e: ProgressEvent) => {
+        if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total)
+      }
+      xhr.onerror = () => reject(new NetworkError(new Error('upload failed')))
+      xhr.onload = () => {
+        let body: Record<string, unknown> = {}
+        try {
+          body = JSON.parse(xhr.responseText) as Record<string, unknown>
+        } catch {
+          /* not JSON: keep the status text */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(body as unknown as RideImport)
+          return
+        }
+        const message = typeof body.error === 'string' ? body.error : xhr.statusText || 'The upload failed.'
+        reject(new ApiError(message, xhr.status, { ...body, retryAfter: xhr.getResponseHeader('Retry-After') }))
+      }
+      xhr.send(form)
+    }),
   /** A rider's own pending threshold suggestions — a detected FTP/max-HR/
    *  threshold-pace change for a field they typed in themselves, which a
    *  sync never overwrites on its own. */
