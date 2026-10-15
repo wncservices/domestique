@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,7 +75,7 @@ func (s *syncBuffer) String() string {
 
 func newWeatherHarness(t *testing.T, mutate ...func(*api.Server)) *weatherHarness {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

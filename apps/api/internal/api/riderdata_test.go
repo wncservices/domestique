@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/routeshare"
@@ -132,25 +132,9 @@ func eachRiderDataEngine(t *testing.T, run func(t *testing.T, env *riderDataEnv)
 		run(t, openRiderDataEnv(t, filepath.Join(t.TempDir(), "rider.db")))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("DOMESTIQUE_TEST_POSTGRES")
-		if dsn == "" {
-			t.Skip("set DOMESTIQUE_TEST_POSTGRES to a PostgreSQL DSN to run this")
-		}
-		// A schema of its own: the shared test database also holds tables
-		// other branches' runs left behind, which the guard would report.
-		name := fmt.Sprintf("purge_%d", time.Now().UnixNano())
-		admin, err := sql.Open("pgx", dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := admin.Exec(`CREATE SCHEMA ` + name); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			_, _ = admin.Exec(`DROP SCHEMA ` + name + ` CASCADE`)
-			_ = admin.Close()
-		})
-		run(t, openRiderDataEnv(t, dsn+"&search_path="+name))
+		// A schema of its own: the guard reads every table it can see, so it
+		// must not see anything another test created.
+		run(t, openRiderDataEnv(t, pgtest.DSN(t)))
 	})
 }
 

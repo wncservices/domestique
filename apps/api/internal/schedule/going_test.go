@@ -2,11 +2,11 @@ package schedule
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
@@ -16,18 +16,9 @@ func eachEngine(t *testing.T, fn func(t *testing.T, s *Store)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) { fn(t, goingStore(t, filepath.Join(t.TempDir(), "going.db"))) })
 	t.Run("postgres", func(t *testing.T) {
-		dsn := envPostgres(t)
+		dsn := pgtest.DSN(t)
 		fn(t, goingStore(t, dsn))
 	})
-}
-
-func envPostgres(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
-	return dsn
 }
 
 func goingStore(t *testing.T, dsn string) *Store {

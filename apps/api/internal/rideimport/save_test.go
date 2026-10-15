@@ -3,19 +3,17 @@ package rideimport
 import (
 	"bytes"
 	"encoding/base64"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 // engines opens the same store on SQLite and on PostgreSQL, so a query that
 // only one of them understands cannot pass. Each test works under its own
@@ -26,10 +24,7 @@ func eachEngine(t *testing.T, run func(t *testing.T, db *workout.DB, rider strin
 	open := map[string]func(*testing.T) string{
 		"sqlite": func(t *testing.T) string { return filepath.Join(t.TempDir(), "test.db") },
 		"postgres": func(t *testing.T) string {
-			dsn := os.Getenv(postgresEnv)
-			if dsn == "" {
-				t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-			}
+			dsn := pgtest.DSN(t)
 			return dsn
 		},
 	}

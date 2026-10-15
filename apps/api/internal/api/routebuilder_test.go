@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -129,7 +130,7 @@ var suggestFixtureRoute = []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 51.03, Lon:
 func newRouteBuilderHarness(t *testing.T, rt routing.Client) (client *http.Client, base string) {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +356,7 @@ func TestRouteBuilderPreviewRejectsTooManyWaypoints(t *testing.T) {
 // other test in this file relies on that field staying nil (unlimited) —
 // see ratelimit.Limiter.Allow's own doc comment for why nil fails open.
 func TestRouteBuilderPreviewIsRateLimited(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +849,7 @@ func TestRouteBuilderSuggestRejectsAnUnsupportedProfile(t *testing.T) {
 }
 
 func TestRouteBuilderSuggestIsRateLimited(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1204,7 +1205,7 @@ func (f fakeGeocoder) Search(context.Context, string) ([]geocoding.Result, error
 func newGeocodeHarness(t *testing.T, geocoder geocoding.Client) (client *http.Client, base string) {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1305,7 +1306,7 @@ func TestGeocodeSearchFailurePropagatesAsBadGateway(t *testing.T) {
 // GeocodeLimiter left nil (unlimited) so only the global limiter can be
 // what blocks the second request.
 func TestGeocodeSearchIsRateLimitedGlobally(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

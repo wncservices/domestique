@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -27,7 +27,7 @@ type recalHarness struct {
 
 func newRecalHarness(t *testing.T) *recalHarness {
 	t.Helper()
-	src, err := source.OpenDB(filepath.Join(t.TempDir(), "recal.db"))
+	src, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

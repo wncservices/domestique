@@ -2,17 +2,15 @@ package weather_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/weather"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 var t0 = time.Date(2026, 10, 1, 7, 0, 0, 0, time.UTC)
 
@@ -42,10 +40,7 @@ func openSQLite(t *testing.T) (*weather.Store, *source.DB) {
 
 func openPostgres(t *testing.T) (*weather.Store, *source.DB) {
 	t.Helper()
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return openStore(t, dsn)
 }
 

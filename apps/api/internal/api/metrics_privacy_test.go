@@ -1,9 +1,9 @@
 package api
 
 import (
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,7 +43,7 @@ func TestPushMetricsCarryNoRiderName(t *testing.T) {
 // The Garmin session gauge answers "does anyone's session lapse soon", not
 // "whose": one series, the earliest expiry, no rider.
 func TestGarminExpiryGaugeCarriesNoRiderName(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "m.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

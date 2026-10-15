@@ -3,15 +3,13 @@ package accounts
 import (
 	"database/sql"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 func openStore(t *testing.T, dsn string) *Store {
 	t.Helper()
@@ -38,10 +36,7 @@ func sqliteStore(t *testing.T) *Store {
 }
 
 func postgresStore(t *testing.T) *Store {
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return openStore(t, dsn)
 }
 

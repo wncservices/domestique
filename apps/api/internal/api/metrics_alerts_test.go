@@ -1,8 +1,8 @@
 package api
 
 import (
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -74,7 +74,7 @@ func TestPushAccountsFailingIgnoresNoops(t *testing.T) {
 
 func garminLinks(t *testing.T) *providerlink.Store {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "g.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

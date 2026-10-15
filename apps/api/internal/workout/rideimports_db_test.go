@@ -2,10 +2,10 @@ package workout
 
 import (
 	"errors"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
@@ -201,9 +201,6 @@ func TestEarliestSessionDateEachEngine(t *testing.T) {
 
 func postgresDSN(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return dsn
 }

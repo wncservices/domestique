@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
@@ -622,10 +622,7 @@ func TestLifeEventLogsCarryNoNote(t *testing.T) {
 // wording and changes nothing. SQLite has no advisory locks, so this needs a
 // real PostgreSQL.
 func TestApplyingWhileTheTickHoldsTheLockIsAConflict(t *testing.T) {
-	dsn := os.Getenv("DOMESTIQUE_TEST_POSTGRES")
-	if dsn == "" {
-		t.Skip("set DOMESTIQUE_TEST_POSTGRES to a PostgreSQL DSN to run this")
-	}
+	dsn := pgtest.DSN(t)
 	db, err := source.OpenDB(dsn)
 	if err != nil {
 		t.Fatal(err)

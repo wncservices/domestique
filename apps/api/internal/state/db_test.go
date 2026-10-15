@@ -1,16 +1,10 @@
 package state
 
 import (
-	"os"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"path/filepath"
 	"testing"
 )
-
-// postgresEnv points the tests at a real PostgreSQL. PostgreSQL is what the
-// deployed instance uses, and it differs from SQLite in the places this store
-// touches — placeholders and the upsert — so passing on SQLite alone proves
-// little. CI sets this.
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 func openSQLiteStore(t *testing.T) Store {
 	t.Helper()
@@ -25,10 +19,7 @@ func openSQLiteStore(t *testing.T) Store {
 func openPostgresStore(t *testing.T) Store {
 	t.Helper()
 
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 
 	store, err := OpenDB(dsn)
 	if err != nil {

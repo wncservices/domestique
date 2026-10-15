@@ -1,7 +1,7 @@
 package pacingpush
 
 import (
-	"os"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"path/filepath"
 	"testing"
 )
@@ -10,10 +10,7 @@ func TestRemoteIDsEachEngine(t *testing.T) {
 	for engine, open := range map[string]func(*testing.T) *Store{
 		"sqlite": func(t *testing.T) *Store { return openStore(t, filepath.Join(t.TempDir(), "p.db")) },
 		"postgres": func(t *testing.T) *Store {
-			dsn := os.Getenv(postgresEnv)
-			if dsn == "" {
-				t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-			}
+			dsn := pgtest.DSN(t)
 			return openStore(t, dsn)
 		},
 	} {

@@ -1198,6 +1198,19 @@ Two things make the suite worth trusting, and both are easy to lose:
    deployment uses. CI runs a service container and fails if those tests *skip*,
    because a silently skipped engine reads green while covering nothing.
 
+3. **Tests share nothing, so packages run in parallel.** A PostgreSQL test gets
+   its database from `pgtest.DSN(t)` (`internal/pgtest`): a schema of its own,
+   dropped afterwards, skipped when `DOMESTIQUE_TEST_POSTGRES` is unset and
+   failed instead of skipped under `DOMESTIQUE_REQUIRE_POSTGRES=1` (CI). Never
+   read `DOMESTIQUE_TEST_POSTGRES` directly — a test that `DROP TABLE`s to force
+   an error path would take the table away from every other package. A SQLite
+   harness in `internal/api` takes `testdb.Path(t)` (`internal/testdb`), a
+   private copy of a database with every store already migrated; migrating
+   dozens of tables per test was a third of the package's time under `-race`.
+   A test of a migration itself (a table that predates a column) builds its
+   own database instead. CI shards `internal/api` three ways by test-name hash
+   (`scripts/test-shard.sh`).
+
 When you add behaviour, check the test fails without it. Several tests here were written after
 confirming that deleting the code they cover turns them red.
 

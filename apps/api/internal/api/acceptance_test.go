@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -165,7 +166,7 @@ func seedCrews(t *testing.T, db *source.DB) *crew.Store {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 
-	src, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	src, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

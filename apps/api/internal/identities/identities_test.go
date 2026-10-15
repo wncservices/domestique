@@ -3,7 +3,6 @@ package identities
 import (
 	"context"
 	"database/sql"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,15 +10,13 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/sessions"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
-const (
-	postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
-	issuer      = "https://issuer.test/"
-)
+const issuer = "https://issuer.test/"
 
 // fixed is the store clock: an explicit zone, so the test means the same in
 // every TZ.
@@ -78,10 +75,7 @@ func eachEngine(t *testing.T, run func(t *testing.T, e env)) {
 		run(t, openStore(t, filepath.Join(t.TempDir(), "identities.db")))
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv(postgresEnv)
-		if dsn == "" {
-			t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-		}
+		dsn := pgtest.DSN(t)
 		run(t, openStore(t, dsn))
 	})
 }

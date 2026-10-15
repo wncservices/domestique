@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,7 @@ func TestGeocodeFailureLogsNoAddress(t *testing.T) {
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,14 +1,12 @@
 package pacingpush
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 func openStore(t *testing.T, dsn string) *Store {
 	t.Helper()
@@ -32,10 +30,7 @@ func TestPacingPushesEachEngine(t *testing.T) {
 	for engine, open := range map[string]func(*testing.T) *Store{
 		"sqlite": func(t *testing.T) *Store { return openStore(t, filepath.Join(t.TempDir(), "p.db")) },
 		"postgres": func(t *testing.T) *Store {
-			dsn := os.Getenv(postgresEnv)
-			if dsn == "" {
-				t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-			}
+			dsn := pgtest.DSN(t)
 			return openStore(t, dsn)
 		},
 	} {

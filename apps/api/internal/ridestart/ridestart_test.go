@@ -4,17 +4,15 @@ import (
 	"context"
 	"errors"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/ridestart"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 var t0 = time.Date(2026, 10, 3, 7, 0, 0, 0, time.UTC)
 
@@ -44,10 +42,7 @@ func openSQLite(t *testing.T) (*ridestart.Store, *source.DB) {
 
 func openPostgres(t *testing.T) (*ridestart.Store, *source.DB) {
 	t.Helper()
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return openStore(t, dsn)
 }
 

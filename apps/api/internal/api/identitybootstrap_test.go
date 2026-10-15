@@ -3,8 +3,8 @@ package api_test
 import (
 	"context"
 	"errors"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,7 +33,7 @@ type bootstrapEnv struct {
 
 func newBootstrapEnv(t *testing.T, mode auth.Mode, people ...auth0mgmt.Person) *bootstrapEnv {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "bootstrap.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

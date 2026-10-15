@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
@@ -54,7 +55,7 @@ func (d *deadlineWriter) lastWrite() time.Duration {
 
 func deadlineServer(t *testing.T) *Server {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "r.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

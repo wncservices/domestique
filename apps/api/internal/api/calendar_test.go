@@ -5,15 +5,14 @@ package api_test
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -69,14 +68,14 @@ type calHarness struct {
 
 var calendarNow = time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC)
 
-// calendarEngines yields the engines to run against: a marker for SQLite and
-// the base DSN for PostgreSQL. Each harness gets its own database from
+// calendarEngines yields the engines to run against: "" for SQLite and a
+// non-empty marker for PostgreSQL. Each harness gets its own database from
 // freshDSN, so one test's rows never leak into the next.
 func calendarEngines(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{"sqlite": ""}
-	if dsn := os.Getenv("DOMESTIQUE_TEST_POSTGRES"); dsn != "" {
-		out["postgres"] = dsn
+	if pgtest.Enabled() {
+		out["postgres"] = "pg"
 	}
 	return out
 }
@@ -84,24 +83,12 @@ func calendarEngines(t *testing.T) map[string]string {
 // freshDSN is a database nobody else has used: a new file for SQLite, a new
 // schema (dropped afterwards) for PostgreSQL, so a parallel package's tables
 // never see these rows either.
-func freshDSN(t *testing.T, base string) string {
+func freshDSN(t *testing.T, engine string) string {
 	t.Helper()
-	if base == "" {
+	if engine == "" {
 		return filepath.Join(t.TempDir(), "cal.db")
 	}
-	name := fmt.Sprintf("cal_%d", time.Now().UnixNano())
-	admin, err := sql.Open("pgx", base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.Exec(`CREATE SCHEMA ` + name); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = admin.Exec(`DROP SCHEMA ` + name + ` CASCADE`)
-		_ = admin.Close()
-	})
-	return base + "&search_path=" + name
+	return pgtest.DSN(t)
 }
 
 func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *calHarness {
