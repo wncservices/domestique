@@ -85,6 +85,9 @@ import type {
   GoalProposal,
   LinkSessionRequest,
   SyncMetricsResult,
+  BestEffortsResponse,
+  EffortSport,
+  SeasonReview,
   ThresholdSuggestion,
   ThresholdSuggestionsResponse,
   TrainingWeek,
@@ -1162,6 +1165,25 @@ export const api = {
    *  was computed from — read-only, reflects whatever syncTrainingMetrics
    *  last recorded. */
   fitness: () => request<FitnessResponse>('/api/training/fitness'),
+  /** The rider's own record book: each metric's all-time, this-season and
+   *  last-42-days best with the ride, the three power curves, and the awards
+   *  not yet announced. */
+  bestEfforts: (sport: EffortSport) => request<BestEffortsResponse>(`/api/training/best-efforts?sport=${sport}`),
+  /** Says the page has shown these awards, so they are not listed as new
+   *  again. The rider is the session's. */
+  announceBestEfforts: (awards: { sessionId: string; metric: string }[]) =>
+    request<{ announced: number }>('/api/training/best-efforts/announce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ awards }),
+    }),
+  /** A season review of one calendar year, or of a goal's own season; the
+   *  current year with neither. 404 for another rider's goal. */
+  seasonReview: (period?: { year: string } | { goal: string }) => {
+    const query =
+      period === undefined ? '' : 'year' in period ? `?year=${encodeURIComponent(period.year)}` : `?goal=${encodeURIComponent(period.goal)}`
+    return request<SeasonReview>(`/api/training/season${query}`)
+  },
   /** Whether the rider has a calendar link and when a calendar app last
    *  fetched it. `available` is false without a public_url on the server. */
   calendarFeed: () => request<CalendarFeedStatus>('/api/training/calendar'),
