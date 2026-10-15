@@ -30,6 +30,9 @@ type Activity struct {
 	DistanceM       float64
 	AvgHR           int
 	AvgPowerWatts   float64
+	// AscentM is Connect's elevationGain in metres; 0 when it reported none
+	// (an indoor ride), which a season total reads as "not reported".
+	AscentM float64
 
 	// NormalizedPower, TrainingStressScore and IntensityFactor are Connect's
 	// own summary numbers — the fallback used when a rider's FIT file could
@@ -62,6 +65,8 @@ type activityDTO struct {
 	Distance  float64 `json:"distance"`
 	AverageHR float64 `json:"averageHR"`
 	AvgPower  float64 `json:"avgPower"`
+	// ElevationGain is the ride's climbing in metres.
+	ElevationGain float64 `json:"elevationGain"`
 
 	NormPower           float64 `json:"normPower"`
 	TrainingStressScore float64 `json:"trainingStressScore"`
@@ -157,6 +162,7 @@ func (c *Client) Activities(ctx context.Context, limit int) ([]Activity, error) 
 			DistanceM:           d.Distance,
 			AvgHR:               int(d.AverageHR),
 			AvgPowerWatts:       d.AvgPower,
+			AscentM:             d.ElevationGain,
 			NormalizedPower:     d.NormPower,
 			TrainingStressScore: d.TrainingStressScore,
 			IntensityFactor:     d.IntensityFactor,

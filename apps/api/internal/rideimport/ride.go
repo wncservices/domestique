@@ -41,7 +41,9 @@ type Ride struct {
 	Duration, Elapsed, Distance float64
 	AvgPower                    float64
 	AvgHR                       int
-	Analysis                    rideanalysis.Analysis
+	// Ascent is the session's total ascent in metres; 0 when the file has none.
+	Ascent   float64
+	Analysis rideanalysis.Analysis
 }
 
 // Parse decodes one FIT and analyses it with no plan. The profile is the
@@ -83,6 +85,9 @@ func Parse(fit []byte, p workout.RiderProfile) (ride Ride, err error) {
 		Date:      start.Add(localOffset(act)).Format("2006-01-02"),
 	}
 	r.Duration, r.Elapsed, r.Distance, r.AvgPower, r.AvgHR = summarise(sess, act)
+	if sess != nil && sess.TotalAscent != basetype.Uint16Invalid {
+		r.Ascent = float64(sess.TotalAscent)
+	}
 
 	r.Analysis = rideanalysis.Analyze(rideanalysis.Input{
 		Activity: act,

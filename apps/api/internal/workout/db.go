@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS completed_sessions (
     avg_hr            INTEGER NOT NULL DEFAULT 0,
     avg_power_watts   DOUBLE PRECISION NOT NULL DEFAULT 0,
     training_load     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ascent_m          DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL,
     UNIQUE (provider, external_id)
 );
@@ -346,6 +347,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM session_links WHERE rider = ?`,
 		`DELETE FROM life_events WHERE rider = ?`,
 		`DELETE FROM best_efforts WHERE rider = ?`,
+		`DELETE FROM ftp_changes WHERE rider = ?`,
 		`DELETE FROM session_analyses WHERE rider = ?`,
 		`DELETE FROM completed_sessions WHERE rider = ?`,
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
@@ -575,7 +577,29 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if _, err := db.Exec(bestEffortSchema(d.Boolean)); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addSessionAscentColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if _, err := db.Exec(ftpChangeSchema); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.copyAcceptedFTPSuggestions(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	return store, nil
+}
+
+// addSessionAscentColumn adds ascent_m to a completed_sessions table that
+// predates it. Idempotent on both engines.
+func (d *DB) addSessionAscentColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE completed_sessions ADD COLUMN ascent_m DOUBLE PRECISION NOT NULL DEFAULT 0`)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
+			return err
+		}
+	}
+	return nil
 }
 
 // addCrewRideColumn adds crew_ride_id to a workouts table that predates it, and
@@ -1073,7 +1097,29 @@ func (d *DB) SetFTPCalibrated(ctx context.Context, rider string, from, to float6
 // or editing it later are the same write, the same shape
 // internal/settings's own encrypted config rows use for a single
 // deployment-wide value.
+//
+// It records an FTP change as a manual one: use SaveProfileFrom when a sync or
+// an accepted suggestion is the author.
 func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfile, error) {
+	return d.SaveProfileFrom(ctx, profile, FTPSourceManual)
+}
+
+// SaveProfileFrom is SaveProfile told who is changing the profile, which is all
+// the FTP history needs to know: source is one of the FTPSource constants and
+// is written with the change when FTP differs from what was stored. It is the
+// one write path for FTP, so every change is recorded exactly once.
+func (d *DB) SaveProfileFrom(ctx context.Context, profile RiderProfile, source string) (RiderProfile, error) {
+	return d.SaveProfileOn(ctx, profile, source, "")
+}
+
+// SaveProfileOn is SaveProfileFrom told which local day a change to FTP is
+// filed under: the rider's own calendar day, which only the caller (who knows
+// the training timezone) can say. An empty date is the store clock's UTC day,
+// right for tests and tools that have no rider's timezone.
+func (d *DB) SaveProfileOn(ctx context.Context, profile RiderProfile, source, date string) (RiderProfile, error) {
+	if !validFTPSource(source) {
+		return RiderProfile{}, fmt.Errorf("workout: %q is not an FTP change source", source)
+	}
 	rider := normalizeRider(profile.Rider)
 	if rider == "" {
 		return RiderProfile{}, errors.New("workout: no rider — whose profile is this?")
@@ -1118,6 +1164,9 @@ func (d *DB) SaveProfile(ctx context.Context, profile RiderProfile) (RiderProfil
 	// so an old copy of the profile cannot overwrite a newer date.
 	if profile.FTPWatts > 0 && profile.FTPWatts != previous.FTPWatts {
 		if err := d.MarkFTPVerified(ctx, rider, d.now().UTC().Format("2006-01-02")); err != nil {
+			return RiderProfile{}, err
+		}
+		if err := d.appendFTPChange(ctx, rider, previous.FTPWatts, profile.FTPWatts, source, date); err != nil {
 			return RiderProfile{}, err
 		}
 	}

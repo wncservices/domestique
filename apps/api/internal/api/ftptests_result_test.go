@@ -50,13 +50,28 @@ func newFTPResultHarness(t *testing.T, protocol string, watts int, profile worko
 // newFTPResultHarnessFor is newFTPResultHarness with the ride's length chosen.
 func newFTPResultHarnessFor(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile) *ftpResultHarness {
 	t.Helper()
-	start := time.Now().AddDate(0, 0, -1)
+	return newFTPResultHarnessAt(t, protocol, watts, seconds, profile, time.Time{})
+}
+
+// newFTPResultHarnessAt is newFTPResultHarnessFor on a fixed clock: the server
+// and the store both read now, and the test is ridden the day before. A zero
+// now is the real clock, which is what the older tests here use.
+func newFTPResultHarnessAt(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile, now time.Time) *ftpResultHarness {
+	t.Helper()
+	ref := now
+	if ref.IsZero() {
+		ref = time.Now()
+	}
+	start := ref.AddDate(0, 0, -1)
 	fake := &fakeGarmin{
 		activities: []garmin.Activity{{ID: "9100", Sport: "cycling", StartTime: start, DurationSeconds: float64(seconds), AvgPowerWatts: float64(watts)}},
 		fitByID:    map[string][]byte{"9100": buildRideFIT(t, start, seconds, watts)},
 	}
 	h := newMetricsSyncHarness(t, fake)
 	h.seedGarminSession("wilant")
+	if !now.IsZero() {
+		h.setClock(now) // before the first write, so every stamp is on the fixed clock
+	}
 	ctx := context.Background()
 
 	profile.Rider = "wilant"

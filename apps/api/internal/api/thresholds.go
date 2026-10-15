@@ -468,7 +468,13 @@ func (s *Server) handleResolveThreshold(w http.ResponseWriter, r *http.Request) 
 		profile.Rider = sug.Rider
 		before := profile
 		profile = applyAcceptedThreshold(profile, sug)
-		if _, err := s.Training.SaveProfile(r.Context(), profile); err != nil {
+		// An accepted FTP is recorded in the history as what produced it: a test
+		// ride's result, or the rides' own estimate.
+		source := workout.FTPSourceDetection
+		if workout.ReasonNamesTest(sug.Reason) {
+			source = workout.FTPSourceTest
+		}
+		if _, err := s.Training.SaveProfileOn(r.Context(), profile, source, s.localDate(s.now())); err != nil {
 			s.fail(w, err)
 			return
 		}
