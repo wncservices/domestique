@@ -10,11 +10,15 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
-// ftpClock is far enough after any FTP verified "today" (the store dates those
-// with the real clock) that it reads as stale, and a Tuesday so the expected
-// day is easy to state: with Tue/Thu available the next one from tomorrow is
-// Thursday 2031-03-20.
+// ftpClock is the server's "now" in these tests: a Tuesday so the expected day
+// is easy to state (with Tue/Thu available the next one from tomorrow is
+// Thursday 2031-03-20). The training store follows it, so an FTP "verified
+// today" is dated on this clock; seedRiderWithStaleFTP saves the profile a year
+// earlier to make it read as stale.
 var ftpClock = time.Date(2031, 3, 18, 9, 0, 0, 0, time.UTC)
+
+// ftpVerifiedClock is when a stale FTP was last set.
+var ftpVerifiedClock = ftpClock.AddDate(-1, 0, 0)
 
 type ftpTestsOut struct {
 	Protocols []struct {
@@ -56,12 +60,13 @@ func getFTPTests(t *testing.T, h *trainingHarness, rider string) ftpTestsOut {
 
 func seedRiderWithStaleFTP(t *testing.T, h *trainingHarness, rider string) {
 	t.Helper()
-	h.srv.Clock = func() time.Time { return ftpClock }
+	h.srv.Clock = func() time.Time { return ftpVerifiedClock }
 	if _, err := h.store.SaveProfile(context.Background(), workout.RiderProfile{
 		Rider: rider, FTPWatts: 250, AvailableDays: []string{"tue", "thu"},
 	}); err != nil {
 		t.Fatal(err)
 	}
+	h.srv.Clock = func() time.Time { return ftpClock }
 }
 
 func TestGetFTPTestsListsProtocolsAndSuggestsForAStaleFTP(t *testing.T) {
@@ -223,12 +228,12 @@ func TestLastTestIsTheLatestCompletedOneAndSetsTheRecommendation(t *testing.T) {
 // The FTP was an auto-estimate whose verified date was set today, which used to
 // silence every reason; a new plan now opens with a test.
 //
-// The clock is the real one, captured once: the store stamps a goal's
-// created_at from the wall clock, and the plan anchors week 1 on that Monday,
-// so a clock years away would put the goal deep into its own plan.
+// The store stamps a goal's created_at from the server's clock and the plan
+// anchors week 1 on that Monday, so the store must follow the same clock as the
+// server or the goal lands deep into its own plan.
 func TestANewGoalSuggestsATestInTheFirstTwoWeeks(t *testing.T) {
 	h := newTrainingHarness(t)
-	now := time.Now().UTC()
+	now := ftpClock
 	h.srv.Clock = func() time.Time { return now }
 	ctx := context.Background()
 	day := func(offset int) string { return now.AddDate(0, 0, offset).Format("2006-01-02") }

@@ -3,12 +3,12 @@ package workout
 import (
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
-func utcToday() string { return time.Now().UTC().Format("2006-01-02") }
+// utcToday is the store's own idea of today, which is what a verification is dated with.
+func utcToday(db *DB) string { return db.now().UTC().Format("2006-01-02") }
 
 func TestFTPVerificationColumnsOnEachEngine(t *testing.T) {
 	for engine, open := range map[string]func(*testing.T) *DB{"sqlite": openTestDB, "postgres": openTestPostgres} {
@@ -30,8 +30,8 @@ func TestFTPVerificationColumnsOnEachEngine(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.FTPVerifiedAt != utcToday() {
-				t.Errorf("verified = %q after setting FTP, want today %s", p.FTPVerifiedAt, utcToday())
+			if p.FTPVerifiedAt != utcToday(db) {
+				t.Errorf("verified = %q after setting FTP, want today %s", p.FTPVerifiedAt, utcToday(db))
 			}
 
 			// A save that leaves FTP alone does not move it.
@@ -158,8 +158,8 @@ CREATE TABLE rider_profiles (
 	}
 	withFTP, _, _ := db.GetProfile(t.Context(), "with-ftp")
 	noFTP, _, _ := db.GetProfile(t.Context(), "no-ftp")
-	if withFTP.FTPVerifiedAt != utcToday() {
-		t.Errorf("existing FTP was backfilled to %q, want the deploy day %s so nobody is nagged at once", withFTP.FTPVerifiedAt, utcToday())
+	if withFTP.FTPVerifiedAt != utcToday(db) {
+		t.Errorf("existing FTP was backfilled to %q, want the deploy day %s so nobody is nagged at once", withFTP.FTPVerifiedAt, utcToday(db))
 	}
 	if noFTP.FTPVerifiedAt != "" {
 		t.Errorf("a rider with no FTP was backfilled to %q", noFTP.FTPVerifiedAt)

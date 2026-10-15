@@ -545,6 +545,9 @@ func TestEachEngine(t *testing.T) {
 
 			t.Run("session analysis saves, round-trips, upserts, filters by rider and date, and feeds fitness", func(t *testing.T) {
 				db := open(t)
+				// Fitness runs up to "now", so a session dated March 2026 only feeds it
+				// when now is after that — not a given on a machine clock set earlier.
+				db.Clock = func() time.Time { return time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC) }
 				ctx := t.Context()
 
 				session, err := db.UpsertSession(ctx, UpsertSessionRequest{

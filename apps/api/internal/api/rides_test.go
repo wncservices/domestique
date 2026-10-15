@@ -718,14 +718,15 @@ func TestUpcomingRidesSpansOwnCrewsOnly(t *testing.T) {
 
 	// Relative to time.Now(), not a hardcoded calendar date — the request
 	// below passes no ?from=, so handleListUpcomingRides defaults its own
-	// cutoff to the real "today" (rides.go's own time.Now().UTC() fallback).
+	// cutoff to the real "today" (rides.go's own time.Now().UTC() fallback), so
+	// these days are counted in UTC too.
 	// A fixed date eventually lands in the past regardless of any code here
 	// being wrong; found live, once it did. TestUpcomingRidesUsesThe-
 	// CallersOwnFrom further below pins its own from= instead and is safe
 	// from this by construction; TestUpcomingRidesOmitsPastRides uses
 	// 2020-01-01, which never stops being in the past.
-	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
-	dayAfter := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
+	tomorrow := time.Now().UTC().AddDate(0, 0, 1).Format("2006-01-02")
+	dayAfter := time.Now().UTC().AddDate(0, 0, 2).Format("2006-01-02")
 
 	h.mustScheduleRideAt(t, "wilant", crewA, routeA.Slug, tomorrow, "09:30")
 	h.mustScheduleRide(t, "stranger", crewB, routeB.Slug, dayAfter)

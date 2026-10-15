@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -29,7 +28,7 @@ func (h *pushHarness) planMade(date string) string {
 	return w.ID
 }
 
-func daysAhead(n int) string { return time.Now().AddDate(0, 0, n).Format("2006-01-02") }
+func daysAhead(n int) string { return daysFromToday(n) }
 
 func TestALifeEventMoveLeavesTheGarminCopyToTheNextPush(t *testing.T) {
 	h := newPushHarness(t)
