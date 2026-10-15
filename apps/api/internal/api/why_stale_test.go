@@ -14,13 +14,15 @@ import (
 // else has rewritten the workout, the old explanation describes a session that
 // no longer exists, so the API stops sending it.
 
+// Both predate replanClock (2026-03-25), the harness clock the rewrites below are
+// stamped with: a rewrite must land after the why, whatever day the suite runs.
 const (
-	jan  = "2026-01-01T00:00:00Z"
-	june = "2026-06-01T00:00:00.000000000Z"
+	jan   = "2026-01-01T00:00:00Z"
+	march = "2026-03-01T00:00:00.000000000Z"
 )
 
 // staleSetup makes a plan session whose last write was in January and gives it
-// a why written in June: a genuine row, recorded after the change it explains.
+// a why written in early March: a genuine row, recorded after the change it explains.
 func staleSetup(t *testing.T, h *pushHarness, goal string) workout.Workout {
 	t.Helper()
 	w := h.altRung(goal, indoorFuture, "threshold", 4)
@@ -29,10 +31,10 @@ func staleSetup(t *testing.T, h *pushHarness, goal string) workout.Workout {
 		t.Fatal(err)
 	}
 	rec := why.NewRecord(why.ReadinessCaution, "Eased one level — HRV is unbalanced today", why.ReadinessInputs{Verdict: "caution"})
-	if err := h.training.RecordAdjustment(context.Background(), "wilant", workout.SubjectWorkout, w.ID, rec, "2026-06-01"); err != nil {
+	if err := h.training.RecordAdjustment(context.Background(), "wilant", workout.SubjectWorkout, w.ID, rec, "2026-03-01"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.Exec(`UPDATE adjustments SET created_at = ? WHERE subject_id = ?`, june, w.ID); err != nil {
+	if _, err := conn.Exec(`UPDATE adjustments SET created_at = ? WHERE subject_id = ?`, march, w.ID); err != nil {
 		t.Fatal(err)
 	}
 	return w
@@ -115,10 +117,10 @@ func TestAnOlderWhyIsHiddenAfterATrainNowReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := why.NewRecord(why.ReadinessCaution, "Eased", why.ReadinessInputs{Verdict: "caution"})
-	if err := h.training.RecordAdjustment(context.Background(), "wilant", workout.SubjectWorkout, w.ID, rec, "2026-06-01"); err != nil {
+	if err := h.training.RecordAdjustment(context.Background(), "wilant", workout.SubjectWorkout, w.ID, rec, "2026-03-01"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.Exec(`UPDATE adjustments SET created_at = ? WHERE subject_id = ?`, june, w.ID); err != nil {
+	if _, err := conn.Exec(`UPDATE adjustments SET created_at = ? WHERE subject_id = ?`, march, w.ID); err != nil {
 		t.Fatal(err)
 	}
 	shownThenHiddenBy(t, h, w.ID, func() {

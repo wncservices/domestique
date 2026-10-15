@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
@@ -64,7 +63,7 @@ func (h *ftpResultHarness) plainWorkout(date string) string {
 // by hand reads the test and moves it to the day it was ridden.
 func TestLinkingARideToATestPlannedForAnotherDayReadsTheTest(t *testing.T) {
 	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250})
-	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	tomorrow := h.now.AddDate(0, 0, 1).Format("2006-01-02")
 	h.moveTest(tomorrow)
 
 	if out := h.sync(); len(out.FTPTests) != 0 {
@@ -103,7 +102,7 @@ func TestLinkingARideToATestPlannedForAnotherDayReadsTheTest(t *testing.T) {
 // to the automatic match.
 func TestUnlinkingARideSticksAndAutoRestoresTheMatch(t *testing.T) {
 	h := newFTPResultHarness(t, "ramp", 200, workout.RiderProfile{FTPWatts: 250})
-	h.moveTest(time.Now().AddDate(0, 0, 3).Format("2006-01-02"))
+	h.moveTest(h.now.AddDate(0, 0, 3).Format("2006-01-02"))
 	plain := h.plainWorkout(h.date)
 
 	h.sync()
@@ -149,8 +148,8 @@ func TestARideThatGaveATestItsResultStaysLinked(t *testing.T) {
 // silently changing that ride's verdict.
 func TestLinkingRefusesASessionAnotherRideHas(t *testing.T) {
 	h := newFTPResultHarness(t, "ramp", 200, workout.RiderProfile{FTPWatts: 250})
-	h.moveTest(time.Now().AddDate(0, 0, 3).Format("2006-01-02"))
-	earlier := time.Now().AddDate(0, 0, -3)
+	h.moveTest(h.now.AddDate(0, 0, 3).Format("2006-01-02"))
+	earlier := h.now.AddDate(0, 0, -3)
 	plain := h.plainWorkout(earlier.Format("2006-01-02"))
 	h.fake.activities = append(h.fake.activities, garmin.Activity{ID: "9200", Sport: "cycling", StartTime: earlier, DurationSeconds: 1200, AvgPowerWatts: 200})
 	h.sync()

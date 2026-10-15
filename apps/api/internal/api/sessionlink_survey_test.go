@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -46,9 +45,9 @@ func (h *ftpResultHarness) analysis() workout.SessionAnalysis {
 func relinkSetup(t *testing.T, watts int, rating string) (*ftpResultHarness, string) {
 	t.Helper()
 	h := newFTPResultHarness(t, "ramp", watts, workout.RiderProfile{FTPWatts: 250})
-	h.moveTest(time.Now().AddDate(0, 0, 3).Format("2006-01-02")) // out of the ride's way
+	h.moveTest(daysFromToday(3)) // out of the ride's way
 	h.threshold(h.date, 4)
-	other := h.threshold(time.Now().AddDate(0, 0, 2).Format("2006-01-02"), 4)
+	other := h.threshold(daysFromToday(2), 4)
 	h.sync()
 	h.rate(rating)
 	return h, other
