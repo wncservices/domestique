@@ -63,7 +63,12 @@ jobs:
         # test's 10-minute default, so a few new tests tipped it into a
         # timeout panic. Raised to keep CI honest while the package is split
         # or parallelised; a test that hangs still fails, just later.
-        run: go test ./apps/api/... -count=1 -race -cover -timeout 25m
+        # -p 1: every package's PostgreSQL tests share one database, and some
+        # drop tables (routes, accounts, ...) to force an error path. Running
+        # packages in parallel let one drop a table another was migrating
+        # ("relation routes does not exist"). Serial costs little: internal/api
+        # is most of the wall time either way.
+        run: go test ./apps/api/... -count=1 -race -cover -timeout 25m -p 1
       - name: Fail if the PostgreSQL tests were skipped
         # A silently skipped engine is worse than no test: it reads green while
         # covering nothing.
