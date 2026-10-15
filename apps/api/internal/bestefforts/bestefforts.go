@@ -9,6 +9,7 @@ package bestefforts
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/thresholds"
@@ -97,6 +98,17 @@ func Efforts(a workout.SessionAnalysis, sport string) map[string]float64 {
 		out["max_hr"] = float64(a.MaxHR)
 	}
 	return out
+}
+
+// PowerSeconds is the window, in seconds, of a power metric ("power_1200" is
+// 1200), and false for any other metric. The curve is drawn from these.
+func PowerSeconds(key string) (int, bool) {
+	rest, ok := strings.CutPrefix(key, "power_")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	return n, err == nil && n > 0
 }
 
 // epsilon absorbs float rounding at the exact threshold (101 against

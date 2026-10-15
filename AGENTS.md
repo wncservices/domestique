@@ -642,6 +642,36 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
   import). 0 means not reported, never flat, and a re-pull that reports none does
   not erase a stored figure.
 
+### Reading the record book and the season
+
+- `GET /api/training/best-efforts?sport=cycling|running` (the card and the
+  curve: all time, this calendar year, last 42 days, the same window threshold
+  detection reads) and `GET /api/training/season?year=|goal=` (current year with
+  neither) are owner-only: the rider is the session's and there is no rider
+  parameter. A goal that is another rider's, an admin's reading included, or does
+  not exist is a 404 that does not say which. `internal/seasonreview` is pure
+  (date strings only, no clock or store) and a section it cannot speak to is
+  absent, never zeros; the page shows nothing rather than "0 W".
+- **Plan compliance** counts days behind us, plus today only once it is done
+  (`compliance.Day`), and shows no percentage under 4 planned sessions.
+- **FTP in a review** is the last recorded change on or before each boundary.
+  Before the first one it says history starts there. The profile's value stands
+  in only for a rider whose FTP never changed on record, in a period that includes
+  today (`fromProfile`).
+- `newBests` on the best-efforts response lists unannounced awards; the page
+  toasts them and posts them to `/best-efforts/announce`, which marks only the
+  caller's own. `sessionAnalysisDTO.awards` is attached to a ride from one
+  `ListAwards` per response.
+
+### The Season tab and print
+
+`?tab=season` on the Fitness page (`SeasonReview.vue`, `SeasonPicker.vue`). A
+section the API omits is not drawn, elevation reads n/a (`ascentText`), and the
+reserved `projectedCtl` is never rendered. Printing is the browser's own dialog
+from a button (`window.print()` in a click handler: the CSP forbids inline
+script); `@media print` in `styles.css` hides the header, tabs and anything with
+`data-no-print`.
+
 ## Fixed-time metrics sync
 
 `RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and

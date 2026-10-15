@@ -253,3 +253,22 @@ body {
 .track-line {
   stroke: var(--ui-primary);
 }
+
+/* Printing the Season review (the browser's own print dialog, no script of our
+   own): drop the app chrome, the tabs and the controls, and flatten the cards
+   so the page reads as a document on paper. */
+@media print {
+  header,
+  nav,
+  [data-no-print] {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  .print-flat {
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    break-inside: avoid;
+  }
+}
