@@ -1051,7 +1051,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
-	saved, err := s.Training.SaveProfile(r.Context(), workout.RiderProfile{
+	saved, err := s.Training.SaveProfileOn(r.Context(), workout.RiderProfile{
 		// FTPEstimated and Estimated are deliberately not read from body:
 		// this is the manual save form, and a rider willing to click Save
 		// owns whatever number sits in each field, estimated or not — see
@@ -1061,7 +1061,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		MaxHR: body.MaxHR, ThresholdHR: body.ThresholdHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
 		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
 		AutoPushWorkouts: body.AutoPushWorkouts, SmartTrainer: body.SmartTrainer,
-	})
+	}, workout.FTPSourceManual, s.localDate(s.now()))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

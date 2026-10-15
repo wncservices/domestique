@@ -190,6 +190,11 @@ var riderTables = map[string]riderTable{
 	// metric is whichever BestIn finds, not a row to choose between.
 	"best_efforts": {Purged: true, Note: "Training.DeleteRider: per-ride best power, speed and heart rate",
 		Rename: renameRule{Columns: []string{"rider"}}},
+	// ftp_changes is the append-only history of the rider's FTP (what it was and
+	// who changed it): health data, so a purge removes it. No unique key, so a
+	// merge concatenates the two riders' histories, ordered by date on read.
+	"ftp_changes": {Purged: true, Note: "Training.DeleteRider: the history of the rider's FTP",
+		Rename: renameRule{Columns: []string{"rider"}}},
 	"ride_imports": {Purged: true, Note: "Training.DeleteRider: the counts of the rider's own history imports",
 		// ride_imports_one_running_idx is unique on rider where state = 'running',
 		// which uniqueKey cannot say, so it is stated as the whole rider: on a

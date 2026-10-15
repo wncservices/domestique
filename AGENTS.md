@@ -622,6 +622,26 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
   (230) is a sensor spike, not an effort.
 - **No value in a log line next to a rider**: rider, metric and scope only.
 
+### FTP history and ride ascent
+
+- **`ftp_changes` is append-only** (id, rider, changed_at, date, from, to,
+  source). `workout.SaveProfileFrom` is the single write path for FTP: it appends
+  a row whenever the stored FTP differs from the saved one (and the new value is
+  above 0), and `SaveProfile` is `SaveProfileFrom(..., "manual")`. The caller
+  names the source: `manual` (the profile form), `detection` (an auto-applied or
+  accepted threshold finding, Garmin's or the history's estimate) or `test` (a
+  value read from a test ride). Do not write `rider_profiles.ftp_watts` anywhere
+  else, or the season review loses a change.
+- **Never invent a start value.** A deployment that predates the table has
+  nothing before its first row; old accepted suggestions are copied in once at
+  start (`copyAcceptedFTPSuggestions`: id `suggestion-<id>`, skipped when a row
+  with that day and value exists, `test` when the reason names a test ride via
+  `workout.ReasonNamesTest`). The review says "FTP history starts <date>".
+- **`completed_sessions.ascent_m`** is the provider's reported climbing (Garmin
+  `elevationGain`, Wahoo `ascent_accum`, a FIT session's `TotalAscent` for an
+  import). 0 means not reported, never flat, and a re-pull that reports none does
+  not erase a stored figure.
+
 ## Fixed-time metrics sync
 
 `RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and

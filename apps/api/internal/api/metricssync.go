@@ -286,7 +286,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 				session, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
 					Rider: rider, Provider: "garmin", ExternalID: a.ID, Sport: a.Sport,
 					Date: a.StartTime.Format("2006-01-02"), DurationSeconds: a.DurationSeconds,
-					DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load,
+					DistanceM: a.DistanceM, AvgHR: a.AvgHR, AvgPowerWatts: a.AvgPowerWatts, TrainingLoad: load, AscentM: a.AscentM,
 				})
 				if err != nil {
 					s.logger().Warn("metrics sync: recording a garmin session failed", "rider", rider, "err", err)
@@ -348,7 +348,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 						// Garmin's list already gives local time.
 						Rider: rider, Provider: "wahoo", ExternalID: wk.ID, Sport: "cycling",
 						Date: s.localDate(wk.Starts), DurationSeconds: wk.DurationSeconds,
-						DistanceM: wk.DistanceM, AvgHR: wk.AvgHR, AvgPowerWatts: wk.AvgPowerWatts, TrainingLoad: load,
+						DistanceM: wk.DistanceM, AvgHR: wk.AvgHR, AvgPowerWatts: wk.AvgPowerWatts, TrainingLoad: load, AscentM: wk.AscentM,
 					})
 					if err != nil {
 						s.logger().Warn("metrics sync: recording a wahoo session failed", "rider", rider, "err", err)
@@ -494,7 +494,15 @@ func (s *Server) inferFromHistory(ctx context.Context, rider string, profile, be
 
 	out := historyInference{Profile: profile, AutoFilled: autoFilled, Detection: tdr, TestRides: testRides}
 	if len(autoFilled) > 0 {
-		if _, err := s.Training.SaveProfile(ctx, profile); err != nil {
+		// Who moved FTP, for the history: a test ride's result when that is
+		// what produced it, otherwise the rides (or Garmin's own estimate).
+		source := workout.FTPSourceDetection
+		for _, d := range tdr.Detected {
+			if d.Field == "ftp" && d.fromTest {
+				source = workout.FTPSourceTest
+			}
+		}
+		if _, err := s.Training.SaveProfileOn(ctx, profile, source, s.localDate(s.now())); err != nil {
 			return historyInference{}, err
 		}
 		s.logger().Info("training profile auto-filled", "rider", rider, "fields", autoFilled)

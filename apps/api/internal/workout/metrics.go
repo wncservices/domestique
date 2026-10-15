@@ -30,7 +30,10 @@ type CompletedSession struct {
 	// silently rewrite the load history of sessions already recorded
 	// against the numbers that were true at the time.
 	TrainingLoad float64
-	CreatedAt    string
+	// AscentM is the climbing the provider reported, in metres. 0 means "not
+	// reported", never "flat": a season total reads n/a when no ride has one.
+	AscentM   float64
+	CreatedAt string
 }
 
 // UpsertSessionRequest records one completed session. Rider must be set by
@@ -47,6 +50,9 @@ type UpsertSessionRequest struct {
 	AvgHR           int
 	AvgPowerWatts   float64
 	TrainingLoad    float64
+	// AscentM is the provider's reported climbing; 0 when it gave none, which
+	// never overwrites a figure already stored (see UpsertSession).
+	AscentM float64
 }
 
 // FitnessSnapshot is one rider's computed training load for one day —

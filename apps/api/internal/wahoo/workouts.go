@@ -30,6 +30,8 @@ type Workout struct {
 	DistanceM       float64
 	AvgHR           int
 	AvgPowerWatts   float64
+	// AscentM is workout_summary.ascent_accum in metres; 0 when absent.
+	AscentM float64
 
 	// NormalizedPower and TSS are the summary fallback used when a rider's
 	// FIT file could not be downloaded or decoded — the same role Garmin's
@@ -58,6 +60,10 @@ type workoutSummaryDTO struct {
 	HeartRateAvg       string `json:"heart_rate_avg"`
 	PowerBikeAvg       string `json:"power_bike_avg"`
 	PowerAvg           string `json:"power_avg"`
+	// AscentAccum is the climbing in metres. Its form (string or number) has not
+	// been seen confirmed, so it decodes through tolerantNumber: anything it
+	// cannot read is 0, never an error that aborts the whole list.
+	AscentAccum tolerantNumber `json:"ascent_accum"`
 	// PowerBikeNPLast and PowerBikeTSSLast were observed to vary between a
 	// JSON string and a bare JSON number — unlike every other field above,
 	// confirmed to always be strings — so they decode through
@@ -79,6 +85,21 @@ type workoutSummaryDTO struct {
 // workoutSummaryDTO's plain-string fields above, which have not shown the
 // same inconsistency.
 type flexibleNumber float64
+
+// tolerantNumber is flexibleNumber that never fails: a value it cannot read
+// (text, an object, an out-of-range number) is 0. For a figure that is only a
+// nicety, where one odd ride must not stop every other ride syncing.
+type tolerantNumber float64
+
+func (n *tolerantNumber) UnmarshalJSON(data []byte) error {
+	var f flexibleNumber
+	if err := f.UnmarshalJSON(data); err != nil {
+		*n = 0
+		return nil
+	}
+	*n = tolerantNumber(f)
+	return nil
+}
 
 func (n *flexibleNumber) UnmarshalJSON(data []byte) error {
 	s := string(data)
@@ -189,6 +210,7 @@ func (c *Client) ListWorkouts(ctx context.Context, accessToken string, page, per
 			w.DistanceM = parseFloatOr0(it.WorkoutSummary.DistanceAccum)
 			w.AvgHR = int(parseFloatOr0(it.WorkoutSummary.HeartRateAvg))
 			w.AvgPowerWatts = it.WorkoutSummary.avgPower()
+			w.AscentM = float64(it.WorkoutSummary.AscentAccum)
 			w.NormalizedPower = float64(it.WorkoutSummary.PowerBikeNPLast)
 			w.TSS = float64(it.WorkoutSummary.PowerBikeTSSLast)
 			w.FileURL = it.WorkoutSummary.File.URL
