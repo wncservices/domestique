@@ -663,6 +663,15 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
   caller's own. `sessionAnalysisDTO.awards` is attached to a ride from one
   `ListAwards` per response.
 
+### The Season tab and print
+
+`?tab=season` on the Fitness page (`SeasonReview.vue`, `SeasonPicker.vue`). A
+section the API omits is not drawn, elevation reads n/a (`ascentText`), and the
+reserved `projectedCtl` is never rendered. Printing is the browser's own dialog
+from a button (`window.print()` in a click handler: the CSP forbids inline
+script); `@media print` in `styles.css` hides the header, tabs and anything with
+`data-no-print`.
+
 ## Fixed-time metrics sync
 
 `RunMetricsSyncLoop` pulls every connected rider's Garmin/Wahoo activities and
