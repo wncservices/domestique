@@ -5,10 +5,11 @@
 // history this and TrainingPlanPage.vue split apart; this half owns the
 // synced fitness history (Phase B1) and the rider's own profile (FTP,
 // thresholds, availability — Phase E's free-text suggestion on top of it).
-import { computed, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
-import type { BestEffortsResponse, DailyWellnessDTO, DetectedThreshold, EffortSport, FitnessResponse, Me, ProgressionLevel,
+import type { SeasonReview as SeasonReviewData, BestEffortsResponse, DailyWellnessDTO, DetectedThreshold, EffortSport, FitnessResponse, Me, ProgressionLevel,
   ProgressionPoint, ProjectionResponse, RiderProfile, ThresholdSuggestion } from '@/api/types'
 import BestEffortsCard from '@/components/fitness/BestEffortsCard.vue'
 import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
@@ -21,6 +22,8 @@ import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
 import RaceDayCard from '@/components/fitness/RaceDayCard.vue'
 import RecentRides from '@/components/fitness/RecentRides.vue'
 import RecoveryCard from '@/components/fitness/RecoveryCard.vue'
+import SeasonPicker from '@/components/fitness/SeasonPicker.vue'
+import SeasonReview from '@/components/fitness/SeasonReview.vue'
 import RideImportCard from '@/components/fitness/RideImportCard.vue'
 import SaveBar from '@/components/fitness/SaveBar.vue'
 import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
@@ -28,11 +31,65 @@ import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
 import { bestEffortToast } from '@/utils/bestEfforts'
+import type { PeriodChoice } from '@/utils/seasonReview'
 import { ftpTestToast } from '@/utils/ftpTests'
 import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
 import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
+
+// --- tabs: Fitness (everything below) and Season (?tab=season) ---
+
+type Tab = 'fitness' | 'season'
+const TABS: { label: string; value: Tab; icon: string }[] = [
+  { label: 'Fitness', value: 'fitness', icon: 'i-lucide-activity' },
+  { label: 'Season', value: 'season', icon: 'i-lucide-calendar-range' },
+]
+const tab = computed<Tab>({
+  get: () => (route.query.tab === 'season' ? 'season' : 'fitness'),
+  set: (value) => {
+    router.replace({ query: { ...route.query, tab: value === 'season' ? 'season' : undefined } })
+  },
+})
+
+// --- season review: computed on the server for one period at a time ---
+
+const seasonPeriod = ref<PeriodChoice | undefined>(undefined)
+const season = ref<SeasonReviewData | null>(null)
+const loadingSeason = ref(false)
+const seasonFailed = ref(false)
+// The picker keeps the list from the first answer: asking for another period
+// must not make the choices flicker.
+const seasonChoices = ref<SeasonReviewData['available'] | null>(null)
+
+async function loadSeason() {
+  loadingSeason.value = true
+  seasonFailed.value = false
+  try {
+    const result = await api.seasonReview(seasonPeriod.value)
+    season.value = result
+    seasonChoices.value = result.available
+    if (!seasonPeriod.value) seasonPeriod.value = { year: result.period.label }
+  } catch (err) {
+    seasonFailed.value = true
+    toast.add({ title: 'Could not load your season review', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+  } finally {
+    loadingSeason.value = false
+  }
+}
+
+function pickSeason(period: PeriodChoice) {
+  seasonPeriod.value = period
+  loadSeason()
+}
+
+watch(tab, (t) => { if (t === 'season' && !season.value) loadSeason() }, { immediate: true })
+
+function printSeason() {
+  window.print()
+}
 const { canSyncGarmin } = useLibrary()
 const { replanAction, announceRecalibration } = useRecalibration()
 
@@ -442,6 +499,25 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col gap-6" :class="{ 'pb-20': dirty }">
+    <UTabs v-model="tab" :items="TABS" :content="false" data-no-print aria-label="Fitness page sections" />
+
+    <section v-if="tab === 'season'" class="flex flex-col gap-4" aria-label="Season review">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="min-w-0">
+          <h2 class="text-lg font-semibold">{{ season?.period.label ?? 'Season review' }}</h2>
+          <p v-if="season" class="text-sm text-muted">{{ season.period.from }} to {{ season.period.to }}</p>
+        </div>
+        <div class="flex items-center gap-2" data-no-print>
+          <SeasonPicker v-if="seasonPeriod" :available="seasonChoices" :model-value="seasonPeriod" @update:model-value="pickSeason" />
+          <UButton icon="i-lucide-printer" color="neutral" variant="outline" aria-label="Print this review" :disabled="!season" @click="printSeason" />
+        </div>
+      </div>
+      <p v-if="loadingSeason && !season" class="text-sm text-muted py-6 text-center">Loading your season…</p>
+      <p v-else-if="seasonFailed && !season" class="text-sm text-muted py-6 text-center">The review could not be loaded.</p>
+      <SeasonReview v-else-if="season" :review="season" />
+    </section>
+
+    <template v-if="tab === 'fitness'">
     <ThresholdSuggestions
       :suggestions="thresholdSuggestions"
       @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
@@ -523,6 +599,8 @@ onMounted(() => {
         @build-max-hr-test="buildMaxHRTest"
       />
     </UCard>
+
+    </template>
 
     <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
   </div>

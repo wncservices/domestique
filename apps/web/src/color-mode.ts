@@ -57,8 +57,26 @@ function cycle(): void {
   set(mode.value === 'light' ? 'dark' : mode.value === 'dark' ? 'system' : 'light')
 }
 
+/**
+ * Paper is white: a page printed in dark mode would come out as pale text on
+ * white. Light tokens are put back for the duration of a print, and the rider's
+ * mode afterwards. `beforeprint`/`afterprint` cover most browsers; the print
+ * media query's own change event covers the ones (Safari) that skip them.
+ */
+function printLight(printing: boolean): void {
+  if (printing) {
+    document.documentElement.classList.remove('dark')
+    document.documentElement.style.colorScheme = 'light'
+  } else {
+    applyColorMode()
+  }
+}
+
 export function initColorMode(): void {
   applyColorMode()
+  window.addEventListener('beforeprint', () => printLight(true))
+  window.addEventListener('afterprint', () => printLight(false))
+  window.matchMedia('print').addEventListener('change', (e: MediaQueryListEvent) => printLight(e.matches))
   // Only meaningful while following the system, but the listener stays
   // attached so switching back to `system` takes effect without a reload.
   query.addEventListener('change', () => {
