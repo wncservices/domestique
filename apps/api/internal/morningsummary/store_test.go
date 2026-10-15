@@ -1,13 +1,13 @@
 package morningsummary
 
 import (
-	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
@@ -38,10 +38,7 @@ func eachEngine(t *testing.T, run func(t *testing.T, e env)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) { run(t, openStore(t, filepath.Join(t.TempDir(), "ms.db"))) })
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv("DOMESTIQUE_TEST_POSTGRES")
-		if dsn == "" {
-			t.Skip("set DOMESTIQUE_TEST_POSTGRES to a PostgreSQL DSN to run this")
-		}
+		dsn := pgtest.DSN(t)
 		run(t, openStore(t, dsn))
 	})
 }

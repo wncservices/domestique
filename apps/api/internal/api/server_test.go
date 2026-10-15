@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -58,7 +59,7 @@ func linkedStore(t *testing.T, db *source.DB) *accounts.Store {
 
 func dbServer(t *testing.T) http.Handler {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,7 @@ func TestConfigSeparatesKomootOffFromKomootBroken(t *testing.T) {
 		{"off but client present", false, stubKomoot{}, "disabled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+			db, err := source.OpenDB(testdb.Path(t))
 			if err != nil {
 				t.Fatal(err)
 			}

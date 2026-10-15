@@ -3,9 +3,9 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,7 +25,7 @@ type crewHarness struct {
 func newCrewHarness(t *testing.T) *crewHarness {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

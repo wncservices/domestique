@@ -1,17 +1,15 @@
 package sessions
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 func newStore(t *testing.T, box *secrets.Box) *Store {
 	t.Helper()
@@ -236,10 +234,7 @@ func TestRefusesASessionForNobody(t *testing.T) {
 }
 
 func TestPostgres(t *testing.T) {
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 
 	db, err := source.OpenDB(dsn)
 	if err != nil {

@@ -2,8 +2,8 @@ package api
 
 import (
 	"bytes"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +18,7 @@ import (
 // to download it, fail with "unknown provider" on every sync, and write an
 // analysis from the summary numbers alone over the proper one's place.
 func TestSyncAnalysisNeverTriesToFetchAnImportedRide(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

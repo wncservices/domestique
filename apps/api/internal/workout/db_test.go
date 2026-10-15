@@ -1,12 +1,12 @@
 package workout
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
@@ -40,17 +40,12 @@ func openTestDB(t *testing.T) *DB {
 	return openStore(t, filepath.Join(t.TempDir(), "test.db"))
 }
 
-// postgresEnv mirrors internal/source's own copy — see that package's
-// db_test.go for why this needs its own real PostgreSQL, not just SQLite.
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
-
+// openTestPostgres: see internal/source's db_test.go for why this needs its own
+// real PostgreSQL, not just SQLite.
 func openTestPostgres(t *testing.T) *DB {
 	t.Helper()
 
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return openStore(t, dsn)
 }
 

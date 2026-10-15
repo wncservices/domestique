@@ -13,6 +13,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -45,7 +46,7 @@ type shareHarness struct {
 func newShareHarness(t *testing.T) *shareHarness {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

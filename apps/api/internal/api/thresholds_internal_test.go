@@ -2,8 +2,8 @@ package api
 
 import (
 	"errors"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,7 +19,7 @@ import (
 // here since this package cannot import that unexported test helper.
 func newThresholdTestServer(t *testing.T) *Server {
 	t.Helper()
-	src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	src, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

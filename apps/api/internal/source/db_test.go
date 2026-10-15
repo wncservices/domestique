@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 )
 
 // openTestDB opens a SQLite database. Most tests use this; TestEachEngine runs
@@ -24,20 +25,15 @@ func openTestDB(t *testing.T) *DB {
 	return db
 }
 
-// postgresDSN is where the tests find a PostgreSQL to exercise.
+// openTestPostgres opens a PostgreSQL schema of its own (see internal/pgtest).
 //
 // PostgreSQL is what this runs against in the cluster, so "it works on SQLite"
 // is not enough: placeholders, the boolean column and the blob type all differ.
 // Set DOMESTIQUE_TEST_POSTGRES to a DSN to include it; CI does.
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
-
 func openTestPostgres(t *testing.T) *DB {
 	t.Helper()
 
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 
 	db, err := OpenDB(dsn)
 	if err != nil {

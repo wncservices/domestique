@@ -4,16 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 type env struct {
 	store *Store
@@ -43,10 +41,7 @@ func sqliteEnv(t *testing.T) env {
 }
 
 func postgresEnvStore(t *testing.T) env {
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return openStore(t, dsn)
 }
 

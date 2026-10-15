@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"path/filepath"
 	"testing"
 
@@ -32,7 +33,7 @@ type purgeHarness struct {
 func newPurgeHarness(t *testing.T) *purgeHarness {
 	t.Helper()
 
-	src, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	src, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +241,7 @@ func TestPurgeRiderDataIsRetrySafeOnAnAlreadyPurgedRider(t *testing.T) {
 // directory-backed deployment's Server has for everything except Source)
 // must not panic — every step is individually nil-guarded.
 func TestPurgeRiderDataToleratesUnwiredStores(t *testing.T) {
-	src, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	src, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

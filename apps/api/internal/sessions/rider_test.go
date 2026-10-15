@@ -3,13 +3,13 @@ package sessions
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
@@ -27,10 +27,7 @@ func eachEngine(t *testing.T, run func(t *testing.T, conn *sql.DB, dsn string)) 
 		run(t, db.Conn(), db.DSN())
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := os.Getenv(postgresEnv)
-		if dsn == "" {
-			t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-		}
+		dsn := pgtest.DSN(t)
 		name := fmt.Sprintf("sessions_%d", time.Now().UnixNano())
 		admin, err := sql.Open("pgx", dsn)
 		if err != nil {

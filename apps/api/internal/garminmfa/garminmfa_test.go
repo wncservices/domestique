@@ -4,18 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 // A fixed instant with an explicit zone, so no assertion depends on the
 // machine's clock or timezone.
@@ -69,10 +67,7 @@ func openSQLite(t *testing.T) (*harness, *source.DB) {
 
 func openPostgres(t *testing.T) (*harness, *source.DB) {
 	t.Helper()
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 	return openStore(t, dsn, newBox(t))
 }
 

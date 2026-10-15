@@ -3,12 +3,12 @@ package api_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -172,7 +172,7 @@ type wahooHarness struct {
 func newWahooHarness(t *testing.T, withKey bool) *wahooHarness {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

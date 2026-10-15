@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +56,7 @@ type authHarness struct {
 func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

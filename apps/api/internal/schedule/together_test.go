@@ -2,6 +2,7 @@ package schedule
 
 import (
 	"context"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -23,7 +24,7 @@ func togetherStore(t *testing.T, dsn string) *Store {
 func eachTogetherEngine(t *testing.T, fn func(t *testing.T, s *Store)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) { fn(t, togetherStore(t, filepath.Join(t.TempDir(), "together.db"))) })
-	t.Run("postgres", func(t *testing.T) { fn(t, togetherStore(t, envPostgres(t))) })
+	t.Run("postgres", func(t *testing.T) { fn(t, togetherStore(t, pgtest.DSN(t))) })
 }
 
 func TestTheTogetherFlagIsOneRowPerRiderPerCrewAndEmptyDeletesIt(t *testing.T) {

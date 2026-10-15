@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -163,7 +164,7 @@ type peopleHarness struct {
 func newPeopleHarness(t *testing.T, people *fakePeople, opts ...func(*api.Server)) *peopleHarness {
 	t.Helper()
 
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +492,7 @@ func TestPeopleEndpointsWithoutAConnectorAreUnavailable(t *testing.T) {
 
 func newTestBlocklist(t *testing.T) *blocklist.Store {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "blocklist.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,15 +3,13 @@ package settings
 import (
 	"bytes"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/secrets"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
-
-const postgresEnv = "DOMESTIQUE_TEST_POSTGRES"
 
 func newStore(t *testing.T, box *secrets.Box) (*Store, *source.DB) {
 	t.Helper()
@@ -205,10 +203,7 @@ func TestSetRejectsEmptyNameOrValue(t *testing.T) {
 
 // PostgreSQL differs in the blob column type and the upsert.
 func TestPostgres(t *testing.T) {
-	dsn := os.Getenv(postgresEnv)
-	if dsn == "" {
-		t.Skipf("set %s to a PostgreSQL DSN to run this", postgresEnv)
-	}
+	dsn := pgtest.DSN(t)
 
 	db, err := source.OpenDB(dsn)
 	if err != nil {

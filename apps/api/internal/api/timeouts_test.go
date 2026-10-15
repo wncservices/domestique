@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -22,7 +23,7 @@ import (
 // tiny read and write timeouts, standing in for the production ones.
 func timeoutHarness(t *testing.T, tiny time.Duration) *httptest.Server {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

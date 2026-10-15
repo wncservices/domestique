@@ -6,11 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -508,7 +508,7 @@ func TestOIDCEmailVerifiedClaimDecidesWhetherARiderCanOptIn(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			db, err := source.OpenDB(filepath.Join(t.TempDir(), "ms.db"))
+			db, err := source.OpenDB(testdb.Path(t))
 			if err != nil {
 				t.Fatal(err)
 			}

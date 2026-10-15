@@ -3,12 +3,12 @@ package api_test
 import (
 	"context"
 	"errors"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"io"
 	"log/slog"
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -50,7 +50,7 @@ type wrHarness struct {
 
 func newWRHarness(t *testing.T, mutate ...func(*wrHarness, *api.Server)) *wrHarness {
 	t.Helper()
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "routes.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

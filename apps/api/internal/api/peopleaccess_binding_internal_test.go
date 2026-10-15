@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"path/filepath"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"slices"
 	"testing"
 
@@ -28,7 +28,7 @@ func (l listOnly) ListPeople(context.Context, string, ...string) ([]auth0mgmt.Pe
 // the riders they are. An account bound to a suffixed rider whose profile still
 // reads like somebody else's name must revoke its own rider, not that person's.
 func TestRidersOfPersonUsesTheBindingNotTheProfileName(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "access.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatal(err)
 	}

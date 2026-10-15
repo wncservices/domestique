@@ -2,11 +2,11 @@ package api
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
 
@@ -25,7 +25,7 @@ func TestWithDBLockRunsUnprotectedWithNoConnection(t *testing.T) {
 // path every existing SQLite-backed test (the laptop path) already exercises
 // indirectly through AutoImportTick, made explicit here.
 func TestWithDBLockRunsUnprotectedOnANonPostgresEngine(t *testing.T) {
-	db, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -56,10 +56,7 @@ func TestWithDBLockRunsUnprotectedOnANonPostgresEngine(t *testing.T) {
 // internal/source/db_test.go's own postgresEnv for why SQLite can't cover
 // this (it has no advisory locks at all).
 func TestWithDBLockSerializesConcurrentHoldersOfTheSameKey(t *testing.T) {
-	dsn := os.Getenv("DOMESTIQUE_TEST_POSTGRES")
-	if dsn == "" {
-		t.Skipf("set DOMESTIQUE_TEST_POSTGRES to a PostgreSQL DSN to run this")
-	}
+	dsn := pgtest.DSN(t)
 	db, err := source.OpenDB(dsn)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)

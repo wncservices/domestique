@@ -8,12 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"math/big"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -861,7 +861,7 @@ func TestConfigIsReachableAnonymouslyInEveryMode(t *testing.T) {
 			}
 			// handleConfig calls Source.Describe(), unlike handleMe — needs a
 			// real source, not just an authenticator.
-			src, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+			src, err := source.OpenDB(testdb.Path(t))
 			if err != nil {
 				t.Fatal(err)
 			}
