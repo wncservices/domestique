@@ -640,7 +640,13 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
 - **`completed_sessions.ascent_m`** is the provider's reported climbing (Garmin
   `elevationGain`, Wahoo `ascent_accum`, a FIT session's `TotalAscent` for an
   import). 0 means not reported, never flat, and a re-pull that reports none does
-  not erase a stored figure.
+  not erase a stored figure. **The two provider field names are unverified**: the
+  only payloads for them in the repo are the synthetic fixtures written alongside
+  the parsers (`garmin/activities_ascent_test.go`, `wahoo/workouts_ascent_test.go`),
+  not a captured Garmin activity list or Wahoo workout. If either is wrong the
+  symptom is silent, not an error: synced rides carry 0, so the Season tab's
+  Elevation card reads n/a for them (FIT imports are unaffected). Check a real
+  payload before trusting a synced ride's ascent.
 
 ### Reading the record book and the season
 
