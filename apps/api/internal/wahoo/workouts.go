@@ -165,14 +165,14 @@ func (c *Client) ListWorkouts(ctx context.Context, accessToken string, page, per
 	url := fmt.Sprintf("%s%s?page=%d&per_page=%d", c.APIBase, workoutsPath, page, perPage)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, wrapURLErr("building workout list request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("wahoo: list workouts: %w", err)
+		return nil, wrapURLErr("list workouts", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

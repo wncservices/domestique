@@ -180,14 +180,14 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (Session, er
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.APIBase+"/oauth/token",
 		strings.NewReader(form.Encode()))
 	if err != nil {
-		return Session{}, err
+		return Session{}, wrapURLErr("building token request", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return Session{}, fmt.Errorf("wahoo: token request: %w", err)
+		return Session{}, wrapURLErr("token request", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -226,14 +226,14 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (Session, er
 func (c *Client) Me(ctx context.Context, accessToken string) (Profile, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.APIBase+"/v1/user", nil)
 	if err != nil {
-		return Profile{}, err
+		return Profile{}, wrapURLErr("building profile request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return Profile{}, fmt.Errorf("wahoo: profile request: %w", err)
+		return Profile{}, wrapURLErr("profile request", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -336,14 +336,14 @@ func (c *Client) routeURL(id string) string {
 func (c *Client) DeleteRoute(ctx context.Context, accessToken, id string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.routeURL(id), nil)
 	if err != nil {
-		return err
+		return wrapURLErr("building delete request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("wahoo: delete route: %w", err)
+		return wrapURLErr("delete route", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -428,14 +428,14 @@ type routeListItem struct {
 func (c *Client) ListRoutes(ctx context.Context, accessToken string) ([]Route, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.APIBase+"/v1/routes", nil)
 	if err != nil {
-		return nil, err
+		return nil, wrapURLErr("building route list request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("wahoo: list routes: %w", err)
+		return nil, wrapURLErr("list routes", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -626,7 +626,7 @@ func (c *Client) routeRequest(ctx context.Context, method, endpoint, accessToken
 
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", wrapURLErr("building route request", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
@@ -634,7 +634,7 @@ func (c *Client) routeRequest(ctx context.Context, method, endpoint, accessToken
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("wahoo: route request: %w", err)
+		return "", wrapURLErr("route request", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
