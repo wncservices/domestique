@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ascentText, ftpChangeText, ftpStartText, hoursText, periodValue, parsePeriodValue } from '../src/utils/seasonReview.ts'
+import { ascentText, endLabelText, ftpChangeText, ftpStartText, hoursText, periodValue, parsePeriodValue, reviewNow } from '../src/utils/seasonReview.ts'
 
 test('hours read as hours and minutes, without a zero minute', () => {
   assert.equal(hoursText(3600 * 142 + 1800), '142 h 30 min')
@@ -24,6 +24,13 @@ test('FTP start says where history starts instead of inventing a start', () => {
 test('the first FTP change reads as set, not as a move from zero', () => {
   assert.equal(ftpChangeText({ from: 0, to: 250 }), 'set to 250 W')
   assert.equal(ftpChangeText({ from: 250, to: 262 }), '250 to 262 W')
+})
+
+test('the end label and the reference date come from the response, not the browser clock', () => {
+  assert.equal(endLabelText({ running: true }), 'Now')
+  assert.equal(endLabelText({ running: false }), 'End')
+  const now = reviewNow({ end: '2026-09-10' })
+  assert.deepEqual([now.getFullYear(), now.getMonth(), now.getDate()], [2026, 8, 10])
 })
 
 test('a picker value round-trips a year or a goal', () => {
