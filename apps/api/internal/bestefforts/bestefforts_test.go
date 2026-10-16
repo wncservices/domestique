@@ -69,6 +69,22 @@ func TestEffortsDropZeroAbsentAndUnknownWindows(t *testing.T) {
 	}
 }
 
+// The database reduces a scope to a count and a maximum; that must award
+// exactly what the full list would.
+func TestAwardFromASummaryMatchesAwardFromTheList(t *testing.T) {
+	m := metric(t, "power_1200")
+	season, allTime := []float64{280, 290, 300}, []float64{280, 290, 300, 310}
+	for _, v := range []float64{250, 301, 311, 312} {
+		want := Award(m, v, season, allTime)
+		if got := AwardFrom(m, v, PriorOf(season), PriorOf(allTime)); got != want {
+			t.Errorf("value %v: AwardFrom = %q, Award = %q", v, got, want)
+		}
+	}
+	if p := PriorOf(nil); p.Count != 0 || p.Max != 0 {
+		t.Errorf("PriorOf(nil) = %+v", p)
+	}
+}
+
 func TestAwardNeedsOneWattMoreForPower(t *testing.T) {
 	m := metric(t, "power_1200")
 	prior := []float64{280, 290, 300, 295}

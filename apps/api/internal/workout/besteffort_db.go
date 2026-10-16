@@ -209,6 +209,28 @@ func (d *DB) ScopeValues(ctx context.Context, rider, metric, from, to, excludeSe
 	return out, rows.Err()
 }
 
+// ScopeStat is how many values a scope holds and the largest of them.
+type ScopeStat struct {
+	Count int
+	Max   float64
+}
+
+// ScopeStats is ScopeValues reduced in the database: awarding only needs the
+// count and the maximum, so a rider with years of rides is not read row by row
+// for every metric of every synced ride. An empty scope is {0, 0}.
+func (d *DB) ScopeStats(ctx context.Context, rider, metric, from, to, excludeSession string) (ScopeStat, error) {
+	args := []any{normalizeRider(rider), metric}
+	clause, args := scopeClause(from, to, args)
+	if excludeSession != "" {
+		clause += ` AND session_id <> ?`
+		args = append(args, excludeSession)
+	}
+	var st ScopeStat
+	err := d.db.QueryRowContext(ctx, d.query(`SELECT COUNT(*), COALESCE(MAX(value), 0) FROM best_efforts WHERE rider = ? AND metric = ?`+clause), args...).
+		Scan(&st.Count, &st.Max)
+	return st, err
+}
+
 // DeleteEffortsForSession removes a session's rows, awards included: the ride
 // they describe is gone.
 func (d *DB) DeleteEffortsForSession(ctx context.Context, sessionID string) error {

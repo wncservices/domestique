@@ -96,17 +96,19 @@ func (s *Server) awardNewEfforts(ctx context.Context, rider string, batch []newE
 			if !ok {
 				continue
 			}
-			season, err := s.Training.ScopeValues(ctx, rider, key, from, to, sess.ID)
+			seasonStat, err := s.Training.ScopeStats(ctx, rider, key, from, to, sess.ID)
 			if err != nil {
 				s.logger().Warn("best efforts: reading a season failed", "rider", rider, "metric", key, "err", err)
 				continue
 			}
-			allTime, err := s.Training.ScopeValues(ctx, rider, key, "", "", sess.ID)
+			allTimeStat, err := s.Training.ScopeStats(ctx, rider, key, "", "", sess.ID)
 			if err != nil {
 				s.logger().Warn("best efforts: reading the history failed", "rider", rider, "metric", key, "err", err)
 				continue
 			}
-			scope := bestefforts.Award(m, value, season, allTime)
+			season := bestefforts.Prior{Count: seasonStat.Count, Max: seasonStat.Max}
+			allTime := bestefforts.Prior{Count: allTimeStat.Count, Max: allTimeStat.Max}
+			scope := bestefforts.AwardFrom(m, value, season, allTime)
 			if scope == "" {
 				continue
 			}
@@ -114,21 +116,13 @@ func (s *Server) awardNewEfforts(ctx context.Context, rider string, batch []newE
 			if scope == bestefforts.ScopeAllTime {
 				prior = allTime
 			}
-			if err := s.Training.SetEffortAward(ctx, sess.ID, key, scope, maxOf(prior)); err != nil {
+			if err := s.Training.SetEffortAward(ctx, sess.ID, key, scope, prior.Max); err != nil {
 				s.logger().Warn("best efforts: saving an award failed", "rider", rider, "metric", key, "scope", scope, "err", err)
 				continue
 			}
 			s.logger().Info("best effort recorded", "rider", rider, "metric", key, "scope", scope)
 		}
 	}
-}
-
-func maxOf(values []float64) float64 {
-	best := 0.0
-	for _, v := range values {
-		best = max(best, v)
-	}
-	return best
 }
 
 // pendingEffortAwards is what the rider has not been told yet.

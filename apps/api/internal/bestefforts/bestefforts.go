@@ -124,6 +124,30 @@ const epsilon = 1e-9
 // MinGain. All-time wins over season: one marker, the stronger label. A tie
 // never awards, so the earlier ride keeps the record.
 func Award(m Metric, value float64, season, allTime []float64) string {
+	return AwardFrom(m, value, PriorOf(season), PriorOf(allTime))
+}
+
+// Prior is all Award needs to know about a scope's other values: how many there
+// are and the largest. A database can answer that with COUNT and MAX instead of
+// handing every row over.
+type Prior struct {
+	Count int
+	Max   float64
+}
+
+// PriorOf summarises a list of values.
+func PriorOf(values []float64) Prior {
+	p := Prior{Count: len(values)}
+	for i, v := range values {
+		if i == 0 || v > p.Max {
+			p.Max = v
+		}
+	}
+	return p
+}
+
+// AwardFrom is Award on summaries rather than lists.
+func AwardFrom(m Metric, value float64, season, allTime Prior) string {
 	if beats(m, value, allTime) {
 		return ScopeAllTime
 	}
@@ -133,15 +157,9 @@ func Award(m Metric, value float64, season, allTime []float64) string {
 	return ""
 }
 
-func beats(m Metric, value float64, prior []float64) bool {
-	if len(prior) < MinPrior {
+func beats(m Metric, value float64, prior Prior) bool {
+	if prior.Count < MinPrior {
 		return false
 	}
-	best := prior[0]
-	for _, v := range prior[1:] {
-		if v > best {
-			best = v
-		}
-	}
-	return value-best >= m.MinGain(best)-epsilon
+	return value-prior.Max >= m.MinGain(prior.Max)-epsilon
 }
