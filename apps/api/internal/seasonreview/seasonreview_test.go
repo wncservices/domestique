@@ -16,6 +16,26 @@ func year(y string) Period {
 	return Period{Kind: KindYear, Label: y, From: y + "-01-01", To: y + "-12-31"}
 }
 
+// The client must not read its own clock to say whether a period is still
+// running or which year "this year" is: the server says so.
+func TestReviewCarriesTheServersEndDateAndWhetherItIsStillRunning(t *testing.T) {
+	cases := []struct {
+		today, end string
+		running    bool
+	}{
+		{"2026-09-10", "2026-09-10", true},  // mid-period: reviewed up to today
+		{"2026-12-31", "2026-12-31", true},  // the last day is still running
+		{"2027-01-02", "2026-12-31", false}, // over: ends on its own last day
+		{"2025-12-31", "2025-12-31", true},  // a period not yet begun still reads up to today
+	}
+	for _, c := range cases {
+		r := Compute(Input{Period: year("2026"), Today: c.today})
+		if r.End != c.end || r.Running != c.running {
+			t.Errorf("today %s: end %q running %v, want %q %v", c.today, r.End, r.Running, c.end, c.running)
+		}
+	}
+}
+
 func TestVolumeSumsTheRidesWithBothBoundaryDaysInclusive(t *testing.T) {
 	got := Compute(Input{
 		Period: year("2026"), Today: "2026-12-31",
@@ -198,6 +218,25 @@ func TestPlanCountsOnlyDaysAlreadyPastAndDoneOnesFromToday(t *testing.T) {
 	p = Compute(in).Plan
 	if p.Planned != 5 || p.Done != 3 {
 		t.Errorf("with today ridden: %+v, want 5 planned and 3 done", p)
+	}
+}
+
+// The classification is per day (compliance.Day weighs the day's rides against
+// the day's planned minutes; a ride is not linked to one workout), so the plan
+// counts days. Counting workouts would score a two-workout day twice on one
+// verdict and call it sessions.
+func TestPlanCountsDaysNotWorkouts(t *testing.T) {
+	in := Input{
+		Period: year("2026"), Today: "2026-09-10",
+		Workouts: []workout.Workout{
+			planned("a1", "2026-09-01"), planned("a2", "2026-09-01"), // one day, two workouts
+			planned("b1", "2026-09-02"),
+		},
+		Sessions: []workout.CompletedSession{ride("r1", "2026-09-01", 7200, 1, 0, 1)},
+	}
+	p := Compute(in).Plan
+	if p == nil || p.Planned != 2 || p.Done != 1 {
+		t.Errorf("plan = %+v, want 2 planned days and 1 done", p)
 	}
 }
 

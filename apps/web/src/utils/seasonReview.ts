@@ -33,6 +33,19 @@ export function ftpChangeText(c: { from: number; to: number }): string {
   return c.from > 0 ? `${Math.round(c.from)} to ${Math.round(c.to)} W` : `set to ${Math.round(c.to)} W`
 }
 
+/** "Now" while the period is still running, "End" once it is over. The server
+ *  says which; the browser's own date can disagree with the rider's day. */
+export function endLabelText(r: { running: boolean }): string {
+  return r.running ? 'Now' : 'End'
+}
+
+/** The reference date for dates in a review ("14 Aug" leaves this year off):
+ *  the server's end date for the review, as a local calendar day. */
+export function reviewNow(r: { end: string }): Date {
+  const [y, m, d] = r.end.split('-').map(Number)
+  return y && m && d ? new Date(y, m - 1, d) : new Date()
+}
+
 export type PeriodChoice = { year: string } | { goal: string }
 
 /** The picker's option value for a period. */

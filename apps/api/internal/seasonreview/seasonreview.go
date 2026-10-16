@@ -58,7 +58,13 @@ type Input struct {
 
 // Review is the answer. The JSON shape is the API's (GET /api/training/season).
 type Review struct {
-	Period      Period       `json:"period"`
+	Period Period `json:"period"`
+	// End is the last day the review reads (the period's own end, or the
+	// rider's today when it has not ended) and Running says the period has not
+	// ended. Both come from the server's clock and the rider's zone, so the page
+	// labels "Now" and picks which year to leave off a date without its own.
+	End         string       `json:"end"`
+	Running     bool         `json:"running"`
 	Volume      *Volume      `json:"volume,omitempty"`
 	Fitness     *Fitness     `json:"fitness,omitempty"`
 	FTP         *FTP         `json:"ftp,omitempty"`
@@ -109,8 +115,9 @@ type FTPChange struct {
 	Source string  `json:"source"`
 }
 
-// Plan is how much of the plan was ridden, over the days already behind us.
-// CompliancePct is absent under four planned sessions: one missed session out
+// Plan is how much of the plan was ridden, counted in planned days (the verdict
+// is per day: a ride is not linked to one workout) already behind us.
+// CompliancePct is absent under four planned days: one missed day out
 // of two is not a percentage worth printing.
 type Plan struct {
 	Planned       int  `json:"planned"`
@@ -118,7 +125,7 @@ type Plan struct {
 	CompliancePct *int `json:"compliancePct,omitempty"`
 }
 
-// MinPlannedForPercent is how many planned sessions it takes to show a percent.
+// MinPlannedForPercent is how many planned days it takes to show a percent.
 const MinPlannedForPercent = 4
 
 // Award is a record set in the period.
@@ -176,7 +183,7 @@ func Compute(in Input) Review {
 	// A period that has not ended is reviewed up to today.
 	end := minDate(p.To, in.Today)
 
-	review := Review{Period: p, BestEfforts: []Award{}, Goals: []GoalResult{}}
+	review := Review{Period: p, End: end, Running: p.To >= in.Today, BestEfforts: []Award{}, Goals: []GoalResult{}}
 	review.Volume = volume(in.Sessions, p.From, p.To)
 	review.Fitness = fitness(in.Snapshots, p.From, end)
 	review.FTP = ftp(in, end)
@@ -328,9 +335,9 @@ func plan(in Input, end string) *Plan {
 		if date > in.Today || (date == in.Today && status != compliance.StatusDone) {
 			continue
 		}
-		out.Planned += len(ws)
+		out.Planned++
 		if status == compliance.StatusDone {
-			out.Done += len(ws)
+			out.Done++
 		}
 	}
 	if out.Planned == 0 {

@@ -2191,7 +2191,7 @@ export interface SeasonFtp {
 export interface SeasonPlan {
   planned: number
   done: number
-  /** Absent under four planned sessions. */
+  /** Counted in planned days: the verdict is per day, not per workout. Absent under four planned days. */
   compliancePct?: number
 }
 
@@ -2236,6 +2236,10 @@ export interface SeasonGoalPeriod {
 
 export interface SeasonReview {
   period: SeasonPeriod
+  /** Last day the review reads: the period's end, or the rider's today while it runs. */
+  end: string
+  /** The period has not ended; the page labels its end "Now". */
+  running: boolean
   /** A section the data cannot speak to is absent, never zeros. */
   volume?: SeasonVolume
   fitness?: SeasonFitness

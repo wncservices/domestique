@@ -7,7 +7,7 @@
 import { computed } from 'vue'
 import type { FtpChangeSource, SeasonReview } from '@/api/types'
 import { awardChipText, formatEffortDate, formatEffortValue } from '@/utils/bestEfforts'
-import { ascentText, ftpChangeText, ftpStartText, hoursText } from '@/utils/seasonReview'
+import { ascentText, endLabelText, ftpChangeText, ftpStartText, hoursText, reviewNow } from '@/utils/seasonReview'
 import { formatDuration } from '@/utils/workoutMath'
 
 const props = defineProps<{ review: SeasonReview }>()
@@ -23,14 +23,10 @@ function km(m: number): string {
   return `${Math.round(m / 1000).toLocaleString('en-GB')} km`
 }
 const round = (v: number): number => Math.round(v)
-const today = new Date()
-// A period still running ends today, which reads better as "Now".
-const endLabel = computed(() => (props.review.period.to >= todayYmd() ? 'Now' : 'End'))
-
-function todayYmd(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+// Both come from the server's end date for the review, in the rider's zone,
+// never the browser's clock: a period still running ends "Now".
+const today = computed(() => reviewNow(props.review))
+const endLabel = computed(() => endLabelText(props.review))
 </script>
 
 <template>
@@ -91,11 +87,11 @@ function todayYmd(): string {
     <UCard v-if="review.plan" variant="outline" class="print-flat">
       <template #header><h3 class="font-semibold">Plan</h3></template>
       <p class="text-sm">
-        <span class="font-mono tabular-nums">{{ review.plan.done }} of {{ review.plan.planned }}</span> planned sessions ridden
+        <span class="font-mono tabular-nums">{{ review.plan.done }} of {{ review.plan.planned }}</span> planned days ridden
         <span v-if="review.plan.compliancePct !== undefined" class="font-mono tabular-nums">({{ review.plan.compliancePct }}%)</span>
       </p>
       <p v-if="review.plan.compliancePct === undefined" class="text-xs text-muted mt-1">
-        A percentage needs at least four planned sessions.
+        A percentage needs at least four planned days.
       </p>
     </UCard>
 
