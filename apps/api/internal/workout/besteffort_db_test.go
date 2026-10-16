@@ -181,6 +181,38 @@ func TestDeleteEffortsForSessionRemovesItsRowsOnly(t *testing.T) {
 	})
 }
 
+func TestScopeStatsAreTheMaxAndCountWithoutTheRideItself(t *testing.T) {
+	eachEffortEngine(t, func(t *testing.T, db *DB) {
+		ctx := t.Context()
+		for i, d := range []string{"2026-01-05", "2026-02-05", "2026-03-05", "2025-03-05"} {
+			session := string(rune('a' + i))
+			if _, err := db.UpsertEfforts(ctx, "wilant", session, "cycling", d, map[string]float64{"power_300": float64(200 + 10*i)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Another rider and another metric must not count.
+		if _, err := db.UpsertEfforts(ctx, "other", "z", "cycling", "2026-01-05", map[string]float64{"power_300": 999, "max_hr": 190}); err != nil {
+			t.Fatal(err)
+		}
+
+		season, err := db.ScopeStats(ctx, "wilant", "power_300", "2026-01-01", "2026-12-31", "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if season.Count != 2 || season.Max != 210 {
+			t.Errorf("season = %+v, want 2 values, max 210 (the ride c itself excluded)", season)
+		}
+		all, _ := db.ScopeStats(ctx, "wilant", "power_300", "", "", "c")
+		if all.Count != 3 || all.Max != 230 {
+			t.Errorf("all-time = %+v, want 3 values, max 230", all)
+		}
+		none, err := db.ScopeStats(ctx, "wilant", "power_300", "2030-01-01", "2030-12-31", "")
+		if err != nil || none.Count != 0 || none.Max != 0 {
+			t.Errorf("an empty scope = %+v, %v, want zero values and no error", none, err)
+		}
+	})
+}
+
 func seedAnalysed(t *testing.T, db *DB, rider, ext, date string, curve map[string]float64, maxHR int) string {
 	t.Helper()
 	ctx := t.Context()
