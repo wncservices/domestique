@@ -167,6 +167,10 @@ Three ways to make a "panel," picked in this order:
   `MAP_COLORS`, both explained in their own comments). Grep for
   `#[0-9a-f]{3,6}` in `apps/web/src/**/*.vue` before merging — today that
   grep returns exactly those two files and nothing else.
+  The guard test (`apps/web/tests/designSystem.test.mjs`) allowlists four
+  files: `RouteMap.vue` and `TrackPreview.vue` (map painting),
+  `RouteBuilderMap.vue` (map painting) and `ElevationProfile.vue` (elevation
+  gradient).
 - If something needs a categorical colour, reuse the icon-chip pattern above
   and pull from the existing four accents — don't add a fifth without
   raising it as a deliberate decision first (it changes the "which four"
