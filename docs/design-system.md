@@ -238,7 +238,7 @@ one per page.
 |---|---|---|
 | `/today` | `TodayPage.vue` | Redesigned: `AppPage`, calm-first card, `StatTile`, `DetailsToggle`, `SuggestionRow` |
 | `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` |
-| `/fitness` | `TrainingFitnessPage.vue` | Old styling |
+| `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
 | `/routes`, `/routes/new`, `/routes/build` | `LibraryPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Old styling |
 | `/crews`, `/settings`, `/people` | `CrewsPage.vue`, `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
 
@@ -251,6 +251,30 @@ headline and one tip, no goal swaps the countdown tile for a "Set a goal" link t
 of failed calls. A read that failed is a dash, never one of these prompts. One suggestion at most;
 dismissing it hides them all for the visit, and a weather one reuses the Plan page's persistent
 "Keep outdoors" dismissal.
+
+### Segmented control
+
+`SegmentedControl` (`components/ui/SegmentedControl.vue`) is the one switch between
+views of a page: `v-model`, `items` (`label`, `value`, optional `icon`) and a required
+`label` for assistive tech. It wraps `UTabs` (pill, `:content="false"`), so it is a real
+tablist with arrow-key movement; the page decides what each value shows. Never add a
+second tab style. The Fitness page binds it to `?tab=season` with `router.push`, so
+deep links and Back both work.
+
+### Fitness page
+
+- **Order:** the summary card (form, fitness, fatigue, hours this week as `StatTile`s,
+  then one sentence on what the form means), threshold suggestions, race day, the
+  fitness chart, progression, best efforts, the power curve, recent rides, then
+  **Data and devices**.
+- **Form in words.** `formWords(tsb)` in `utils/fitnessSummary.ts` maps the
+  `formStatus` bands to a label and a tone; `formTile` on Today uses it too, so the
+  two pages cannot disagree.
+- **Data and devices** is the pattern for set-up-once cards: a section under the
+  charts with its own heading, holding unchanged cards (recovery, profile, zones,
+  calendar feed, morning summary, ride import). Moving a card there never changes
+  what it does. The profile card has `id="profile"`; `/fitness#profile` (Today's
+  "Finish your profile" link) scrolls to it once the page has loaded.
 
 ### Plan page
 

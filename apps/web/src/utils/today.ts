@@ -16,6 +16,7 @@ import type {
 } from '@/api/types'
 import { phaseLabel } from '../components/plan/phaseStyle.ts'
 import { formatSigned, formStatus, latestWithDelta } from './fitnessMath.ts'
+import { formWords } from './fitnessSummary.ts'
 import { weekdayLong, weekdayShort } from './planDates.ts'
 import { flattenSteps, formatDuration, isPlanMadeSession } from './workoutMath.ts'
 import { zoneColorVar } from './zones.ts'
@@ -80,8 +81,7 @@ export function formTile(snapshots: FitnessSnapshot[], failed = false): Tile {
     const delta = ctl.delta === undefined ? '' : `, ${Math.round(ctl.delta) >= 0 ? 'up' : 'down'} ${Math.abs(Math.round(ctl.delta))} this week`
     parts.push(`fitness ${Math.round(ctl.value)}${delta}`)
   }
-  const tone: Tone = status.key === 'high-risk' ? 'behind' : status.key === 'fresh' || status.key === 'productive' ? 'good' : 'default'
-  return { label: 'Form', value: formatSigned(tsb.value), caption: parts.join(' · '), tone }
+  return { label: 'Form', value: formatSigned(tsb.value), caption: parts.join(' · '), tone: formWords(tsb.value).tone }
 }
 
 export type CountdownTile = (Tile & { kind: 'countdown' }) | { kind: 'set-goal'; label: string; caption: string; href: string }

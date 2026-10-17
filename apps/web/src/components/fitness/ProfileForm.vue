@@ -18,7 +18,7 @@ const props = defineProps<{
   /** The most recent sync's own auto-applied findings — provenance for an
    *  estimated FTP/max HR/threshold pace ("detected ..."). Empty once the
    *  rider confirms the field (Save clears `estimated`/`ftpEstimated`), and
-   *  otherwise only covers the current session — see TrainingFitnessPage's
+   *  otherwise only covers the current session — see FitnessPage's
    *  own comment on why there's no persisted source date to show instead. */
   detected?: DetectedThreshold[]
 }>()
