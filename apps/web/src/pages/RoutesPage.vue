@@ -245,7 +245,7 @@ async function push(items: { accountId: string; slug: string }[]) {
 
     <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <StatTile label="Routes" :value="String(routes.length)" />
-      <StatTile label="Distance" :value="`${totalDistance.toFixed(0)} km`" />
+      <StatTile label="Distance" :value="`${Math.round(totalDistance).toLocaleString()} km`" />
       <StatTile label="Ascent" :value="`${Math.round(totalAscent).toLocaleString()} m`" />
       <StatTile label="Head units" :value="String(myAccountCount)" />
     </section>
