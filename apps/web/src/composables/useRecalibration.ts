@@ -1,6 +1,6 @@
 // The one place the "your levels were adjusted for a new FTP" copy and its
 // "Replan the rest of this week" action live, shared by the three surfaces
-// that can hear about a recalibration: the sync toast (TrainingFitnessPage),
+// that can hear about a recalibration: the sync toast (FitnessPage),
 // accepting a threshold suggestion (ThresholdSuggestions) and the manual
 // profile save. See docs/superpowers/specs/2026-09-28-level-recalibration-design.md,
 // "How the rider is told" and "Replan" — recalibration never replans on its
