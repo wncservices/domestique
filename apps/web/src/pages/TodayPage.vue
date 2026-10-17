@@ -296,7 +296,7 @@ async function dismissSuggestion() {
                 :verdict="readiness!.today.verdict"
                 :reasons="readiness!.today.reasons ?? []"
               />
-              <UBadge v-else-if="ridden" color="success" variant="subtle" icon="i-lucide-circle-check">
+              <UBadge v-else-if="ridden" color="primary" variant="subtle" icon="i-lucide-circle-check">
                 {{ today?.status === 'partial' ? 'Partly done' : 'Done' }}
               </UBadge>
             </div>
