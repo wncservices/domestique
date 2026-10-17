@@ -64,7 +64,7 @@ test('test-rider can sign in and see the library', async ({ page }) => {
 
   await signIn(page, email, password)
 
-  // The library page's own route count heading — see LibraryPage.vue.
+  // The library page's own route count heading — see RoutesPage.vue.
   await expect(page.getByText(/route(s)?$/i).first()).toBeVisible()
 })
 

@@ -2,6 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useColorMode } from '@/color-mode'
+import AppPage from '@/components/ui/AppPage.vue'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import StatTile from '@/components/ui/StatTile.vue'
 import LibraryDuplicatesPanel from '@/components/LibraryDuplicatesPanel.vue'
 import PlanPanel from '@/components/PlanPanel.vue'
 import RouteCard from '@/components/RouteCard.vue'
@@ -12,12 +15,13 @@ import { formatRideWhen, todayISO } from '@/utils/rideDates'
 import { prefetchTrackPreviewImages } from '@/utils/prefetchPreviewImages'
 import { describeError } from '@/utils/errorMessage'
 
-// Named explicitly for App.vue's <KeepAlive include="LibraryPage">, rather
-// than relying on build-tool filename inference: the whole point of that
+// Named explicitly for App.vue's <KeepAlive include="RoutesPage">, rather
+// than relying on build-tool filename inference (it matches the file name
+// today, so this is belt and braces): the whole point of that
 // KeepAlive is to stop every card's preview (route line + background wash)
 // from being rebuilt on every visit, and a silent inference miss would
 // bring that regression back with no error to point at.
-defineOptions({ name: 'LibraryPage' })
+defineOptions({ name: 'RoutesPage' })
 
 const {
   accounts,
@@ -28,8 +32,21 @@ const {
   me,
   canPush,
   canUpload,
+  routingConfigured,
+  totalDistance,
+  totalAscent,
   refresh,
 } = useLibrary()
+
+// accounts is every device this rider can see, their own and a crew
+// fellow's (see server.go's listableAccounts), but this tile answers "how
+// many head units do I have". Same own-account check AccountsPanel.vue's
+// isMine uses, so the two never disagree on what "mine" means.
+const myAccountCount = computed(() => {
+  const user = me.value?.user?.toLowerCase()
+  if (!user) return 0
+  return accounts.value.filter((a) => a.rider.toLowerCase() === user).length
+})
 
 const { resolved } = useColorMode()
 
@@ -116,7 +133,11 @@ const pagedSlugs = computed(() => new Set(pagedRoutes.value.map((r) => r.slug)))
 
 // Map mode wants every filtered route plotted at once, not one page of 24 —
 // pagination doesn't apply to it.
-const viewMode = ref<'grid' | 'map'>('grid')
+const viewMode = ref<string>('grid')
+const viewItems = [
+  { label: 'Grid', value: 'grid', icon: 'i-lucide-layout-grid' },
+  { label: 'Map', value: 'map', icon: 'i-lucide-map' },
+]
 
 // Keyed by slug rather than refetched per filter change: a search keystroke
 // or sport toggle only changes which routes are *visible*, not their
@@ -206,7 +227,29 @@ async function push(items: { accountId: string; slug: string }[]) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <AppPage title="Routes" subtitle="The shared library, and what each head unit holds.">
+    <template #actions>
+      <!-- Hidden rather than disabled for a viewer: the page would be an
+           empty form. Build also needs a routing engine on this deployment. -->
+      <UButton v-if="canUpload" to="/routes/new" icon="i-lucide-plus">Add route</UButton>
+      <UButton
+        v-if="canUpload && routingConfigured"
+        to="/routes/build"
+        icon="i-lucide-pencil-ruler"
+        color="neutral"
+        variant="outline"
+      >
+        Build a route
+      </UButton>
+    </template>
+
+    <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <StatTile label="Routes" :value="String(routes.length)" />
+      <StatTile label="Distance" :value="`${totalDistance.toFixed(0)} km`" />
+      <StatTile label="Ascent" :value="`${Math.round(totalAscent).toLocaleString()} m`" />
+      <StatTile label="Head units" :value="String(myAccountCount)" />
+    </section>
+
     <UAlert
       v-if="upcomingRides.length"
       color="primary"
@@ -262,22 +305,7 @@ async function push(items: { accountId: string; slug: string }[]) {
           {{ routes.length }} route{{ routes.length === 1 ? '' : 's' }}
         </h2>
         <div class="flex flex-wrap items-center gap-2">
-          <UButtonGroup>
-            <UButton
-              icon="i-lucide-layout-grid"
-              :color="viewMode === 'grid' ? 'primary' : 'neutral'"
-              :variant="viewMode === 'grid' ? 'subtle' : 'outline'"
-              aria-label="Grid view"
-              @click="viewMode = 'grid'"
-            />
-            <UButton
-              icon="i-lucide-map"
-              :color="viewMode === 'map' ? 'primary' : 'neutral'"
-              :variant="viewMode === 'map' ? 'subtle' : 'outline'"
-              aria-label="Map view"
-              @click="viewMode = 'map'"
-            />
-          </UButtonGroup>
+          <SegmentedControl v-model="viewMode" :items="viewItems" label="Library view" />
           <USelect
             v-model="sportFilter"
             :items="sportFilterOptions"
@@ -294,7 +322,7 @@ async function push(items: { accountId: string; slug: string }[]) {
         </div>
       </div>
 
-      <div v-if="loading" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-if="loading" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <USkeleton v-for="n in 3" :key="n" class="h-72" />
       </div>
 
@@ -321,7 +349,7 @@ async function push(items: { accountId: string; slug: string }[]) {
       />
 
       <template v-else-if="viewMode === 'map'">
-        <div class="relative h-[600px] overflow-hidden rounded-lg border border-default">
+        <div class="relative h-[600px] overflow-hidden rounded-[var(--radius-card)] border border-default">
           <RouteMap
             :routes="mapRoutes"
             :selected-slug="selectedSlug"
@@ -337,7 +365,7 @@ async function push(items: { accountId: string; slug: string }[]) {
       </template>
 
       <template v-else>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <RouteCard
             v-for="route in visibleRoutes"
             v-show="pagedSlugs.has(route.slug)"
@@ -371,5 +399,5 @@ async function push(items: { accountId: string; slug: string }[]) {
       @update:open="(v: boolean) => { if (!v) selectedSlug = null }"
       @updated="backgroundRefresh"
     />
-  </div>
+  </AppPage>
 </template>

@@ -25,7 +25,7 @@ export function buildRoutes(load: PageLoader): RouteRecordRaw[] {
     { path: '/today', component: load('TodayPage') },
     { path: '/plan', component: load('PlanPage') },
     { path: '/fitness', component: load('FitnessPage') },
-    { path: '/routes', component: load('LibraryPage') },
+    { path: '/routes', component: load('RoutesPage') },
     { path: '/routes/new', component: load('AddPage') },
     { path: '/routes/build', component: load('BuildRoutePage') },
     { path: '/crews', component: load('CrewsPage') },
