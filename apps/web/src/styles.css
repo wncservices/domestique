@@ -184,7 +184,9 @@
    * a literal shade class, so nothing needs a `dark:` variant of its own. */
   --app-accent-primary: var(--ui-primary);
   --app-accent-primary-soft: var(--color-primary-100);
-  --app-accent-ember: var(--color-ember-600);
+  /* ember-700, not 600: this is also the ember used as text, and 600 is
+   * 3.74:1 on white where 700 is 5.35:1. */
+  --app-accent-ember: var(--color-ember-700);
   --app-accent-ember-soft: var(--color-ember-100);
   --app-accent-sky: var(--color-sky-600);
   --app-accent-sky-soft: var(--color-sky-100);
