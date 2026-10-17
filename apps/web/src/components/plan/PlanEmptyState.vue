@@ -3,6 +3,8 @@
 // stack — every one of those needs a goal (or the fallback one) to talk
 // about, so showing them empty read as a broken page rather than a rider
 // who simply hasn't started yet.
+import EmptyState from '@/components/ui/EmptyState.vue'
+
 defineProps<{
   narrationEnabled: boolean
   starting: boolean
@@ -16,16 +18,12 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <UCard variant="outline">
-    <div class="flex flex-col items-center gap-4 py-8 text-center">
-      <div class="flex size-12 items-center justify-center rounded-full bg-elevated">
-        <UIcon name="i-lucide-flag" class="size-6 text-muted" />
-      </div>
-      <div>
-        <h2 class="text-lg font-semibold text-highlighted">Start your plan</h2>
-        <p class="mt-1 text-sm text-muted">Pick what you're training for, and Domestique builds the weeks toward it.</p>
-      </div>
-
+  <EmptyState
+    icon="i-lucide-flag"
+    title="Start your plan"
+    text="Pick what you're training for, and Domestique builds the weeks toward it."
+  >
+    <template #actions>
       <div class="grid w-full gap-3 sm:grid-cols-3">
         <!-- Always offered: a goal needs an event date, not a route. With
              narration on, the same form also takes a one-sentence
@@ -64,6 +62,6 @@ const emit = defineEmits<{
           <span class="text-xs text-muted">Twelve rolling weeks of steady base, no event needed.</span>
         </button>
       </div>
-    </div>
-  </UCard>
+    </template>
+  </EmptyState>
 </template>
