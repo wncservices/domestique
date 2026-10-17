@@ -1417,7 +1417,7 @@ personal location and health data, so:
   - `src/color-mode.ts` puts the `dark` class on `<html>` from the OS preference. Outside Nuxt
     nothing does this for you, and without it the app is permanently light.
   - `App.vue` must stay wrapped in `<UApp>` — toasts, tooltips and modals need it.
-  - `vue-router` routes the app's pages (`src/main.ts` lists them; `src/pages/` holds
+  - `vue-router` routes the app's pages (`src/router.ts` lists them; `src/pages/` holds
     them) and is also what Nuxt UI's link components import. Pages are lazy-loaded; keep it that way.
 - The frontend has `maplibre-gl`, used by the interactive maps (`RouteMap.vue`, `RouteBuilderMap.vue`)
   and only ever loaded via dynamic `import()` (top-level imports are `import type` only) — never a top-level import, so it stays out of the `main`
