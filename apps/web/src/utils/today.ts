@@ -4,13 +4,21 @@
 // by the Plan and Fitness pages; none of it invents a new one.
 import type {
   FitnessSnapshot,
+  FtpTestSuggestion,
+  PeriodizationPhase,
   ProjectionResponse,
   ReadinessResponse,
+  RideTogether,
   RiderProfile,
+  WeatherSuggestion,
+  WeekDay,
+  WeekFocus,
   Workout,
 } from '@/api/types'
 import { formatSigned, formStatus, latestWithDelta } from './fitnessMath.ts'
-import { flattenSteps } from './workoutMath.ts'
+import { weekdayLong, weekdayShort } from './planDates.ts'
+import { flattenSteps, formatDuration, isPlanMadeSession } from './workoutMath.ts'
+import { zoneColorVar } from './zones.ts'
 
 export function greeting(hour: number, name?: string): string {
   const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
@@ -60,7 +68,9 @@ export interface Tile {
 
 /** Form is fitness minus fatigue (TSB), banded and worded exactly as the
  *  Fitness page does; only its two clearly good/bad bands get a tone. */
-export function formTile(snapshots: FitnessSnapshot[]): Tile {
+export function formTile(snapshots: FitnessSnapshot[], failed = false): Tile {
+  // A failed read is not an empty history: no prompt, just a dash.
+  if (failed) return { label: 'Form', value: '—', tone: 'default' }
   const tsb = latestWithDelta(snapshots, 'tsb', 7)
   if (!tsb) return { label: 'Form', value: '—', caption: 'Appears after your first synced ride', tone: 'default' }
   const status = formStatus(tsb.value)
@@ -96,7 +106,7 @@ export function countdownTile(input: {
   return {
     kind: 'countdown',
     label: goal.name,
-    value: String(days),
+    value: days === 1 ? '1 day' : `${days} days`,
     caption: own?.message,
     tone: own?.key === 'undertrained' ? 'behind' : 'default',
   }
@@ -104,21 +114,89 @@ export function countdownTile(input: {
 
 // ---- Week ----
 
-/** "2.6 of 3.4 h" */
-export function weekHoursLabel(completedSeconds: number, plannedSeconds: number): string {
-  if (plannedSeconds <= 0 && completedSeconds <= 0) return 'Nothing planned'
-  const h = (s: number) => (s / 3600).toFixed(1)
-  return `${h(completedSeconds)} of ${h(plannedSeconds)} h`
+/** "2.6 / 3.4 h", the Plan page's arithmetic: the target is the larger of what
+ *  is planned and the focus week's target hours. */
+export function weekHoursLabel(completedSeconds: number, plannedSeconds: number, focusTargetHours = 0): string {
+  const target = Math.max(plannedSeconds, focusTargetHours * 3600)
+  if (target <= 0 && completedSeconds <= 0) return 'Nothing planned'
+  return `${(completedSeconds / 3600).toFixed(1)} / ${(target / 3600).toFixed(1)} h`
+}
+
+export interface WeekTile {
+  date: string
+  label: string
+  isToday: boolean
+  /** A zone colour variable; absent for rest days and rides with no plan. */
+  color?: string
+  done: boolean
+  /** Visible under the colour, so a tile never relies on colour alone. */
+  text: string
+  aria: string
+}
+
+const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
+
+/** One tile for every day of the week: planned sessions, rides already done
+ *  (a done day may have nothing left planned) or rest. */
+export function weekTiles(days: WeekDay[], today: string): WeekTile[] {
+  return days.map((d) => {
+    const plannedSeconds = sum(d.planned.map((w) => w.plannedSeconds))
+    const completedSeconds = sum(d.completed.map((c) => c.durationSeconds))
+    const done = d.status === 'done' || d.status === 'partial'
+    const seconds = done || !d.planned.length ? completedSeconds : plannedSeconds
+    const text = seconds > 0 ? formatDuration(seconds) : d.planned.length || d.completed.length ? 'Ride' : 'Rest'
+    return {
+      date: d.date,
+      label: weekdayShort(d.date),
+      isToday: d.date === today,
+      color: d.planned.length ? zoneColorVar(d.planned[0]!.zone ?? 'endurance') : undefined,
+      done,
+      text,
+      aria: `${weekdayLong(d.date)}: ${text}${done ? ', done' : ''}`,
+    }
+  })
+}
+
+export type CardState =
+  | { kind: 'rest'; title: string; text: string }
+  | { kind: 'ridden'; title: string; text: string }
+  | { kind: 'planned' }
+
+/** What the primary card is about: a rest day, a ride with nothing planned, or
+ *  the planned session. */
+export function cardState(day: WeekDay | undefined): CardState {
+  if (day && !day.planned.length && !day.completed.length) return { kind: 'rest', title: REST_HEADLINE, text: REST_TIP }
+  if (day && !day.planned.length) {
+    const secs = sum(day.completed.map((c) => c.durationSeconds))
+    return { kind: 'ridden', title: 'You rode today', text: `${formatDuration(secs)} logged. Nothing else is planned.` }
+  }
+  return { kind: 'planned' }
+}
+
+export function eyebrowFor(focus: Pick<WeekFocus, 'phase' | 'recovery' | 'weekNumber'> | undefined): string {
+  if (!focus?.phase) return "Today's ride"
+  const phase = (focus.phase as PeriodizationPhase).charAt(0).toUpperCase() + focus.phase.slice(1)
+  const rec = focus.recovery ? ' · recovery' : ''
+  return `Today's ride · ${phase}${rec}${focus.weekNumber ? ` week ${focus.weekNumber}` : ''}`
+}
+
+/** The session the Swap menu belongs to: plan-made, unridden, not past, with no
+ *  route (a swap would change what the route was chosen for). */
+export function swappableWorkout(day: WeekDay | undefined, todayDate: string): Workout | undefined {
+  const w = day?.planned.find(isPlanMadeSession)
+  if (!w || w.route || !day || day.completed.length > 0 || day.date < todayDate) return undefined
+  return w
 }
 
 // ---- Session details (behind the Details toggle) ----
 
-/** TSS and intensity factor, estimated from the steps against the rider's
- *  FTP. Null without an FTP: the steps then carry no honest watts, and a
+/** An estimate of TSS and intensity factor from the power steps against the
+ *  rider's FTP (not a server figure). Null without an FTP or a power step: the steps then carry no honest watts, and a
  *  guessed load would read as fact. */
 export function workoutLoad(workout: Pick<Workout, 'steps'>, profile: RiderProfile): { tss: number; if: number } | null {
   if (!profile.ftpWatts || profile.ftpWatts <= 0) return null
-  const steps = flattenSteps(workout.steps, profile)
+  // Only power steps carry watts; heart-rate or open steps would be guesses.
+  const steps = flattenSteps(workout.steps, profile).filter((s) => s.step.target === 'power')
   const total = steps.reduce((sum, s) => sum + s.seconds, 0)
   if (total <= 0) return null
   const np = Math.pow(steps.reduce((sum, s) => sum + Math.pow(s.level, 4) * s.seconds, 0) / total, 0.25)
@@ -163,4 +241,42 @@ export interface SuggestionInputs {
  *  an overdue FTP test, then a ride someone else proposed. */
 export function pickSuggestion(inputs: SuggestionInputs): Suggestion | null {
   return inputs.lifeEvent ?? inputs.weather ?? inputs.ftpTest ?? inputs.rideTogether ?? null
+}
+
+export interface SuggestionSources {
+  lifeEvent?: { label: string; range: string }
+  weather?: Pick<WeatherSuggestion, 'reasons'>
+  ftpTest?: Pick<FtpTestSuggestion, 'message'>
+  rideTogether?: Pick<RideTogether, 'crewName' | 'routeName' | 'day'>
+}
+
+/** The words and icon for each candidate; pickSuggestion then keeps one. */
+export function buildSuggestionInputs(src: SuggestionSources): SuggestionInputs {
+  const day = (d: string) => d.charAt(0).toUpperCase() + d.slice(1)
+  return {
+    lifeEvent: src.lifeEvent && {
+      kind: 'life-event',
+      icon: 'i-lucide-calendar-off',
+      title: src.lifeEvent.label,
+      text: `${src.lifeEvent.range}. Change or end it on the Plan page.`,
+    },
+    weather: src.weather && {
+      kind: 'weather',
+      icon: 'i-lucide-cloud-rain',
+      title: "Weather may spoil today's ride.",
+      text: src.weather.reasons.join(', ') + '.',
+    },
+    ftpTest: src.ftpTest && {
+      kind: 'ftp-test',
+      icon: 'i-lucide-gauge',
+      title: 'An FTP test would help.',
+      text: src.ftpTest.message,
+    },
+    rideTogether: src.rideTogether && {
+      kind: 'ride-together',
+      icon: 'i-lucide-users-round',
+      title: `${src.rideTogether.crewName} proposes a ride together.`,
+      text: `${src.rideTogether.routeName}, ${day(src.rideTogether.day)}.`,
+    },
+  }
 }

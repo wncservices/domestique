@@ -64,6 +64,7 @@ import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
 import { describeError } from '@/utils/errorMessage'
+import { pushWorkoutToGarmin as pushWorkout } from '@/utils/pushWorkout'
 
 const toast = useToast()
 const route = useRoute()
@@ -357,24 +358,7 @@ async function sendCourseOf(w: Workout) {
 async function pushWorkoutToGarmin(w: Workout) {
   pushingWorkout.value = w.id
   try {
-    const res = await api.pushWorkoutToGarmin(w.id)
-    toast.add({ title: `Pushed ${w.name} to Garmin`, icon: 'i-lucide-watch', color: 'success' })
-    // The workout went whatever happened to its route; say so if the route did not.
-    if (res.course === 'failed') {
-      toast.add({
-        title: `${w.name} was sent, but its route was not`,
-        description: 'The route could not be sent to your devices. Try "Send to devices" on the day card.',
-        icon: 'i-lucide-triangle-alert',
-        color: 'warning',
-      })
-    }
-  } catch (err) {
-    toast.add({
-      title: `Could not push ${w.name} to Garmin`,
-      description: describeError(err),
-      icon: 'i-lucide-triangle-alert',
-      color: 'error',
-    })
+    await pushWorkout(toast, w)
   } finally {
     pushingWorkout.value = ''
   }
