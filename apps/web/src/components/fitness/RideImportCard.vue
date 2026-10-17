@@ -176,7 +176,7 @@ onBeforeUnmount(stopPolling)
 <template>
   <UCard variant="outline">
     <template #header>
-      <h2 class="text-lg font-semibold">Import ride history</h2>
+      <h3 class="text-lg font-semibold">Import ride history</h3>
     </template>
 
     <p class="text-sm text-muted">

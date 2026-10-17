@@ -17,7 +17,7 @@ const shown = computed(() => !!props.projection?.available && !!props.projection
 const tone = computed(() => projectionTone(props.projection?.verdict))
 const TONE_TEXT: Record<ReturnType<typeof projectionTone>, string> = {
   success: 'text-success',
-  warning: 'text-warning',
+  warning: 'text-[var(--app-accent-ember)]',
   info: 'text-info',
   neutral: 'text-muted',
 }

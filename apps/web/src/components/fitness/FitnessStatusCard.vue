@@ -27,10 +27,10 @@ const explanation = computed(() => {
 </script>
 
 <template>
-  <UCard variant="outline">
-    <template #header>
+  <section class="flex flex-col gap-4" aria-labelledby="where-you-are">
+    <div>
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold">Where you are</h2>
+        <h2 id="where-you-are" class="text-lg font-semibold">Where you are</h2>
         <UButton
           v-if="loading || hasHistory"
           icon="i-lucide-refresh-cw"
@@ -42,7 +42,7 @@ const explanation = computed(() => {
           Sync now
         </UButton>
       </div>
-    </template>
+    </div>
 
     <UAlert
       v-if="needsSetup && hasHistory"
@@ -72,7 +72,7 @@ const explanation = computed(() => {
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile v-for="tile in tiles" :key="tile.label" :label="tile.label" :value="tile.value" :caption="tile.caption" :tone="tile.tone" />
       </div>
-      <p v-if="explanation" class="mt-4 text-sm text-muted">{{ explanation }}</p>
+      <p v-if="explanation" class="mt-3 text-sm text-muted">{{ explanation }}</p>
     </div>
-  </UCard>
+  </section>
 </template>
