@@ -215,12 +215,21 @@ Pick in this order:
 2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
    `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
    `behind`). Tone carries meaning (on track, behind), not decoration.
-3. **`UCard variant="outline"`** — the default panel. Anything that is
+3. **`DetailsToggle`** (`components/ui/DetailsToggle.vue`) — `v-model:open`,
+   optional `label` (default "Details"), a default slot. A real button with
+   `aria-expanded`; the content is not rendered while closed.
+4. **`SuggestionRow`** (`components/ui/SuggestionRow.vue`) — `icon`, `title`,
+   `text`, an `actions` slot, and a `dismiss` event. A slim row, never a panel.
+5. **`UCard variant="outline"`** — the default panel. Anything that is
    fundamentally a Nuxt UI component consumer: `PeoplePage.vue`,
    `SettingsPage.vue`, most of `CrewsPage.vue`, `RouteCard.vue`.
-4. **`.app-card` / `.app-card-interactive`** — only when you need the same
+6. **`.app-card` / `.app-card-interactive`** — only when you need the same
    shadow/hover language on something that is not semantically a Nuxt UI card.
    `.app-card-interactive` adds the hover lift for a tappable tile.
+
+**Calm first.** A card leads with a plain headline and one number. The dense
+layer goes behind `DetailsToggle`. Suggestions are `SuggestionRow`, at most
+one per page.
 
 ## Navigation
 
