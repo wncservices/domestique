@@ -184,7 +184,7 @@ func TestEventDescriptionCarriesOnlyThePlan(t *testing.T) {
 	e := Events([]workout.Workout{w}, now, brussels, nil, appURL)[0]
 	for _, want := range []string{
 		"Zone: Threshold", "Duration: 45 min", "Target: 3 x 10 min at 250-260 W",
-		"Stay seated on the climbs.", appURL + "/training/plan",
+		"Stay seated on the climbs.", appURL + "/plan",
 	} {
 		if !strings.Contains(e.Description, want) {
 			t.Errorf("description lacks %q:\n%s", want, e.Description)

@@ -156,7 +156,7 @@ const savingEdit = ref(false)
 onMounted(async () => {
   const slug = routeQuery.query.edit
   if (typeof slug !== 'string' || !slug) return
-  // Consumed once — a reload of /build afterward should behave like the
+  // Consumed once — a reload of /routes/build afterward should behave like the
   // builder's own blank-slate default, not silently re-enter edit mode for
   // whatever slug happened to still be in the address bar.
   router.replace({ path: '/routes/build' })

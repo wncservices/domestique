@@ -45,7 +45,7 @@ export function loadMapLibreModules() {
  * idle time, falling back to a short timeout on Safari (no
  * requestIdleCallback there), so this never competes with the page's own
  * critical first render — by the time a rider actually opens a map
- * (LibraryPage's map view, a route detail modal, or /build), the modules
+ * (LibraryPage's map view, a route detail modal, or /routes/build), the modules
  * are already fetched and parsed instead of starting cold. Errors are
  * swallowed: this is a best-effort warmup only, and a real attempt (with
  * its own error handling) happens when a map component actually mounts.

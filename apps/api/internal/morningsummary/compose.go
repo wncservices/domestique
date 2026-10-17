@@ -84,7 +84,7 @@ func Compose(in Input) (subject, body string) {
 				b.WriteString("Today's session was already eased to match.\n")
 			}
 			if in.AppURL != "" {
-				fmt.Fprintf(&b, "Why: %s\n", link(in.AppURL, "/training/fitness"))
+				fmt.Fprintf(&b, "Why: %s\n", link(in.AppURL, "/fitness"))
 			}
 		}
 		if len(in.Weather) > 0 {
@@ -100,8 +100,8 @@ func Compose(in Input) (subject, body string) {
 
 	if in.AppURL != "" {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "Open the plan: %s\n", link(in.AppURL, "/training/plan"))
-		fmt.Fprintf(&b, "Change or turn off this email: %s\n", link(in.AppURL, "/training/fitness"))
+		fmt.Fprintf(&b, "Open the plan: %s\n", link(in.AppURL, "/plan"))
+		fmt.Fprintf(&b, "Change or turn off this email: %s\n", link(in.AppURL, "/fitness"))
 	}
 	return subject, b.String()
 }

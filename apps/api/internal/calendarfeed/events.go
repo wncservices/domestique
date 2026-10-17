@@ -129,7 +129,7 @@ func description(w workout.Workout, appURL string) string {
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, strings.TrimRight(appURL, "/")+"/training/plan")
+		lines = append(lines, strings.TrimRight(appURL, "/")+"/plan")
 	}
 	return strings.Join(lines, "\n")
 }
