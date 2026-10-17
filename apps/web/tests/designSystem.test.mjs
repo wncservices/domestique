@@ -118,7 +118,7 @@ test('design: the documented allowlist matches the test', () => {
 
 // A spinner icon in a page is a page-level loading state; use SkeletonCard.
 // A button's own `:loading` prop never names the icon, so it cannot trip this.
-const PAGE_SPINNER = /<UIcon\s+(?::)?name="[^"]*i-lucide-loader/
+const PAGE_SPINNER = /<UIcon\b[^>]*?:?name="[^"]*i-lucide-loader/
 
 test('design: pages show loading as skeletons, not spinner icons', () => {
   const bad = offenders(PAGE_SPINNER, (f) => !f.rel.startsWith('pages/'))
@@ -128,6 +128,7 @@ test('design: pages show loading as skeletons, not spinner icons', () => {
 test('design: the page-spinner scanner catches a spinner and ignores a loading prop and comments', () => {
   assert.equal(hitsIn('<UIcon name="i-lucide-loader-circle" class="animate-spin" />', PAGE_SPINNER).length, 1)
   assert.equal(hitsIn('<UIcon :name="busy ? \'i-lucide-loader-circle\' : \'i-lucide-x\'" />', PAGE_SPINNER).length, 1)
+  assert.equal(hitsIn('<UIcon class="size-5" name="i-lucide-loader-circle" />', PAGE_SPINNER).length, 1)
   assert.equal(hitsIn('<UButton :loading="saving">Save</UButton>', PAGE_SPINNER).length, 0)
   assert.equal(hitsIn('<!-- <UIcon name="i-lucide-loader" /> -->', PAGE_SPINNER).length, 0)
 })
