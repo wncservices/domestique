@@ -231,6 +231,24 @@ Pick in this order:
 layer goes behind `DetailsToggle`. Suggestions are `SuggestionRow`, at most
 one per page.
 
+## Page inventory
+
+| Path | Page | Status |
+|---|---|---|
+| `/today` | `TodayPage.vue` | Redesigned: `AppPage`, calm-first card, `StatTile`, `DetailsToggle`, `SuggestionRow` |
+| `/plan` | `TrainingPlanPage.vue` | Old styling; restyled in phase 4 |
+| `/fitness` | `TrainingFitnessPage.vue` | Old styling |
+| `/routes`, `/routes/new`, `/routes/build` | `LibraryPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Old styling |
+| `/crews`, `/settings`, `/people` | `CrewsPage.vue`, `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
+
+`TodayPage` reads the Plan and Fitness pages' endpoints and adds none. Its pure
+choices (greeting, headline, which suggestion wins, tile tones, TSS/IF/power range)
+live in `utils/today.ts`. Empty states are deliberate: a rest day shows the rest
+headline and one tip, no goal swaps the countdown tile for a "Set a goal" link to
+`/plan`, no FTP omits the power range and TSS (never "0 W") and links to
+`/settings`, and a role without `training:manage` gets a plain explanation instead
+of failed calls.
+
 ## Navigation
 
 `components/shell/AppShell.vue` replaces the old header. The destinations
