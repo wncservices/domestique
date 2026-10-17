@@ -243,6 +243,8 @@ one per page.
 | `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line empty state |
 | `/settings` | `SettingsPage.vue` | Redesigned: `AppPage` with a sectioned layout (see "Sectioned settings") |
 | `/people` | `PeoplePage.vue` | Restyled: `AppPage` with Refresh / Invite as page actions, the same list and states, one labelled actions menu per person |
+| landing page | `landing/Landing.vue` | Restyled: new type scale and colour roles; the hero is a static, `aria-hidden` illustration of the Today card (invented values, `StatTile`, zone-coloured week row) with no API call, so the separate bundle stays free of the API client, the shell and `maplibre-gl` |
+| `/shared/:token` | `SharedRoutePage.vue` | Restyled: route-card treatment outside the shell, a large map, one tabular stats row, labelled Add to my library / Download GPX actions; sign-in check, error states and track fetch unchanged |
 
 `TodayPage` reads the Plan and Fitness pages' endpoints and adds none. Its pure
 choices (greeting, headline, which suggestion wins, tile tones, TSS/IF/power range)
