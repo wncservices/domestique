@@ -132,7 +132,7 @@ const initial = computed(() => (displayName.value.trim()[0] ?? '?').toLocaleUppe
   <UDropdownMenu v-else-if="me" :items="groups" :content="{ align: compact ? 'end' : 'start', side: compact ? 'bottom' : 'top' }">
     <button
       type="button"
-      class="flex w-full min-w-0 items-center gap-3 rounded-lg p-2 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+      :class="['flex min-w-0 items-center gap-3 rounded-lg p-2 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary', compact ? 'shrink-0' : 'w-full']"
       :aria-label="`Account menu for ${displayName || 'this deployment'}`"
     >
       <span
