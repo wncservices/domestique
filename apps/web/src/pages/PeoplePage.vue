@@ -663,7 +663,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
                 color="neutral"
                 variant="ghost"
                 icon="i-lucide-ellipsis"
-                :aria-label="`Actions for ${person.name || person.email}`"
+                :aria-label="`Actions for ${person.name || person.email || person.id}`"
                 :loading="binding === person.id || togglingBlocked === person.id || deletingPerson === person.id"
               />
             </UDropdownMenu>
