@@ -13,10 +13,10 @@ test('planActions: a week with gaps leads with Replan', () => {
   assert.deepEqual(ids(overflow), ['train-now', 'life-event', 'ftp-test', 'export'])
 })
 
-test('planActions: a full week leads with "I have N minutes"', () => {
+test('planActions: a full week leads with "I have … minutes"', () => {
   const { primary, overflow } = planActions({ isCurrentWeek: true, hasGaps: false })
   assert.equal(primary.id, 'train-now')
-  assert.equal(primary.label, 'I have N minutes')
+  assert.equal(primary.label, 'I have … minutes')
   assert.deepEqual(ids(overflow), ['replan', 'life-event', 'ftp-test', 'export'])
 })
 
@@ -26,14 +26,14 @@ test('planActions: the overflow always holds Life event, FTP test and Export, wi
     for (const label of ['Life event', 'FTP test', 'Export']) assert.ok(labels(overflow).includes(label), `${label} missing`)
   }
   assert.deepEqual(labels(planActions({ isCurrentWeek: true, hasGaps: true }).overflow), [
-    'I have N minutes',
+    'I have … minutes',
     'Life event',
     'FTP test',
     'Export',
   ])
 })
 
-test('planActions: Replan and "I have N minutes" are offered only on the current week', () => {
+test('planActions: Replan and "I have … minutes" are offered only on the current week', () => {
   const { primary, overflow } = planActions({ isCurrentWeek: false, hasGaps: true })
   assert.equal(primary.id, 'life-event')
   assert.deepEqual(ids(overflow), ['ftp-test', 'export'])

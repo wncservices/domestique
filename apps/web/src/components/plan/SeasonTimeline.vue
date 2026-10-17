@@ -207,9 +207,10 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       >
         <title>You are here</title>
       </line>
+      <!-- At the foot of the line: the top is where event dots and diamonds sit. -->
       <polygon
         v-if="todayIndex >= 0"
-        :points="`${colX(todayIndex) + colWidth / 2 - 4},0 ${colX(todayIndex) + colWidth / 2 + 4},0 ${colX(todayIndex) + colWidth / 2},6`"
+        :points="`${colX(todayIndex) + colWidth / 2 - 4},${BAND_Y + BAND_HEIGHT} ${colX(todayIndex) + colWidth / 2 + 4},${BAND_Y + BAND_HEIGHT} ${colX(todayIndex) + colWidth / 2},${BAND_Y + BAND_HEIGHT - 6}`"
         fill="currentColor"
         class="text-highlighted"
       />
