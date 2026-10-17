@@ -13,12 +13,14 @@ const props = defineProps<{
   reasons: string[]
 }>()
 
-type ChipConfig = { label: string; color: 'success' | 'warning' | 'error'; icon: string }
+// Rider state, not system state: primary is good/ready, ember is behind or
+// take care, and Rest is neutral because resting is not an error.
+type ChipConfig = { label: string; color: 'primary' | 'neutral'; icon: string; class?: string }
 
 const CONFIG: Record<ReadinessVerdict, ChipConfig> = {
-  ready: { label: 'Ready', color: 'success', icon: 'i-lucide-battery-full' },
-  caution: { label: 'Take care', color: 'warning', icon: 'i-lucide-battery-medium' },
-  rest: { label: 'Rest', color: 'error', icon: 'i-lucide-battery-low' },
+  ready: { label: 'Ready', color: 'primary', icon: 'i-lucide-battery-full' },
+  caution: { label: 'Take care', color: 'neutral', icon: 'i-lucide-battery-medium', class: 'text-[var(--app-accent-ember)]' },
+  rest: { label: 'Rest', color: 'neutral', icon: 'i-lucide-battery-low' },
 }
 
 const config = computed(() => CONFIG[props.verdict])
@@ -28,7 +30,7 @@ const ariaLabel = computed(() => `Readiness: ${config.value.label} — show reas
 <template>
   <UPopover>
     <button type="button" class="inline-flex cursor-pointer items-center" :aria-label="ariaLabel">
-      <UBadge :color="config.color" variant="subtle" :icon="config.icon">{{ config.label }}</UBadge>
+      <UBadge :color="config.color" variant="subtle" :icon="config.icon" :class="config.class">{{ config.label }}</UBadge>
     </button>
 
     <template #content>
