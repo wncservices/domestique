@@ -241,7 +241,8 @@ one per page.
 | `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
 | `/routes`, `/routes/new`, `/routes/build` | `RoutesPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Redesigned: `AppPage` with Add route / Build a route as page actions, library `StatTile` row, `SegmentedControl` (Grid / Map), slim sync banner, `RouteCard` with an actions menu. Add and Build are `AppPage`s with a "Back to routes" action |
 | `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line empty state |
-| `/settings`, `/people` | `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
+| `/settings` | `SettingsPage.vue` | Redesigned: `AppPage` with a sectioned layout (see "Sectioned settings") |
+| `/people` | `PeoplePage.vue` | Restyled: `AppPage` with Refresh / Invite as page actions, the same list and states, one labelled actions menu per person |
 
 `TodayPage` reads the Plan and Fitness pages' endpoints and adds none. Its pure
 choices (greeting, headline, which suggestion wins, tile tones, TSS/IF/power range)
@@ -252,6 +253,31 @@ headline and one tip, no goal swaps the countdown tile for a "Set a goal" link t
 of failed calls. A read that failed is a dash, never one of these prompts. One suggestion at most;
 dismissing it hides them all for the visit, and a weather one reuses the Plan page's persistent
 "Keep outdoors" dismissal.
+
+### Sectioned settings
+
+`SettingsPage` is one long page split into sections, with a sub-navigation of anchor
+links: Profile, Devices and sync, Training, Notifications, and an **Admin** group
+(Deployment, Basemap) that only admins get. Which sections exist is
+`settingsSections(role)` in `utils/settingsSections.ts`; what is inside a section
+still follows its own permission or data gate.
+
+- **Sub-nav:** a single `<nav aria-label="Settings">`. A sticky left column from `lg` up,
+  a horizontally scrolling row on a phone. The section reached by click or hash gets
+  `aria-current="true"`. Links are `#id` anchors; `/settings#basemap` scrolls once the
+  panels above it have loaded, the way `/fitness#profile` does.
+- **Sections** are `<section id>` with a `text-xl` display heading and one line of
+  description; the cards inside use `h3`. A section whose cards are all gated out shows
+  a one-line "nothing to set here" instead of a blank gap.
+- **One sentence per setting.** Anything longer goes unchanged behind
+  `DetailsToggle label="Learn more"`. Do not delete help text to shorten a page.
+
+### People
+
+Admin only. The same list, pagination, orphan-rider alert and modals as before. Role
+stays an inline select; binding, block and delete live in one labelled menu per
+person, with block and delete last in their own group. Each still opens the
+confirmation it always did.
 
 ### Segmented control
 
