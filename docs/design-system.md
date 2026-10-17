@@ -214,7 +214,8 @@ Pick in this order:
    side padding, so a page does not wrap itself in `UContainer`.
 2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
    `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
-   `behind`). Tone carries meaning (on track, behind), not decoration.
+   `behind`). Tone carries meaning, not decoration: `good` is the primary accent,
+   `behind` is ember (coral); status colours stay for system state.
 3. **`DetailsToggle`** (`components/ui/DetailsToggle.vue`) — `v-model:open`,
    optional `label` (default "Details"), a default slot. A real button with
    `aria-expanded`; the content is not rendered while closed.
@@ -246,8 +247,10 @@ choices (greeting, headline, which suggestion wins, tile tones, TSS/IF/power ran
 live in `utils/today.ts`. Empty states are deliberate: a rest day shows the rest
 headline and one tip, no goal swaps the countdown tile for a "Set a goal" link to
 `/plan`, no FTP omits the power range and TSS (never "0 W") and links to
-`/settings`, and a role without `training:manage` gets a plain explanation instead
-of failed calls.
+`/fitness`, where the profile form lives, and a role without `training:manage` gets a plain explanation instead
+of failed calls. A read that failed is a dash, never one of these prompts. One suggestion at most;
+dismissing it hides them all for the visit, and a weather one reuses the Plan page's persistent
+"Keep outdoors" dismissal.
 
 ## Navigation
 

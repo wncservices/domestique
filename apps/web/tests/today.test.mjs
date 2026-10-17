@@ -2,6 +2,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  buildSuggestionInputs,
+  cardState,
+  eyebrowFor,
+  swappableWorkout,
+  weekTiles,
   countdownTile,
   formTile,
   greeting,
@@ -78,7 +83,7 @@ test('countdown: days to the event, behind when the projection says undertrained
   }
   const t = countdownTile({ goal, projection, today: '2026-10-17' })
   assert.equal(t.kind, 'countdown')
-  assert.equal(t.value, '84')
+  assert.equal(t.value, '84 days')
   assert.equal(t.tone, 'behind')
   assert.equal(t.caption, 'Behind plan')
 })
@@ -141,7 +146,90 @@ test('power range spans the working steps, not the warm-up', () => {
   assert.deepEqual(powerRange(w, { ftpWatts: 250 }), { low: 150, high: 185 })
 })
 
-test('week hours: completed of planned, one decimal', () => {
-  assert.equal(weekHoursLabel(9360, 12240), '2.6 of 3.4 h')
+test('week hours: the Plan page arithmetic, target is the larger of planned and focus', () => {
+  assert.equal(weekHoursLabel(9360, 12240), '2.6 / 3.4 h')
+  assert.equal(weekHoursLabel(9360, 6840, 3.4), '2.6 / 3.4 h')
   assert.equal(weekHoursLabel(0, 0), 'Nothing planned')
+})
+
+test('countdown: always says days, singular for one', () => {
+  const goal = { id: 'g', name: 'G', eventDate: '2026-10-18' }
+  assert.equal(countdownTile({ goal, projection: null, today: '2026-10-17' }).value, '1 day')
+})
+
+test('form tile: a failed read is a dash with no prompt', () => {
+  const t = formTile([], true)
+  assert.equal(t.value, '—')
+  assert.equal(t.caption, undefined)
+})
+
+test('load: heart-rate-only steps give no TSS', () => {
+  const w = ride({ steps: [step({ target: 'heart_rate', targetLow: 120, targetHigh: 140 })] })
+  assert.equal(workoutLoad(w, { ftpWatts: 250, maxHr: 190 }), null)
+})
+
+const day = (date, over = {}) => ({ date, status: 'upcoming', planned: [], completed: [], ...over })
+const done = (secs) => ({ id: 'c', durationSeconds: secs })
+
+test('week tiles: every day, done rides included, with visible text', () => {
+  const tiles = weekTiles(
+    [
+      day('2026-10-12'),
+      day('2026-10-13', { status: 'done', completed: [done(3600)] }),
+      day('2026-10-14', { planned: [ride({ plannedSeconds: 5400 })] }),
+      day('2026-10-15', { status: 'partial', planned: [ride()], completed: [done(1800)] }),
+    ],
+    '2026-10-14',
+  )
+  assert.equal(tiles.length, 4)
+  assert.equal(tiles[0].text, 'Rest')
+  assert.equal(tiles[0].color, undefined)
+  assert.equal(tiles[1].text, '1h')
+  assert.equal(tiles[1].done, true)
+  assert.match(tiles[1].aria, /done/)
+  assert.equal(tiles[2].text, '1h 30m')
+  assert.equal(tiles[2].color, 'var(--color-zone-endurance)')
+  assert.equal(tiles[2].isToday, true)
+  assert.equal(tiles[3].text, '30m')
+})
+
+test('card state: rest day, ridden without a plan, planned', () => {
+  const rest = cardState(day('2026-10-17', { status: 'rest' }))
+  assert.equal(rest.kind, 'rest')
+  assert.equal(rest.title, REST_HEADLINE)
+  assert.ok(rest.text.length > 0)
+  const ridden = cardState(day('2026-10-17', { completed: [done(3600)] }))
+  assert.equal(ridden.title, 'You rode today')
+  assert.match(ridden.text, /1h/)
+  assert.equal(cardState(day('2026-10-17', { planned: [ride()] })).kind, 'planned')
+})
+
+test('eyebrow: names the phase and week when the plan has them', () => {
+  assert.equal(eyebrowFor(undefined), "Today's ride")
+  assert.equal(eyebrowFor({ phase: 'build', weekNumber: 3 }), "Today's ride · Build week 3")
+})
+
+test('swappable: plan-made, unridden, not past, no route', () => {
+  assert.equal(swappableWorkout(day('2026-10-17', { planned: [ride()] }), '2026-10-17'), undefined)
+  assert.equal(swappableWorkout(undefined, '2026-10-17'), undefined)
+})
+
+test('suggestion inputs: copy and icons per kind', () => {
+  const i = buildSuggestionInputs({
+    lifeEvent: { label: 'Travelling', range: 'Mon' },
+    weather: { reasons: ['rain', 'wind'] },
+    ftpTest: { message: 'Due.' },
+    rideTogether: { crewName: 'Crew', routeName: 'Loop', day: 'sat' },
+  })
+  assert.equal(i.lifeEvent.title, 'Travelling')
+  assert.equal(i.weather.text, 'rain, wind.')
+  assert.equal(i.ftpTest.text, 'Due.')
+  assert.equal(i.rideTogether.text, 'Loop, Sat.')
+  assert.deepEqual(buildSuggestionInputs({}), {
+    lifeEvent: undefined,
+    weather: undefined,
+    ftpTest: undefined,
+    rideTogether: undefined,
+  })
+  assert.equal(pickSuggestion(buildSuggestionInputs({ ftpTest: { message: 'm' } })).kind, 'ftp-test')
 })

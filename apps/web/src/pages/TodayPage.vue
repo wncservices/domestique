@@ -3,7 +3,9 @@
 // at most one suggestion. It reads the same endpoints the Plan and Fitness
 // pages do (no new ones) and leaves editing, goals and the long tail to them.
 // Every optional read (weather, readiness, projection, ...) may fail without a
-// word: a nice-to-have missing must never blank the day's ride.
+// word: a nice-to-have missing must never blank the day's ride. The reads that
+// feed a prompt (profile, goals, fitness) also remember that they failed, so
+// a failure is never mistaken for "you have not set this up".
 import { computed, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
@@ -22,7 +24,6 @@ import type {
 import AlternatesMenu from '@/components/plan/AlternatesMenu.vue'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
-import { phaseLabel } from '@/components/plan/phaseStyle'
 import ReadinessChip from '@/components/plan/ReadinessChip.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import AppPage from '@/components/ui/AppPage.vue'
@@ -32,23 +33,25 @@ import SuggestionRow from '@/components/ui/SuggestionRow.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useWeather } from '@/composables/useWeather'
 import { describeError } from '@/utils/errorMessage'
-import { localDate, weekdayLong, weekdayShort } from '@/utils/planDates'
+import { localDate } from '@/utils/planDates'
+import { pushWorkoutToGarmin } from '@/utils/pushWorkout'
 import { todayISO } from '@/utils/rideDates'
 import {
+  buildSuggestionInputs,
+  cardState,
   countdownTile,
+  eyebrowFor,
   formTile,
   greeting,
   pickSuggestion,
   powerRange,
-  REST_HEADLINE,
-  REST_TIP,
+  swappableWorkout,
   todayHeadline,
   weekHoursLabel,
+  weekTiles,
   workoutLoad,
-  type Suggestion,
 } from '@/utils/today'
-import { zoneColorVar, zoneLabel } from '@/utils/zones'
-import { formatDuration, isPlanMadeSession } from '@/utils/workoutMath'
+import { formatDuration } from '@/utils/workoutMath'
 
 const toast = useToast()
 const { me, loading: libraryLoading, canManageTraining, canSyncGarmin } = useLibrary()
@@ -64,12 +67,14 @@ const snapshots = ref<FitnessSnapshot[]>([])
 const ftpTests = ref<FtpTests | null>(null)
 const rideTogether = ref<RideTogether[]>([])
 const lifeEvents = ref<LifeEvent[]>([])
+const profileFailed = ref(false)
+const goalsFailed = ref(false)
+const fitnessFailed = ref(false)
 const pushing = ref(false)
 const detailsOpen = ref(false)
 // Remembered for this visit only: a reload brings the suggestion back.
 const dismissedKey = ref('')
 
-// Each optional read swallows its own failure; only the week is essential.
 async function quietly<T>(read: Promise<T>, fallback: T): Promise<T> {
   try {
     return await read
@@ -78,30 +83,60 @@ async function quietly<T>(read: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+// Ticketed like the Plan page's loads: a swap reloads while an earlier load may
+// still be in flight, and a slower stale response must not overwrite the newer.
+let weekRequest = 0
 async function loadWeek() {
+  const id = ++weekRequest
   try {
-    week.value = await api.trainingWeek()
+    const result = await api.trainingWeek()
+    if (id !== weekRequest) return
+    week.value = result
     weekFailed.value = false
   } catch {
-    weekFailed.value = true
+    if (id === weekRequest) weekFailed.value = true
   }
 }
 
+let readinessRequest = 0
 async function loadReadiness() {
-  readiness.value = await quietly(api.readiness(todayISO()), null)
+  const id = ++readinessRequest
+  const result = await quietly(api.readiness(todayISO()), null)
+  if (id === readinessRequest) readiness.value = result
 }
 
 async function loadAll() {
-  weekFailed.value = false
   await Promise.all([
     loadWeek(),
     loadReadiness(),
-    quietly(api.riderProfile(), {} as RiderProfile).then((v) => (profile.value = v)),
-    quietly(api.goals(), [] as Goal[]).then(async (v) => {
-      goals.value = v
-      projection.value = v.length ? await quietly(api.projection(), null) : null
-    }),
-    quietly(api.fitness(), null).then((v) => (snapshots.value = v?.snapshots ?? [])),
+    api
+      .riderProfile()
+      .then((v) => {
+        profile.value = v
+        profileFailed.value = false
+      })
+      .catch(() => {
+        profileFailed.value = true
+      }),
+    api
+      .goals()
+      .then(async (v) => {
+        goals.value = v
+        goalsFailed.value = false
+        projection.value = v.length ? await quietly(api.projection(), null) : null
+      })
+      .catch(() => {
+        goalsFailed.value = true
+      }),
+    api
+      .fitness()
+      .then((v) => {
+        snapshots.value = v.snapshots
+        fitnessFailed.value = false
+      })
+      .catch(() => {
+        fitnessFailed.value = true
+      }),
     quietly(api.ftpTests(), null).then((v) => (ftpTests.value = v)),
     quietly(api.rideTogether(), { proposals: [] }).then((v) => (rideTogether.value = v.proposals)),
     quietly(api.lifeEvents(), { events: [] }).then((v) => (lifeEvents.value = v.events)),
@@ -128,48 +163,35 @@ const today = computed<WeekDay | undefined>(() => week.value?.days.find((d) => d
 const workout = computed(() => today.value?.planned[0] ?? null)
 const extraCount = computed(() => Math.max(0, (today.value?.planned.length ?? 0) - 1))
 const ridden = computed(() => (today.value?.completed.length ?? 0) > 0)
-const isRestDay = computed(() => !!today.value && !workout.value && !ridden.value)
+const state = computed(() => cardState(today.value))
 const dateLabel = computed(() =>
   localDate(week.value?.today ?? todayISO()).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }),
 )
 
-const eyebrow = computed(() => {
-  const f = week.value?.focus
-  const phase = f?.phase ? `${phaseLabel(f.phase, f.recovery)}${f.weekNumber ? ` week ${f.weekNumber}` : ''}` : ''
-  return phase ? `Today's ride · ${phase}` : "Today's ride"
-})
-
+const eyebrow = computed(() => eyebrowFor(week.value?.focus))
 const headline = computed(() => todayHeadline(workout.value, readiness.value))
 const showReadiness = computed(() => !!workout.value && !ridden.value && !!readiness.value && !readiness.value.today.lifeEvent)
 
 const hasFtp = computed(() => (profile.value.ftpWatts ?? 0) > 0)
+// Only a read that succeeded and found no FTP is an empty profile.
+const promptProfile = computed(() => !profileFailed.value && !hasFtp.value)
 const load = computed(() => (workout.value ? workoutLoad(workout.value, profile.value) : null))
 const watts = computed(() => (workout.value ? powerRange(workout.value, profile.value) : null))
 const detailLine = computed(() => {
   const parts: string[] = []
-  if (load.value) parts.push(`${load.value.tss} TSS`, `IF ${load.value.if.toFixed(2)}`)
+  if (load.value) parts.push(`Est. ${load.value.tss} TSS`, `IF ${load.value.if.toFixed(2)}`)
   if (watts.value) parts.push(`${watts.value.low}–${watts.value.high} W`)
   return parts.join(' · ')
 })
 
-// The Plan card's own rule for offering a swap: a plan-made session on a day
-// that is neither ridden, past, nor already tied to a route. The menu asks the
-// server and hides itself when there is nothing on offer.
-const swappable = computed(() => {
-  const w = today.value?.planned.find(isPlanMadeSession)
-  if (!w || w.route || ridden.value || (today.value?.date ?? '') < todayISO()) return undefined
-  return w
-})
+const swappable = computed(() => swappableWorkout(today.value, todayISO()))
 
 async function pushToGarmin() {
   const w = workout.value
   if (!w) return
   pushing.value = true
   try {
-    await api.pushWorkoutToGarmin(w.id)
-    toast.add({ title: `Sent ${w.name} to Garmin`, icon: 'i-lucide-watch', color: 'success' })
-  } catch (err) {
-    toast.add({ title: `Could not send ${w.name} to Garmin`, description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+    await pushWorkoutToGarmin(toast, w)
   } finally {
     pushing.value = false
   }
@@ -181,7 +203,7 @@ async function reloadAfterSwap() {
 
 // ---- Tiles ----
 
-const form = computed(() => formTile(snapshots.value))
+const form = computed(() => formTile(snapshots.value, fitnessFailed.value))
 
 // The server's week focus when it has one, else the same fallback goal the
 // Plan page's header uses, so both pages name the same goal.
@@ -192,59 +214,29 @@ const focusGoal = computed(() => {
   return g ? { id: g.id, name: g.name, eventDate: g.eventDate } : undefined
 })
 const countdown = computed(() => countdownTile({ goal: focusGoal.value, projection: projection.value, today: week.value?.today ?? todayISO() }))
+// Goals that failed to load are not "no goal": a dash, no prompt.
+const goalUnknown = computed(() => goalsFailed.value && !focusGoal.value)
 
 // ---- The week ----
 
-const dayTiles = computed(() =>
-  (week.value?.days ?? []).map((d) => {
-    const zone = d.planned[0]?.zone ?? (d.planned.length ? 'endurance' : undefined)
-    const done = d.status === 'done' || d.status === 'partial'
-    const what = zone ? zoneLabel(zone) : d.completed.length ? 'Ridden' : 'Rest'
-    return {
-      date: d.date,
-      label: weekdayShort(d.date),
-      isToday: d.date === week.value!.today,
-      color: zone ? zoneColorVar(zone) : undefined,
-      done,
-      aria: `${weekdayLong(d.date)}: ${what}${done ? ', done' : ''}`,
-    }
-  }),
+const tiles = computed(() => weekTiles(week.value?.days ?? [], week.value?.today ?? ''))
+const weekLabel = computed(() =>
+  week.value ? weekHoursLabel(week.value.totals.completedSeconds, week.value.totals.plannedSeconds, week.value.focus?.targetHours) : '',
 )
 
 // ---- Suggestion ----
 
-const suggestion = computed<Suggestion | null>(() => {
-  const w = workout.value
+const todaysWeather = computed(() => (workout.value ? weather.suggestionFor(workout.value.id) : undefined))
+const suggestion = computed(() => {
   const event = eventsOn(lifeEvents.value, week.value?.today)[0]
-  const wx = w ? weather.suggestionFor(w.id) : undefined
-  const test = ftpTests.value?.suggestion
-  const together = rideTogether.value.find((p) => p.yourStatus === 'pending')
-  const picked = pickSuggestion({
-    lifeEvent: event && {
-      kind: 'life-event',
-      icon: 'i-lucide-calendar-off',
-      title: eventLabel(event),
-      text: `${rangeLabel(event)}. Change or end it on the Plan page.`,
-    },
-    weather: wx && {
-      kind: 'weather',
-      icon: 'i-lucide-cloud-rain',
-      title: "Weather may spoil today's ride.",
-      text: wx.reasons.join(', ') + '.',
-    },
-    ftpTest: test && {
-      kind: 'ftp-test',
-      icon: 'i-lucide-gauge',
-      title: 'An FTP test would help.',
-      text: test.message,
-    },
-    rideTogether: together && {
-      kind: 'ride-together',
-      icon: 'i-lucide-users-round',
-      title: `${together.crewName} proposes a ride together.`,
-      text: `${together.routeName}, ${together.day}.`,
-    },
-  })
+  const picked = pickSuggestion(
+    buildSuggestionInputs({
+      lifeEvent: event && { label: eventLabel(event), range: rangeLabel(event) },
+      weather: todaysWeather.value,
+      ftpTest: ftpTests.value?.suggestion,
+      rideTogether: rideTogether.value.find((p) => p.yourStatus === 'pending'),
+    }),
+  )
   return picked && `${picked.kind}:${picked.title}` !== dismissedKey.value ? picked : null
 })
 
@@ -252,6 +244,9 @@ async function dismissSuggestion() {
   const s = suggestion.value
   if (!s) return
   dismissedKey.value = `${s.kind}:${s.title}`
+  // Weather reuses the Plan page's remembered "Keep outdoors", so it does not
+  // come back on every reload.
+  if (s.kind === 'weather' && todaysWeather.value) weather.keepOutdoors(todaysWeather.value)
   // The Plan page's "Not now": the server owns the 28-day snooze.
   if (s.kind === 'ftp-test') {
     try {
@@ -265,8 +260,10 @@ async function dismissSuggestion() {
 
 <template>
   <AppPage :title="greeting(new Date().getHours(), name)" :subtitle="dateLabel">
+    <USkeleton v-if="libraryLoading || (canManageTraining && !week && !weekFailed)" class="h-48 w-full rounded-[var(--radius-card)]" />
+
     <!-- No training permission: say so plainly instead of a page of 403s. -->
-    <UCard v-if="!libraryLoading && !canManageTraining" variant="outline" data-testid="today-no-access">
+    <UCard v-else-if="!canManageTraining" variant="outline" data-testid="today-no-access">
       <div class="flex flex-col items-start gap-3">
         <h2 class="font-display text-[length:var(--text-title)] text-highlighted">Training is for riders</h2>
         <p class="text-[length:var(--text-body)] text-muted">
@@ -276,17 +273,17 @@ async function dismissSuggestion() {
       </div>
     </UCard>
 
-    <template v-else-if="canManageTraining">
-      <UCard v-if="weekFailed" variant="outline">
+    <template v-else>
+      <UCard v-if="weekFailed && !week" variant="outline">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <p class="text-[length:var(--text-body)] text-muted">Today could not be loaded.</p>
           <UButton color="neutral" variant="outline" icon="i-lucide-refresh-cw" @click="loadAll">Try again</UButton>
         </div>
       </UCard>
 
-      <USkeleton v-else-if="!week" class="h-48 w-full rounded-[var(--radius-card)]" />
+      <template v-else-if="week">
+        <UAlert v-if="weekFailed" color="error" variant="subtle" icon="i-lucide-triangle-alert" title="Could not refresh today. Showing what was loaded earlier." />
 
-      <template v-else>
         <UCard variant="outline" data-testid="today-card">
           <div class="flex flex-col gap-3">
             <div class="flex items-center justify-between gap-3">
@@ -302,20 +299,18 @@ async function dismissSuggestion() {
             </div>
 
             <!-- Rest day: the headline is the card, plus one tip. -->
-            <template v-if="isRestDay">
-              <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ REST_HEADLINE }}</h2>
-              <p class="text-[length:var(--text-body)] text-muted">{{ REST_TIP }}</p>
+            <template v-if="state.kind === 'rest'">
+              <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ state.title }}</h2>
+              <p class="text-[length:var(--text-body)] text-muted">{{ state.text }}</p>
             </template>
 
             <!-- Something ridden with nothing planned. -->
-            <template v-else-if="!workout">
-              <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">You rode today</h2>
-              <p class="text-[length:var(--text-body)] text-muted tabular-nums">
-                {{ formatDuration(today!.completed.reduce((s, c) => s + c.durationSeconds, 0)) }} logged. Nothing else is planned.
-              </p>
+            <template v-else-if="state.kind === 'ridden'">
+              <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ state.title }}</h2>
+              <p class="text-[length:var(--text-body)] text-muted tabular-nums">{{ state.text }}</p>
             </template>
 
-            <template v-else>
+            <template v-else-if="workout">
               <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
                 <h2 class="min-w-0 font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ workout.name }}</h2>
                 <div
@@ -349,9 +344,9 @@ async function dismissSuggestion() {
                 </div>
               </DetailsToggle>
 
-              <p v-if="!hasFtp" class="text-[length:var(--text-label)] text-muted">
+              <p v-if="promptProfile" class="text-[length:var(--text-label)] text-muted">
                 Power targets need your FTP.
-                <RouterLink to="/settings" class="text-primary underline underline-offset-2">Finish your profile in Settings</RouterLink>.
+                <RouterLink to="/fitness" class="text-primary underline underline-offset-2">Finish your profile</RouterLink>.
               </p>
             </template>
           </div>
@@ -359,8 +354,9 @@ async function dismissSuggestion() {
 
         <div class="grid gap-3 sm:grid-cols-2">
           <StatTile :label="form.label" :value="form.value" :caption="form.caption" :tone="form.tone" />
+          <StatTile v-if="goalUnknown" label="Goal" value="—" />
           <RouterLink
-            v-if="countdown.kind === 'set-goal'"
+            v-else-if="countdown.kind === 'set-goal'"
             :to="countdown.href"
             class="app-card-interactive flex flex-col justify-center px-4 py-3 focus-visible:outline-2 focus-visible:outline-primary"
           >
@@ -371,7 +367,7 @@ async function dismissSuggestion() {
             v-else
             :label="countdown.label"
             :value="countdown.value"
-            :caption="countdown.caption ?? (countdown.value === '—' ? undefined : 'days to go')"
+            :caption="countdown.caption"
             :tone="countdown.tone"
           />
         </div>
@@ -380,18 +376,21 @@ async function dismissSuggestion() {
           <div class="flex items-baseline justify-between gap-3">
             <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted">This week</h2>
             <span class="text-[length:var(--text-label)] text-muted tabular-nums">
-              {{ weekHoursLabel(week.totals.completedSeconds, week.totals.plannedSeconds) }}
+              {{ weekLabel }}
             </span>
           </div>
           <ol class="mt-3 grid grid-cols-7 gap-1.5">
-            <li v-for="d in dayTiles" :key="d.date" class="text-center" :aria-label="d.aria" :aria-current="d.isToday ? 'date' : undefined">
+            <li v-for="d in tiles" :key="d.date" class="min-w-0 text-center" :title="d.aria" :aria-label="d.aria" :aria-current="d.isToday ? 'date' : undefined">
               <div class="text-[length:var(--text-label)]" :class="d.isToday ? 'font-semibold text-primary' : 'text-muted'">{{ d.label }}</div>
               <div
-                class="mt-1 flex h-9 items-center justify-center rounded-md"
-                :class="[d.color ? '' : 'bg-elevated', d.isToday ? 'outline-2 outline-offset-1 outline-primary' : '']"
-                :style="d.color ? { background: d.color } : undefined"
+                class="mt-1 overflow-hidden rounded-md border border-default bg-elevated/50"
+                :class="d.isToday ? 'outline-2 outline-offset-1 outline-primary' : ''"
               >
-                <UIcon v-if="d.done" name="i-lucide-check" aria-hidden="true" class="size-4 text-inverted" />
+                <div class="h-1.5" :class="d.color ? '' : 'bg-transparent'" :style="d.color ? { background: d.color } : undefined" />
+                <div class="flex min-h-8 items-center justify-center gap-0.5 px-0.5 py-1 text-[length:var(--text-label)] tabular-nums text-highlighted">
+                  <UIcon v-if="d.done" name="i-lucide-check" aria-hidden="true" class="size-3 shrink-0 text-primary" />
+                  <span class="truncate">{{ d.text }}</span>
+                </div>
               </div>
             </li>
           </ol>
