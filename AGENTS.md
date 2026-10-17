@@ -1428,7 +1428,7 @@ personal location and health data, so:
   public CDN — those aren't location-sensitive (identical for every request, no route coordinates
   in them), so self-hosting them would add nothing.
 - A library route's full geometry reaches the frontend via `GET /api/tracks/{slug}`
-  (`handleTrack`/`api.track`); `TrackPreview.vue`, `RouteDetailModal.vue` and `LibraryPage.vue`'s
+  (`handleTrack`/`api.track`); `TrackPreview.vue`, `RouteDetailModal.vue` and `RoutesPage.vue`'s
   map view call it. The other geometry endpoints are special cases with their own reason:
   `/api/track-preview/{slug}` and `/api/track-preview-image/{slug}` (cached thumbnails),
   `/api/shares/{token}/track` (a share link's recipient) and `/api/routebuilder/preview` (a route

@@ -433,7 +433,7 @@ async function toggleOwner(crew: Crew, rider: string, owner: boolean) {
 // --- scheduled rides ---
 
 // todayISO/rideMonth/rideDay: see utils/rideDates.ts — shared with
-// LibraryPage.vue and with the "from" cutoff loadUpcomingRides sends above,
+// RoutesPage.vue and with the "from" cutoff loadUpcomingRides sends above,
 // rather than three near-identical copies of the same date-only string
 // slicing drifting apart one at a time.
 const scheduleDate = ref(todayISO())
