@@ -210,7 +210,7 @@ Pick in this order:
 
 1. **`AppPage`** (`components/ui/AppPage.vue`) — the frame of every top-level
    page: `title`, optional `subtitle`, an `actions` slot for the page's buttons
-   and the default slot for content, at `max-w-6xl`. The shell supplies the
+   and the default slot for content, at full width of the shell's `max-w-6xl` column. The shell supplies the
    side padding, so a page does not wrap itself in `UContainer`.
 2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
    `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
@@ -244,7 +244,7 @@ layouts cannot disagree and the lists are testable without a DOM.
 
 ## Checklist for a new page or component
 
-- Wrap the page in `AppPage` (`max-w-6xl`); the shell supplies the side padding.
+- Wrap the page in `AppPage` (the shell caps width at `max-w-6xl`); the shell supplies the side padding.
 - Reach for `UCard variant="outline"` before `.app-card`.
 - No literal hex colours in `.vue`/`.ts` files outside the documented
   exceptions, each explained in its own comments. The guard test

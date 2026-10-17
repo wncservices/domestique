@@ -66,7 +66,40 @@ onMounted(() => {
           :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => refresh() }]"
         />
 
+        <!-- KeepAlive, LibraryPage only: every other page (Add, Settings,
+             People, Crews) genuinely wants fresh state each visit, but
+             Library's own cards each carry a background wash that's real
+             work to (re)build — a route line projected from the raw track
+             and, since #174, an earth/landuse/water/roads wash decoded from
+             vector tiles (or, since #179, fetched from the server-side
+             cache — still a network round trip either way). Without this,
+             navigating away and back destroyed every TrackPreview instance
+             and rebuilt all of it from scratch, even though nothing about
+             the route itself had changed. LibraryPage's own route list
+             already comes from useLibrary's shared state, not a
+             component-local fetch, so keeping the component alive doesn't
+             risk showing a stale list — a route added on another page still
+             appears the moment that shared state updates. -->
+        <RouterView v-slot="{ Component }">
+          <KeepAlive include="LibraryPage">
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
 
+        <!-- AGPL-3.0 section 13: a modified version offered over a network has
+             to offer its users the source. A link in the footer of every page is
+             the simplest way to actually satisfy that, and the easiest thing to
+             forget. -->
+        <footer class="mt-2 border-t border-default pt-4 text-[length:var(--text-label)] text-dimmed">
+          <a
+            href="https://github.com/wncservices/domestique"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hover:text-default"
+          >
+            Domestique — free software under the AGPL-3.0. Source.
+          </a>
+        </footer>
       </div>
     </component>
   </UApp>
