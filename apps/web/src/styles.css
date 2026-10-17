@@ -307,9 +307,12 @@ body {
 
 /* Printing the Season review (the browser's own print dialog, no script of our
    own): drop the app chrome, the tabs and the controls, and flatten the cards
-   so the page reads as a document on paper. */
+   so the page reads as a document on paper. The shell's phone header is
+   targeted by class, not a bare `header`, so AppPage's own <header> (the
+   page's h1) still prints. */
 @media print {
-  header,
+  aside,
+  .app-header,
   nav,
   [data-no-print] {
     display: none !important;

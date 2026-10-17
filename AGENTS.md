@@ -669,8 +669,10 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
 section the API omits is not drawn, elevation reads n/a (`ascentText`), and the
 reserved `projectedCtl` is never rendered. Printing is the browser's own dialog
 from a button (`window.print()` in a click handler: the CSP forbids inline
-script); `@media print` in `styles.css` hides the header, tabs and anything with
-`data-no-print`.
+script); `@media print` in `styles.css` hides the shell's sidebar `<aside>` and phone header (`.app-header`), every `<nav>` (the
+phone tab bar, the tab lists) and anything with `data-no-print`, and drops the content
+wrapper's rail padding (`print:pl-0 print:pb-0`). AppPage's own `<header>` (the page's h1)
+still prints, which is why the header rule is a class and not a bare `header`.
 
 ## Fixed-time metrics sync
 
