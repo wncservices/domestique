@@ -83,7 +83,7 @@ function openEditInfo() {
 // Reopens this route's own path in the Draw tab (RouteBuilderPanel.vue's
 // own onMounted watches for ?edit=) rather than only ever letting a rider
 // change the name/description above — a fresh page navigation, not a
-// same-component transition, since /build is a different route entirely.
+// same-component transition, since /routes/build is a different route entirely.
 function editRoute() {
   if (!props.route) return
   router.push({ path: '/routes/build', query: { edit: props.route.slug } })

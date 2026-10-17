@@ -2,7 +2,7 @@ import ui from '@nuxt/ui/vue-plugin'
 import { createApp } from 'vue'
 import App from './App.vue'
 import { applyColorMode, initColorMode } from './color-mode'
-import { router } from './router'
+import { createAppRouter } from './router'
 import { initTelemetry } from './telemetry'
 import { prefetchMapLibreModules } from './utils/maplibre'
 import './styles.css'
@@ -10,6 +10,10 @@ import './styles.css'
 // Before anything else: catches errors/traces from router setup and mount
 // itself, not just from code that runs after this point.
 initTelemetry()
+
+// Vite needs the import path literal, hence the glob rather than a template.
+const pages = import.meta.glob('./pages/*.vue')
+const router = createAppRouter((page) => pages[`./pages/${page}.vue`]!)
 
 initColorMode()
 

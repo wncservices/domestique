@@ -23,3 +23,28 @@ test('new and unknown paths are not redirected', () => {
   assert.equal(redirectFor('/routes', {}), null)
   assert.equal(redirectFor('/nope', {}), null)
 })
+
+import { createMemoryHistory } from 'vue-router'
+import { createAppRouter } from '../src/router.ts'
+
+// The real route table with stub pages: guards against one entry shadowing
+// another (a pathless parent once swallowed the '/' redirect).
+const settle = async (path) => {
+  const r = createAppRouter(() => async () => ({ render: () => null }), createMemoryHistory())
+  await r.push(path)
+  return r.currentRoute.value.fullPath
+}
+
+test('route table: redirects land on the new paths', async () => {
+  assert.equal(await settle('/'), '/today')
+  assert.equal(await settle('/training/fitness?tab=season'), '/fitness?tab=season')
+  assert.equal(await settle('/training'), '/plan')
+  assert.equal(await settle('/add'), '/routes/new')
+  assert.equal(await settle('/no/such/page?x=1'), '/today?x=1')
+})
+
+test('route table: new paths stay put', async () => {
+  for (const p of ['/today', '/plan', '/fitness', '/routes', '/routes/new', '/routes/build', '/crews']) {
+    assert.equal(await settle(p), p)
+  }
+})

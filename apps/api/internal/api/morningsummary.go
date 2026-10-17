@@ -212,7 +212,7 @@ func (s *Server) handleTestMorningSummary(w http.ResponseWriter, r *http.Request
 
 	body := "This is a test message from Domestique.\n\nIf you can read it, your morning summary will reach you.\n"
 	if base := s.publicURL(); base != "" {
-		body += "\nChange or turn off the morning summary: " + strings.TrimRight(base, "/") + "/training/fitness\n"
+		body += "\nChange or turn off the morning summary: " + strings.TrimRight(base, "/") + "/fitness\n"
 	}
 	if err := s.Mailer.Send(r.Context(), id.Email, "Domestique: test message", body); err != nil {
 		stage, code := mailFailure(err)

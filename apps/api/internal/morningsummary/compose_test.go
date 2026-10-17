@@ -43,7 +43,7 @@ func TestSessionDay(t *testing.T) {
 	for _, want := range []string{
 		"Saturday 3 October", "Threshold 3 x 10", "Duration: 45 min", "Zone: Threshold",
 		"Target: 3 x 10 min at 250-260 W", "Readiness: Ready",
-		appURL + "/training/plan", appURL + "/training/fitness",
+		appURL + "/plan", appURL + "/fitness",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body lacks %q:\n%s", want, body)
