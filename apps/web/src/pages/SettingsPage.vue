@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type {
@@ -18,6 +19,9 @@ import GarminSetup from '@/components/GarminSetup.vue'
 import KomootConnect from '@/components/KomootConnect.vue'
 import WeatherSettings from '@/components/WeatherSettings.vue'
 import RideStartCard from '@/components/plan/RideStartCard.vue'
+import AppPage from '@/components/ui/AppPage.vue'
+import DetailsToggle from '@/components/ui/DetailsToggle.vue'
+import { settingsSections } from '@/utils/settingsSections'
 import { describeError } from '@/utils/errorMessage'
 
 const {
@@ -33,6 +37,40 @@ const {
   refresh,
 } = useLibrary()
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
+
+// --- sub-nav: anchors into one long page, not routes ---
+
+const sections = computed(() => settingsSections(me.value?.role ?? 'none'))
+const generalSections = computed(() => sections.value.filter((x) => !x.admin))
+const adminSections = computed(() => sections.value.filter((x) => x.admin))
+const current = ref('')
+
+function goTo(id: string) {
+  current.value = id
+  router.replace({ hash: `#${id}` })
+  document.getElementById(id)?.scrollIntoView({ block: 'start' })
+}
+
+// Same shape as the Fitness page's #profile jump: the panels above a section
+// load after mount and shift it, so scroll once now and again once they settle,
+// unless the rider has scrolled in the meantime.
+async function scrollToHash(loads: Promise<unknown>[]) {
+  const id = route.hash.slice(1)
+  if (!id) return
+  current.value = id
+  const jump = () => document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  await nextTick()
+  jump()
+  const startY = window.scrollY
+  await Promise.allSettled(loads)
+  await nextTick()
+  if (Math.abs(window.scrollY - startY) < 2) jump()
+}
+
+const aboutAutoSync = ref(false)
+const aboutAutoSchedule = ref(false)
 
 // --- profile: name + password, both proxied through Auth0's Management API
 // (see meDTO.canEditName/canChangePassword on the server) ---
@@ -413,7 +451,7 @@ onMounted(async () => {
   // races the shell's first fetch — without this the card renders and then
   // reports "no encryption key" because it never got to ask.
   await refresh()
-  await Promise.all([
+  const loads = [
     loadConnection(),
     loadGarmin(),
     loadWahoo(),
@@ -421,312 +459,423 @@ onMounted(async () => {
     loadAutoSync(),
     loadAutoSchedule(),
     pollBasemapWhileRunning(),
-  ])
+  ]
+  scrollToHash(loads)
+  await Promise.all(loads)
 })
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
-    <!-- Only ever available under authMode oidc, with Auth0 Management API
-         credentials configured — meDTO omits both flags (defaulting them
-         false) for a proxy/none deployment or one without that client. -->
-    <UCard v-if="me?.canEditName" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-user-round" />
-          Profile
-        </h2>
-        <p class="text-sm text-muted">Your own name and sign-in, for this account only.</p>
-      </template>
-
-      <div class="flex flex-col gap-4">
-        <UFormField label="Name">
-          <div class="flex max-w-sm gap-2">
-            <UInput v-model="nameInput" class="flex-1" @keyup.enter="saveName" />
-            <UButton
-              :loading="savingName"
-              :disabled="!nameInput.trim() || nameInput.trim() === me?.name"
-              @click="saveName"
+  <AppPage title="Settings" subtitle="Your account, your devices and how Domestique trains and warns you.">
+    <div class="flex flex-col gap-6 lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start lg:gap-10">
+      <!-- One nav for both widths: a horizontal scrolling row on a phone, a
+           sticky column from lg up, so the landmark is announced once. -->
+      <nav aria-label="Settings" class="lg:sticky lg:top-20">
+        <ul class="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+          <li v-for="section in generalSections" :key="section.id" class="shrink-0">
+            <a
+              :href="`#${section.id}`"
+              class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=true]:bg-elevated aria-[current=true]:font-medium aria-[current=true]:text-highlighted"
+              :aria-current="current === section.id ? 'true' : undefined"
+              @click.prevent="goTo(section.id)"
             >
-              Save
-            </UButton>
-          </div>
-        </UFormField>
-
-        <div>
-          <p class="mb-1 text-sm font-medium text-toned">Password</p>
-          <UButton
-            v-if="me?.canChangePassword"
-            size="sm"
-            variant="soft"
-            icon="i-lucide-mail"
-            :loading="sendingPasswordReset"
-            @click="sendPasswordReset"
-          >
-            Email me a reset link
-          </UButton>
-          <p v-else class="text-xs text-dimmed">
-            You sign in with an external provider — there's no password here to change.
-          </p>
-        </div>
-
-        <div>
-          <div class="mb-1 flex items-center gap-2">
-            <p class="text-sm font-medium text-toned">Two-factor authentication</p>
-            <UButton
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              icon="i-lucide-refresh-cw"
-              :loading="loadingMfa"
-              aria-label="Refresh"
-              @click="loadMfa"
-            />
-          </div>
-
-          <div v-if="mfaEnrollments.length" class="flex flex-col gap-2">
-            <div
-              v-for="factor in mfaEnrollments"
-              :key="factor.id"
-              class="flex items-center gap-2 text-sm"
-            >
-              <UIcon name="i-lucide-shield-check" class="size-4 text-dimmed" />
-              <span class="flex-1 text-toned">
-                {{ factorLabel(factor.type) }}<span v-if="factor.name"> · {{ factor.name }}</span>
-              </span>
-              <UBadge
-                :color="factor.status === 'confirmed' ? 'success' : 'warning'"
-                variant="subtle"
-                size="sm"
+              {{ section.label }}
+            </a>
+          </li>
+          <template v-if="adminSections.length">
+            <li class="shrink-0 self-center px-3 text-[length:var(--text-label)] text-dimmed lg:mt-3 lg:self-start" aria-hidden="true">
+              Admin
+            </li>
+            <li v-for="section in adminSections" :key="section.id" class="shrink-0">
+              <a
+                :href="`#${section.id}`"
+                class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=true]:bg-elevated aria-[current=true]:font-medium aria-[current=true]:text-highlighted"
+                :aria-current="current === section.id ? 'true' : undefined"
+                @click.prevent="goTo(section.id)"
               >
-                {{ factor.status === 'confirmed' ? 'Active' : 'Pending' }}
-              </UBadge>
-              <UButton
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-x"
-                :loading="removingFactor && removingFactorId === factor.id"
-                @click="removeTarget = factor"
-              />
+                <span class="sr-only">Admin: </span>{{ section.label }}
+              </a>
+            </li>
+          </template>
+        </ul>
+      </nav>
+
+      <div class="flex min-w-0 flex-col gap-10">
+        <section id="profile" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="profile-title">
+          <div>
+            <h2 id="profile-title" class="font-display text-xl text-highlighted">Profile</h2>
+            <p class="text-sm text-muted">Your own name and sign-in, for this account only.</p>
+          </div>
+
+          <!-- Only ever available under authMode oidc, with Auth0 Management API
+               credentials configured — meDTO omits both flags (defaulting them
+               false) for a proxy/none deployment or one without that client. -->
+          <UCard v-if="me?.canEditName" variant="outline">
+            <div class="flex flex-col gap-4">
+              <UFormField label="Name">
+                <div class="flex max-w-sm gap-2">
+                  <UInput v-model="nameInput" class="flex-1" @keyup.enter="saveName" />
+                  <UButton
+                    :loading="savingName"
+                    :disabled="!nameInput.trim() || nameInput.trim() === me?.name"
+                    @click="saveName"
+                  >
+                    Save
+                  </UButton>
+                </div>
+              </UFormField>
+
+              <div>
+                <p class="mb-1 text-sm font-medium text-toned">Password</p>
+                <UButton
+                  v-if="me?.canChangePassword"
+                  size="sm"
+                  variant="soft"
+                  icon="i-lucide-mail"
+                  :loading="sendingPasswordReset"
+                  @click="sendPasswordReset"
+                >
+                  Email me a reset link
+                </UButton>
+                <p v-else class="text-xs text-dimmed">
+                  You sign in with an external provider — there's no password here to change.
+                </p>
+              </div>
+
+              <div>
+                <div class="mb-1 flex items-center gap-2">
+                  <p class="text-sm font-medium text-toned">Two-factor authentication</p>
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-refresh-cw"
+                    :loading="loadingMfa"
+                    aria-label="Refresh"
+                    @click="loadMfa"
+                  />
+                </div>
+
+                <div v-if="mfaEnrollments.length" class="flex flex-col gap-2">
+                  <div
+                    v-for="factor in mfaEnrollments"
+                    :key="factor.id"
+                    class="flex items-center gap-2 text-sm"
+                  >
+                    <UIcon name="i-lucide-shield-check" class="size-4 text-dimmed" />
+                    <span class="flex-1 text-toned">
+                      {{ factorLabel(factor.type) }}<span v-if="factor.name"> · {{ factor.name }}</span>
+                    </span>
+                    <UBadge
+                      :color="factor.status === 'confirmed' ? 'success' : 'warning'"
+                      variant="subtle"
+                      size="sm"
+                    >
+                      {{ factor.status === 'confirmed' ? 'Active' : 'Pending' }}
+                    </UBadge>
+                    <UButton
+                      size="xs"
+                      color="neutral"
+                      variant="ghost"
+                      icon="i-lucide-x"
+                      :aria-label="`Remove ${factorLabel(factor.type)}`"
+                      :loading="removingFactor && removingFactorId === factor.id"
+                      @click="removeTarget = factor"
+                    />
+                  </div>
+                </div>
+                <p v-else class="mb-2 text-xs text-dimmed">Nothing set up yet.</p>
+
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <UButton
+                    size="sm"
+                    variant="soft"
+                    icon="i-lucide-shield-plus"
+                    :loading="enrolling"
+                    @click="startMfaEnroll"
+                  >
+                    Add a factor
+                  </UButton>
+                  <!-- The new tab this opens on click can be silently blocked by
+                       the browser (see startMfaEnroll's own comment) — this stays
+                       up as a guaranteed-to-work fallback until the rider uses it
+                       or starts a fresh attempt. -->
+                  <UButton
+                    v-if="enrollUrl"
+                    :to="enrollUrl"
+                    external
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    size="sm"
+                    variant="outline"
+                    color="neutral"
+                    icon="i-lucide-external-link"
+                  >
+                    Continue in Auth0
+                  </UButton>
+                </div>
+              </div>
             </div>
-          </div>
-          <p v-else class="mb-2 text-xs text-dimmed">Nothing set up yet.</p>
+          </UCard>
 
-          <div class="mt-2 flex flex-wrap items-center gap-2">
-            <UButton
-              size="sm"
-              variant="soft"
-              icon="i-lucide-shield-plus"
-              :loading="enrolling"
-              @click="startMfaEnroll"
-            >
-              Add a factor
-            </UButton>
-            <!-- The new tab this opens on click can be silently blocked by
-                 the browser (see startMfaEnroll's own comment) — this stays
-                 up as a guaranteed-to-work fallback until the rider uses it
-                 or starts a fresh attempt. -->
-            <UButton
-              v-if="enrollUrl"
-              :to="enrollUrl"
-              external
-              target="_blank"
-              rel="noopener noreferrer"
-              size="sm"
-              variant="outline"
-              color="neutral"
-              icon="i-lucide-external-link"
-            >
-              Continue in Auth0
+          <!-- Without Auth0 there is nothing to edit here, but the account is
+               still worth naming so the section is not blank. -->
+          <UCard v-else variant="outline">
+            <p class="text-sm text-toned">
+              Signed in as
+              <span class="text-highlighted">
+                {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
+              </span>
+            </p>
+          </UCard>
+
+          <!-- Same gating as the Profile card above: only ever available under
+               authMode oidc with Auth0 Management API credentials configured.
+               Kept at the foot of the section, away from the forms — a
+               destructive, rarely-used action doesn't need to compete for
+               attention with the rest. -->
+          <div v-if="me?.canEditName" class="flex justify-end">
+            <UButton size="sm" color="error" variant="ghost" icon="i-lucide-trash-2" @click="deleteAccountOpen = true">
+              Delete my account
             </UButton>
           </div>
-        </div>
+        </section>
+
+        <section id="devices" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="devices-title">
+          <div>
+            <h2 id="devices-title" class="font-display text-xl text-highlighted">Devices and sync</h2>
+            <p class="text-sm text-muted">Head units and accounts your routes are pushed to or imported from.</p>
+          </div>
+
+          <!-- Deployment plumbing, and only an admin gets it: the same pattern
+               the Garmin setup / "This deployment" cards further down follow.
+               Kept with the devices rather than under Deployment — this is the
+               one riders actually want to check or flip day to day. -->
+          <UCard v-if="autoSync?.canManage" variant="outline">
+            <template #header>
+              <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                <UIcon name="i-lucide-refresh-cw" />
+                Auto-sync
+              </h3>
+              <p class="text-sm text-muted">
+                Pull in new routes from riders' connected accounts and push what changed out to devices on its own.
+              </p>
+            </template>
+
+            <label class="flex w-fit items-center gap-2 text-sm text-toned">
+              <USwitch
+                :model-value="autoSync.enabled"
+                :loading="togglingAutoSync"
+                @update:model-value="toggleAutoSync"
+              />
+              {{ autoSync.enabled ? 'On' : 'Off' }}
+            </label>
+            <p v-if="autoSync.updatedBy" class="mt-2 text-xs text-dimmed">
+              Last changed by {{ autoSync.updatedBy }}.
+            </p>
+            <DetailsToggle v-model:open="aboutAutoSync" label="Learn more" class="mt-3">
+              <p class="text-sm text-muted">
+                Whether this deployment pulls in new routes from a rider's connected Wahoo, Komoot or
+                Garmin on its own, then pushes what changed out to devices — for every rider, without
+                anyone clicking "Push to devices". Which of a rider's own devices actually get pushed
+                to is set per device, below.
+              </p>
+            </DetailsToggle>
+          </UCard>
+
+          <AccountsPanel
+            :accounts="accounts"
+            :me="me"
+            :can-manage="canManageAccounts"
+            :garmin="garmin"
+            :wahoo="wahoo"
+            @changed="refresh"
+            @garmin-changed="garminChanged"
+            @wahoo-changed="wahooChanged"
+          />
+
+          <UAlert
+            v-if="garminError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="garminError"
+          />
+
+          <UAlert
+            v-if="wahooError"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            :description="wahooError"
+          />
+
+          <UCard v-if="canImportKomoot && komootEnabled" variant="outline">
+            <template #header>
+              <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                <UIcon name="i-lucide-mountain-snow" />
+                Komoot
+              </h3>
+              <p class="text-sm text-muted">Sign in to import your own planned routes.</p>
+            </template>
+
+            <UAlert
+              v-if="connectionError"
+              color="error"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              :description="connectionError"
+              class="mb-4"
+            />
+
+            <KomootConnect :connection="connection" @changed="connection = $event" />
+          </UCard>
+        </section>
+
+        <section id="training" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="training-title">
+          <div>
+            <h2 id="training-title" class="font-display text-xl text-highlighted">Training</h2>
+            <p class="text-sm text-muted">Where your rides start and how your plan gets scheduled.</p>
+          </div>
+
+          <div class="peer flex flex-col gap-4 empty:hidden">
+            <p v-if="canManageTraining" class="text-sm text-muted">
+              Your FTP and the rest of your training profile live on
+              <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Fitness</RouterLink>.
+            </p>
+
+            <RideStartCard v-if="canManageTraining" :routing-configured="routingConfigured" />
+
+            <!-- Same deployment-wide shape as auto-sync, for training instead of
+                 routes, and likewise admin only. -->
+            <UCard v-if="autoSchedule?.canManage" variant="outline">
+              <template #header>
+                <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                  <UIcon name="i-lucide-calendar-clock" />
+                  Auto-schedule
+                </h3>
+                <p class="text-sm text-muted">
+                  Sync every rider's completed sessions and schedule their current plan week on its own.
+                </p>
+              </template>
+
+              <label class="flex w-fit items-center gap-2 text-sm text-toned">
+                <USwitch
+                  :model-value="autoSchedule.enabled"
+                  :loading="togglingAutoSchedule"
+                  @update:model-value="toggleAutoSchedule"
+                />
+                {{ autoSchedule.enabled ? 'On' : 'Off' }}
+              </label>
+              <p v-if="autoSchedule.updatedBy" class="mt-2 text-xs text-dimmed">
+                Last changed by {{ autoSchedule.updatedBy }}.
+              </p>
+              <DetailsToggle v-model:open="aboutAutoSchedule" label="Learn more" class="mt-3">
+                <p class="text-sm text-muted">
+                  Whether training runs on its own: every rider's completed Garmin/Wahoo sessions are
+                  synced in the background, and their current plan week is scheduled into real workouts
+                  — for every rider with a goal and a filled-in fitness profile, without anyone visiting
+                  the Training page to click "Sync now" or "Schedule this week's workouts".
+                </p>
+              </DetailsToggle>
+            </UCard>
+          </div>
+          <p class="hidden text-sm text-dimmed peer-empty:block">Nothing to set here for your role.</p>
+        </section>
+
+        <section id="notifications" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="notifications-title">
+          <div>
+            <h2 id="notifications-title" class="font-display text-xl text-highlighted">Notifications</h2>
+            <p class="text-sm text-muted">What Domestique warns you about for planned rides.</p>
+          </div>
+
+          <!-- A rider's own setting. The card hides itself when the deployment
+               has weather switched off. -->
+          <div class="peer flex flex-col gap-4 empty:hidden">
+            <WeatherSettings v-if="canManageTraining" />
+          </div>
+          <p class="hidden text-sm text-dimmed peer-empty:block">Nothing to set here on this deployment.</p>
+        </section>
+
+        <section v-if="adminSections.length" id="deployment" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="deployment-title">
+          <div>
+            <h2 id="deployment-title" class="font-display text-xl text-highlighted">Deployment</h2>
+            <p class="text-sm text-muted">Settings that apply to every rider on this deployment.</p>
+          </div>
+
+          <div class="peer flex flex-col gap-4 empty:hidden">
+            <!-- Deployment plumbing, and only an admin gets it: the API omits the
+                 consumer entirely for everyone else, so this card does not exist for
+                 a rider. Nothing here is theirs to set or worth them knowing. -->
+            <UCard v-if="garmin.consumer" variant="outline">
+              <template #header>
+                <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                  <UIcon name="i-lucide-watch" />
+                  Garmin setup
+                </h3>
+                <p class="text-sm text-muted">
+                  One pair of app keys for the whole deployment, so riders can sign in.
+                </p>
+              </template>
+
+              <GarminSetup :consumer="garmin.consumer" @changed="loadGarmin" />
+            </UCard>
+
+            <!-- Deployment plumbing, and only an admin gets it: the API omits
+                 Source entirely for everyone else (it names the database host and
+                 port), the same pattern the Garmin setup card above follows. -->
+            <UCard v-if="config?.source" variant="outline">
+              <template #header>
+                <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                  <UIcon name="i-lucide-info" />
+                  This deployment
+                </h3>
+              </template>
+
+              <dl class="grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt class="text-dimmed">Signed in as</dt>
+                  <dd class="text-highlighted">
+                    {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-dimmed">Library</dt>
+                  <dd class="tabular-nums text-xs break-all text-highlighted">{{ config.source }}</dd>
+                </div>
+              </dl>
+            </UCard>
+          </div>
+          <p class="hidden text-sm text-dimmed peer-empty:block">Nothing to set here.</p>
+        </section>
+
+        <section v-if="adminSections.length" id="basemap" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="basemap-title">
+          <div>
+            <h2 id="basemap-title" class="font-display text-xl text-highlighted">Basemap</h2>
+            <p class="text-sm text-muted">
+              Tile data behind a route's map — self-hosted, so a rider's coordinates never reach a third party.
+            </p>
+          </div>
+
+          <!-- Deployment plumbing, and only an admin gets it — same gating as
+               auto-sync above, since (unlike the Garmin/config cards) the DTO
+               here is shaped to distinguish "unavailable" from "not your job,"
+               not to omit itself for a rider. -->
+          <div class="peer flex flex-col gap-4 empty:hidden">
+            <UCard v-if="basemap?.canManage" variant="outline">
+              <template #header>
+                <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                  <UIcon name="i-lucide-map" />
+                  Map basemap
+                </h3>
+              </template>
+
+              <BasemapSetup :basemap="basemap" @changed="pollBasemapWhileRunning" />
+            </UCard>
+          </div>
+          <p class="hidden text-sm text-dimmed peer-empty:block">The basemap status is not available.</p>
+        </section>
       </div>
-    </UCard>
-
-    <!-- A rider's own setting, like the profile above. The card hides itself
-         when the deployment has weather switched off. -->
-    <WeatherSettings v-if="canManageTraining" />
-    <RideStartCard v-if="canManageTraining" :routing-configured="routingConfigured" />
-
-    <!-- Deployment plumbing, and only an admin gets it: the same pattern
-         the Garmin setup / "This deployment" cards further down follow.
-         Placed near the top rather than with those other admin-only cards
-         — this is the one riders actually want to check or flip day to
-         day, not something set once and forgotten. -->
-    <UCard v-if="autoSync?.canManage" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-refresh-cw" />
-          Auto-sync
-        </h2>
-        <p class="text-sm text-muted">
-          Whether this deployment pulls in new routes from a rider's connected Wahoo, Komoot or
-          Garmin on its own, then pushes what changed out to devices — for every rider, without
-          anyone clicking "Push to devices". Which of a rider's own devices actually get pushed
-          to is set per device, below.
-        </p>
-      </template>
-
-      <label class="flex w-fit items-center gap-2 text-sm text-toned">
-        <USwitch
-          :model-value="autoSync.enabled"
-          :loading="togglingAutoSync"
-          @update:model-value="toggleAutoSync"
-        />
-        {{ autoSync.enabled ? 'On' : 'Off' }}
-      </label>
-      <p v-if="autoSync.updatedBy" class="mt-2 text-xs text-dimmed">
-        Last changed by {{ autoSync.updatedBy }}.
-      </p>
-    </UCard>
-
-    <UCard v-if="autoSchedule?.canManage" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-calendar-clock" />
-          Auto-schedule
-        </h2>
-        <p class="text-sm text-muted">
-          Whether training runs on its own: every rider's completed Garmin/Wahoo sessions are
-          synced in the background, and their current plan week is scheduled into real workouts
-          — for every rider with a goal and a filled-in fitness profile, without anyone visiting
-          the Training page to click "Sync now" or "Schedule this week's workouts".
-        </p>
-      </template>
-
-      <label class="flex w-fit items-center gap-2 text-sm text-toned">
-        <USwitch
-          :model-value="autoSchedule.enabled"
-          :loading="togglingAutoSchedule"
-          @update:model-value="toggleAutoSchedule"
-        />
-        {{ autoSchedule.enabled ? 'On' : 'Off' }}
-      </label>
-      <p v-if="autoSchedule.updatedBy" class="mt-2 text-xs text-dimmed">
-        Last changed by {{ autoSchedule.updatedBy }}.
-      </p>
-    </UCard>
-
-    <AccountsPanel
-      :accounts="accounts"
-      :me="me"
-      :can-manage="canManageAccounts"
-      :garmin="garmin"
-      :wahoo="wahoo"
-      @changed="refresh"
-      @garmin-changed="garminChanged"
-      @wahoo-changed="wahooChanged"
-    />
-
-    <UAlert
-      v-if="garminError"
-      color="error"
-      variant="subtle"
-      icon="i-lucide-triangle-alert"
-      :description="garminError"
-    />
-
-    <UAlert
-      v-if="wahooError"
-      color="error"
-      variant="subtle"
-      icon="i-lucide-triangle-alert"
-      :description="wahooError"
-    />
-
-    <UCard v-if="canImportKomoot && komootEnabled" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-mountain-snow" />
-          Komoot
-        </h2>
-        <p class="text-sm text-muted">Sign in to import your own planned routes.</p>
-      </template>
-
-      <UAlert
-        v-if="connectionError"
-        color="error"
-        variant="subtle"
-        icon="i-lucide-triangle-alert"
-        :description="connectionError"
-        class="mb-4"
-      />
-
-      <KomootConnect :connection="connection" @changed="connection = $event" />
-    </UCard>
-
-    <!-- Deployment plumbing, and only an admin gets it: the API omits the
-         consumer entirely for everyone else, so this card does not exist for
-         a rider. Nothing here is theirs to set or worth them knowing. -->
-    <UCard v-if="garmin.consumer" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-watch" />
-          Garmin setup
-        </h2>
-        <p class="text-sm text-muted">
-          One pair of app keys for the whole deployment, so riders can sign in.
-        </p>
-      </template>
-
-      <GarminSetup :consumer="garmin.consumer" @changed="loadGarmin" />
-    </UCard>
-
-    <!-- Deployment plumbing, and only an admin gets it — same gating as
-         auto-sync above, since (unlike the Garmin/config cards) the DTO
-         here is shaped to distinguish "unavailable" from "not your job,"
-         not to omit itself for a rider. -->
-    <UCard v-if="basemap?.canManage" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-map" />
-          Map basemap
-        </h2>
-        <p class="text-sm text-muted">
-          Tile data behind a route's map — self-hosted, so a rider's coordinates never reach a
-          third party.
-        </p>
-      </template>
-
-      <BasemapSetup :basemap="basemap" @changed="pollBasemapWhileRunning" />
-    </UCard>
-
-    <!-- Deployment plumbing, and only an admin gets it: the API omits
-         Source entirely for everyone else (it names the database host and
-         port), the same pattern the Garmin setup card above follows. -->
-    <UCard v-if="config?.source" variant="outline">
-      <template #header>
-        <h2 class="flex items-center gap-2 font-medium text-highlighted">
-          <UIcon name="i-lucide-info" />
-          This deployment
-        </h2>
-      </template>
-
-      <dl class="grid gap-3 text-sm sm:grid-cols-2">
-        <div>
-          <dt class="text-dimmed">Signed in as</dt>
-          <dd class="text-highlighted">
-            {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
-          </dd>
-        </div>
-        <div>
-          <dt class="text-dimmed">Library</dt>
-          <dd class="tabular-nums text-xs break-all text-highlighted">{{ config.source }}</dd>
-        </div>
-      </dl>
-    </UCard>
-
-    <!-- Same gating as the Profile card above: only ever available under
-         authMode oidc with Auth0 Management API credentials configured.
-         Kept on its own, at the very bottom, rather than inside a card
-         with everything else — a destructive, rarely-used action doesn't
-         need to compete for attention with the rest of the page. -->
-    <div v-if="me?.canEditName" class="flex justify-end">
-      <UButton size="sm" color="error" variant="ghost" icon="i-lucide-trash-2" @click="deleteAccountOpen = true">
-        Delete my account
-      </UButton>
     </div>
 
     <UModal
@@ -773,5 +922,5 @@ onMounted(async () => {
         </div>
       </template>
     </UModal>
-  </div>
+  </AppPage>
 </template>
