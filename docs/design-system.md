@@ -41,7 +41,7 @@ phase scale for training phases only; neither is reused for decoration.
 
 | Role | Token | Means |
 |---|---|---|
-| Primary | `--ui-primary` | Actions and you. `primary-700` on light, `primary-400` on dark, with `primary-950` button text on dark (`--ui-text-inverted`). |
+| Primary | `--ui-primary` | Actions and you. `primary-700` on light, `primary-400` on dark, with `primary-950` button text on dark (`--ui-text-inverted`). That inverted text applies to every solid Nuxt UI variant in dark mode, not just primary buttons. |
 | Behind | `--color-ember-*` | Behind plan, a shortfall. |
 | Effort | `--color-zone-*` | Training zone. Nothing else. |
 | Phase | `--color-phase-*` | Training phase. Nothing else. |
@@ -51,13 +51,42 @@ phase scale for training phases only; neither is reused for decoration.
 `--color-zone-endurance`, `--color-zone-tempo`, `--color-zone-sweet_spot`,
 `--color-zone-threshold`, `--color-zone-vo2max`, `--color-zone-anaerobic`.
 Each has a light value and a `.dark` override, and each holds at least 3:1
-against its card (white, and about `#131d1b`). In code use
+against its card (white, and about `#121a18`, which is `rgb(30 43 39 / .5)` over neutral-950). In code use
 `zoneColorVar(zone)` from `utils/zones.ts`, never a literal; `intervals`
 maps to anaerobic and an unknown zone to endurance.
 
 **Phase scale**, a quiet neutral-to-teal ramp unlike the zones:
 `--color-phase-base`, `--color-phase-build`, `--color-phase-peak`,
 `--color-phase-taper`.
+
+The ramp is ordered by load, not by calendar. Base is the quietest neutral
+because it is the least intense block, build steps up to teal, and peak is
+the strongest teal (darkest in light mode, brightest in dark) because those
+are the heaviest weeks. Taper drops back to a lighter, greyer teal, since the
+load falls while the rider stays sharp. The dark overrides keep that order by
+flipping the lightness, so peak stays the most prominent bar on either card.
+Every step holds 3:1 against its card, which is why taper is a muted teal and
+not the pale tint the shape of the ramp would suggest: a pale tint fails on
+white.
+
+### Charts
+
+Every chart reads the same scales and never carries colours of its own:
+
+- Zones come from `zoneColorVar(zone)`. A step known only by its relative
+  effort goes through `zoneForLevel(level)` first (`WorkoutProfile.vue`).
+- Phases come from `--color-phase-*` through `plan/phaseStyle.ts`.
+- `FitnessChart.vue` uses the colour roles: fitness (CTL) is primary, fatigue
+  (ATL) is ember and form (TSB) is neutral. Its productive band is a
+  `color-mix` tint of success and its high-risk band a tint of ember.
+- `ElevationProfile.vue` colours a climb by gradient on the zone scale, from
+  recovery (descending) through endurance, tempo, threshold and vo2max to
+  anaerobic (12% and steeper). This is the one use of the zone scale outside
+  a training zone, because steepness is effort.
+- `TrainingZones.vue` bars take the zone scale: all seven for power, and
+  recovery, endurance, tempo, threshold and vo2max for five-zone HR and pace.
+- `PowerCurveChart.vue` draws this season in primary, last season in neutral
+  and the all-time curve dashed.
 
 ### Categorical accents
 
@@ -126,28 +155,26 @@ four accents) but was already tried once and didn't read well in practice.
 
 ### Type
 
-Three font roles, each a `--font-*` token (which Tailwind v4 turns into a
+Two font roles, each a `--font-*` token (which Tailwind v4 turns into a
 `font-{name}` utility automatically):
 
-- **`font-display`** (Bricolage Grotesque) — the brand wordmark and page
-  `h1`s only. Not a general heading font; `h2`/`h3` stay on the body face.
+- **`font-display`** (Bricolage Grotesque) — the brand wordmark, page `h1`s
+  and a card's one hero number (`text-[length:var(--text-hero)]`). Not a
+  general heading font; `h2`/`h3` stay on the body face.
 - **`font-sans`** (Plus Jakarta Sans) — the body default, set once on `body`
   in `styles.css`. Nothing needs to opt in.
-- **`font-mono`** (IBM Plex Mono) — anything tabular: distances, ascent,
-  counts, ids. Pair with `tabular-nums` where digits line up in a column
-  (stat tiles, route card distance/ascent).
 
-All three are self-hosted via `@fontsource-variable/bricolage-grotesque`,
-`@fontsource-variable/plus-jakarta-sans`, and `@fontsource/ibm-plex-mono`
-(pulled in from `styles.css` — see the `@import` lines at its top), not a
-Google Fonts `<link>`. That was the first cut, and it broke silently: a
-network-blocked or ad-blocked `fonts.googleapis.com` request just falls back
-to the system font, invisible in review, and only shows up as "this doesn't
-look like the redesign" once it's live. Self-hosting avoids the whole
-failure class. `@fontsource`'s variable-font packages cover every weight
-used in one file each; IBM Plex Mono ships no variable build upstream, so
-only the specific static weights (400/500/600) actually used are imported —
-don't add more without a reason.
+There is no monospace face. Numbers, ids and anything that must line up in a
+column use `tabular-nums` in the body font.
+
+Both faces are self-hosted via `@fontsource-variable/bricolage-grotesque` and
+`@fontsource-variable/plus-jakarta-sans` (pulled in from `styles.css` — see
+the `@import` lines at its top), not a Google Fonts `<link>`. That was the
+first cut, and it broke silently: a network-blocked or ad-blocked
+`fonts.googleapis.com` request just falls back to the system font, invisible
+in review, and only shows up as "this doesn't look like the redesign" once
+it's live. Self-hosting avoids the whole failure class. Variable-font
+packages cover every weight used in one file each.
 
 **Type scale**: `--text-label` (12px), `--text-body` (14px), `--text-lead`
 (16px), `--text-title` (24px) and `--text-hero` (32px) give the utilities
@@ -171,8 +198,8 @@ larger, separate value for a full tile, not a Nuxt UI component).
 No formal scale beyond Tailwind's own — but a few values recur enough to
 treat as the idiom rather than re-deriving spacing per page: `gap-3`/`gap-4`
 for tight stacks, `gap-6` between major sections, `p-4`/`p-5` for card
-padding, `text-[0.7rem] uppercase tracking-wide text-dimmed` for an
-eyebrow/label line above a value. Match these in a new page rather than
+padding, `text-[length:var(--text-label)] text-muted`, in sentence case, for a
+label line above a value. Match these in a new page rather than
 picking new numbers.
 
 ## Structural components
@@ -199,9 +226,9 @@ Three ways to make a "panel," picked in this order:
 - No literal hex colours in `.vue`/`.ts` files outside the documented
   exceptions, each explained in its own comments. The guard test
   (`apps/web/tests/designSystem.test.mjs`) enforces this and allowlists four
-  files: `RouteMap.vue` and `TrackPreview.vue` (map painting),
-  `RouteBuilderMap.vue` (map painting) and `ElevationProfile.vue` (elevation
-  gradient).
+  files, matched on their path under `src/`:
+  `components/RouteMap.vue`, `components/TrackPreview.vue` and
+  `components/RouteBuilderMap.vue`, all map painting.
 - If something needs a categorical colour, reuse the icon-chip pattern above
   and pull from the existing accents. Effort uses the zone scale and nothing
   else does; training phases use the phase scale. Don't add a new scale

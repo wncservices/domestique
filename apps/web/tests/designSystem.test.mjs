@@ -2,7 +2,7 @@
 // Enforces docs/design-system.md. Paths resolve from this file, not the cwd.
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -11,12 +11,12 @@ const STYLES = fileURLToPath(new URL('../src/styles.css', import.meta.url))
 const DOC = fileURLToPath(new URL('../../../docs/design-system.md', import.meta.url))
 
 // Files that paint a map or an elevation gradient and so need literal colours.
-// Each must say why in a comment. Task 3 removes ElevationProfile.vue.
+// Each must say why in a comment. Matched on the path relative to src/, so a
+// same-named file elsewhere does not inherit the exemption.
 const ALLOWED_HEX_FILES = [
-  'RouteMap.vue',
-  'TrackPreview.vue',
-  'RouteBuilderMap.vue',
-  'ElevationProfile.vue',
+  'components/RouteMap.vue',
+  'components/TrackPreview.vue',
+  'components/RouteBuilderMap.vue',
 ]
 
 function walk(dir) {
@@ -29,8 +29,7 @@ function walk(dir) {
 
 const files = walk(SRC).map((path) => ({
   path,
-  name: basename(path),
-  rel: path.slice(SRC.length + 1),
+  rel: relative(SRC, path).split(sep).join('/'),
   text: readFileSync(path, 'utf8'),
 }))
 
@@ -43,22 +42,38 @@ function withoutComments(text) {
     .replace(/(^|\s)\/\/.*$/gm, '$1')
 }
 
+function hitsIn(text, re) {
+  return withoutComments(text).match(new RegExp(re.source, 'g')) ?? []
+}
+
 function offenders(re, skip = () => false) {
   return files
     .filter((f) => !skip(f))
     .flatMap((f) => {
-      const hits = withoutComments(f.text).match(new RegExp(re.source, 'g'))
-      return hits ? [`${f.rel}: ${[...new Set(hits)].join(', ')}`] : []
+      const hits = hitsIn(f.text, re)
+      return hits.length ? [`${f.rel}: ${[...new Set(hits)].join(', ')}`] : []
     })
 }
+
+const HEX = /#[0-9a-fA-F]{3,8}\b/
 
 test('design: scans a plausible number of source files', () => {
   assert.ok(files.length > 20, `only found ${files.length} files under ${SRC}`)
 })
 
 test('design: no literal hex colours outside the map-painting allowlist', () => {
-  const bad = offenders(/#[0-9a-fA-F]{3,8}\b/, (f) => ALLOWED_HEX_FILES.includes(f.name))
+  const bad = offenders(HEX, (f) => ALLOWED_HEX_FILES.includes(f.rel))
   assert.deepEqual(bad, [])
+})
+
+// The scanner must keep catching real colours and ignoring prose, or the rule
+// above passes by being blind.
+test('design: the hex scanner catches real hex and ignores comments', () => {
+  assert.deepEqual(hitsIn("const c = '#fff'", HEX), ['#fff'])
+  assert.deepEqual(hitsIn('<div style="color:#abc">x</div>', HEX), ['#abc'])
+  assert.deepEqual(hitsIn('// since #174', HEX), [])
+  assert.deepEqual(hitsIn('<!-- #174 -->', HEX), [])
+  assert.deepEqual(hitsIn('/* see #174 */', HEX), [])
 })
 
 test('design: no raw Tailwind palette classes', () => {
@@ -68,11 +83,11 @@ test('design: no raw Tailwind palette classes', () => {
   assert.deepEqual(bad, [])
 })
 
-test('design: no monospace font', { todo: true }, () => {
+test('design: no monospace font', () => {
   assert.deepEqual(offenders(/\bfont-mono\b/), [])
 })
 
-test('design: no tiny uppercase eyebrows', { todo: true }, () => {
+test('design: no tiny uppercase eyebrows', () => {
   assert.deepEqual(offenders(/text-\[0\.7rem\][^"]*uppercase/), [])
 })
 
