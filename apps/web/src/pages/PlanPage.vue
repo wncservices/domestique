@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The other half of what was one TrainingPage.vue — see
-// TrainingFitnessPage.vue's own doc comment for the split. This half owns
+// The other half of what was one training page — see
+// FitnessPage.vue's own doc comment for the split. This half owns
 // what a rider is training *toward*: goals, the periodized plan each one
 // produces (Phases C/D, see internal/periodization and internal/adapter),
 // and the manual workout builder (Phase A) with its Phase B2 Garmin push.
@@ -32,6 +32,8 @@ import type {
   Why,
   Workout,
 } from '@/api/types'
+import AppPage from '@/components/ui/AppPage.vue'
+import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import FtpTestBanner from '@/components/plan/FtpTestBanner.vue'
 import FtpTestModal from '@/components/plan/FtpTestModal.vue'
 import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
@@ -64,6 +66,7 @@ import { usePlanGoals } from '@/composables/usePlanGoals'
 import { localDate, shortDate, weekdayLong } from '@/utils/planDates'
 import { todayISO } from '@/utils/rideDates'
 import { describeError } from '@/utils/errorMessage'
+import { pushWorkoutToGarmin as pushWorkout } from '@/utils/pushWorkout'
 
 const toast = useToast()
 const route = useRoute()
@@ -357,24 +360,7 @@ async function sendCourseOf(w: Workout) {
 async function pushWorkoutToGarmin(w: Workout) {
   pushingWorkout.value = w.id
   try {
-    const res = await api.pushWorkoutToGarmin(w.id)
-    toast.add({ title: `Pushed ${w.name} to Garmin`, icon: 'i-lucide-watch', color: 'success' })
-    // The workout went whatever happened to its route; say so if the route did not.
-    if (res.course === 'failed') {
-      toast.add({
-        title: `${w.name} was sent, but its route was not`,
-        description: 'The route could not be sent to your devices. Try "Send to devices" on the day card.',
-        icon: 'i-lucide-triangle-alert',
-        color: 'warning',
-      })
-    }
-  } catch (err) {
-    toast.add({
-      title: `Could not push ${w.name} to Garmin`,
-      description: describeError(err),
-      icon: 'i-lucide-triangle-alert',
-      color: 'error',
-    })
+    await pushWorkout(toast, w)
   } finally {
     pushingWorkout.value = ''
   }
@@ -751,7 +737,7 @@ function selectSeasonWeek(startDate: string) {
 }
 
 function fromRoute() {
-  router.push('/')
+  router.push('/routes')
 }
 
 // --- life events: travel, illness, a busy spell. The modal owns the form, the
@@ -855,6 +841,16 @@ async function confirmReplan() {
   }
 }
 
+// Goals and the library are set-up, not the daily view: collapsed once a goal
+// exists, open for a rider who has none yet. Decided once, when the goals first
+// finish loading, so opening or closing it by hand is never overridden.
+const goalsOpen = ref(true)
+const stopGoalsWatch = watch(loadingGoals, (loading) => {
+  if (loading) return
+  goalsOpen.value = goals.value.length === 0
+  stopGoalsWatch()
+})
+
 const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && profile.value.availableDays?.length))
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
@@ -912,7 +908,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <AppPage title="Plan">
     <PlanEmptyState
       v-if="!loadingGoals && goals.length === 0"
       :narration-enabled="!!me?.narrationEnabled"
@@ -1047,23 +1043,24 @@ onMounted(() => {
       />
     </template>
 
-    <GoalsSection
-      v-if="goals.length || workouts.length"
-      :goals="goals"
-      :workouts="workouts"
-      :focus-goal-id="effectiveFocus?.goalId"
-      :can-sync-garmin="canSyncGarmin"
-      :deleting-goal="deletingGoal"
-      :deleting-workout="deletingWorkout"
-      :pushing-workout="pushingWorkout"
-      @edit-goal="openEditGoal"
-      @delete-goal="deleteGoal"
-      @focus-goal="selectGoal"
-      @edit-workout="openEditWorkout"
-      @delete-workout="deleteWorkout"
-      @push-workout="pushWorkoutToGarmin"
-      @new-workout="openCreateWorkout"
-    />
+    <DetailsToggle v-if="goals.length || workouts.length" v-model:open="goalsOpen" label="Goals and workouts">
+      <GoalsSection
+        :goals="goals"
+        :workouts="workouts"
+        :focus-goal-id="effectiveFocus?.goalId"
+        :can-sync-garmin="canSyncGarmin"
+        :deleting-goal="deletingGoal"
+        :deleting-workout="deletingWorkout"
+        :pushing-workout="pushingWorkout"
+        @edit-goal="openEditGoal"
+        @delete-goal="deleteGoal"
+        @focus-goal="selectGoal"
+        @edit-workout="openEditWorkout"
+        @delete-workout="deleteWorkout"
+        @push-workout="pushWorkoutToGarmin"
+        @new-workout="openCreateWorkout"
+      />
+    </DetailsToggle>
 
     <GoalSlideover
       v-model:open="goalModalOpen"
@@ -1148,5 +1145,5 @@ onMounted(() => {
         </div>
       </template>
     </UModal>
-  </div>
+  </AppPage>
 </template>

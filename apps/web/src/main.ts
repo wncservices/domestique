@@ -1,8 +1,8 @@
 import ui from '@nuxt/ui/vue-plugin'
 import { createApp } from 'vue'
-import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
 import { applyColorMode, initColorMode } from './color-mode'
+import { createAppRouter } from './router'
 import { initTelemetry } from './telemetry'
 import { prefetchMapLibreModules } from './utils/maplibre'
 import './styles.css'
@@ -11,41 +11,9 @@ import './styles.css'
 // itself, not just from code that runs after this point.
 initTelemetry()
 
-// Each page answers a different question: what is in the library, how do I
-// put something in it, who am I connected to, and (admin-only) who has
-// access at all. The catch-all keeps a refresh on any path rendering the
-// app rather than the API's 404 — the Go side already falls back to
-// index.html.
-const router = createRouter({
-  history: createWebHistory(),
-  routes: [
-    { path: '/', component: () => import('./pages/LibraryPage.vue') },
-    { path: '/add', component: () => import('./pages/AddPage.vue') },
-    { path: '/build', component: () => import('./pages/BuildRoutePage.vue') },
-    { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
-    { path: '/people', component: () => import('./pages/PeoplePage.vue') },
-    { path: '/crews', component: () => import('./pages/CrewsPage.vue') },
-    {
-      path: '/training',
-      component: () => import('./pages/TrainingPage.vue'),
-      children: [
-        // A relative string redirect ('plan') does not resolve reliably
-        // against this child's own empty path — it left a bare /training
-        // visit falling through to the catch-all below and bouncing to /
-        // instead of /training/plan. Absolute sidesteps that resolution
-        // entirely.
-        { path: '', redirect: '/training/plan' },
-        { path: 'fitness', component: () => import('./pages/TrainingFitnessPage.vue') },
-        { path: 'plan', component: () => import('./pages/TrainingPlanPage.vue') },
-      ],
-    },
-    // Not part of "the app" the way the rest of these are — a share
-    // recipient may hold no role in this deployment at all. See App.vue's
-    // own isSharedRoutePage for why it renders outside the usual shell.
-    { path: '/shared/:token', component: () => import('./pages/SharedRoutePage.vue') },
-    { path: '/:pathMatch(.*)*', redirect: '/' },
-  ],
-})
+// Vite needs the import path literal, hence the glob rather than a template.
+const pages = import.meta.glob('./pages/*.vue')
+const router = createAppRouter((page) => pages[`./pages/${page}.vue`]!)
 
 initColorMode()
 

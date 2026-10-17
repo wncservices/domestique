@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The goal form, moved from TrainingPlanPage.vue's UModal into a USlideover
+// The goal form, moved from PlanPage.vue's UModal into a USlideover
 // (design's "Goal and workout forms move from UModal to USlideover"). Pure
 // presentation: the page still owns goalForm/saveGoal/proposeGoal, this only
 // renders them and emits back — see forms.ts for the GoalForm shape.
@@ -158,7 +158,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
                 :model-value="form.pacingIf"
                 @update:model-value="(v: number | undefined) => set('pacingIf', v ?? form.pacingIf)"
               />
-              <span class="w-12 text-right font-mono tabular-nums text-sm">{{ form.pacingIf.toFixed(2) }}</span>
+              <span class="w-12 text-right tabular-nums text-sm">{{ form.pacingIf.toFixed(2) }}</span>
             </div>
           </div>
         </UFormField>

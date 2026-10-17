@@ -111,10 +111,19 @@ function pathFor(key: SeriesKey, future: boolean): string {
 
 const zeroY = computed(() => yFor(0))
 
+// Bands are tints of the tokens, so they follow light and dark by themselves.
+// Productive is success; high risk is ember (behind), the same hue as fatigue.
+const PRODUCTIVE_TINT = 'color-mix(in oklab, var(--ui-success) 14%, transparent)'
+const HIGH_RISK_TINT = 'color-mix(in oklab, var(--color-ember-500) 14%, transparent)'
+const PRODUCTIVE_SWATCH = 'color-mix(in oklab, var(--ui-success) 45%, transparent)'
+const HIGH_RISK_SWATCH = 'color-mix(in oklab, var(--color-ember-500) 45%, transparent)'
+
 const SERIES: { key: SeriesKey; label: string; varName: string }[] = [
-  { key: 'ctl', label: 'Fitness (CTL)', varName: '--app-accent-sky' },
+  // Colour roles: you (fitness) are teal, behind (fatigue) is ember, and form
+  // is neutral — it is a balance of the other two, not a third thing.
+  { key: 'ctl', label: 'Fitness (CTL)', varName: '--app-accent-primary' },
   { key: 'atl', label: 'Fatigue (ATL)', varName: '--app-accent-ember' },
-  { key: 'tsb', label: 'Form (TSB)', varName: '--app-accent-primary' },
+  { key: 'tsb', label: 'Form (TSB)', varName: '--ui-text-muted' },
 ]
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -279,8 +288,7 @@ const ariaLabel = computed(() => {
           :y="productiveBand.y"
           :width="WIDTH"
           :height="productiveBand.height"
-          style="fill: var(--ui-success)"
-          opacity="0.12"
+          :style="{ fill: PRODUCTIVE_TINT }"
         />
         <rect
           v-if="highRiskBand"
@@ -288,8 +296,7 @@ const ariaLabel = computed(() => {
           :y="highRiskBand.y"
           :width="WIDTH"
           :height="highRiskBand.height"
-          style="fill: var(--ui-error)"
-          opacity="0.1"
+          :style="{ fill: HIGH_RISK_TINT }"
         />
         <rect
           v-if="raceBand"
@@ -331,7 +338,7 @@ const ariaLabel = computed(() => {
           :y="HEIGHT - 1"
           font-size="9"
           text-anchor="middle"
-          class="fill-muted"
+          style="fill: var(--ui-text-muted)"
         >
           {{ t.label }}
         </text>
@@ -411,7 +418,7 @@ const ariaLabel = computed(() => {
           {{ formatReadoutDate(crosshairSnapshot.date) }}
           <span v-if="crosshairSnapshot.projected" class="text-muted font-normal">· Projected</span>
         </p>
-        <p class="font-mono tabular-nums text-muted">
+        <p class="tabular-nums text-muted">
           CTL {{ Math.round(crosshairSnapshot.ctl) }} · ATL {{ Math.round(crosshairSnapshot.atl) }} · TSB
           {{ Math.round(crosshairSnapshot.tsb) }}
         </p>
@@ -424,11 +431,11 @@ const ariaLabel = computed(() => {
         {{ s.label }}
       </span>
       <span class="flex items-center gap-1.5">
-        <span class="size-2 rounded-full" style="background: var(--ui-success); opacity: 0.5" />
+        <span class="size-2 rounded-full" aria-hidden="true" :style="{ background: PRODUCTIVE_SWATCH }" />
         Productive (TSB −30…−10)
       </span>
       <span class="flex items-center gap-1.5">
-        <span class="size-2 rounded-full" style="background: var(--ui-error); opacity: 0.5" />
+        <span class="size-2 rounded-full" aria-hidden="true" :style="{ background: HIGH_RISK_SWATCH }" />
         High risk (TSB &lt; −30)
       </span>
       <template v-if="hasFuture">

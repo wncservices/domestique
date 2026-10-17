@@ -170,7 +170,7 @@ async function deleteSelected() {
               {{ (route.distanceM / 1000).toFixed(1) }} km
               · {{ Math.round(route.ascentM) }} m
               · {{ pushSummary(route) }}
-              <span class="font-mono text-xs text-dimmed">· {{ route.slug }}</span>
+              <span class="tabular-nums text-xs text-dimmed">· {{ route.slug }}</span>
             </span>
             <UBadge v-if="!toDelete.has(route.slug)" color="success" variant="subtle" size="sm">keep</UBadge>
           </label>

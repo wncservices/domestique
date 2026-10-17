@@ -171,7 +171,7 @@ async function apply() {
           </ul>
 
           <section v-if="preview.diff.leftAlone.length > 0" class="flex flex-col gap-2">
-            <h3 class="text-[0.7rem] uppercase tracking-wide text-dimmed">Left alone</h3>
+            <h3 class="text-[length:var(--text-label)] text-muted">Left alone</h3>
             <ul class="flex flex-col gap-1">
               <li v-for="n in preview.diff.leftAlone" :key="n.workoutId" class="flex items-start gap-2 text-xs text-muted">
                 <UIcon name="i-lucide-shield-check" class="mt-0.5 size-3.5 shrink-0" />

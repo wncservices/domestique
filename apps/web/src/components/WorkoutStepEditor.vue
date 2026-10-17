@@ -287,7 +287,7 @@ function addCooldown() {
                 placeholder="mm:ss"
                 :color="durationInvalid[index] ? 'error' : undefined"
                 :highlight="durationInvalid[index]"
-                class="w-full sm:w-24 font-mono tabular-nums"
+                class="w-full sm:w-24 tabular-nums"
                 @update:model-value="(v: string | number) => onDurationInput(index, v)"
                 @blur="commitDuration(index)"
                 @keydown.enter.prevent="commitDuration(index)"
@@ -341,7 +341,7 @@ function addCooldown() {
                   class="w-full sm:w-24"
                   @update:model-value="(v: string | number) => setTarget(index, step, 'targetHigh', v, thresholdFor(step.target, profile ?? {}))"
                 />
-                <span v-if="otherUnitHint(index, step, thresholdFor(step.target, profile ?? {}))" class="text-xs text-muted font-mono tabular-nums">
+                <span v-if="otherUnitHint(index, step, thresholdFor(step.target, profile ?? {}))" class="text-xs text-muted tabular-nums">
                   {{ otherUnitHint(index, step, thresholdFor(step.target, profile ?? {})) }}
                 </span>
               </template>

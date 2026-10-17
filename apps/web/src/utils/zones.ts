@@ -1,4 +1,4 @@
-// Shared zone labels, level formatting and per-zone-family accent — used by
+// Shared zone labels, level formatting and zone colour — used by
 // ProgressionCard.vue, ZoneLevelBadge.vue and WeekStrip/TodayCard wherever a
 // workout's zone/level is shown, so all three read the same vocabulary
 // rather than three independently-spelled copies. Mirrors
@@ -32,25 +32,36 @@ export function formatLevel(level: number): string {
   return level.toFixed(1)
 }
 
-// Categorical accent per zone *family*, from the app's four-accent set
-// (docs/design-system.md's "Categorical accents") — 'primary' is deliberately
-// left out here since it means the brand/interactive colour, not "just
-// another category" (see that doc's own warning). Grouped by training
-// character rather than one accent per zone, since there are six zones and
-// only three spare accents: tempo/sweet_spot are both sub-threshold sustained
-// work, threshold/vo2max are the two "how much aerobic power" zones, and
-// anaerobic/intervals are the top-end/neuromuscular pair.
-const ZONE_ACCENT: Record<string, 'ember' | 'sky' | 'violet'> = {
-  tempo: 'sky',
-  sweet_spot: 'sky',
-  threshold: 'ember',
-  vo2max: 'ember',
-  anaerobic: 'violet',
-  intervals: 'violet',
+// Zones in effort order, easiest to hardest. The zone scale in styles.css
+// (--color-zone-*) runs cool to warm in the same order.
+export const ZONE_ORDER: readonly string[] = [
+  'recovery',
+  'endurance',
+  'tempo',
+  'sweet_spot',
+  'threshold',
+  'vo2max',
+  'anaerobic',
+]
+
+/** The CSS variable holding a zone's colour. `intervals` is the legacy name
+ *  for top-end work and shares anaerobic's colour; an unrecognised zone gets
+ *  endurance's rather than nothing, since this is decoration, not a signal
+ *  anything depends on. */
+export function zoneColorVar(zone: string): string {
+  const id = zone === 'intervals' ? 'anaerobic' : ZONE_ORDER.includes(zone) ? zone : 'endurance'
+  return `var(--color-zone-${id})`
 }
 
-/** Falls back to 'sky' for an unrecognised zone — better a plausible colour
- *  than none, and this is decoration, not a signal anything depends on. */
-export function zoneAccent(zone: string): 'ember' | 'sky' | 'violet' {
-  return ZONE_ACCENT[zone] ?? 'sky'
+/** The zone a relative effort falls in, as a fraction of threshold (1.0 is
+ *  threshold itself). The upper edges are the usual Coggan power zones; the
+ *  workout profile uses this to colour a step it knows only by its level. */
+export function zoneForLevel(level: number): string {
+  if (level <= 0.55) return 'recovery'
+  if (level <= 0.75) return 'endurance'
+  if (level <= 0.87) return 'tempo'
+  if (level <= 0.94) return 'sweet_spot'
+  if (level <= 1.05) return 'threshold'
+  if (level <= 1.2) return 'vo2max'
+  return 'anaerobic'
 }

@@ -43,7 +43,7 @@ function difficultyLabel(difficulty: string): string {
           <span class="font-medium text-highlighted">{{ p.name }}</span>
           <UBadge v-if="p.id === recommended" color="primary" variant="subtle" size="sm">Recommended</UBadge>
         </span>
-        <span class="font-mono tabular-nums text-xs text-muted">~{{ p.durationMinutes }} min · {{ difficultyLabel(p.difficulty) }}</span>
+        <span class="tabular-nums text-xs text-muted">~{{ p.durationMinutes }} min · {{ difficultyLabel(p.difficulty) }}</span>
         <span class="text-xs text-toned">FTP = {{ p.formula }}</span>
         <span class="flex items-center gap-1 text-xs text-muted">
           <UIcon name="i-lucide-bike" class="size-3.5 shrink-0" />

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-// Half of what was one TrainingPage.vue, split so a rider can jump straight
+// Half of what was one training page, split so a rider can jump straight
 // to "what's my fitness / what should I enter" without scrolling past goals
-// and workouts first. See TrainingPage.vue's own doc comment for the phase
-// history this and TrainingPlanPage.vue split apart; this half owns the
+// and workouts first. See docs/training-plan.md for the phase history; this half owns the
 // synced fitness history (Phase B1) and the rider's own profile (FTP,
 // thresholds, availability — Phase E's free-text suggestion on top of it).
-import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
@@ -14,6 +13,9 @@ import type { SeasonReview as SeasonReviewData, BestEffortsResponse, DailyWellne
 import BestEffortsCard from '@/components/fitness/BestEffortsCard.vue'
 import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
+import AppPage from '@/components/ui/AppPage.vue'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import MorningSummaryCard from '@/components/fitness/MorningSummaryCard.vue'
 import PowerCurveChart from '@/components/fitness/PowerCurveChart.vue'
@@ -47,6 +49,7 @@ const TABS: { label: string; value: Tab; icon: string }[] = [
   { label: 'Fitness', value: 'fitness', icon: 'i-lucide-activity' },
   { label: 'Season', value: 'season', icon: 'i-lucide-calendar-range' },
 ]
+// replace: arrow keys activate a tab, and each press must not add a history entry.
 const tab = computed<Tab>({
   get: () => (route.query.tab === 'season' ? 'season' : 'fitness'),
   set: (value) => {
@@ -485,21 +488,60 @@ async function onImported() {
   if (!dirty.value) await loadProfile()
 }
 
+// Deep links into this page: Today sends a rider with no FTP to #profile,
+// Settings sends one to #morning-summary. The cards above load after mount and
+// move the target, and the morning summary card only renders once its own
+// status has loaded, so: scroll at once if the target is there, again once the
+// loads have settled, and wait briefly for a target that is not rendered yet.
+// A rider who scrolls in the meantime is left where they are.
+const hashTargets = ['#profile', '#morning-summary']
+
+function whenRendered(id: string, timeoutMs: number): Promise<HTMLElement | null> {
+  const found = document.getElementById(id)
+  if (found) return Promise.resolve(found)
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      const el = document.getElementById(id)
+      if (el) { observer.disconnect(); clearTimeout(timer); resolve(el) }
+    })
+    const timer = setTimeout(() => { observer.disconnect(); resolve(null) }, timeoutMs)
+    observer.observe(document.body, { childList: true, subtree: true })
+  })
+}
+
+async function scrollToHash(loads: Promise<unknown>[]) {
+  if (!hashTargets.includes(route.hash)) return
+  const id = route.hash.slice(1)
+  const jump = () => document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  await nextTick()
+  jump()
+  const startY = window.scrollY
+  await Promise.allSettled(loads)
+  await nextTick()
+  const el = await whenRendered(id, 3000)
+  if (el && Math.abs(window.scrollY - startY) < 2) jump()
+}
+
 onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
-  loadProfile()
-  loadFitness()
-  loadProjection()
-  loadProgression()
-  loadReadiness()
-  loadThresholdSuggestions()
-  loadBestEfforts(true)
+  // Always started, hash or not; scrollToHash only decides whether to wait on them.
+  scrollToHash([
+    loadProfile(),
+    loadFitness(),
+    loadProjection(),
+    loadProgression(),
+    loadReadiness(),
+    loadThresholdSuggestions(),
+    loadBestEfforts(true),
+  ])
 })
 </script>
 
 <template>
-  <div class="flex flex-col gap-6" :class="{ 'pb-20': dirty }">
-    <UTabs v-model="tab" :items="TABS" :content="false" data-no-print aria-label="Fitness page sections" />
+  <AppPage title="Fitness" subtitle="How your training is adding up." :class="{ 'pb-20': dirty }">
+    <template #actions>
+      <SegmentedControl v-model="tab" :items="TABS" label="Fitness views" data-no-print />
+    </template>
 
     <section v-if="tab === 'season'" class="flex flex-col gap-4" aria-label="Season review">
       <div class="flex flex-wrap items-center justify-between gap-2">
@@ -512,96 +554,111 @@ onMounted(() => {
           <UButton icon="i-lucide-printer" color="neutral" variant="outline" aria-label="Print this review" :disabled="!season" @click="printSeason" />
         </div>
       </div>
-      <p v-if="loadingSeason && !season" class="text-sm text-muted py-6 text-center">Loading your season…</p>
-      <p v-else-if="seasonFailed && !season" class="text-sm text-muted py-6 text-center">The review could not be loaded.</p>
+      <SkeletonCard v-if="loadingSeason && !season" :lines="5" label="Loading your season…" />
+      <UAlert
+        v-else-if="seasonFailed && !season"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        title="The review could not be loaded."
+        :actions="[{ label: 'Try again', color: 'error', variant: 'subtle', onClick: () => loadSeason() }]"
+      />
       <SeasonReview v-else-if="season" :review="season" />
     </section>
 
     <template v-if="tab === 'fitness'">
-    <ThresholdSuggestions
-      :suggestions="thresholdSuggestions"
-      @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
-    />
-
-    <FitnessStatusCard
-      :fitness="fitness"
-      :loading="loadingFitness"
-      :syncing="syncingMetrics"
-      :needs-setup="needsSetup"
-      @sync="syncMetrics"
-    />
-
-    <RaceDayCard :projection="projection" />
-
-    <ProgressionCard :levels="progressionLevels" :history="progressionHistory" />
-
-    <RecoveryCard :days="recoveryDays" />
-
-    <UCard v-if="hasFitnessHistory" variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Fitness, fatigue and form</h2>
-      </template>
-      <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
-    </UCard>
-
-    <BestEffortsCard :data="bestEfforts" :loading="loadingEfforts" :sport="effortSport" @update:sport="onEffortSport" @open-ride="openRide" />
-
-    <UCard v-if="effortSport === 'cycling' && hasCurve" variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Power curve</h2>
-      </template>
-      <PowerCurveChart :curve="bestEfforts!.curve" />
-    </UCard>
-
-    <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Recent rides</h2>
-      </template>
-      <RecentRides ref="recentRides" :sessions="fitness.sessions" />
-    </UCard>
-
-    <RideImportCard @done="onImported" />
-
-    <TrainingZones
-      :profile="profile"
-      :building-ftp-test="buildingFTPTest"
-      :building-max-hr-test="buildingMaxHRTest"
-      @build-ftp-test="buildFTPTest"
-      @build-max-hr-test="buildMaxHRTest"
-    />
-
-    <CalendarFeedCard />
-
-    <MorningSummaryCard />
-
-    <UCard variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Your fitness profile</h2>
-      </template>
-      <p class="text-sm text-muted mb-4">
-        Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can
-        tell us is filled in for you and marked <UBadge color="info" variant="subtle" size="sm">auto-filled</UBadge> —
-        check it, and press Save to confirm. Anything you type yourself is never overwritten.
-      </p>
-      <ProfileForm
-        v-model:note="profileNote"
-        :profile="profile"
-        :detected="lastDetected"
-        :narration-enabled="!!me?.narrationEnabled"
-        :can-sync-garmin="canSyncGarmin"
-        :proposing="proposingProfileChange"
-        :explanation="proposalExplanation"
-        :building-ftp-test="buildingFTPTest"
-        :building-max-hr-test="buildingMaxHRTest"
-        @update:profile="(p: RiderProfile) => (profile = p)"
-        @propose="proposeProfileChange"
-        @build-ftp-test="buildFTPTest"
-        @build-max-hr-test="buildMaxHRTest"
+      <FitnessStatusCard
+        :fitness="fitness"
+        :loading="loadingFitness"
+        :syncing="syncingMetrics"
+        :needs-setup="needsSetup"
+        @sync="syncMetrics"
       />
-    </UCard>
 
+      <ThresholdSuggestions
+        :suggestions="thresholdSuggestions"
+        @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
+      />
+
+      <RaceDayCard :projection="projection" />
+
+      <UCard v-if="hasFitnessHistory" variant="outline">
+        <template #header>
+          <h2 class="text-lg font-semibold">Fitness, fatigue and form</h2>
+        </template>
+        <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
+      </UCard>
+
+      <ProgressionCard :levels="progressionLevels" :history="progressionHistory" />
+
+      <BestEffortsCard :data="bestEfforts" :loading="loadingEfforts" :sport="effortSport" @update:sport="onEffortSport" @open-ride="openRide" />
+
+      <UCard v-if="effortSport === 'cycling' && hasCurve" variant="outline">
+        <template #header>
+          <h2 class="text-lg font-semibold">Power curve</h2>
+        </template>
+        <PowerCurveChart :curve="bestEfforts!.curve" />
+      </UCard>
+
+      <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
+        <template #header>
+          <h2 class="text-lg font-semibold">Recent rides</h2>
+        </template>
+        <RecentRides ref="recentRides" :sessions="fitness.sessions" />
+      </UCard>
+
+      <!-- Everything you set up once and then leave alone. Each card is unchanged;
+           only its place on the page moved. -->
+      <section class="flex flex-col gap-6" aria-labelledby="data-devices-heading">
+        <div>
+          <h2 id="data-devices-heading" class="font-display text-[length:var(--text-lead)] text-highlighted">Data and devices</h2>
+          <p class="mt-1 text-sm text-muted">Recovery, your profile, calendar and morning feeds, and ride imports.</p>
+        </div>
+
+        <RecoveryCard :days="recoveryDays" />
+
+        <UCard id="profile" class="scroll-mt-20" variant="outline">
+          <template #header>
+            <h3 class="text-lg font-semibold">Your fitness profile</h3>
+          </template>
+          <p class="text-sm text-muted mb-4">
+            Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can
+            tell us is filled in for you and marked <UBadge color="info" variant="subtle" size="sm">auto-filled</UBadge> —
+            check it, and press Save to confirm. Anything you type yourself is never overwritten.
+          </p>
+          <ProfileForm
+            v-model:note="profileNote"
+            :profile="profile"
+            :detected="lastDetected"
+            :narration-enabled="!!me?.narrationEnabled"
+            :can-sync-garmin="canSyncGarmin"
+            :proposing="proposingProfileChange"
+            :explanation="proposalExplanation"
+            :building-ftp-test="buildingFTPTest"
+            :building-max-hr-test="buildingMaxHRTest"
+            @update:profile="(p: RiderProfile) => (profile = p)"
+            @propose="proposeProfileChange"
+            @build-ftp-test="buildFTPTest"
+            @build-max-hr-test="buildMaxHRTest"
+          />
+        </UCard>
+
+        <TrainingZones
+          :profile="profile"
+          :building-ftp-test="buildingFTPTest"
+          :building-max-hr-test="buildingMaxHRTest"
+          @build-ftp-test="buildFTPTest"
+          @build-max-hr-test="buildMaxHRTest"
+        />
+
+        <CalendarFeedCard />
+
+        <MorningSummaryCard />
+
+        <RideImportCard @done="onImported" />
+      </section>
     </template>
 
     <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
-  </div>
+  </AppPage>
 </template>

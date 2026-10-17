@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import ColorModeToggle from '@/components/ColorModeToggle.vue'
+import StatTile from '@/components/ui/StatTile.vue'
+import { zoneColorVar } from '@/utils/zones'
 
 // Where the app lives. Built in, so a self-hoster changes it in one place —
 // this page cannot discover its own deployment's domain at runtime.
@@ -101,6 +103,19 @@ const trainingFeatures = [
   },
 ]
 
+// Made-up values, on purpose: the hero card below is an illustration of the
+// Today page, not a call to it. The landing bundle must stay free of the API
+// client (and so of anything that fetches), and a visitor has no data anyway.
+const sampleWeek = [
+  { day: 'Mon', zone: 'endurance', text: '1h 30m', today: true },
+  { day: 'Tue', zone: 'threshold', text: '1h 10m' },
+  { day: 'Wed', zone: '', text: 'Rest' },
+  { day: 'Thu', zone: 'sweet_spot', text: '1h 15m' },
+  { day: 'Fri', zone: 'recovery', text: '45m' },
+  { day: 'Sat', zone: 'tempo', text: '2h' },
+  { day: 'Sun', zone: 'endurance', text: '2h 30m' },
+]
+
 const sections = [
   { id: 'routes', title: 'Routes', lead: 'One library for the whole crew, on every device.', features: routeFeatures },
   { id: 'training', title: 'Training', lead: 'A coach that reads every ride and adjusts the next one.', features: trainingFeatures },
@@ -131,14 +146,15 @@ const sections = [
     </div>
 
     <UContainer class="max-w-5xl">
-      <section class="py-16 sm:py-24">
+      <section class="grid items-center gap-10 py-16 sm:py-24 lg:grid-cols-2">
+        <div>
         <h1
-          class="font-display max-w-2xl text-4xl font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-6xl"
+          class="font-display max-w-2xl text-[length:var(--text-hero)] font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-5xl"
         >
           Your routes. Your training.<br />Every head unit.
         </h1>
 
-        <p class="mt-6 max-w-xl text-lg text-muted">
+        <p class="mt-6 max-w-xl text-[length:var(--text-lead)] text-muted">
           You ride a Garmin, your mate rides a Wahoo. Add a route once and it turns up on
           both. Training for something? Domestique builds the plan, reads every ride and
           adjusts what comes next.
@@ -160,13 +176,57 @@ const sections = [
           </UButton>
         </div>
 
-        <p class="mt-4 text-sm text-dimmed">
+        <p class="mt-4 text-[length:var(--text-body)] text-dimmed">
           Free to sign up — bring your own Garmin, Wahoo, or Komoot account.
         </p>
+        </div>
+
+        <!-- An illustration, hidden from assistive tech so the invented name
+             and numbers are never read out as someone's real day. -->
+        <div class="flex flex-col gap-3" aria-hidden="true" data-testid="landing-today-sample">
+          <UCard variant="outline">
+            <div class="flex flex-col gap-3">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-[length:var(--text-label)] font-medium text-muted">Good morning, Alex</span>
+                <UBadge color="primary" variant="subtle" icon="i-lucide-battery-full">Ready</UBadge>
+              </div>
+              <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+                <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">Endurance ride</h2>
+                <div class="font-display text-[length:var(--text-hero)] leading-none text-highlighted tabular-nums">1h 30m</div>
+              </div>
+              <p class="text-[length:var(--text-body)] text-muted">
+                Steady and easy today. Keep it conversational and save the legs for Tuesday.
+              </p>
+            </div>
+          </UCard>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <StatTile label="Form" value="+6" caption="Fresh" tone="good" />
+            <StatTile label="Spring Classic" value="83 days" caption="to go" />
+          </div>
+
+          <UCard variant="outline">
+            <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted">This week</h2>
+            <ol class="mt-3 grid grid-cols-7 gap-1.5">
+              <li v-for="d in sampleWeek" :key="d.day" class="min-w-0 text-center">
+                <div class="text-[length:var(--text-label)]" :class="d.today ? 'font-semibold text-primary' : 'text-muted'">{{ d.day }}</div>
+                <div
+                  class="mt-1 overflow-hidden rounded-md border border-default bg-elevated/50"
+                  :class="d.today ? 'outline-2 outline-offset-1 outline-primary' : ''"
+                >
+                  <div class="h-1.5" :class="d.zone ? '' : 'bg-transparent'" :style="d.zone ? { background: zoneColorVar(d.zone) } : undefined" />
+                  <div class="flex min-h-8 items-center justify-center px-0.5 py-1 text-[length:var(--text-label)] tabular-nums text-highlighted">
+                    <span class="truncate">{{ d.text }}</span>
+                  </div>
+                </div>
+              </li>
+            </ol>
+          </UCard>
+        </div>
       </section>
 
       <section v-for="section in sections" :key="section.id" class="pb-16" :aria-labelledby="`section-${section.id}`">
-        <h2 :id="`section-${section.id}`" class="font-display text-2xl font-semibold tracking-tight text-highlighted">
+        <h2 :id="`section-${section.id}`" class="font-display text-[length:var(--text-title)] font-semibold tracking-tight text-highlighted">
           {{ section.title }}
         </h2>
         <p class="mt-1 text-muted">{{ section.lead }}</p>
@@ -183,12 +243,12 @@ const sections = [
               <UIcon :name="feature.icon" class="size-5" />
             </span>
             <h3 class="mt-3 font-medium text-highlighted">{{ feature.title }}</h3>
-            <p class="mt-1 text-sm text-muted">{{ feature.body }}</p>
+            <p class="mt-1 text-[length:var(--text-body)] text-muted">{{ feature.body }}</p>
           </div>
         </div>
       </section>
 
-      <footer class="border-t border-default py-6 text-xs text-dimmed">
+      <footer class="border-t border-default py-6 text-[length:var(--text-label)] text-dimmed">
         <a
           href="https://github.com/wncservices/domestique"
           target="_blank"

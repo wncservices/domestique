@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The workout builder, moved from TrainingPlanPage.vue's UModal into a
+// The workout builder, moved from PlanPage.vue's UModal into a
 // USlideover (design's "Goal and workout forms move from UModal to
 // USlideover") with a live interval-profile chart at the top, per the design
 // doc's "Workout builder" section. The page still owns workoutForm/saveWorkout;
@@ -58,10 +58,10 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
                placeholder; a duration/step-count line under that would read
                as "— · 0 steps", so it only appears once there's something to
                summarize. -->
-          <p v-if="totalSeconds > 0" class="text-xs font-mono tabular-nums text-muted">
+          <p v-if="totalSeconds > 0" class="text-xs tabular-nums text-muted">
             {{ formatDuration(totalSeconds) }} · {{ form.steps.length }} step{{ form.steps.length === 1 ? '' : 's' }}
           </p>
-          <p v-else-if="form.steps.length > 0" class="text-xs font-mono tabular-nums text-muted">
+          <p v-else-if="form.steps.length > 0" class="text-xs tabular-nums text-muted">
             {{ form.steps.length }} step{{ form.steps.length === 1 ? '' : 's' }}
           </p>
         </div>

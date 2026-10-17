@@ -2,9 +2,9 @@ import { computed, ref, watch, type Ref } from 'vue'
 
 /**
  * Client-side pagination over an already-fetched list — the same pattern
- * LibraryPage.vue built for itself before this existed, extracted so a page
+ * RoutesPage.vue built for itself before this existed, extracted so a page
  * with nothing to filter (CrewsPage, PeoplePage) doesn't have to reinvent
- * it. Not used by LibraryPage itself: its own page-reset-on-search-or-filter
+ * it. Not used by RoutesPage itself: its own page-reset-on-search-or-filter
  * behavior is a different, slightly stricter semantic (reset to page 1 on
  * any filter change, not just when the current page becomes invalid) that
  * this was not worth complicating the shared API to also cover.

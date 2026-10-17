@@ -14,11 +14,16 @@ import { formatDuration } from '@/utils/workoutMath'
 import DifficultyChip from './DifficultyChip.vue'
 import { describeError } from '@/utils/errorMessage'
 
-const props = defineProps<{
-  workout: Workout
-  // False for a day that is ridden or past: nothing to ask the server then.
-  canOffer: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    workout: Workout
+    // False for a day that is ridden or past: nothing to ask the server then.
+    canOffer: boolean
+    // The Today page calls this action "Swap"; the Plan page keeps the default.
+    label?: string
+  }>(),
+  { label: 'Alternates' },
+)
 
 const emit = defineEmits<{ changed: [] }>()
 
@@ -161,10 +166,10 @@ const items = computed(() => {
 
 <template>
   <UDropdownMenu v-if="visible" :items="items" :content="{ align: 'start' }" :ui="{ content: 'min-w-64' }">
-    <UButton color="neutral" variant="outline" icon="i-lucide-shuffle" :loading="busy">Alternates</UButton>
+    <UButton color="neutral" variant="outline" icon="i-lucide-shuffle" :loading="busy">{{ label }}</UButton>
 
     <template #option-description="{ item }">
-      <span class="font-mono tabular-nums">{{ item.description }}</span>
+      <span class="tabular-nums">{{ item.description }}</span>
       <span v-if="item.option?.warning" class="mt-0.5 flex items-center gap-1 text-warning">
         <UIcon name="i-lucide-triangle-alert" class="size-3 shrink-0" />
         {{ item.option.warning }}

@@ -63,10 +63,10 @@ onMounted(load)
 <template>
   <UCard v-if="available && routingConfigured && !loading" variant="outline">
     <template #header>
-      <h2 class="flex items-center gap-2 font-medium text-highlighted">
+      <h3 class="flex items-center gap-2 font-medium text-highlighted">
         <UIcon name="i-lucide-map-pin" />
         Where do your rides start?
-      </h2>
+      </h3>
       <p class="text-sm text-muted">Used to make a route for a planned ride. Your own, for this account only.</p>
     </template>
 

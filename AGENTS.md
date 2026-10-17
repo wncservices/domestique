@@ -675,8 +675,10 @@ Design: `docs/superpowers/specs/2026-09-29-season-review-design.md`.
 section the API omits is not drawn, elevation reads n/a (`ascentText`), and the
 reserved `projectedCtl` is never rendered. Printing is the browser's own dialog
 from a button (`window.print()` in a click handler: the CSP forbids inline
-script); `@media print` in `styles.css` hides the header, tabs and anything with
-`data-no-print`.
+script); `@media print` in `styles.css` hides the shell's sidebar `<aside>` and phone header (`.app-header`), every `<nav>` (the
+phone tab bar, the tab lists) and anything with `data-no-print`, and drops the content
+wrapper's rail padding (`print:pl-0 print:pb-0`). AppPage's own `<header>` (the page's h1)
+still prints, which is why the header rule is a class and not a bare `header`.
 
 ## Fixed-time metrics sync
 
@@ -1421,7 +1423,7 @@ personal location and health data, so:
   - `src/color-mode.ts` puts the `dark` class on `<html>` from the OS preference. Outside Nuxt
     nothing does this for you, and without it the app is permanently light.
   - `App.vue` must stay wrapped in `<UApp>` — toasts, tooltips and modals need it.
-  - `vue-router` routes the app's pages (`src/main.ts` lists them; `src/pages/` holds
+  - `vue-router` routes the app's pages (`src/router.ts` lists them; `src/pages/` holds
     them) and is also what Nuxt UI's link components import. Pages are lazy-loaded; keep it that way.
 - The frontend has `maplibre-gl`, used by the interactive maps (`RouteMap.vue`, `RouteBuilderMap.vue`)
   and only ever loaded via dynamic `import()` (top-level imports are `import type` only) — never a top-level import, so it stays out of the `main`
@@ -1434,7 +1436,7 @@ personal location and health data, so:
   public CDN — those aren't location-sensitive (identical for every request, no route coordinates
   in them), so self-hosting them would add nothing.
 - A library route's full geometry reaches the frontend via `GET /api/tracks/{slug}`
-  (`handleTrack`/`api.track`); `TrackPreview.vue`, `RouteDetailModal.vue` and `LibraryPage.vue`'s
+  (`handleTrack`/`api.track`); `TrackPreview.vue`, `RouteDetailModal.vue` and `RoutesPage.vue`'s
   map view call it. The other geometry endpoints are special cases with their own reason:
   `/api/track-preview/{slug}` and `/api/track-preview-image/{slug}` (cached thumbnails),
   `/api/shares/{token}/track` (a share link's recipient) and `/api/routebuilder/preview` (a route

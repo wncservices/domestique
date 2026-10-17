@@ -7,13 +7,10 @@
  * falls back to the system font, which is invisible in review and only
  * shows up as "the redesign doesn't look like the mockup" in the field.
  * Variable-font packages for the two faces that have one (covers every
- * weight used with a single file); IBM Plex Mono ships no variable build,
- * so only the specific static weights actually used are pulled in. */
+ * weight used with a single file). There is no monospace face: numbers use
+ * tabular-nums in the body font. */
 @import "@fontsource-variable/bricolage-grotesque";
 @import "@fontsource-variable/plus-jakarta-sans";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
-@import "@fontsource/ibm-plex-mono/600.css";
 
 /* Domestique's palette, layered over Nuxt UI's design tokens.
  *
@@ -97,10 +94,10 @@
   --color-violet-950: #24144a;
 
   /* Bricolage for the brand wordmark and page h1s only; Plus Jakarta Sans is
-   * the body default (set on body below, not per-element); Plex Mono is for
-   * anything tabular — distances, ascent, counts, ids. Declaring these here
-   * (Tailwind v4's `--font-*` namespace) is what makes `font-display` /
-   * `font-mono` work as utility classes; `--font-sans` also becomes the
+   * the body default (set on body below, not per-element). Numbers use
+   * `tabular-nums` in that face. Declaring these here
+   * (Tailwind v4's `--font-*` namespace) is what makes `font-display` work
+   * as a utility class; `--font-sans` also becomes the
    * `font-sans` utility, but body already opts every element in by default.
    *
    * The first name in each stack is " Variable" — @fontsource-variable's own
@@ -111,7 +108,34 @@
    * just moved one step earlier. */
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Type scale: five roles. 13px and 20px are reached through text-[13px] and
+   * text-xl, so they need no token. */
+  --text-label: 0.75rem;
+  --text-body: 0.875rem;
+  --text-lead: 1rem;
+  --text-title: 1.5rem;
+  --text-hero: 2rem;
+
+  --radius-card: 1rem;
+
+  /* Zone scale: effort only, cool to warm. Light values hold 3:1 against a
+   * white card; the .dark block below holds 3:1 against the dark card. */
+  --color-zone-recovery: #5f8a84;
+  --color-zone-endurance: var(--color-sky-600);
+  --color-zone-tempo: var(--color-violet-600);
+  --color-zone-sweet_spot: #b0409a;
+  --color-zone-threshold: var(--color-ember-600);
+  --color-zone-vo2max: var(--color-ember-700);
+  --color-zone-anaerobic: #8f1f10;
+
+  /* Phase scale: a quiet neutral-to-teal ramp, deliberately unlike the zones.
+   * Every step holds 3:1 against a white card, which is why taper is a muted
+   * teal rather than the pale tint the ramp's shape suggests. */
+  --color-phase-base: var(--color-neutral-500);
+  --color-phase-build: var(--color-primary-700);
+  --color-phase-peak: var(--color-primary-900);
+  --color-phase-taper: #4f9d92;
 }
 
 :root {
@@ -124,7 +148,8 @@
    * independent, so it lives once here rather than in both `:root`/`.dark`. */
   --ui-radius: 0.5rem;
 
-  --ui-primary: var(--color-primary-600);
+  /* Primary actions: 700 on white is 5.5:1; 600 was 3.9:1. */
+  --ui-primary: var(--color-primary-700);
 
   /* Light mode is a tinted page with white cards, rather than white on white
    * — the old flat-white version gave a card no edge of its own, so a dozen
@@ -159,7 +184,9 @@
    * a literal shade class, so nothing needs a `dark:` variant of its own. */
   --app-accent-primary: var(--ui-primary);
   --app-accent-primary-soft: var(--color-primary-100);
-  --app-accent-ember: var(--color-ember-600);
+  /* ember-700, not 600: this is also the ember used as text, and 600 is
+   * 3.74:1 on white where 700 is 5.35:1. */
+  --app-accent-ember: var(--color-ember-700);
   --app-accent-ember-soft: var(--color-ember-100);
   --app-accent-sky: var(--color-sky-600);
   --app-accent-sky-soft: var(--color-sky-100);
@@ -172,6 +199,21 @@
    * white is close to invisible on a dark surface. Same reasoning applies to
    * every categorical accent below — each swaps to its own 400 step. */
   --ui-primary: var(--color-primary-400);
+  /* Text on a primary button: near-black teal, not the neutral default. */
+  --ui-text-inverted: var(--color-primary-950);
+
+  --color-zone-recovery: #7fa8a1;
+  --color-zone-endurance: var(--color-sky-400);
+  --color-zone-tempo: var(--color-violet-400);
+  --color-zone-sweet_spot: #e070c0;
+  --color-zone-threshold: var(--color-ember-400);
+  --color-zone-vo2max: var(--color-ember-500);
+  --color-zone-anaerobic: #ff4d3a;
+
+  --color-phase-base: var(--color-neutral-500);
+  --color-phase-build: var(--color-primary-700);
+  --color-phase-peak: var(--color-primary-300);
+  --color-phase-taper: #3f9a8c;
 
   --ui-bg: var(--color-neutral-950);
   --ui-bg-muted: var(--color-neutral-900);
@@ -209,7 +251,7 @@ body {
 .app-card {
   background-color: var(--app-card-bg);
   border: 1px solid var(--ui-border);
-  border-radius: 1rem;
+  border-radius: var(--radius-card);
   box-shadow: var(--app-card-shadow);
   transition:
     box-shadow 0.2s ease,
@@ -240,6 +282,13 @@ body {
   }
 }
 
+/* Fixed navigation chrome (sidebar, tab bar): the frosted background without
+ * .app-header's bottom border, which would draw on the wrong edge. */
+.app-chrome {
+  background-color: var(--app-header-bg);
+  backdrop-filter: blur(12px);
+}
+
 .app-header {
   background-color: var(--app-header-bg);
   backdrop-filter: blur(12px);
@@ -251,14 +300,21 @@ body {
  * so a card grid full of routes still reads as one library, the same
  * reasoning RouteMap.vue's live map already applies to itself. */
 .track-line {
-  stroke: var(--ui-primary);
+  stroke: var(--color-primary-600);
+}
+
+.dark .track-line {
+  stroke: var(--color-primary-400);
 }
 
 /* Printing the Season review (the browser's own print dialog, no script of our
    own): drop the app chrome, the tabs and the controls, and flatten the cards
-   so the page reads as a document on paper. */
+   so the page reads as a document on paper. The shell's phone header is
+   targeted by class, not a bare `header`, so AppPage's own <header> (the
+   page's h1) still prints. */
 @media print {
-  header,
+  aside,
+  .app-header,
   nav,
   [data-no-print] {
     display: none !important;

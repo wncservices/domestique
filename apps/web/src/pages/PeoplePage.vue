@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch, computed } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
+import type { DropdownMenuItem } from '@nuxt/ui'
 import { api, ApiError } from '@/api/client'
 import type { AssignableRole, Person, RiderInfo, RiderMerge } from '@/api/types'
 import { roleColor } from '@/utils/role'
 import { usePagedList } from '@/composables/usePagedList'
 import { describeError } from '@/utils/errorMessage'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import AppPage from '@/components/ui/AppPage.vue'
 
 const toast = useToast()
 
@@ -498,46 +501,74 @@ async function confirmDeletePerson() {
     deletingPerson.value = ''
   }
 }
+
+const subtitle = computed(() => {
+  if (loading.value) return 'Loading…'
+  if (unavailable.value) return 'Not available on this deployment'
+  return `${people.value.length} with access`
+})
+
+// Binding is the only non-destructive secondary action; block and delete go
+// last, in their own group. All three open the confirmation they always did.
+function personActions(person: Person): DropdownMenuItem[][] {
+  const groups: DropdownMenuItem[][] = []
+  if (person.bindingStatus) {
+    groups.push([
+      {
+        label: 'Change which rider this is',
+        icon: 'i-lucide-link',
+        description: isOwn(person)
+          ? 'Your own sign-in: only onto a rider nobody is bound to (lockout recovery)'
+          : undefined,
+        disabled: binding.value === person.id,
+        onSelect: () => openBind(person),
+      },
+    ])
+  }
+  groups.push([
+    {
+      label: person.blocked ? 'Unblock' : 'Block',
+      icon: person.blocked ? 'i-lucide-shield-check' : 'i-lucide-shield-off',
+      color: person.blocked ? undefined : 'error',
+      disabled: togglingBlocked.value === person.id,
+      onSelect: () => { blockTarget.value = person },
+    },
+    {
+      label: 'Delete',
+      icon: 'i-lucide-trash-2',
+      color: 'error',
+      disabled: deletingPerson.value === person.id,
+      onSelect: () => openDeleteConfirm(person),
+    },
+  ])
+  return groups
+}
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
-    <UCard variant="outline">
-      <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 class="flex items-center gap-2 font-medium text-highlighted">
-              <UIcon name="i-lucide-users" />
-              People
-            </h2>
-            <p class="text-sm text-muted">
-              <template v-if="loading">Loading…</template>
-              <template v-else-if="unavailable">Not available on this deployment</template>
-              <template v-else>{{ people.length }} with access</template>
-            </p>
-          </div>
-          <div class="flex gap-2">
-            <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load">
-              Refresh
-            </UButton>
-            <UButton
-              v-if="!unavailable"
-              icon="i-lucide-user-plus"
-              :disabled="loading"
-              @click="inviteOpen = true"
-            >
-              Invite
-            </UButton>
-          </div>
-        </div>
-      </template>
+  <AppPage title="People" :subtitle="subtitle">
+    <template #actions>
+      <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" :loading="loading" @click="load">
+        Refresh
+      </UButton>
+      <UButton
+        v-if="!unavailable"
+        icon="i-lucide-user-plus"
+        :disabled="loading"
+        @click="inviteOpen = true"
+      >
+        Invite
+      </UButton>
+    </template>
 
+    <UCard variant="outline">
       <UAlert
         v-if="error"
         color="error"
         variant="subtle"
         icon="i-lucide-triangle-alert"
         :description="error"
+        :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => load() }]"
         class="mb-4"
       />
 
@@ -565,11 +596,13 @@ async function confirmDeletePerson() {
         </template>
       </UAlert>
 
-      <UEmpty
+      <EmptyState
         v-if="unavailable"
+        bare
+        :heading-level="3"
         icon="i-lucide-key-round"
         title="Auth0 Management API access is not configured"
-        description="An administrator can set DOMESTIQUE_AUTH0_MGMT_CLIENT_ID and DOMESTIQUE_AUTH0_MGMT_CLIENT_SECRET to enable this page."
+        text="An administrator can set DOMESTIQUE_AUTH0_MGMT_CLIENT_ID and DOMESTIQUE_AUTH0_MGMT_CLIENT_SECRET to enable this page."
       />
 
       <template v-else-if="people.length">
@@ -628,42 +661,16 @@ async function confirmDeletePerson() {
               aria-label="Change role"
               @update:model-value="(role: AssignableRole) => changeRole(person, role)"
             />
-            <UTooltip
-              v-if="person.bindingStatus"
-              :text="isOwn(person) ? 'Your own sign-in: only onto a rider nobody is bound to (lockout recovery)' : 'Change which rider this is'"
-            >
+            <UDropdownMenu :items="personActions(person)" :content="{ align: 'end' }">
               <UButton
                 size="sm"
                 color="neutral"
                 variant="ghost"
-                icon="i-lucide-link"
-                aria-label="Change which rider this is"
-                :loading="binding === person.id"
-                @click="openBind(person)"
+                icon="i-lucide-ellipsis"
+                :aria-label="`Actions for ${person.name || person.email || person.id}`"
+                :loading="binding === person.id || togglingBlocked === person.id || deletingPerson === person.id"
               />
-            </UTooltip>
-            <UTooltip :text="person.blocked ? 'Unblock' : 'Block'">
-              <UButton
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                :icon="person.blocked ? 'i-lucide-shield-check' : 'i-lucide-shield-off'"
-                :aria-label="person.blocked ? 'Unblock' : 'Block'"
-                :loading="togglingBlocked === person.id"
-                @click="blockTarget = person"
-              />
-            </UTooltip>
-            <UTooltip text="Delete">
-              <UButton
-                size="sm"
-                color="error"
-                variant="ghost"
-                icon="i-lucide-trash-2"
-                aria-label="Delete"
-                :loading="deletingPerson === person.id"
-                @click="openDeleteConfirm(person)"
-              />
-            </UTooltip>
+            </UDropdownMenu>
             <div v-if="person.flagText || person.suggestRider" class="flex basis-full flex-col items-start gap-2">
               <p v-if="person.flagText" class="text-xs text-warning">{{ person.flagText }}</p>
               <UButton
@@ -691,11 +698,13 @@ async function confirmDeletePerson() {
         />
       </template>
 
-      <UEmpty
+      <EmptyState
         v-else-if="!loading"
+        bare
+        :heading-level="3"
         icon="i-lucide-user-x"
         title="Nobody has access yet"
-        description="Invite the first rider above."
+        text="Invite the first rider above."
       />
     </UCard>
 
@@ -874,7 +883,7 @@ async function confirmDeletePerson() {
             <p class="text-sm font-medium text-highlighted">These are dropped, and the merge cannot bring them back:</p>
             <ul class="mt-1 flex list-disc flex-col gap-1 pl-5 text-xs text-toned">
               <li v-for="(d, i) in mergePreview.dropped" :key="i">
-                <span class="font-mono text-highlighted">{{ d.table }}<template v-if="d.what"> ({{ d.what }})</template></span>:
+                <span class="tabular-nums text-highlighted">{{ d.table }}<template v-if="d.what"> ({{ d.what }})</template></span>:
                 {{ d.consequence }}
               </li>
             </ul>
@@ -897,7 +906,7 @@ async function confirmDeletePerson() {
               </thead>
               <tbody class="divide-y divide-default">
                 <tr v-for="t in mergePreview.tables" :key="t.table">
-                  <td class="p-2 font-mono">{{ t.table }}</td>
+                  <td class="p-2 tabular-nums">{{ t.table }}</td>
                   <td class="p-2 text-right">{{ t.moved }}</td>
                   <td class="p-2 text-right">{{ t.keptTarget }}</td>
                   <td class="p-2 text-right" :class="t.droppedSource ? 'text-warning' : ''">{{ t.droppedSource }}</td>
@@ -956,5 +965,5 @@ async function confirmDeletePerson() {
         </div>
       </template>
     </UModal>
-  </div>
+  </AppPage>
 </template>

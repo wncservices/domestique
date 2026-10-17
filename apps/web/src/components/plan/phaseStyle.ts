@@ -1,12 +1,9 @@
-// Categorical colours for a periodization phase — shared by WeekStrip's own
-// header chip and SeasonTimeline's bars/bands/legend, so the four phases
-// read as the same palette everywhere rather than two independently-tuned
-// colour sets. Base has no accent var (Nuxt UI's own neutral surface/text
-// carries it instead) — see docs/design-system.md's categorical-vs-semantic
-// rule for why a phase never borrows primary/success/warning/error.
+// Colours for a periodization phase — shared by WeekStrip's header chip and
+// SeasonTimeline's bars/bands/legend, so the four phases read as the same
+// palette everywhere. They come from the phase scale (--color-phase-* in
+// styles.css, see docs/design-system.md), which is deliberately a quiet
+// neutral-to-teal ramp unlike the zone scale: a phase is not an effort.
 import type { PeriodizationPhase } from '@/api/types'
-
-const phaseAccent: Partial<Record<PeriodizationPhase, string>> = { build: 'sky', peak: 'ember', taper: 'violet' }
 
 export const phaseOrder: PeriodizationPhase[] = ['base', 'build', 'peak', 'taper']
 
@@ -14,37 +11,34 @@ export function phaseLabel(phase: PeriodizationPhase, recovery?: boolean): strin
   return phase.charAt(0).toUpperCase() + phase.slice(1) + (recovery ? ' · recovery' : '')
 }
 
-/** WeekStrip's header chip: a soft-background/solid-text pill, or the
- *  neutral surface classes when there's no accent for this phase. */
+/** The phase's solid colour. */
+export function phaseColor(phase: PeriodizationPhase): string {
+  return `var(--color-phase-${phase})`
+}
+
+/** The phase colour softened over whatever is behind it. */
+function phaseTint(phase: PeriodizationPhase, percent: number): string {
+  return `color-mix(in oklab, ${phaseColor(phase)} ${percent}%, transparent)`
+}
+
+/** WeekStrip's header chip: a tinted pill with the normal text colour, since
+ *  the lightest phases would not hold contrast as text. */
 export function phaseChipStyle(phase: PeriodizationPhase): { class: string; style: Record<string, string> } {
-  const accent = phaseAccent[phase]
-  if (!accent) return { class: 'bg-elevated text-muted', style: {} }
-  return { class: '', style: { background: `var(--app-accent-${accent}-soft)`, color: `var(--app-accent-${accent})` } }
+  return { class: 'text-highlighted', style: { background: phaseTint(phase, 22) } }
 }
 
-/** SeasonTimeline's bar fill — the phase's own solid accent, or
- *  'currentColor' for base so pairing it with `phaseFillClass` (below)
- *  resolves to the muted foreground instead of a made-up neutral colour. */
+/** SeasonTimeline's bar fill. */
 export function phaseFill(phase: PeriodizationPhase): string {
-  const accent = phaseAccent[phase]
-  return accent ? `var(--app-accent-${accent})` : 'currentColor'
+  return phaseColor(phase)
 }
 
-export function phaseFillClass(phase: PeriodizationPhase): string {
-  return phaseAccent[phase] ? '' : 'text-muted'
-}
-
-/** SeasonTimeline's phase-band row: the same accent, softened, so the band
+/** SeasonTimeline's phase-band row: the same colour, softened, so the band
  *  reads as a background a bar sits on rather than competing with it. */
 export function phaseBandFill(phase: PeriodizationPhase): string {
-  const accent = phaseAccent[phase]
-  return accent ? `var(--app-accent-${accent}-soft)` : 'var(--ui-bg-elevated)'
+  return phaseTint(phase, 20)
 }
 
-/** SeasonTimeline's legend dot — an HTML element, so base needs
- *  `bg-current`/`text-muted` rather than an SVG `fill`. */
+/** SeasonTimeline's legend dot. */
 export function phaseDotStyle(phase: PeriodizationPhase): { class: string; style: Record<string, string> } {
-  const accent = phaseAccent[phase]
-  if (!accent) return { class: 'bg-current text-muted', style: {} }
-  return { class: '', style: { background: `var(--app-accent-${accent})` } }
+  return { class: '', style: { background: phaseColor(phase) } }
 }

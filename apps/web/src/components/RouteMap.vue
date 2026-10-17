@@ -36,7 +36,7 @@ let maplibregl: typeof import('maplibre-gl') | null = null
 
 // This route's own named waypoint markers — only ever drawn for a
 // single-route view (RouteDetailModal.vue): the library overview's own
-// multi-route map (LibraryPage.vue) would otherwise pile up every visible
+// multi-route map (RoutesPage.vue) would otherwise pile up every visible
 // route's markers on top of each other, which is noise, not information,
 // at that zoom level. DOM markers rather than a data-driven layer like the
 // route line itself, matching RouteBuilderMap.vue's own poi rendering —

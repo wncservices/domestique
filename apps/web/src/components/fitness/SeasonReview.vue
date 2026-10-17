@@ -38,11 +38,11 @@ const endLabel = computed(() => endLabelText(props.review))
     <UCard v-if="review.volume" variant="outline" class="print-flat">
       <template #header><h3 class="font-semibold">Volume</h3></template>
       <dl class="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
-        <div><dt class="text-xs text-muted">Rides</dt><dd class="font-mono tabular-nums text-lg">{{ review.volume.rides }}</dd></div>
-        <div><dt class="text-xs text-muted">Time</dt><dd class="font-mono tabular-nums text-lg">{{ hoursText(review.volume.seconds) }}</dd></div>
-        <div><dt class="text-xs text-muted">Distance</dt><dd class="font-mono tabular-nums text-lg">{{ km(review.volume.distanceM) }}</dd></div>
-        <div><dt class="text-xs text-muted">Elevation</dt><dd class="font-mono tabular-nums text-lg">{{ ascentText(review.volume) }}</dd></div>
-        <div><dt class="text-xs text-muted">Training load</dt><dd class="font-mono tabular-nums text-lg">{{ round(review.volume.tss) }} TSS</dd></div>
+        <div><dt class="text-xs text-muted">Rides</dt><dd class="tabular-nums text-lg">{{ review.volume.rides }}</dd></div>
+        <div><dt class="text-xs text-muted">Time</dt><dd class="tabular-nums text-lg">{{ hoursText(review.volume.seconds) }}</dd></div>
+        <div><dt class="text-xs text-muted">Distance</dt><dd class="tabular-nums text-lg">{{ km(review.volume.distanceM) }}</dd></div>
+        <div><dt class="text-xs text-muted">Elevation</dt><dd class="tabular-nums text-lg">{{ ascentText(review.volume) }}</dd></div>
+        <div><dt class="text-xs text-muted">Training load</dt><dd class="tabular-nums text-lg">{{ round(review.volume.tss) }} TSS</dd></div>
       </dl>
     </UCard>
 
@@ -51,16 +51,16 @@ const endLabel = computed(() => endLabelText(props.review))
       <dl class="grid grid-cols-3 gap-4 text-sm">
         <div>
           <dt class="text-xs text-muted">Start</dt>
-          <dd class="font-mono tabular-nums text-lg">{{ review.fitness.startCtl === undefined ? 'n/a' : round(review.fitness.startCtl) }}</dd>
+          <dd class="tabular-nums text-lg">{{ review.fitness.startCtl === undefined ? 'n/a' : round(review.fitness.startCtl) }}</dd>
         </div>
         <div>
           <dt class="text-xs text-muted">Peak</dt>
-          <dd class="font-mono tabular-nums text-lg">{{ round(review.fitness.peakCtl) }}</dd>
+          <dd class="tabular-nums text-lg">{{ round(review.fitness.peakCtl) }}</dd>
           <dd class="text-xs text-muted">{{ formatEffortDate(review.fitness.peakDate, today) }}</dd>
         </div>
         <div>
           <dt class="text-xs text-muted">{{ endLabel }}</dt>
-          <dd class="font-mono tabular-nums text-lg">{{ review.fitness.endCtl === undefined ? 'n/a' : round(review.fitness.endCtl) }}</dd>
+          <dd class="tabular-nums text-lg">{{ review.fitness.endCtl === undefined ? 'n/a' : round(review.fitness.endCtl) }}</dd>
         </div>
       </dl>
     </UCard>
@@ -68,17 +68,17 @@ const endLabel = computed(() => endLabelText(props.review))
     <UCard v-if="review.ftp" variant="outline" class="print-flat">
       <template #header><h3 class="font-semibold">FTP</h3></template>
       <p class="text-sm">
-        <span class="font-mono tabular-nums">{{ ftpStartText(review.ftp, today) }}</span>
+        <span class="tabular-nums">{{ ftpStartText(review.ftp, today) }}</span>
         <template v-if="review.ftp.endWatts !== undefined">
           <span class="text-muted"> to </span>
-          <span class="font-mono tabular-nums">{{ round(review.ftp.endWatts) }} W</span>
+          <span class="tabular-nums">{{ round(review.ftp.endWatts) }} W</span>
         </template>
         <span v-if="review.ftp.fromProfile" class="text-muted"> (your current FTP: no change was ever recorded)</span>
       </p>
       <ul v-if="review.ftp.changes.length" class="mt-3 flex flex-col gap-1 text-sm">
         <li v-for="c in review.ftp.changes" :key="`${c.date}-${c.to}`" class="flex flex-wrap gap-x-2">
           <span class="text-muted">{{ formatEffortDate(c.date, today) }}</span>
-          <span class="font-mono tabular-nums">{{ ftpChangeText(c) }}</span>
+          <span class="tabular-nums">{{ ftpChangeText(c) }}</span>
           <UBadge color="neutral" variant="subtle" size="sm">{{ SOURCES[c.source] }}</UBadge>
         </li>
       </ul>
@@ -87,8 +87,8 @@ const endLabel = computed(() => endLabelText(props.review))
     <UCard v-if="review.plan" variant="outline" class="print-flat">
       <template #header><h3 class="font-semibold">Plan</h3></template>
       <p class="text-sm">
-        <span class="font-mono tabular-nums">{{ review.plan.done }} of {{ review.plan.planned }}</span> planned days ridden
-        <span v-if="review.plan.compliancePct !== undefined" class="font-mono tabular-nums">({{ review.plan.compliancePct }}%)</span>
+        <span class="tabular-nums">{{ review.plan.done }} of {{ review.plan.planned }}</span> planned days ridden
+        <span v-if="review.plan.compliancePct !== undefined" class="tabular-nums">({{ review.plan.compliancePct }}%)</span>
       </p>
       <p v-if="review.plan.compliancePct === undefined" class="text-xs text-muted mt-1">
         A percentage needs at least four planned days.
@@ -101,7 +101,7 @@ const endLabel = computed(() => endLabelText(props.review))
         <li v-for="a in review.bestEfforts" :key="`${a.sessionId}-${a.metric}`" class="flex flex-wrap items-center gap-x-2">
           <UIcon name="i-lucide-trophy" class="size-4 text-muted shrink-0" />
           <span>{{ awardChipText(a) }}</span>
-          <span class="font-mono tabular-nums">{{ formatEffortValue(a.metric, a.value, a.unit) }}</span>
+          <span class="tabular-nums">{{ formatEffortValue(a.metric, a.value, a.unit) }}</span>
           <span class="text-muted">{{ formatEffortDate(a.date, today) }}</span>
         </li>
       </ul>
@@ -116,10 +116,10 @@ const endLabel = computed(() => endLabelText(props.review))
             <UBadge v-if="g.priority" color="neutral" variant="subtle" size="sm">Priority {{ g.priority }}</UBadge>
             <span class="text-muted">{{ formatEffortDate(g.eventDate, today) }}</span>
           </p>
-          <p v-if="g.ctl !== undefined" class="font-mono tabular-nums text-xs sm:text-sm">
+          <p v-if="g.ctl !== undefined" class="tabular-nums text-xs sm:text-sm">
             Event day: fitness {{ round(g.ctl) }}<template v-if="g.tsb !== undefined">, form {{ round(g.tsb) }}</template>
           </p>
-          <p v-if="g.ride" class="font-mono tabular-nums text-xs sm:text-sm text-muted">
+          <p v-if="g.ride" class="tabular-nums text-xs sm:text-sm text-muted">
             Ride: {{ formatDuration(g.ride.seconds) }}<template v-if="g.ride.distanceM">, {{ km(g.ride.distanceM) }}</template>, {{ round(g.ride.tss) }} TSS
           </p>
           <p v-else class="text-xs text-muted">No ride found on the day.</p>

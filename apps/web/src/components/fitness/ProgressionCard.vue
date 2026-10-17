@@ -19,7 +19,7 @@ import {
   type ProgressionRange,
   RANGE_DAYS,
 } from '@/utils/progressionSeries'
-import { formatLevel, zoneAccent, zoneLabel } from '@/utils/zones'
+import { formatLevel, zoneColorVar, zoneLabel } from '@/utils/zones'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
 
 const props = defineProps<{
@@ -57,8 +57,8 @@ const windowStart = computed(() =>
 
 function deltaMeta(d: number) {
   const r = Math.round(d * 10) / 10
-  if (r > 0) return { icon: 'i-lucide-trending-up', class: 'text-success' }
-  if (r < 0) return { icon: 'i-lucide-trending-down', class: 'text-warning' }
+  if (r > 0) return { icon: 'i-lucide-trending-up', class: 'text-primary' }
+  if (r < 0) return { icon: 'i-lucide-trending-down', class: 'text-[var(--app-accent-ember)]' }
   return { icon: 'i-lucide-minus', class: 'text-muted' }
 }
 
@@ -69,7 +69,7 @@ function whyFor(sport: string, zone: string): Why | undefined {
 }
 
 function accent(zone: string): string {
-  return `var(--app-accent-${zoneAccent(zone)})`
+  return zoneColorVar(zone)
 }
 
 function dateLabel(t: number): string {
@@ -126,7 +126,7 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
     <!-- Trend -->
     <div v-if="view === 'trend'" class="flex flex-col gap-5">
       <div v-for="group in groups" :key="group.sport" class="flex flex-col gap-3">
-        <p v-if="group.heading" class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ group.heading }}</p>
+        <p v-if="group.heading" class="text-[length:var(--text-label)] text-muted">{{ group.heading }}</p>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div v-for="s in group.series" :key="s.key" class="flex flex-col gap-2 rounded-lg border border-default p-3">
             <div class="flex items-start justify-between gap-2">
@@ -134,11 +134,11 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
                 <span class="size-2 rounded-full" :style="{ background: accent(s.zone) }" aria-hidden="true" />
                 <span class="text-sm font-medium text-highlighted">{{ zoneLabel(s.zone) }}</span>
               </div>
-              <span class="font-mono tabular-nums text-2xl leading-none text-highlighted">{{ formatLevel(s.current) }}</span>
+              <span class="tabular-nums text-2xl leading-none text-highlighted">{{ formatLevel(s.current) }}</span>
             </div>
             <p class="flex items-center gap-1 text-xs" :class="deltaMeta(s.current - (s.start ?? s.current)).class">
               <UIcon :name="deltaMeta(s.current - (s.start ?? s.current)).icon" class="size-3.5 shrink-0" />
-              <span class="font-mono tabular-nums">{{ formatDelta(s.current - (s.start ?? s.current)) }}</span>
+              <span class="tabular-nums">{{ formatDelta(s.current - (s.start ?? s.current)) }}</span>
               <span class="text-muted">since {{ windowStart }}</span>
             </p>
             <LevelSparkline :points="s.points" :color="accent(s.zone)" :label="`${zoneLabel(s.zone)} level`" />
@@ -155,17 +155,17 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
       <ul v-else class="divide-y divide-default">
         <li v-for="c in shownChanges" :key="`${c.key}-${c.at}`" class="flex flex-col gap-0.5 py-2">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span class="w-14 shrink-0 font-mono tabular-nums text-xs text-muted">{{ dateLabel(c.at) }}</span>
+            <span class="w-14 shrink-0 tabular-nums text-xs text-muted">{{ dateLabel(c.at) }}</span>
             <span class="size-2 rounded-full" :style="{ background: accent(c.zone) }" aria-hidden="true" />
             <span class="text-sm font-medium text-highlighted">
               {{ zoneLabel(c.zone) }}<template v-if="sportCount > 1"> · {{ SPORT_LABEL[c.sport as Sport] }}</template>
             </span>
-            <span class="font-mono tabular-nums text-sm text-default">
+            <span class="tabular-nums text-sm text-default">
               <template v-if="c.from !== undefined">{{ formatLevel(c.from) }} → </template>{{ formatLevel(c.to) }}
             </span>
             <span
               v-if="c.from !== undefined"
-              class="flex items-center gap-0.5 font-mono tabular-nums text-xs"
+              class="flex items-center gap-0.5 tabular-nums text-xs"
               :class="deltaMeta(c.to - c.from).class"
             >
               <UIcon :name="deltaMeta(c.to - c.from).icon" class="size-3.5" />{{ formatDelta(c.to - c.from) }}

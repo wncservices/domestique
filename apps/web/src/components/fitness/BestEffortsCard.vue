@@ -88,13 +88,13 @@ function cell(row: EffortRow, key: Column['key']): EffortCell | null {
           <a
             v-if="cell(row, c.key)"
             :href="`#ride-${cell(row, c.key)!.sessionId}`"
-            class="font-mono tabular-nums text-xs sm:text-sm text-highlighted hover:underline break-words"
+            class="tabular-nums text-xs sm:text-sm text-highlighted hover:underline break-words"
             :title="'Show this ride'"
             @click.prevent="emit('open-ride', cell(row, c.key)!.sessionId)"
           >
             {{ formatEffortCell(row.metric, row.unit, cell(row, c.key)) }}
           </a>
-          <span v-else class="font-mono text-muted" aria-label="no value">–</span>
+          <span v-else class="tabular-nums text-muted" aria-label="no value">–</span>
         </div>
       </div>
     </div>

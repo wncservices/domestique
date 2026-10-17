@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppPage from '@/components/ui/AppPage.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import RouteBuilderPanel from '@/components/RouteBuilderPanel.vue'
 
@@ -6,7 +7,10 @@ const { canUpload, routingConfigured, refresh } = useLibrary()
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <AppPage title="Build a route" subtitle="Draw a route on the map and save it to the library.">
+    <template #actions>
+      <UButton to="/routes" icon="i-lucide-arrow-left" color="neutral" variant="ghost">Back to routes</UButton>
+    </template>
     <RouteBuilderPanel v-if="canUpload && routingConfigured" @built="refresh" />
 
     <UAlert
@@ -29,5 +33,5 @@ const { canUpload, routingConfigured, refresh } = useLibrary()
       title="Route builder not available"
       description="This deployment has no routing engine configured."
     />
-  </div>
+  </AppPage>
 </template>

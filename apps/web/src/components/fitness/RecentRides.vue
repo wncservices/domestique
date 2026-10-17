@@ -86,7 +86,7 @@ function awardsText(session: CompletedSession): string {
           New best!
         </UBadge>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 font-mono tabular-nums text-xs sm:text-sm">
+      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 tabular-nums text-xs sm:text-sm">
         <span>{{ formatDuration(session.durationSeconds) }}</span>
         <span v-if="formatDistance(session.distanceM)">{{ formatDistance(session.distanceM) }}</span>
         <span v-if="session.avgPowerWatts">{{ Math.round(session.avgPowerWatts) }} W</span>

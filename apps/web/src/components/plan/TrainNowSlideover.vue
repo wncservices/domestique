@@ -190,12 +190,12 @@ function tssLabel(s: TrainNowSuggestion): string {
           <p class="text-xs text-muted">{{ applyNote }}</p>
           <UCard v-for="s in result.suggestions" :key="s.kind" variant="outline">
             <div class="flex flex-col gap-2">
-              <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ KIND_LABEL[s.kind] }}</p>
+              <p class="text-[length:var(--text-label)] text-muted">{{ KIND_LABEL[s.kind] }}</p>
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <h3 class="text-base font-semibold text-highlighted">{{ s.name }}</h3>
                 <DifficultyChip :difficulty="s.difficulty" />
               </div>
-              <p class="font-mono tabular-nums text-sm text-muted">{{ formatDuration(s.minutes * 60) }} · {{ tssLabel(s) }}</p>
+              <p class="tabular-nums text-sm text-muted">{{ formatDuration(s.minutes * 60) }} · {{ tssLabel(s) }}</p>
               <p class="text-sm text-toned">{{ s.why }}</p>
               <p v-if="s.warning" class="flex items-start gap-1 text-xs text-warning">
                 <UIcon name="i-lucide-triangle-alert" class="mt-0.5 shrink-0" />

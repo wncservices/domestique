@@ -50,7 +50,7 @@ const canConfirm = computed(() => !props.busy && !props.error && (isConvert.valu
             <dl class="flex flex-col gap-2 text-sm">
               <div class="flex flex-wrap items-baseline justify-between gap-2">
                 <dt class="text-muted">Length on the trainer</dt>
-                <dd class="font-mono tabular-nums text-highlighted">
+                <dd class="tabular-nums text-highlighted">
                   {{ formatDuration(preview.plannedSeconds) }}
                   <span v-if="changedLength" class="text-xs text-muted">(outdoors {{ formatDuration(preview.originalSeconds!) }})</span>
                 </dd>

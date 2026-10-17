@@ -364,7 +364,7 @@ function onRated(analysis: SessionAnalysis) {
 
     <UCard variant="outline">
       <div class="flex items-center justify-between gap-2">
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ eyebrow }}</p>
+        <p class="text-[length:var(--text-label)] text-muted">{{ eyebrow }}</p>
         <div class="flex items-center gap-2">
           <WeatherChip v-if="weatherDay" :day="weatherDay" :attribution="weatherAttribution" />
           <ReadinessChip v-if="showingToday && readinessVerdict && !onEventDay" :verdict="readinessVerdict" :reasons="readinessReasons ?? []" />
@@ -402,7 +402,7 @@ function onRated(analysis: SessionAnalysis) {
           <div class="flex flex-wrap items-center gap-2">
             <UIcon :name="ridden.icon" class="size-5" :class="ridden.color" />
             <span class="font-medium text-highlighted">{{ ridden.label }}</span>
-            <span class="font-mono tabular-nums text-sm text-muted">
+            <span class="tabular-nums text-sm text-muted">
               {{ formatDuration(completedSecondsOf(day)) }} of {{ formatDuration(plannedSecondsOf(day)) }} planned
             </span>
             <UBadge v-if="testResult" color="primary" variant="subtle" icon="i-lucide-gauge">
@@ -434,7 +434,7 @@ function onRated(analysis: SessionAnalysis) {
               <li v-for="(e, i) in efforts.efforts" :key="i" class="flex items-baseline gap-2 text-xs text-muted">
                 <span class="size-2 shrink-0 translate-y-[-1px] rounded-full" :class="GRADE_DOT[e.grade]" aria-hidden="true" />
                 <span class="text-default">{{ e.name }}</span>
-                <span class="font-mono tabular-nums">{{ e.detail }}</span>
+                <span class="tabular-nums">{{ e.detail }}</span>
               </li>
             </ul>
           </div>
@@ -462,7 +462,7 @@ function onRated(analysis: SessionAnalysis) {
                 {{ ftpTestLabel(firstWorkout.testProtocol) }}
               </UBadge>
             </div>
-            <p class="font-mono tabular-nums text-sm text-muted">
+            <p class="tabular-nums text-sm text-muted">
               {{ formatDuration(firstWorkout.plannedSeconds) }}
               <template v-if="firstWorkoutTarget"> · {{ firstWorkoutTarget }}</template>
             </p>
@@ -473,7 +473,7 @@ function onRated(analysis: SessionAnalysis) {
               <span class="font-medium">{{ crewKindLabel }}</span>
               <span v-if="crewRide.crewName" class="text-muted">with {{ crewRide.crewName }}</span>
             </p>
-            <p class="font-mono tabular-nums text-xs text-muted">
+            <p class="tabular-nums text-xs text-muted">
               About {{ formatDuration(firstWorkout.plannedSeconds) }} · estimated TSS {{ Math.round(crewRide.estimatedTss) }}
             </p>
             <p v-if="(crewRide.goingNames?.length ?? 0) > 0" class="text-xs text-muted">
@@ -529,7 +529,7 @@ function onRated(analysis: SessionAnalysis) {
               <span class="text-sm font-medium text-highlighted">{{ activeRoute.name }}</span>
               <UBadge v-if="activeRoute.generated" color="neutral" variant="subtle">Made for this ride</UBadge>
             </div>
-            <p class="font-mono tabular-nums text-xs text-muted">
+            <p class="tabular-nums text-xs text-muted">
               {{ (activeRoute.distanceM / 1000).toFixed(1) }} km · {{ Math.round(activeRoute.ascentM) }} m up · about
               {{ formatDuration(activeRoute.estimatedSeconds) }}
             </p>
@@ -599,7 +599,7 @@ function onRated(analysis: SessionAnalysis) {
         <div v-else-if="day.completed.length > 0" class="mt-2 flex flex-wrap items-center gap-2">
           <UIcon name="i-lucide-info" class="size-5 text-info" />
           <span class="font-medium text-highlighted">Unplanned ride</span>
-          <span class="font-mono tabular-nums text-sm text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
+          <span class="tabular-nums text-sm text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
           <button
             v-if="analysedSession"
             type="button"

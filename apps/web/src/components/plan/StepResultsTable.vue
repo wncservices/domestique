@@ -69,7 +69,7 @@ function formatActual(step: AnalysisStep): string {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[26rem] text-sm">
           <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-dimmed">
+            <tr class="text-left text-[length:var(--text-label)] text-muted">
               <th class="pb-2 pr-2 font-medium">Step</th>
               <th class="pb-2 pr-2 font-medium">Target</th>
               <th class="pb-2 pr-2 font-medium">Actual</th>
@@ -79,8 +79,8 @@ function formatActual(step: AnalysisStep): string {
           <tbody class="divide-y divide-default">
             <tr v-for="step in steps" :key="step.index" :class="{ 'text-muted': !step.hard }">
               <td class="py-2 pr-2" :class="{ 'font-semibold text-highlighted': step.hard }">{{ step.name }}</td>
-              <td class="py-2 pr-2 font-mono tabular-nums whitespace-nowrap">{{ formatRange(step) }}</td>
-              <td class="py-2 pr-2 font-mono tabular-nums whitespace-nowrap">
+              <td class="py-2 pr-2 tabular-nums whitespace-nowrap">{{ formatRange(step) }}</td>
+              <td class="py-2 pr-2 tabular-nums whitespace-nowrap">
                 <div>{{ formatActual(step) }}</div>
                 <div v-if="step.inTargetPct" class="text-xs text-dimmed">{{ Math.round(step.inTargetPct) }}% in range</div>
               </td>

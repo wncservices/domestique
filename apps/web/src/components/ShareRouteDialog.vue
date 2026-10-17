@@ -136,7 +136,7 @@ const sortedShares = computed(() =>
             Copy this now — you won't be able to see it again, but you can revoke it below.
           </p>
           <div class="flex gap-2">
-            <UInput :model-value="justCreated.url" readonly class="w-full font-mono text-xs" />
+            <UInput :model-value="justCreated.url" readonly class="w-full tabular-nums text-xs" />
             <UButton
               :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
               :color="copied ? 'success' : 'neutral'"

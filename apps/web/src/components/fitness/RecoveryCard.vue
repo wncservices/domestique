@@ -74,13 +74,13 @@ function formatReadiness(day: DailyWellnessDTO): string {
 <template>
   <UCard v-if="sorted.length > 0" variant="outline">
     <template #header>
-      <h2 class="text-lg font-semibold">Recovery</h2>
+      <h3 class="text-lg font-semibold">Recovery</h3>
     </template>
 
     <div class="overflow-x-auto">
       <table class="w-full min-w-[36rem] text-sm">
         <thead>
-          <tr class="text-left text-xs uppercase tracking-wide text-dimmed">
+          <tr class="text-left text-[length:var(--text-label)] text-muted">
             <th class="py-1.5 pr-3 font-medium">Date</th>
             <th class="py-1.5 pr-3 font-medium">Sleep</th>
             <th class="py-1.5 pr-3 font-medium">HRV</th>
@@ -91,10 +91,10 @@ function formatReadiness(day: DailyWellnessDTO): string {
         <tbody class="divide-y divide-default">
           <tr v-for="day in sorted" :key="day.date">
             <td class="whitespace-nowrap py-1.5 pr-3 text-muted">{{ formatDate(day.date) }}</td>
-            <td class="whitespace-nowrap py-1.5 pr-3 font-mono tabular-nums">{{ formatSleep(day) }}</td>
-            <td class="whitespace-nowrap py-1.5 pr-3 font-mono tabular-nums">{{ formatHrv(day) }}</td>
-            <td class="whitespace-nowrap py-1.5 pr-3 font-mono tabular-nums">{{ formatRestingHr(day) }}</td>
-            <td class="whitespace-nowrap py-1.5 font-mono tabular-nums">{{ formatReadiness(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums">{{ formatSleep(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums">{{ formatHrv(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums">{{ formatRestingHr(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 tabular-nums">{{ formatReadiness(day) }}</td>
           </tr>
         </tbody>
       </table>

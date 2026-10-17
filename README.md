@@ -255,7 +255,7 @@ dependency. Already-imported tours are skipped, so running it twice is safe.
 
 **Both providers push automatically** once a rider links their account (see
 [Linking a head unit](#linking-a-head-unit) above) — every general-purpose push
-(the CLI, the Library page's "Push to devices" button, and auto-sync) reaches
+(the CLI, the Routes page's "Push to devices" button, and auto-sync) reaches
 only the route's own owner's own linked accounts, regardless of what `targets`
 names. Naming a crew in `targets` shares the route with that crew and makes it
 eligible for that crew's own explicit "Sync now" action, on the crew's ride
