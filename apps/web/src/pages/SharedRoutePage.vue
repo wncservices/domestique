@@ -123,7 +123,7 @@ async function importToLibrary() {
 
 <template>
   <div class="flex flex-col gap-5">
-    <RouterLink to="/" class="flex min-w-0 items-center gap-3">
+    <RouterLink to="/today" class="flex min-w-0 items-center gap-3">
       <span
         class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
         aria-hidden="true"

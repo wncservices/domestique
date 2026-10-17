@@ -751,7 +751,7 @@ function selectSeasonWeek(startDate: string) {
 }
 
 function fromRoute() {
-  router.push('/')
+  router.push('/routes')
 }
 
 // --- life events: travel, illness, a busy spell. The modal owns the form, the

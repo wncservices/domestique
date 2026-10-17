@@ -117,7 +117,7 @@ async function schedule() {
       description: date.value,
       icon: 'i-lucide-calendar-check',
       color: 'success',
-      actions: [{ label: 'View plan', onClick: () => void router.push('/training/plan') }],
+      actions: [{ label: 'View plan', onClick: () => void router.push('/plan') }],
     })
   } catch (err) {
     toast.add({

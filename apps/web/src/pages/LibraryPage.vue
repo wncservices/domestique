@@ -305,7 +305,7 @@ async function push(items: { accountId: string; slug: string }[]) {
         description="Add one from the Add route page, or import from Komoot."
       >
         <template #actions>
-          <UButton to="/add" icon="i-lucide-plus">Add a route</UButton>
+          <UButton to="/routes/new" icon="i-lucide-plus">Add a route</UButton>
         </template>
       </UEmpty>
 

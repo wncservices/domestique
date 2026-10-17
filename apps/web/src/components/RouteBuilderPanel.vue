@@ -159,7 +159,7 @@ onMounted(async () => {
   // Consumed once — a reload of /build afterward should behave like the
   // builder's own blank-slate default, not silently re-enter edit mode for
   // whatever slug happened to still be in the address bar.
-  router.replace({ path: '/build' })
+  router.replace({ path: '/routes/build' })
 
   try {
     const [track, library] = await Promise.all([api.track(slug), api.routes()])
