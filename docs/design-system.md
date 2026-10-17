@@ -400,6 +400,7 @@ layouts cannot disagree and the lists are testable without a DOM.
   and pull from the existing accents. Effort uses the zone scale and nothing
   else does; training phases use the phase scale. Don't add a new scale
   without raising it as a deliberate decision first.
+- Compose from `AppPage`, `StatTile`, `DetailsToggle`, `SuggestionRow`, `SegmentedControl`, `EmptyState` and `SkeletonCard` before inventing markup.
 - Empty list: `EmptyState`. Loading: `SkeletonCard`. Failed load: an error `UAlert` with Retry.
 - The guard test is the enforcement for hex colours, raw palette classes, `font-mono`,
   `uppercase`, undocumented tokens and page-level spinners. Run `npm test` in `apps/web`.

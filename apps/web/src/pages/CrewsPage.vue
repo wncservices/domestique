@@ -917,7 +917,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
     <EmptyState
       v-else-if="!loading"
       icon="i-lucide-users"
-      title="A crew is a group of riders who share routes and plan rides together. Create one, or find one to join."
+      text="A crew is a group of riders who share routes and plan rides together. Create one, or find one to join."
     >
       <template #actions>
         <UButton icon="i-lucide-plus" @click="createOpen = true">Create a crew</UButton>
