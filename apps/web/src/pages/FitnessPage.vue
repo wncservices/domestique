@@ -48,11 +48,11 @@ const TABS: { label: string; value: Tab; icon: string }[] = [
   { label: 'Fitness', value: 'fitness', icon: 'i-lucide-activity' },
   { label: 'Season', value: 'season', icon: 'i-lucide-calendar-range' },
 ]
-// push, not replace: the switch is a navigation, so Back returns to the other view.
+// replace: arrow keys activate a tab, and each press must not add a history entry.
 const tab = computed<Tab>({
   get: () => (route.query.tab === 'season' ? 'season' : 'fitness'),
   set: (value) => {
-    router.push({ query: { ...route.query, tab: value === 'season' ? 'season' : undefined } })
+    router.replace({ query: { ...route.query, tab: value === 'season' ? 'season' : undefined } })
   },
 })
 
@@ -489,15 +489,23 @@ async function onImported() {
 
 // /fitness#profile is where Today sends a rider with no FTP. The cards above
 // the profile load after mount and move it, so scroll once they have settled.
-async function scrollToHash() {
+// Scroll at once if the target is already there, then again once the loads
+// above it have shifted it, unless the rider has scrolled in the meantime.
+async function scrollToHash(loads: Promise<unknown>[]) {
   if (route.hash !== '#profile') return
+  const jump = () => document.getElementById('profile')?.scrollIntoView({ block: 'start' })
   await nextTick()
-  document.getElementById('profile')?.scrollIntoView({ block: 'start' })
+  jump()
+  const startY = window.scrollY
+  await Promise.allSettled(loads)
+  await nextTick()
+  if (Math.abs(window.scrollY - startY) < 2) jump()
 }
 
-onMounted(async () => {
+onMounted(() => {
   api.me().then((m) => { me.value = m }).catch(() => {})
-  await Promise.allSettled([
+  // Always started, hash or not; scrollToHash only decides whether to wait on them.
+  scrollToHash([
     loadProfile(),
     loadFitness(),
     loadProjection(),
@@ -506,7 +514,6 @@ onMounted(async () => {
     loadThresholdSuggestions(),
     loadBestEfforts(true),
   ])
-  await scrollToHash()
 })
 </script>
 

@@ -247,7 +247,7 @@ choices (greeting, headline, which suggestion wins, tile tones, TSS/IF/power ran
 live in `utils/today.ts`. Empty states are deliberate: a rest day shows the rest
 headline and one tip, no goal swaps the countdown tile for a "Set a goal" link to
 `/plan`, no FTP omits the power range and TSS (never "0 W") and links to
-`/fitness`, where the profile form lives, and a role without `training:manage` gets a plain explanation instead
+`/fitness#profile`, where the profile form lives, and a role without `training:manage` gets a plain explanation instead
 of failed calls. A read that failed is a dash, never one of these prompts. One suggestion at most;
 dismissing it hides them all for the visit, and a weather one reuses the Plan page's persistent
 "Keep outdoors" dismissal.

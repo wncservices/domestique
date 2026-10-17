@@ -110,7 +110,7 @@ const paceBars = computed(() => {
 <template>
   <UCard variant="outline">
     <template #header>
-      <h2 class="text-lg font-semibold">Training zones</h2>
+      <h3 class="text-lg font-semibold">Training zones</h3>
     </template>
 
     <div class="flex flex-col gap-6">
