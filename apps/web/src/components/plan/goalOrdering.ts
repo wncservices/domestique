@@ -1,6 +1,6 @@
 // The same ordering internal/api/trainingweek.go's weekFocus uses to pick
 // which goal a week's header talks about — priority A>B>C, dated goals
-// before undated, nearest event first. TrainingPlanPage.vue reuses it as a
+// before undated, nearest event first. PlanPage.vue reuses it as a
 // page-side fallback for a week the server didn't compute a focus for (the
 // browsed week falls outside every goal's periodized plan weeks), so the
 // header still names *a* goal instead of showing a bare icon-chip. Kept in

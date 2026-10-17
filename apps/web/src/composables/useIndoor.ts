@@ -1,5 +1,5 @@
 // State and handlers for the indoor version of a session: the confirm modal's
-// preview, and the convert and revert calls. Kept out of TrainingPlanPage.vue
+// preview, and the convert and revert calls. Kept out of PlanPage.vue
 // for the same file-size reason usePlanGoals is.
 //
 // The day passed to the API is the browser's own (todayISO), because whether a

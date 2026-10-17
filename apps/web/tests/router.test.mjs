@@ -55,5 +55,5 @@ test('route table: /today loads TodayPage', () => {
   const route = r.getRoutes().find((x) => x.path === '/today')
   assert.ok(route)
   assert.equal(route.components.default, loaders.TodayPage)
-  assert.notEqual(route.components.default, loaders.TrainingPlanPage)
+  assert.notEqual(route.components.default, loaders.PlanPage)
 })

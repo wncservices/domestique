@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The workout builder, moved from TrainingPlanPage.vue's UModal into a
+// The workout builder, moved from PlanPage.vue's UModal into a
 // USlideover (design's "Goal and workout forms move from UModal to
 // USlideover") with a live interval-profile chart at the top, per the design
 // doc's "Workout builder" section. The page still owns workoutForm/saveWorkout;
