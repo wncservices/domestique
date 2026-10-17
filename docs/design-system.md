@@ -22,7 +22,7 @@ Five scales, each 11 steps (`50`–`950`), declared once in `@theme static`:
 |---|---|
 | `--color-primary-*` | Brand teal. The one interactive/brand colour — CTAs, links, active nav state, the logo mark. |
 | `--color-neutral-*` | Surfaces and text. Teal-tinted near-white in light mode, not pure grey — keeps the accent from looking like an afterthought. |
-| `--color-ember-*` | Categorical accent (coral, not amber — see below). |
+| `--color-ember-*` | Behind plan or a shortfall (coral, not amber — see below). Also the landing page's decorative feature chips. |
 | `--color-sky-*` | Categorical accent. |
 | `--color-violet-*` | Categorical accent. |
 
@@ -37,7 +37,9 @@ untouched, and not something this app re-themes.
 ### Colour roles
 
 Colour carries one meaning each. Teal means you, an action or good news.
-Coral (`ember`) means behind. The zone scale is for effort only, and the
+Coral (`ember`) means behind. As text, use `--app-accent-ember`, the
+text-safe ember (ember-700 on light, 5.35:1 on white; ember-400 on dark): the
+raw ember-600 is only 3.74:1 on white. The zone scale is for effort only, and the
 phase scale for training phases only; neither is reused for decoration.
 
 | Role | Token | Means |
@@ -107,11 +109,13 @@ colour (`success`/`warning`/`error`/`info`) means *status* and nothing else
 explicit; the icon, not the colour, is what actually distinguishes cycling
 from running.) `primary` means *the brand* — the
 one interactive action or focal colour on a page; don't hand it out as "just
-another category" once there's more than one thing to colour. `ember` /
-`sky` / `violet` are *purely* categorical: they distinguish
+another category" once there's more than one thing to colour.  `sky` / `violet` are *purely* categorical: they distinguish
 same-kind-different-instance items (N route cards, the landing page's four
 features) and carry no meaning beyond "this one is not
-that one." Never let a categorical accent collide with a semantic one in the
+that one." `ember` now carries meaning (behind plan or missed, see Colour
+roles), so the landing page's categorical feature chips are its one decorative
+use left; nothing in the app proper should reach for it as "just another
+colour". Never let a categorical accent collide with a semantic one in the
 same view — it's why ember is a coral and not an amber, the same reason the
 brand teal replaced an earlier orange (see the comment at the top of
 `styles.css`).
@@ -135,14 +139,15 @@ kinds* of thing, not *many instances of the same kind*). That single colour
 is now maintained in **three** places, not two, each a literal because none
 of them can read a CSS custom property:
 
-- `.track-line` in `styles.css` — `var(--ui-primary)`, the SVG fallback
+- `.track-line` in `styles.css` — pinned to `--color-primary-600` (light) and
+  `--color-primary-400` (dark) rather than `var(--ui-primary)`, the SVG fallback
   `TrackPreview.vue` draws only if its image request fails.
 - `apps/api/internal/basemap/renderimage.go`'s `cardImageThemes` map — the
   *primary* card-preview path since the PNG-first change in `c9aa6b5`, a
   Go-side rasterizer with no access to `styles.css` at all.
 - `RouteMap.vue`'s live map — a MapLibre paint spec, same restriction.
 
-All three are kept at `--ui-primary`'s own resolved value per theme
+All three are kept at the same primary step per theme
 (`--color-primary-600` light, `--color-primary-400` dark) by hand — there is
 no shared source of truth across the Go/TS/MapLibre boundary, so a change to
 the palette has to be copied to all three or they visibly disagree (this
@@ -200,8 +205,7 @@ treat as the idiom rather than re-deriving spacing per page: `gap-3`/`gap-4`
 for tight stacks, `gap-6` between major sections, `p-4`/`p-5` for card
 padding, `text-[length:var(--text-label)] text-muted`, in sentence case, for a
 label line above a value. There is no `uppercase` anywhere, table headers
-included; the guard test fails on it. The one planned exception is phase 2's
-sidebar group labels, which that phase adds to the guard when it lands. Match these in a new page rather than
+included; the guard test fails on it. Match these in a new page rather than
 picking new numbers.
 
 ## Structural components
@@ -277,7 +281,7 @@ still follows its own permission or data gate.
 
 - **Sub-nav:** a single `<nav aria-label="Settings">`. A sticky left column from `lg` up,
   a horizontally scrolling row on a phone. The section reached by click or hash gets
-  `aria-current="true"`. Links are `#id` anchors; `/settings#basemap` scrolls once the
+  `aria-current="location"`. Links are `#id` anchors; `/settings#basemap` scrolls once the
   panels above it have loaded, the way `/fitness#profile` does.
 - **Sections** are `<section id>` with a `text-xl` display heading and one line of
   description; the cards inside use `h3`. A section whose cards are all gated out shows
@@ -298,8 +302,8 @@ confirmation it always did.
 views of a page: `v-model`, `items` (`label`, `value`, optional `icon`) and a required
 `label` for assistive tech. It wraps `UTabs` (pill, `:content="false"`), so it is a real
 tablist with arrow-key movement; the page decides what each value shows. Never add a
-second tab style. The Fitness page binds it to `?tab=season` with `router.push`, so
-deep links and Back both work.
+second tab style. The Fitness page binds it to `?tab=season` with `router.replace`, so
+deep links work and a tab switch does not add a history entry.
 
 ### Routes page
 
@@ -324,7 +328,7 @@ deep links and Back both work.
   the card opens the crew popup. Member count, ownership, auto-share and waiting requests are badges.
 - **Empty state, the line pattern.** One plain sentence saying what the thing is, then its actions as
   buttons, centred inside a single card: `EmptyState`. No illustration. Reuse it for other empty lists.
-- **Menus in the popup.** Each ride has "Ride actions" (sync now; delete last), each approved member
+- **Menus in the popup.** Each ride has "Sync now" as a visible button and a "Ride actions" menu holding delete only; each approved member has
   "Actions for <rider>" (make or remove owner; remove from crew last), and the footer has "Crew actions"
   (delete crew for an owner, leave crew for a member). Destructive items are in their own last group.
   Approve and deny on a pending request stay visible buttons, as does Accept and Decline on an invite,
@@ -355,7 +359,7 @@ deep links and Back both work.
   On a week other than the current one Replan and "I have … minutes" are not offered, so
   Life event leads. Export keeps its per-session and zip options as a nested menu
   (`composables/useExportItems.ts`, shared with `ExportMenu`).
-- **Week tiles** give a session name two lines (`line-clamp-2`, never truncated to one),
+- **Week tiles** give a session name three lines (`line-clamp-3`, never truncated to one),
   a left bar in its zone colour (`zoneColorVar`), and duration and TSS. Hovering shows
   the whole session; a tap selects it into the day card above. Below `sm` the week is a
   horizontal row of fixed-width tiles.
