@@ -488,19 +488,38 @@ async function onImported() {
   if (!dirty.value) await loadProfile()
 }
 
-// /fitness#profile is where Today sends a rider with no FTP. The cards above
-// the profile load after mount and move it, so scroll once they have settled.
-// Scroll at once if the target is already there, then again once the loads
-// above it have shifted it, unless the rider has scrolled in the meantime.
+// Deep links into this page: Today sends a rider with no FTP to #profile,
+// Settings sends one to #morning-summary. The cards above load after mount and
+// move the target, and the morning summary card only renders once its own
+// status has loaded, so: scroll at once if the target is there, again once the
+// loads have settled, and wait briefly for a target that is not rendered yet.
+// A rider who scrolls in the meantime is left where they are.
+const hashTargets = ['#profile', '#morning-summary']
+
+function whenRendered(id: string, timeoutMs: number): Promise<HTMLElement | null> {
+  const found = document.getElementById(id)
+  if (found) return Promise.resolve(found)
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      const el = document.getElementById(id)
+      if (el) { observer.disconnect(); clearTimeout(timer); resolve(el) }
+    })
+    const timer = setTimeout(() => { observer.disconnect(); resolve(null) }, timeoutMs)
+    observer.observe(document.body, { childList: true, subtree: true })
+  })
+}
+
 async function scrollToHash(loads: Promise<unknown>[]) {
-  if (route.hash !== '#profile') return
-  const jump = () => document.getElementById('profile')?.scrollIntoView({ block: 'start' })
+  if (!hashTargets.includes(route.hash)) return
+  const id = route.hash.slice(1)
+  const jump = () => document.getElementById(id)?.scrollIntoView({ block: 'start' })
   await nextTick()
   jump()
   const startY = window.scrollY
   await Promise.allSettled(loads)
   await nextTick()
-  if (Math.abs(window.scrollY - startY) < 2) jump()
+  const el = await whenRendered(id, 3000)
+  if (el && Math.abs(window.scrollY - startY) < 2) jump()
 }
 
 onMounted(() => {
