@@ -123,9 +123,9 @@ const statusIcon: Record<string, string> = {
   unplanned: 'i-lucide-circle-plus',
 }
 const statusColor: Record<string, string> = {
-  done: 'text-success',
-  partial: 'text-warning',
-  missed: 'text-error',
+  done: 'text-primary',
+  partial: 'text-[var(--app-accent-ember)]',
+  missed: 'text-[var(--app-accent-ember)]',
   unplanned: 'text-info',
 }
 
