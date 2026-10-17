@@ -257,9 +257,9 @@ dismissing it hides them all for the visit, and a weather one reuses the Plan pa
 - **Toolbar: one primary action plus an overflow.** `planActions(state)` in
   `utils/planActions.ts` is pure and decides the order. The primary is Replan when the
   week has gaps (the signal that also offers Fill: a week that has not ended, has a plan
-  focus and nothing planned) and "I have N minutes" otherwise; the other one, Life event,
+  focus and nothing planned) and "I have … minutes" otherwise; the other one, Life event,
   FTP test and Export go in the overflow (an icon button, `aria-label="More actions"`).
-  On a week other than the current one Replan and "I have N minutes" are not offered, so
+  On a week other than the current one Replan and "I have … minutes" are not offered, so
   Life event leads. Export keeps its per-session and zip options as a nested menu
   (`composables/useExportItems.ts`, shared with `ExportMenu`).
 - **Week tiles** give a session name two lines (`line-clamp-2`, never truncated to one),

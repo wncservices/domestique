@@ -41,6 +41,9 @@ watch(
 const needsGuess = computed(() => protocol.value === 'ramp' && !props.hasFtp && !(estimatedFtp.value && estimatedFtp.value > 0))
 // Open from the start when the ramp needs an FTP guess before it can be scheduled.
 const optionsOpen = ref(needsGuess.value)
+watch(needsGuess, (v) => {
+  if (v) optionsOpen.value = true
+})
 const dayLabel = computed(() => weekdayLong(props.suggestion.date))
 
 function schedule() {
@@ -54,7 +57,7 @@ function schedule() {
 
 <template>
   <div class="flex flex-col gap-2">
-    <SuggestionRow icon="i-lucide-gauge" :title="suggestion.message" @dismiss="emit('snooze')">
+    <SuggestionRow icon="i-lucide-gauge" :title="suggestion.message" dismiss-label="Not now" :dismissing="snoozing" @dismiss="emit('snooze')">
       <template #actions>
         <UButton
           color="primary"

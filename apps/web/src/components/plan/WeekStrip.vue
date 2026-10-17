@@ -325,23 +325,27 @@ watch(
         <WeatherChip v-if="weatherOn(day.date)" :day="weatherOn(day.date)!" :attribution="weatherAttribution" compact />
 
         <UTooltip v-for="w in day.planned" :key="w.id" :delay-duration="400" :content="{ side: 'bottom' }">
+          <!-- Flat on purpose: padding and a menu beside the name left it ~60px. -->
           <div
-            class="flex w-full flex-col gap-0.5 rounded border border-l-4 bg-default p-1.5 cursor-pointer"
-            :class="w.id === selectedWorkoutId ? 'border-primary ring-1 ring-primary' : 'border-default hover:bg-elevated'"
-            :style="{ borderLeftColor: zoneColorVar(w.zone ?? 'endurance') }"
+            class="flex w-full flex-col gap-0.5 rounded-sm border-l-4 pl-1.5 cursor-pointer"
+            :class="w.id === selectedWorkoutId ? 'bg-elevated ring-1 ring-primary' : 'hover:bg-elevated'"
+            :style="{ borderLeftColor: w.zone ? zoneColorVar(w.zone) : 'var(--ui-border-accented)' }"
             role="button"
             tabindex="0"
             :aria-pressed="w.id === selectedWorkoutId"
-            :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
+            :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}${adjustmentNote(w.description) ? `. ${adjustmentNote(w.description)}` : ''}`"
             :draggable="canDrag(day.date, w)"
             @dragstart="onDragStart($event, w)"
             @click="emit('select', w, day.date)"
             @keydown.enter.prevent="emit('select', w, day.date)"
             @keydown.space.prevent="emit('select', w, day.date)"
           >
-            <div class="flex items-start justify-between gap-1">
-              <!-- Two lines, never one: a long name is the point of the wider tile. -->
-              <span class="line-clamp-2 break-words text-xs font-medium text-highlighted">{{ w.name }}</span>
+            <!-- Three lines, never one; the tooltip carries the rest of a very long name. -->
+            <span class="line-clamp-3 break-words text-xs font-medium text-highlighted">{{ w.name }}</span>
+            <div class="flex items-center justify-between gap-1">
+              <span class="tabular-nums text-[length:var(--text-label)] text-muted">
+                {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template>
+              </span>
               <UDropdownMenu v-if="!w.crewRide" :items="moveMenuItems(w, day.date)">
                 <UButton
                   color="neutral"
@@ -354,9 +358,6 @@ watch(
                 />
               </UDropdownMenu>
             </div>
-            <span class="tabular-nums text-[length:var(--text-label)] text-muted">
-              {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template>
-            </span>
             <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
             <IndoorBadge v-if="w.indoor" :description="w.description" compact />
             <CrewRideBadge v-if="w.crewRide" :crew-ride="w.crewRide" compact />
@@ -365,7 +366,7 @@ watch(
               {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
             </UBadge>
             <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
-            <UIcon v-if="adjustmentNote(w.description)" name="i-lucide-wand-sparkles" class="size-3 text-info" :aria-label="adjustmentNote(w.description)" />
+            <UIcon v-if="adjustmentNote(w.description)" name="i-lucide-wand-sparkles" aria-hidden="true" class="size-3 text-info" />
           </div>
           <!-- Hover shows the whole session; a tap selects it into the day card above, which is the full detail. -->
           <template #content>
