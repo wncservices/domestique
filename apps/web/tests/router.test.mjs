@@ -48,3 +48,12 @@ test('route table: new paths stay put', async () => {
     assert.equal(await settle(p), p)
   }
 })
+
+test('route table: /today loads TodayPage', () => {
+  const loaders = {}
+  const r = createAppRouter((page) => (loaders[page] ??= async () => ({ render: () => null })), createMemoryHistory())
+  const route = r.getRoutes().find((x) => x.path === '/today')
+  assert.ok(route)
+  assert.equal(route.components.default, loaders.TodayPage)
+  assert.notEqual(route.components.default, loaders.TrainingPlanPage)
+})
