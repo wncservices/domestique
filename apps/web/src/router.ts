@@ -22,8 +22,7 @@ export type PageLoader = (page: string) => () => Promise<unknown>
 
 export function buildRoutes(load: PageLoader): RouteRecordRaw[] {
   return [
-    // Task 7 replaces this with the real Today page; until then it is the plan.
-    { path: '/today', component: load('TrainingPlanPage') },
+    { path: '/today', component: load('TodayPage') },
     { path: '/plan', component: load('TrainingPlanPage') },
     { path: '/fitness', component: load('TrainingFitnessPage') },
     { path: '/routes', component: load('LibraryPage') },
