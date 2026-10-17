@@ -14,6 +14,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { GeocodeResult, WeatherPrefs } from '@/api/types'
+import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import { describeError } from '@/utils/errorMessage'
 
 const emit = defineEmits<{ changed: [] }>()
@@ -23,6 +24,7 @@ const toast = useToast()
 const prefs = ref<WeatherPrefs | null>(null)
 const available = ref(true)
 const loading = ref(true)
+const aboutWeather = ref(false)
 
 const changing = ref(false)
 const query = ref('')
@@ -134,18 +136,20 @@ onMounted(load)
 <template>
   <UCard v-if="available && !loading" variant="outline">
     <template #header>
-      <h2 class="flex items-center gap-2 font-medium text-highlighted">
+      <h3 class="flex items-center gap-2 font-medium text-highlighted">
         <UIcon name="i-lucide-cloud-sun" />
         Weather
-      </h2>
+      </h3>
       <p class="text-sm text-muted">Forecasts for your planned rides. Your own, for this account only.</p>
     </template>
 
     <div class="flex flex-col gap-4">
-      <p class="text-sm text-muted">
-        When rain, wind, cold, heat or a storm is forecast for a planned ride in the next three days, the plan says so
-        and offers an indoor version or another day. It only ever suggests.
-      </p>
+      <DetailsToggle v-model:open="aboutWeather" label="Learn more">
+        <p class="text-sm text-muted">
+          When rain, wind, cold, heat or a storm is forecast for a planned ride in the next three days, the plan says so
+          and offers an indoor version or another day. It only ever suggests.
+        </p>
+      </DetailsToggle>
 
       <div v-if="configured" class="flex flex-wrap items-center gap-2">
         <UBadge color="neutral" variant="subtle" icon="i-lucide-map-pin">{{ prefs?.place }}</UBadge>
