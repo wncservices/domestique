@@ -338,7 +338,7 @@ const ariaLabel = computed(() => {
           :y="HEIGHT - 1"
           font-size="9"
           text-anchor="middle"
-          class="fill-muted"
+          style="fill: var(--ui-text-muted)"
         >
           {{ t.label }}
         </text>

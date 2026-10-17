@@ -182,7 +182,7 @@ const ariaLabel = computed(() => {
             :y="yFor(v) + 3"
             font-size="9"
             text-anchor="end"
-            class="fill-muted"
+            style="fill: var(--ui-text-muted)"
           >
             {{ v }}
           </text>
@@ -206,7 +206,7 @@ const ariaLabel = computed(() => {
             :y="HEIGHT - 8"
             font-size="9"
             text-anchor="middle"
-            class="fill-muted"
+            style="fill: var(--ui-text-muted)"
           >
             {{ windowLabel(s) }}
           </text>

@@ -80,7 +80,7 @@ function formatReadiness(day: DailyWellnessDTO): string {
     <div class="overflow-x-auto">
       <table class="w-full min-w-[36rem] text-sm">
         <thead>
-          <tr class="text-left text-xs uppercase tracking-wide text-dimmed">
+          <tr class="text-left text-[length:var(--text-label)] text-muted">
             <th class="py-1.5 pr-3 font-medium">Date</th>
             <th class="py-1.5 pr-3 font-medium">Sleep</th>
             <th class="py-1.5 pr-3 font-medium">HRV</th>

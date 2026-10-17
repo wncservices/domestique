@@ -82,7 +82,7 @@ const library = computed(() => props.workouts.filter((w) => !w.date))
     </div>
 
     <div class="mt-6 flex items-center justify-between">
-      <h3 class="text-xs font-medium uppercase tracking-wide text-muted">Workout library</h3>
+      <h3 class="text-[length:var(--text-label)] font-medium text-muted">Workout library</h3>
       <UButton color="neutral" variant="ghost" icon="i-lucide-plus" size="sm" @click="emit('newWorkout')">Build a workout</UButton>
     </div>
 

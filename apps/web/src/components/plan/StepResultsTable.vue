@@ -69,7 +69,7 @@ function formatActual(step: AnalysisStep): string {
       <div class="overflow-x-auto">
         <table class="w-full min-w-[26rem] text-sm">
           <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-dimmed">
+            <tr class="text-left text-[length:var(--text-label)] text-muted">
               <th class="pb-2 pr-2 font-medium">Step</th>
               <th class="pb-2 pr-2 font-medium">Target</th>
               <th class="pb-2 pr-2 font-medium">Actual</th>

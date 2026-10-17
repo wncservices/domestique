@@ -1042,7 +1042,7 @@ async function saveShare() {
                 class="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-elevated/60"
               >
                 <div class="flex w-11 shrink-0 flex-col items-center rounded-lg bg-elevated py-1 leading-none">
-                  <span class="text-[0.6rem] font-medium uppercase tracking-wide text-dimmed">
+                  <span class="text-[length:var(--text-label)] font-medium text-muted">
                     {{ rideMonth(ride.date) }}
                   </span>
                   <span class="text-base font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>

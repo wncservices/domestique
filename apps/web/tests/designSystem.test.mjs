@@ -76,6 +76,11 @@ test('design: the hex scanner catches real hex and ignores comments', () => {
   assert.deepEqual(hitsIn('/* see #174 */', HEX), [])
 })
 
+test('design: the uppercase scanner catches a plain uppercase class', () => {
+  assert.deepEqual(hitsIn('<h3 class="text-xs uppercase tracking-wide">', /\buppercase\b/), ['uppercase'])
+  assert.deepEqual(hitsIn('// no uppercase here', /\buppercase\b/), [])
+})
+
 test('design: no raw Tailwind palette classes', () => {
   const bad = offenders(
     /\b(text|bg|border|fill|stroke|ring|from|to)-(red|blue|green|orange|purple|slate|gray|amber|yellow|indigo|violet|pink|rose|emerald|teal|cyan|lime|zinc|stone|neutral|sky|ember)-\d{2,3}\b/,
@@ -87,8 +92,8 @@ test('design: no monospace font', () => {
   assert.deepEqual(offenders(/\bfont-mono\b/), [])
 })
 
-test('design: no tiny uppercase eyebrows', () => {
-  assert.deepEqual(offenders(/text-\[0\.7rem\][^"]*uppercase/), [])
+test('design: no uppercase text', () => {
+  assert.deepEqual(offenders(/\buppercase\b/), [])
 })
 
 test('design: every token in styles.css is documented', () => {

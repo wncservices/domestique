@@ -144,7 +144,7 @@ async function send(provider: 'garmin' | 'wahoo') {
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead>
-            <tr class="text-left text-xs uppercase tracking-wide text-dimmed">
+            <tr class="text-left text-[length:var(--text-label)] text-muted">
               <th class="pb-2 pr-3 font-medium">Where</th>
               <th class="pb-2 pr-3 font-medium">Stretch</th>
               <th class="pb-2 pr-3 font-medium">Gradient</th>

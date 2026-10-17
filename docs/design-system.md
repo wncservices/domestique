@@ -199,7 +199,9 @@ No formal scale beyond Tailwind's own — but a few values recur enough to
 treat as the idiom rather than re-deriving spacing per page: `gap-3`/`gap-4`
 for tight stacks, `gap-6` between major sections, `p-4`/`p-5` for card
 padding, `text-[length:var(--text-label)] text-muted`, in sentence case, for a
-label line above a value. Match these in a new page rather than
+label line above a value. There is no `uppercase` anywhere, table headers
+included; the guard test fails on it. The one planned exception is phase 2's
+sidebar group labels, which that phase adds to the guard when it lands. Match these in a new page rather than
 picking new numbers.
 
 ## Structural components
