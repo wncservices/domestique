@@ -8,6 +8,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
 import { truncationNote } from '@/utils/pagination'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 import CrewRideGoing from '@/components/CrewRideGoing.vue'
 import CrewTogetherDays from '@/components/CrewTogetherDays.vue'
@@ -853,6 +854,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
       variant="subtle"
       icon="i-lucide-triangle-alert"
       :description="error"
+      :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => refresh() }]"
     />
 
     <UAlert
@@ -912,19 +914,18 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
     </section>
 
     <!-- One line and the two ways in; no illustration. -->
-    <UCard v-else-if="!loading" variant="outline">
-      <div class="flex flex-col items-center gap-4 py-6 text-center">
-        <p class="max-w-md text-[length:var(--text-body)] text-toned">
-          A crew is a group of riders who share routes and plan rides together. Create one, or find one to join.
-        </p>
-        <div class="flex flex-wrap justify-center gap-2">
-          <UButton icon="i-lucide-plus" @click="createOpen = true">Create a crew</UButton>
-          <UButton icon="i-lucide-search" color="neutral" variant="outline" @click="searchOpen = true">
-            Find a crew to join
-          </UButton>
-        </div>
-      </div>
-    </UCard>
+    <EmptyState
+      v-else-if="!loading"
+      icon="i-lucide-users"
+      title="A crew is a group of riders who share routes and plan rides together. Create one, or find one to join."
+    >
+      <template #actions>
+        <UButton icon="i-lucide-plus" @click="createOpen = true">Create a crew</UButton>
+        <UButton icon="i-lucide-search" color="neutral" variant="outline" @click="searchOpen = true">
+          Find a crew to join
+        </UButton>
+      </template>
+    </EmptyState>
 
     <UModal v-model:open="createOpen" title="Create a crew">
       <template #body>
