@@ -284,7 +284,7 @@ async function remove() {
          — nobody reading this grid needs the permanent URL id, only the
          name and (when there is one) the description right under it. -->
     <div class="flex items-start justify-between gap-2">
-      <h3 class="line-clamp-2 h-[2lh] min-w-0 font-medium text-highlighted">{{ route.name }}</h3>
+      <h3 class="line-clamp-2 min-w-0 font-medium text-highlighted">{{ route.name }}</h3>
       <!-- Stops click and key events so using the menu does not also open
            the detail popup. -->
       <UDropdownMenu :items="actionItems" :content="{ align: 'end' }">
@@ -300,7 +300,7 @@ async function remove() {
         />
       </UDropdownMenu>
     </div>
-    <p class="line-clamp-2 h-[2lh] text-sm text-toned">{{ route.description }}</p>
+    <p v-if="route.description" class="line-clamp-2 text-sm text-toned">{{ route.description }}</p>
 
     <dl class="flex flex-wrap gap-x-5 gap-y-1 tabular-nums">
       <div class="min-w-0">
@@ -363,12 +363,29 @@ async function remove() {
         </span>
       </UTooltip>
 
-      <span v-if="route.owner" aria-hidden="true" class="text-dimmed/50">·</span>
+      <span v-if="route.owner || canEdit" aria-hidden="true" class="text-dimmed/50">·</span>
       <UTooltip v-if="route.owner" :text="`Uploaded by ${route.owner}`">
         <span class="inline-flex items-center gap-1">
           <UIcon name="i-lucide-user" class="size-3.5" />
           {{ route.owner }}
         </span>
+      </UTooltip>
+      <!-- First-come: an ownerless route can neither reach a device nor be
+           shared to a crew until someone claims it, so it stays visible. -->
+      <UTooltip
+        v-else-if="canEdit"
+        text="This route has no owner yet, so it can't reach any device or be shared to a crew. Claim it to fix that."
+      >
+        <UButton
+          size="xs"
+          color="warning"
+          variant="outline"
+          icon="i-lucide-user-plus"
+          :loading="claiming"
+          @click.stop="claim"
+        >
+          Claim
+        </UButton>
       </UTooltip>
     </div>
 
