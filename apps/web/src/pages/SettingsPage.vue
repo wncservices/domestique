@@ -49,8 +49,10 @@ const current = ref('')
 
 function goTo(id: string) {
   current.value = id
-  router.replace({ hash: `#${id}` })
+  // The hash watcher scrolls; scroll here too for the case where the hash
+  // is already this one and so never fires.
   document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  router.replace({ hash: `#${id}` })
 }
 
 // Same shape as the Fitness page's #profile jump: the panels above a section
@@ -68,6 +70,18 @@ async function scrollToHash(loads: Promise<unknown>[]) {
   await nextTick()
   if (Math.abs(window.scrollY - startY) < 2) jump()
 }
+
+// Re-clicking a link or editing the URL while already here changes only the
+// hash, and the mount-time scroll never runs again.
+watch(
+  () => route.hash,
+  (hash) => {
+    const id = hash.slice(1)
+    if (!id || !document.getElementById(id)) return
+    current.value = id
+    document.getElementById(id)?.scrollIntoView({ block: 'start' })
+  },
+)
 
 const aboutAutoSync = ref(false)
 const aboutAutoSchedule = ref(false)
@@ -445,6 +459,17 @@ async function garminChanged(next: GarminConnection) {
   await refresh()
 }
 
+// Cards arrive asynchronously, so a section is only called empty once every
+// load behind it has settled; otherwise the fallback would flash first.
+const loaded = ref(false)
+// null until WeatherSettings has finished asking, then whether it shows.
+const weatherShown = ref<boolean | null>(null)
+const deploymentEmpty = computed(
+  () => loaded.value && !autoSync.value?.canManage && !autoSchedule.value?.canManage && !garmin.value.consumer && !config.value?.source,
+)
+const basemapEmpty = computed(() => loaded.value && !basemap.value?.canManage)
+const notificationsEmpty = computed(() => !canManageTraining.value || weatherShown.value === false)
+
 onMounted(async () => {
   // Wait for the shared state first. Whether Komoot is worth asking about
   // depends on the config and the caller's permissions, and mounting a page
@@ -462,6 +487,7 @@ onMounted(async () => {
   ]
   scrollToHash(loads)
   await Promise.all(loads)
+  loaded.value = true
 })
 </script>
 
@@ -470,34 +496,36 @@ onMounted(async () => {
     <div class="flex flex-col gap-6 lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start lg:gap-10">
       <!-- One nav for both widths: a horizontal scrolling row on a phone, a
            sticky column from lg up, so the landmark is announced once. -->
-      <nav aria-label="Settings" class="lg:sticky lg:top-20">
-        <ul class="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+      <!-- One nav for both widths: a horizontal scrolling row on a phone, a
+           sticky column from lg up, so the landmark is announced once. -->
+      <nav aria-label="Settings" class="flex gap-4 overflow-x-auto lg:sticky lg:top-20 lg:flex-col lg:gap-3 lg:overflow-visible">
+        <ul class="flex gap-1 lg:flex-col">
           <li v-for="section in generalSections" :key="section.id" class="shrink-0">
             <a
               :href="`#${section.id}`"
-              class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=true]:bg-elevated aria-[current=true]:font-medium aria-[current=true]:text-highlighted"
-              :aria-current="current === section.id ? 'true' : undefined"
+              class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
+              :aria-current="current === section.id ? 'location' : undefined"
               @click.prevent="goTo(section.id)"
             >
               {{ section.label }}
             </a>
           </li>
-          <template v-if="adminSections.length">
-            <li class="shrink-0 self-center px-3 text-[length:var(--text-label)] text-dimmed lg:mt-3 lg:self-start" aria-hidden="true">
-              Admin
-            </li>
+        </ul>
+        <div v-if="adminSections.length" class="flex items-center gap-1 lg:flex-col lg:items-stretch">
+          <p class="shrink-0 px-3 text-[length:var(--text-label)] text-dimmed" aria-hidden="true">Admin</p>
+          <ul aria-label="Admin" class="flex gap-1 lg:flex-col">
             <li v-for="section in adminSections" :key="section.id" class="shrink-0">
               <a
-                :href="`#${section.id}`"
-                class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=true]:bg-elevated aria-[current=true]:font-medium aria-[current=true]:text-highlighted"
-                :aria-current="current === section.id ? 'true' : undefined"
-                @click.prevent="goTo(section.id)"
-              >
-                <span class="sr-only">Admin: </span>{{ section.label }}
-              </a>
+              :href="`#${section.id}`"
+              class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
+              :aria-current="current === section.id ? 'location' : undefined"
+              @click.prevent="goTo(section.id)"
+            >
+              {{ section.label }}
+            </a>
             </li>
-          </template>
-        </ul>
+          </ul>
+        </div>
       </nav>
 
       <div class="flex min-w-0 flex-col gap-10">
@@ -506,6 +534,13 @@ onMounted(async () => {
             <h2 id="profile-title" class="font-display text-xl text-highlighted">Profile</h2>
             <p class="text-sm text-muted">Your own name and sign-in, for this account only.</p>
           </div>
+
+          <p class="text-sm text-toned">
+            Signed in as
+            <span class="text-highlighted">
+              {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
+            </span>
+          </p>
 
           <!-- Only ever available under authMode oidc, with Auth0 Management API
                credentials configured — meDTO omits both flags (defaulting them
@@ -618,17 +653,6 @@ onMounted(async () => {
             </div>
           </UCard>
 
-          <!-- Without Auth0 there is nothing to edit here, but the account is
-               still worth naming so the section is not blank. -->
-          <UCard v-else variant="outline">
-            <p class="text-sm text-toned">
-              Signed in as
-              <span class="text-highlighted">
-                {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
-              </span>
-            </p>
-          </UCard>
-
           <!-- Same gating as the Profile card above: only ever available under
                authMode oidc with Auth0 Management API credentials configured.
                Kept at the foot of the section, away from the forms — a
@@ -646,42 +670,6 @@ onMounted(async () => {
             <h2 id="devices-title" class="font-display text-xl text-highlighted">Devices and sync</h2>
             <p class="text-sm text-muted">Head units and accounts your routes are pushed to or imported from.</p>
           </div>
-
-          <!-- Deployment plumbing, and only an admin gets it: the same pattern
-               the Garmin setup / "This deployment" cards further down follow.
-               Kept with the devices rather than under Deployment — this is the
-               one riders actually want to check or flip day to day. -->
-          <UCard v-if="autoSync?.canManage" variant="outline">
-            <template #header>
-              <h3 class="flex items-center gap-2 font-medium text-highlighted">
-                <UIcon name="i-lucide-refresh-cw" />
-                Auto-sync
-              </h3>
-              <p class="text-sm text-muted">
-                Pull in new routes from riders' connected accounts and push what changed out to devices on its own.
-              </p>
-            </template>
-
-            <label class="flex w-fit items-center gap-2 text-sm text-toned">
-              <USwitch
-                :model-value="autoSync.enabled"
-                :loading="togglingAutoSync"
-                @update:model-value="toggleAutoSync"
-              />
-              {{ autoSync.enabled ? 'On' : 'Off' }}
-            </label>
-            <p v-if="autoSync.updatedBy" class="mt-2 text-xs text-dimmed">
-              Last changed by {{ autoSync.updatedBy }}.
-            </p>
-            <DetailsToggle v-model:open="aboutAutoSync" label="Learn more" class="mt-3">
-              <p class="text-sm text-muted">
-                Whether this deployment pulls in new routes from a rider's connected Wahoo, Komoot or
-                Garmin on its own, then pushes what changed out to devices — for every rider, without
-                anyone clicking "Push to devices". Which of a rider's own devices actually get pushed
-                to is set per device, below.
-              </p>
-            </DetailsToggle>
-          </UCard>
 
           <AccountsPanel
             :accounts="accounts"
@@ -738,13 +726,71 @@ onMounted(async () => {
             <p class="text-sm text-muted">Where your rides start and how your plan gets scheduled.</p>
           </div>
 
-          <div class="peer flex flex-col gap-4 empty:hidden">
-            <p v-if="canManageTraining" class="text-sm text-muted">
+          <div v-if="canManageTraining" class="flex flex-col gap-4">
+            <p class="text-sm text-muted">
               Your FTP and the rest of your training profile live on
               <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Fitness</RouterLink>.
             </p>
 
-            <RideStartCard v-if="canManageTraining" :routing-configured="routingConfigured" />
+            <RideStartCard :routing-configured="routingConfigured" />
+
+          </div>
+          <p v-else class="text-sm text-dimmed">Nothing to set here for your role.</p>
+        </section>
+
+        <section id="notifications" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="notifications-title">
+          <div>
+            <h2 id="notifications-title" class="font-display text-xl text-highlighted">Notifications</h2>
+            <p class="text-sm text-muted">What Domestique warns you about for planned rides.</p>
+          </div>
+
+          <!-- A rider's own setting. The card hides itself when the deployment
+               has weather switched off. -->
+          <WeatherSettings v-if="canManageTraining" @visible="weatherShown = $event" />
+          <p v-if="notificationsEmpty" class="text-sm text-dimmed">Nothing to set here on this deployment.</p>
+        </section>
+
+        <section v-if="adminSections.length" id="deployment" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="deployment-title">
+          <div>
+            <h2 id="deployment-title" class="font-display text-xl text-highlighted">Deployment</h2>
+            <p class="text-sm text-muted">Settings that apply to every rider on this deployment.</p>
+          </div>
+
+          <div class="flex flex-col gap-4">
+            <!-- Deployment plumbing, and only an admin gets it: the same pattern
+                 the Garmin setup / "This deployment" cards further down follow.
+                 Lives under Deployment: it is a deployment-wide switch. -->
+            <UCard v-if="autoSync?.canManage" variant="outline">
+              <template #header>
+                <h3 class="flex items-center gap-2 font-medium text-highlighted">
+                  <UIcon name="i-lucide-refresh-cw" />
+                  Auto-sync
+                </h3>
+                <p class="text-sm text-muted">
+                  Pull in new routes from riders' connected accounts and push what changed out to devices on its own.
+                </p>
+              </template>
+
+              <label class="flex w-fit items-center gap-2 text-sm text-toned">
+                <USwitch
+                  :model-value="autoSync.enabled"
+                  :loading="togglingAutoSync"
+                  @update:model-value="toggleAutoSync"
+                />
+                {{ autoSync.enabled ? 'On' : 'Off' }}
+              </label>
+              <p v-if="autoSync.updatedBy" class="mt-2 text-xs text-dimmed">
+                Last changed by {{ autoSync.updatedBy }}.
+              </p>
+              <DetailsToggle v-model:open="aboutAutoSync" label="Learn more" class="mt-3">
+                <p class="text-sm text-muted">
+                  Whether this deployment pulls in new routes from a rider's connected Wahoo, Komoot or
+                  Garmin on its own, then pushes what changed out to devices — for every rider, without
+                  anyone clicking "Push to devices". Which of a rider's own devices actually get pushed
+                  to is set per device, under Devices and sync.
+                </p>
+              </DetailsToggle>
+            </UCard>
 
             <!-- Same deployment-wide shape as auto-sync, for training instead of
                  routes, and likewise admin only. -->
@@ -779,31 +825,7 @@ onMounted(async () => {
                 </p>
               </DetailsToggle>
             </UCard>
-          </div>
-          <p class="hidden text-sm text-dimmed peer-empty:block">Nothing to set here for your role.</p>
-        </section>
 
-        <section id="notifications" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="notifications-title">
-          <div>
-            <h2 id="notifications-title" class="font-display text-xl text-highlighted">Notifications</h2>
-            <p class="text-sm text-muted">What Domestique warns you about for planned rides.</p>
-          </div>
-
-          <!-- A rider's own setting. The card hides itself when the deployment
-               has weather switched off. -->
-          <div class="peer flex flex-col gap-4 empty:hidden">
-            <WeatherSettings v-if="canManageTraining" />
-          </div>
-          <p class="hidden text-sm text-dimmed peer-empty:block">Nothing to set here on this deployment.</p>
-        </section>
-
-        <section v-if="adminSections.length" id="deployment" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="deployment-title">
-          <div>
-            <h2 id="deployment-title" class="font-display text-xl text-highlighted">Deployment</h2>
-            <p class="text-sm text-muted">Settings that apply to every rider on this deployment.</p>
-          </div>
-
-          <div class="peer flex flex-col gap-4 empty:hidden">
             <!-- Deployment plumbing, and only an admin gets it: the API omits the
                  consumer entirely for everyone else, so this card does not exist for
                  a rider. Nothing here is theirs to set or worth them knowing. -->
@@ -834,19 +856,13 @@ onMounted(async () => {
 
               <dl class="grid gap-3 text-sm sm:grid-cols-2">
                 <div>
-                  <dt class="text-dimmed">Signed in as</dt>
-                  <dd class="text-highlighted">
-                    {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
-                  </dd>
-                </div>
-                <div>
                   <dt class="text-dimmed">Library</dt>
                   <dd class="tabular-nums text-xs break-all text-highlighted">{{ config.source }}</dd>
                 </div>
               </dl>
             </UCard>
           </div>
-          <p class="hidden text-sm text-dimmed peer-empty:block">Nothing to set here.</p>
+          <p v-if="deploymentEmpty" class="text-sm text-dimmed">Nothing to set here.</p>
         </section>
 
         <section v-if="adminSections.length" id="basemap" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="basemap-title">
@@ -861,7 +877,7 @@ onMounted(async () => {
                auto-sync above, since (unlike the Garmin/config cards) the DTO
                here is shaped to distinguish "unavailable" from "not your job,"
                not to omit itself for a rider. -->
-          <div class="peer flex flex-col gap-4 empty:hidden">
+          <div class="flex flex-col gap-4">
             <UCard v-if="basemap?.canManage" variant="outline">
               <template #header>
                 <h3 class="flex items-center gap-2 font-medium text-highlighted">
@@ -873,7 +889,7 @@ onMounted(async () => {
               <BasemapSetup :basemap="basemap" @changed="pollBasemapWhileRunning" />
             </UCard>
           </div>
-          <p class="hidden text-sm text-dimmed peer-empty:block">The basemap status is not available.</p>
+          <p v-if="basemapEmpty" class="text-sm text-dimmed">The basemap status is not available.</p>
         </section>
       </div>
     </div>
