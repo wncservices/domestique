@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -73,13 +74,18 @@ func weekWorkouts(t *testing.T, h *trainingHarness) map[string]whyWorkoutOut {
 
 func TestTheWeekCarriesAWhyOnAdjustedWorkoutsOnly(t *testing.T) {
 	h := newTrainingHarness(t)
-	h.srv.Clock = weekClock
+	// The store stamps each why from the server's clock, and "the latest row"
+	// is decided by that stamp, so a fixed clock has to move between the two
+	// writes or they tie.
+	now := weekClock()
+	h.srv.Clock = func() time.Time { return now }
 	adjusted := plainWorkout(t, h, "wilant", "Threshold", "2026-09-30")
 	older := why.NewRecord(why.FatigueOverload, "older sentence", why.FatigueOverloadInputs{AnalysedTSS: 300, PlannedTSS: 200, Ratio: 1.5})
 	newer := why.NewRecord(why.ReadinessCaution, "Eased one level — HRV is unbalanced today", why.ReadinessInputs{
 		Verdict: "caution", Signals: []why.Signal{{Kind: "hrv", Label: "HRV unbalanced", Value: "41 ms vs usual 52"}},
 	})
 	recordWhy(t, h, "wilant", adjusted.ID, older, "2026-09-29")
+	now = now.Add(time.Second)
 	recordWhy(t, h, "wilant", adjusted.ID, newer, "2026-09-30")
 	plain := plainWorkout(t, h, "wilant", "Endurance", "2026-10-01")
 

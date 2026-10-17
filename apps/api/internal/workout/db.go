@@ -650,7 +650,7 @@ WHERE workout_id IN (SELECT id FROM workouts WHERE test_protocol <> '')
 func (d *DB) backfillFTPVerified() error {
 	_, err := d.db.Exec(d.query(
 		`UPDATE rider_profiles SET ftp_verified_at = ? WHERE ftp_verified_at = '' AND ftp_watts > 0`),
-		time.Now().UTC().Format("2006-01-02"))
+		d.now().UTC().Format("2006-01-02"))
 	return err
 }
 

@@ -26,6 +26,7 @@ func newPushHarness(t *testing.T) *pushHarness {
 		t.Fatal(err)
 	}
 	h.srv.Training = training
+	followServerClock(h.srv, training)
 	h.connectGarmin("wilant")
 	return &pushHarness{connectHarness: h, training: training}
 }
@@ -55,12 +56,15 @@ func (h *pushHarness) calls() string { return strings.Join(h.garmin.workoutCalls
 // default), which is what the server's localToday compares against. The
 // machine's own zone would make this "today" for the server between local
 // midnight in Brussels and midnight in the test's zone.
-func tomorrow() string {
+func tomorrow() string { return daysFromToday(1) }
+
+// daysFromToday is n days after today in the training zone, see tomorrow.
+func daysFromToday(n int) string {
 	loc, err := time.LoadLocation("Europe/Brussels")
 	if err != nil {
 		panic(err)
 	}
-	return time.Now().In(loc).AddDate(0, 0, 1).Format("2006-01-02")
+	return time.Now().In(loc).AddDate(0, 0, n).Format("2006-01-02")
 }
 
 func TestPushingTwiceNeverMakesASecondCopy(t *testing.T) {
@@ -119,7 +123,7 @@ func TestMovingAWorkoutMovesItsCalendarEntry(t *testing.T) {
 	id := h.newWorkout(tomorrow())
 	h.push(id)
 
-	later := time.Now().AddDate(0, 0, 3).Format("2006-01-02")
+	later := daysFromToday(3)
 	h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+id, `{"date":"`+later+`"}`)
 	h.garmin.workoutCalls = nil
 	h.push(id)

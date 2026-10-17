@@ -61,6 +61,7 @@ func newTrainingHarness(t *testing.T) *trainingHarness {
 	}
 
 	srv := &api.Server{Auth: authenticator, Training: trainingStore}
+	followServerClock(srv, trainingStore)
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 
@@ -95,6 +96,16 @@ func (h *trainingHarness) seedSession(rider, date string, hours float64) {
 	if err != nil {
 		h.t.Fatal(err)
 	}
+}
+
+// pinClock fixes the server's "now" (the training store follows it) to
+// weekClock and returns it, for a test that plans or seeds relative to today.
+// The real clock would make those dates depend on the day, and near midnight on
+// which zone is asked.
+func (h *trainingHarness) pinClock() time.Time {
+	now := weekClock()
+	h.srv.Clock = func() time.Time { return now }
+	return now
 }
 
 func (h *trainingHarness) as(user, groups, method, path, body string) *http.Response {
@@ -477,8 +488,9 @@ func TestPushWorkoutToGarmin(t *testing.T) {
 
 func TestGoalPeriodization(t *testing.T) {
 	h := newTrainingHarness(t)
+	now := h.pinClock()
 
-	eventDate := time.Now().AddDate(0, 0, 70).Format("2006-01-02") // 10 weeks out
+	eventDate := now.AddDate(0, 0, 70).Format("2006-01-02") // 10 weeks out
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
 		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
 	g := decodeGoal(t, resp)
@@ -531,8 +543,9 @@ const reconcileLookbackWeeks = 3
 // computed it.
 func TestGoalPeriodizationReconcilesAgainstRecentTrainingHistory(t *testing.T) {
 	h := newTrainingHarness(t)
+	now := h.pinClock()
 
-	eventDate := time.Now().AddDate(0, 0, 300).Format("2006-01-02") // long enough for a real Base phase
+	eventDate := now.AddDate(0, 0, 300).Format("2006-01-02") // long enough for a real Base phase
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
 		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
 	g := decodeGoal(t, resp)
@@ -556,7 +569,7 @@ func TestGoalPeriodizationReconcilesAgainstRecentTrainingHistory(t *testing.T) {
 	// in those historical weeks: heavily undertrained.
 	goal := workout.Goal{EventDate: g.EventDate}
 	profile := workout.RiderProfile{HoursPerAvailableDay: 1, AvailableDays: []string{"mon", "wed", "fri"}}
-	pastAnchor := periodization.MondayOf(time.Now()).AddDate(0, 0, -7*reconcileLookbackWeeks)
+	pastAnchor := periodization.MondayOf(now).AddDate(0, 0, -7*reconcileLookbackWeeks)
 	histPlan, err := periodization.BuildPlan(goal, profile, pastAnchor)
 	if err != nil {
 		t.Fatal(err)
@@ -564,7 +577,7 @@ func TestGoalPeriodizationReconcilesAgainstRecentTrainingHistory(t *testing.T) {
 	if len(histPlan.Weeks) < reconcileLookbackWeeks {
 		t.Fatalf("historical plan too short: %d weeks", len(histPlan.Weeks))
 	}
-	h.seedSession("wilant", time.Now().Format("2006-01-02"), 0.5)
+	h.seedSession("wilant", now.Format("2006-01-02"), 0.5)
 
 	adjusted := decodePeriodization(t, h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", ""))
 	if adjusted.Adjustment >= 0.99 {
@@ -686,8 +699,9 @@ func fakeAnthropic(t *testing.T, text string) *httptest.Server {
 
 func TestExplainPlanRequiresNarrationConfigured(t *testing.T) {
 	h := newTrainingHarness(t)
+	now := h.pinClock()
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
-		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, time.Now().AddDate(0, 0, 70).Format("2006-01-02")))
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, now.AddDate(0, 0, 70).Format("2006-01-02")))
 	g := decodeGoal(t, resp)
 
 	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/explain", "")
@@ -698,13 +712,14 @@ func TestExplainPlanRequiresNarrationConfigured(t *testing.T) {
 
 func TestExplainPlanReturnsTheModelsTextAndIsOwnerOnly(t *testing.T) {
 	h := newTrainingHarness(t)
+	now := h.pinClock()
 	fake := fakeAnthropic(t, "This week starts your base phase — steady, easy miles.")
 	client := narration.New("test-key")
 	client.APIBase = fake.URL
 	h.srv.Narration = client
 
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
-		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, time.Now().AddDate(0, 0, 70).Format("2006-01-02")))
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, now.AddDate(0, 0, 70).Format("2006-01-02")))
 	g := decodeGoal(t, resp)
 	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
 		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
@@ -1058,7 +1073,8 @@ func TestProposeGoalRequiresNarrationConfigured(t *testing.T) {
 // handleCreateGoal makes a goal real, so ownership stays decided in one place.
 func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
 	h := newTrainingHarness(t)
-	future := time.Now().AddDate(0, 3, 0).Format("2006-01-02")
+	now := h.pinClock()
+	future := now.AddDate(0, 3, 0).Format("2006-01-02")
 	fake := fakeAnthropic(t, fmt.Sprintf(
 		`{"name":"Gran Fondo","sport":"cycling","eventDate":%q,"priority":"A","targetDistanceKm":180,"targetElevationM":2400,"explanation":"ok"}`, future))
 	client := narration.New("test-key")
@@ -1121,9 +1137,10 @@ type fitnessOut struct {
 // and omit it for a session nobody has analysed yet.
 func TestFitnessIncludesAnalysisForAnalysedSessionsOnly(t *testing.T) {
 	h := newTrainingHarness(t)
+	now := h.pinClock()
 
-	analysedDate := time.Now().Format("2006-01-02")
-	plainDate := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	analysedDate := now.Format("2006-01-02")
+	plainDate := now.AddDate(0, 0, -1).Format("2006-01-02")
 	h.seedSession("wilant", analysedDate, 1)
 	h.seedSession("wilant", plainDate, 1)
 
@@ -1172,9 +1189,10 @@ func TestFitnessIncludesAnalysisForAnalysedSessionsOnly(t *testing.T) {
 // follows (isOwnTraining), here enforced by ListAnalyses' own rider filter.
 func TestFitnessAnalysisIsOwnerOnly(t *testing.T) {
 	h := newTrainingHarness(t)
-	date := time.Now().Format("2006-01-02")
+	now := h.pinClock()
+	date := now.Format("2006-01-02")
 	h.seedSession("wilant", date, 1)
-	otherDate := time.Now().AddDate(0, 0, -2).Format("2006-01-02")
+	otherDate := now.AddDate(0, 0, -2).Format("2006-01-02")
 	h.seedSession("other", otherDate, 1)
 
 	if err := h.store.SaveAnalysis(context.Background(), workout.SessionAnalysis{
@@ -1202,7 +1220,8 @@ func TestFitnessAnalysisIsOwnerOnly(t *testing.T) {
 // analysis storage alone has a bad day. See analysesSince's own doc comment.
 func TestFitnessDegradesWhenAnalysisStorageFails(t *testing.T) {
 	h := newTrainingHarness(t)
-	date := time.Now().Format("2006-01-02")
+	now := h.pinClock()
+	date := now.Format("2006-01-02")
 	h.seedSession("wilant", date, 1)
 	h.breakAnalysisStorage()
 

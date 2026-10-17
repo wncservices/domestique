@@ -37,6 +37,7 @@ type ftpResultHarness struct {
 	testID string
 	date   string
 	fake   *fakeGarmin
+	now    time.Time // the harness clock, which the server and the store both read
 }
 
 // newFTPResultHarness plans protocol as a test yesterday and has the rider ride
@@ -50,28 +51,31 @@ func newFTPResultHarness(t *testing.T, protocol string, watts int, profile worko
 // newFTPResultHarnessFor is newFTPResultHarness with the ride's length chosen.
 func newFTPResultHarnessFor(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile) *ftpResultHarness {
 	t.Helper()
-	return newFTPResultHarnessAt(t, protocol, watts, seconds, profile, time.Time{})
+	return newFTPResultHarnessAt(t, protocol, watts, seconds, profile, ftpResultClock)
 }
 
-// newFTPResultHarnessAt is newFTPResultHarnessFor on a fixed clock: the server
+// ftpResultClock is the "now" of the harness unless a test picks its own: the
+// server and the store both read it, and the test is ridden the day before.
+// Fixed rather than the real clock so nothing here depends on the day the
+// suite runs.
+var ftpResultClock = time.Date(2026, time.March, 12, 9, 0, 0, 0, time.UTC)
+
+// newFTPResultHarnessAt is newFTPResultHarnessFor on a chosen clock: the server
 // and the store both read now, and the test is ridden the day before. A zero
-// now is the real clock, which is what the older tests here use.
+// now means ftpResultClock.
 func newFTPResultHarnessAt(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile, now time.Time) *ftpResultHarness {
 	t.Helper()
-	ref := now
-	if ref.IsZero() {
-		ref = time.Now()
+	if now.IsZero() {
+		now = ftpResultClock
 	}
-	start := ref.AddDate(0, 0, -1)
+	start := now.AddDate(0, 0, -1)
 	fake := &fakeGarmin{
 		activities: []garmin.Activity{{ID: "9100", Sport: "cycling", StartTime: start, DurationSeconds: float64(seconds), AvgPowerWatts: float64(watts)}},
 		fitByID:    map[string][]byte{"9100": buildRideFIT(t, start, seconds, watts)},
 	}
 	h := newMetricsSyncHarness(t, fake)
 	h.seedGarminSession("wilant")
-	if !now.IsZero() {
-		h.setClock(now) // before the first write, so every stamp is on the fixed clock
-	}
+	h.setClock(now) // before the first write, so every stamp is on the fixed clock
 	ctx := context.Background()
 
 	profile.Rider = "wilant"
@@ -87,7 +91,7 @@ func newFTPResultHarnessAt(t *testing.T, protocol string, watts, seconds int, pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &ftpResultHarness{metricsSyncHarness: h, testID: test.ID, date: req.Date, fake: fake}
+	return &ftpResultHarness{metricsSyncHarness: h, testID: test.ID, date: req.Date, fake: fake, now: now}
 }
 
 func (h *ftpResultHarness) sync() syncFTPTestsOut {
@@ -244,7 +248,7 @@ func TestSyncReportsARideWithNoPowerAsUnreadableOnceAndOnlyOnce(t *testing.T) {
 func TestSyncIgnoresATestThatWasNotRidden(t *testing.T) {
 	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250})
 	// Move the test to a day with no ride: it is never linked, so nothing is read.
-	other := time.Now().AddDate(0, 0, -3).Format("2006-01-02")
+	other := h.now.AddDate(0, 0, -3).Format("2006-01-02")
 	if _, err := h.srv.Training.UpdateWorkout(context.Background(), h.testID, workout.UpdateWorkoutRequest{Date: &other}); err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +304,7 @@ func TestADecodedRideTooShortForTheWindowIsUnreadable(t *testing.T) {
 // not the test's.
 func TestSyncReportsTheRidesFindingWhenAnEFTPBreakthroughOutranksTheTest(t *testing.T) {
 	h := newFTPResultHarness(t, "ramp", 400, workout.RiderProfile{FTPWatts: 250}) // test reads 300
-	other := time.Now().AddDate(0, 0, -3)
+	other := h.now.AddDate(0, 0, -3)
 	h.fake.activities = append(h.fake.activities, garmin.Activity{
 		ID: "9200", Sport: "cycling", StartTime: other, DurationSeconds: 1200, AvgPowerWatts: 360,
 	})

@@ -85,6 +85,7 @@ func newPacingPushHarness(t *testing.T) *pacingPushHarness {
 	}
 	h.srv.Training, h.srv.PacingPushes = tr, pushes
 	h.srv.Clock = func() time.Time { return demandsClock }
+	followServerClock(h.srv, tr)
 	var buf bytes.Buffer
 	h.srv.Log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{
 		Level: slog.LevelDebug,

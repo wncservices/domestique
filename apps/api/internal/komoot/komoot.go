@@ -61,7 +61,13 @@ const (
 func (c *Client) allowedHost(raw string) error {
 	target, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("komoot: unusable URL %q: %w", raw, err)
+		// url.Parse's error repeats the whole URL, query string included, and
+		// this one can come out of a response body. Keep only the cause.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("komoot: unusable URL: %w", err)
 	}
 
 	for _, base := range []string{c.BaseV6, c.BaseV7} {
@@ -326,6 +332,12 @@ func (c *Client) do(req *http.Request, into any) error {
 
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		// *url.Error repeats the request URL: the query string and, for Login,
+		// the rider's email in the path. Callers log this, so keep the cause only.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("komoot: %s request failed: %w", ue.Op, ue.Err)
+		}
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
