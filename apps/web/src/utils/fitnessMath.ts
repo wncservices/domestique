@@ -359,7 +359,7 @@ export function formatPace(metersPerSecond: number): string {
 //
 // One place for "which field is this" formatting, shared by
 // ThresholdSuggestions.vue, ProfileForm.vue's provenance line and
-// TrainingFitnessPage.vue's sync toast — see DetectedThreshold/
+// FitnessPage.vue's sync toast — see DetectedThreshold/
 // ThresholdSuggestion in api/types.ts.
 export type ThresholdField = 'ftp' | 'max_hr' | 'threshold_pace' | 'threshold_hr'
 

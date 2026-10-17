@@ -342,7 +342,7 @@ async function dismissSuggestion() {
 
               <p v-if="promptProfile" class="text-[length:var(--text-label)] text-muted">
                 Power targets need your FTP.
-                <RouterLink to="/fitness" class="text-primary underline underline-offset-2">Finish your profile</RouterLink>.
+                <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Finish your profile</RouterLink>.
               </p>
             </template>
           </div>
