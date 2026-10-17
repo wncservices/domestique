@@ -599,6 +599,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
       <EmptyState
         v-if="unavailable"
         bare
+        :heading-level="3"
         icon="i-lucide-key-round"
         title="Auth0 Management API access is not configured"
         text="An administrator can set DOMESTIQUE_AUTH0_MGMT_CLIENT_ID and DOMESTIQUE_AUTH0_MGMT_CLIENT_SECRET to enable this page."
@@ -700,6 +701,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
       <EmptyState
         v-else-if="!loading"
         bare
+        :heading-level="3"
         icon="i-lucide-user-x"
         title="Nobody has access yet"
         text="Invite the first rider above."
