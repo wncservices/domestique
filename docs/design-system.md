@@ -240,7 +240,8 @@ one per page.
 | `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` |
 | `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
 | `/routes`, `/routes/new`, `/routes/build` | `RoutesPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Redesigned: `AppPage` with Add route / Build a route as page actions, library `StatTile` row, `SegmentedControl` (Grid / Map), slim sync banner, `RouteCard` with an actions menu. Add and Build are `AppPage`s with a "Back to routes" action |
-| `/crews`, `/settings`, `/people` | `CrewsPage.vue`, `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
+| `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line empty state |
+| `/settings`, `/people` | `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
 
 `TodayPage` reads the Plan and Fitness pages' endpoints and adds none. Its pure
 choices (greeting, headline, which suggestion wins, tile tones, TSS/IF/power range)
@@ -275,6 +276,20 @@ deep links and Back both work.
   label; an offered-but-blocked item is disabled with the reason as its description, and a role that may
   not do something does not see it. The card's own click (open the detail) is unchanged, and the
   trigger stops click and key events so it does not also open it.
+
+### Crews page
+
+- **Page actions.** "Search crews" (browse, request to join, accept an invite) and "Create crew" are
+  buttons in `AppPage`'s `actions` slot.
+- **Crew cards.** A rider's own crews are `UCard`s in a two-column grid with `app-card-interactive`;
+  the card opens the crew popup. Member count, ownership, auto-share and waiting requests are badges.
+- **Empty state, the line pattern.** One plain sentence saying what the thing is, then its actions as
+  buttons, centred inside a single card. No illustration, no `UEmpty`. Reuse it for other empty lists.
+- **Menus in the popup.** Each ride has "Ride actions" (sync now; delete last), each approved member
+  "Actions for <rider>" (make or remove owner; remove from crew last), and the footer has "Crew actions"
+  (delete crew for an owner, leave crew for a member). Destructive items are in their own last group.
+  Approve and deny on a pending request stay visible buttons, as does Accept and Decline on an invite,
+  because they are a state to act on.
 
 ### Fitness page
 
