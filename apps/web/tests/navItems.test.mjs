@@ -43,3 +43,9 @@ test('menu: the open-deployment notice shows only when auth is off', () => {
   const open = menuItems('admin', { authMode: 'none' }).find((i) => i.notice)
   assert.equal(open?.notice, 'no login required')
 })
+
+test('menu: Add route and Build route are page actions on Routes, not menu items', () => {
+  const labels = menuItems('admin', { authMode: 'oidc', signOut: 'post' }).map((i) => i.label)
+  assert.ok(!labels.includes('Add route'))
+  assert.ok(!labels.includes('Build route'))
+})

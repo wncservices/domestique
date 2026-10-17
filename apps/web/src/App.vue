@@ -66,7 +66,7 @@ onMounted(() => {
           :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => refresh() }]"
         />
 
-        <!-- KeepAlive, LibraryPage only: every other page (Add, Settings,
+        <!-- KeepAlive, RoutesPage only: every other page (Add, Settings,
              People, Crews) genuinely wants fresh state each visit, but
              Library's own cards each carry a background wash that's real
              work to (re)build — a route line projected from the raw track
@@ -75,13 +75,13 @@ onMounted(() => {
              cache — still a network round trip either way). Without this,
              navigating away and back destroyed every TrackPreview instance
              and rebuilt all of it from scratch, even though nothing about
-             the route itself had changed. LibraryPage's own route list
+             the route itself had changed. RoutesPage's own route list
              already comes from useLibrary's shared state, not a
              component-local fetch, so keeping the component alive doesn't
              risk showing a stale list — a route added on another page still
              appears the moment that shared state updates. -->
         <RouterView v-slot="{ Component }">
-          <KeepAlive include="LibraryPage">
+          <KeepAlive include="RoutesPage">
             <component :is="Component" />
           </KeepAlive>
         </RouterView>
