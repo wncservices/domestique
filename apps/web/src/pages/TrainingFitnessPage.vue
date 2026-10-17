@@ -1,8 +1,7 @@
 <script setup lang="ts">
-// Half of what was one TrainingPage.vue, split so a rider can jump straight
+// Half of what was one training page, split so a rider can jump straight
 // to "what's my fitness / what should I enter" without scrolling past goals
-// and workouts first. See TrainingPage.vue's own doc comment for the phase
-// history this and TrainingPlanPage.vue split apart; this half owns the
+// and workouts first. See docs/training-plan.md for the phase history; this half owns the
 // synced fitness history (Phase B1) and the rider's own profile (FTP,
 // thresholds, availability — Phase E's free-text suggestion on top of it).
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'

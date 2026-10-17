@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The other half of what was one TrainingPage.vue — see
+// The other half of what was one training page — see
 // TrainingFitnessPage.vue's own doc comment for the split. This half owns
 // what a rider is training *toward*: goals, the periodized plan each one
 // produces (Phases C/D, see internal/periodization and internal/adapter),

@@ -206,20 +206,41 @@ picking new numbers.
 
 ## Structural components
 
-Three ways to make a "panel," picked in this order:
+Pick in this order:
 
-1. **`UCard variant="outline"`** — the default. Anything that's fundamentally
-   a Nuxt UI component consumer: `PeoplePage.vue`, `SettingsPage.vue`, most
-   of `CrewsPage.vue`, `RouteCard.vue`. Fully token-driven already; reach
-   for this first.
-2. **`.app-card` / `.app-card-interactive`** — only when you need the same
-   shadow/hover language on something that isn't semantically a Nuxt UI
-   card: the stat-tile row, the landing feature grid, `CrewsPage.vue`'s own
-   hand-rolled tile sections. `.app-card-interactive` adds the hover
-   lift/shadow for a tappable tile; plain `.app-card` is for a static one.
-3. **`UContainer` alone** — page-level width/padding with no card semantics
-   at all (`AddPage.vue`, which is just a stack of panel components).
-   `max-w-5xl` is the standing width for every page — match it.
+1. **`AppPage`** (`components/ui/AppPage.vue`) — the frame of every top-level
+   page: `title`, optional `subtitle`, an `actions` slot for the page's buttons
+   and the default slot for content, at `max-w-6xl`. The shell supplies the
+   side padding, so a page does not wrap itself in `UContainer`.
+2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
+   `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
+   `behind`). Tone carries meaning (on track, behind), not decoration.
+3. **`UCard variant="outline"`** — the default panel. Anything that is
+   fundamentally a Nuxt UI component consumer: `PeoplePage.vue`,
+   `SettingsPage.vue`, most of `CrewsPage.vue`, `RouteCard.vue`.
+4. **`.app-card` / `.app-card-interactive`** — only when you need the same
+   shadow/hover language on something that is not semantically a Nuxt UI card.
+   `.app-card-interactive` adds the hover lift for a tappable tile.
+
+## Navigation
+
+`components/shell/AppShell.vue` replaces the old header. The destinations
+and the avatar menu are data in `components/shell/navItems.ts`, so the three
+layouts cannot disagree and the lists are testable without a DOM.
+
+- **Groups:** *You* (Today, Plan, Fitness) and *Shared* (Routes, Crews). Group
+  labels are sentence case.
+- **Breakpoints:** phone below 640px (`sm`), a labelled bottom tab bar with the
+  avatar top right; tablet 640-1023px, a sidebar narrowed to icons with
+  tooltips; desktop 1024px and up (`lg`), the full sidebar with the wordmark.
+  Every layout is a `<nav aria-label="Main">`; the current page is marked with
+  `aria-current="page"` by the router. The tab bar pads for
+  `env(safe-area-inset-bottom)`.
+- **Avatar menu:** Settings, People (admins only), theme, sign out, and under
+  auth mode none a "no login required" notice. Sign out is a POST under
+  oidc and a link to the provider under proxy.
+- **No shell** on `/shared/:token` and the landing page.
+- Sub-views inside a page use one segmented control, never a second tab style.
 
 ## Checklist for a new page or component
 
