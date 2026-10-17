@@ -83,7 +83,10 @@ test('design: every token in styles.css is documented', () => {
   const names = blocks.flatMap((b) =>
     [...b.matchAll(/(--(?:color-zone-|color-phase-|text-|radius-)[\w-]*)\s*:/g)].map((m) => m[1]),
   )
-  const missing = [...new Set(names)].filter((n) => !doc.includes(n))
+  assert.ok(blocks.length > 0, 'no @theme block found in styles.css')
+  assert.ok(names.length > 0, 'no documented-token candidates found in styles.css')
+  // Whole token names: `--text-sm` must not be satisfied by `--text-small`.
+  const missing = [...new Set(names)].filter((n) => !new RegExp(`${n}(?![\\w-])`).test(doc))
   assert.deepEqual(missing, [])
 })
 

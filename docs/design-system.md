@@ -33,6 +33,32 @@ from the palette above, each defined once in `:root` and again in `.dark`.
 Nuxt UI's own `success`/`info`/`warning`/`error` stay on its defaults —
 untouched, and not something this app re-themes.
 
+### Colour roles
+
+Colour carries one meaning each. Teal means you, an action or good news.
+Coral (`ember`) means behind. The zone scale is for effort only, and the
+phase scale for training phases only; neither is reused for decoration.
+
+| Role | Token | Means |
+|---|---|---|
+| Primary | `--ui-primary` | Actions and you. `primary-700` on light, `primary-400` on dark, with `primary-950` button text on dark (`--ui-text-inverted`). |
+| Behind | `--color-ember-*` | Behind plan, a shortfall. |
+| Effort | `--color-zone-*` | Training zone. Nothing else. |
+| Phase | `--color-phase-*` | Training phase. Nothing else. |
+| Status | Nuxt UI `success`/`warning`/`error`/`info` | State, never decoration. |
+
+**Zone scale**, cool to warm, in effort order: `--color-zone-recovery`,
+`--color-zone-endurance`, `--color-zone-tempo`, `--color-zone-sweet_spot`,
+`--color-zone-threshold`, `--color-zone-vo2max`, `--color-zone-anaerobic`.
+Each has a light value and a `.dark` override, and each holds at least 3:1
+against its card (white, and about `#131d1b`). In code use
+`zoneColorVar(zone)` from `utils/zones.ts`, never a literal; `intervals`
+maps to anaerobic and an unknown zone to endurance.
+
+**Phase scale**, a quiet neutral-to-teal ramp unlike the zones:
+`--color-phase-base`, `--color-phase-build`, `--color-phase-peak`,
+`--color-phase-taper`.
+
 ### Categorical accents
 
 `--app-accent-primary` / `-ember` / `-sky` / `-violet`, each paired with a
@@ -123,13 +149,21 @@ used in one file each; IBM Plex Mono ships no variable build upstream, so
 only the specific static weights (400/500/600) actually used are imported —
 don't add more without a reason.
 
+**Type scale**: `--text-label` (12px), `--text-body` (14px), `--text-lead`
+(16px), `--text-title` (24px) and `--text-hero` (32px) give the utilities
+`text-label`, `text-body`, `text-lead`, `text-title` and `text-hero`. 13px
+and 20px are reached through `text-[13px]` and `text-xl`, so they have no
+token.
+
 ### Shape
+
+`--radius-card` is `1rem`, the corner of a full card (`.app-card`).
 
 `--ui-radius` (`styles.css`, top of `:root`) is Nuxt UI's own corner-radius
 knob, not one this app invented — every button/input/badge corner reads off
 it. Set to `0.5rem`, double Nuxt UI's `0.25rem` default. One value, colour-
 mode independent, so don't add a per-component override; if something needs
-a genuinely different radius, that's `.app-card`'s own `1rem` (a deliberately
+a genuinely different radius, that's `--radius-card` (`1rem`) (a deliberately
 larger, separate value for a full tile, not a Nuxt UI component).
 
 ### Spacing
@@ -162,19 +196,16 @@ Three ways to make a "panel," picked in this order:
 
 - Wrap the page in `UContainer max-w-5xl`, matching every existing page.
 - Reach for `UCard variant="outline"` before `.app-card`.
-- No literal hex colours in `.vue`/`.ts` files outside the two documented
-  exceptions (`RouteMap.vue`'s MapLibre paint literals, `TrackPreview.vue`'s
-  `MAP_COLORS`, both explained in their own comments). Grep for
-  `#[0-9a-f]{3,6}` in `apps/web/src/**/*.vue` before merging — today that
-  grep returns exactly those two files and nothing else.
-  The guard test (`apps/web/tests/designSystem.test.mjs`) allowlists four
+- No literal hex colours in `.vue`/`.ts` files outside the documented
+  exceptions, each explained in its own comments. The guard test
+  (`apps/web/tests/designSystem.test.mjs`) enforces this and allowlists four
   files: `RouteMap.vue` and `TrackPreview.vue` (map painting),
   `RouteBuilderMap.vue` (map painting) and `ElevationProfile.vue` (elevation
   gradient).
 - If something needs a categorical colour, reuse the icon-chip pattern above
-  and pull from the existing four accents — don't add a fifth without
-  raising it as a deliberate decision first (it changes the "which four"
-  story for the doc and for every other categorical use already in the UI).
+  and pull from the existing accents. Effort uses the zone scale and nothing
+  else does; training phases use the phase scale. Don't add a new scale
+  without raising it as a deliberate decision first.
 - Check both light and dark mode by hand. There's no automated visual test
   (see below), so this is the only check that happens.
 

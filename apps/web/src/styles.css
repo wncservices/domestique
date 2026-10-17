@@ -112,6 +112,32 @@
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Type scale: five roles. 13px and 20px are reached through text-[13px] and
+   * text-xl, so they need no token. */
+  --text-label: 0.75rem;
+  --text-body: 0.875rem;
+  --text-lead: 1rem;
+  --text-title: 1.5rem;
+  --text-hero: 2rem;
+
+  --radius-card: 1rem;
+
+  /* Zone scale: effort only, cool to warm. Light values hold 3:1 against a
+   * white card; the .dark block below holds 3:1 against the dark card. */
+  --color-zone-recovery: #5f8a84;
+  --color-zone-endurance: var(--color-sky-600);
+  --color-zone-tempo: var(--color-violet-600);
+  --color-zone-sweet_spot: #b0409a;
+  --color-zone-threshold: var(--color-ember-600);
+  --color-zone-vo2max: var(--color-ember-700);
+  --color-zone-anaerobic: #8f1f10;
+
+  /* Phase scale: a quiet neutral-to-teal ramp, deliberately unlike the zones. */
+  --color-phase-base: var(--color-neutral-400);
+  --color-phase-build: var(--color-primary-500);
+  --color-phase-peak: var(--color-primary-700);
+  --color-phase-taper: var(--color-primary-300);
 }
 
 :root {
@@ -124,7 +150,8 @@
    * independent, so it lives once here rather than in both `:root`/`.dark`. */
   --ui-radius: 0.5rem;
 
-  --ui-primary: var(--color-primary-600);
+  /* Primary actions: 700 on white is 5.5:1; 600 was 3.9:1. */
+  --ui-primary: var(--color-primary-700);
 
   /* Light mode is a tinted page with white cards, rather than white on white
    * — the old flat-white version gave a card no edge of its own, so a dozen
@@ -172,6 +199,21 @@
    * white is close to invisible on a dark surface. Same reasoning applies to
    * every categorical accent below — each swaps to its own 400 step. */
   --ui-primary: var(--color-primary-400);
+  /* Text on a primary button: near-black teal, not the neutral default. */
+  --ui-text-inverted: var(--color-primary-950);
+
+  --color-zone-recovery: #7fa8a1;
+  --color-zone-endurance: var(--color-sky-400);
+  --color-zone-tempo: var(--color-violet-400);
+  --color-zone-sweet_spot: #e070c0;
+  --color-zone-threshold: var(--color-ember-400);
+  --color-zone-vo2max: var(--color-ember-500);
+  --color-zone-anaerobic: #ff4d3a;
+
+  --color-phase-base: var(--color-neutral-500);
+  --color-phase-build: var(--color-primary-600);
+  --color-phase-peak: var(--color-primary-400);
+  --color-phase-taper: var(--color-primary-800);
 
   --ui-bg: var(--color-neutral-950);
   --ui-bg-muted: var(--color-neutral-900);
@@ -209,7 +251,7 @@ body {
 .app-card {
   background-color: var(--app-card-bg);
   border: 1px solid var(--ui-border);
-  border-radius: 1rem;
+  border-radius: var(--radius-card);
   box-shadow: var(--app-card-shadow);
   transition:
     box-shadow 0.2s ease,
@@ -251,7 +293,11 @@ body {
  * so a card grid full of routes still reads as one library, the same
  * reasoning RouteMap.vue's live map already applies to itself. */
 .track-line {
-  stroke: var(--ui-primary);
+  stroke: var(--color-primary-600);
+}
+
+.dark .track-line {
+  stroke: var(--color-primary-400);
 }
 
 /* Printing the Season review (the browser's own print dialog, no script of our

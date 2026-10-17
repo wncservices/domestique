@@ -19,7 +19,7 @@ import {
   type ProgressionRange,
   RANGE_DAYS,
 } from '@/utils/progressionSeries'
-import { formatLevel, zoneAccent, zoneLabel } from '@/utils/zones'
+import { formatLevel, zoneColorVar, zoneLabel } from '@/utils/zones'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
 
 const props = defineProps<{
@@ -69,7 +69,7 @@ function whyFor(sport: string, zone: string): Why | undefined {
 }
 
 function accent(zone: string): string {
-  return `var(--app-accent-${zoneAccent(zone)})`
+  return zoneColorVar(zone)
 }
 
 function dateLabel(t: number): string {

@@ -5,7 +5,7 @@
 // decides *whether* to render it at all (only when zone is structured and
 // level > 0 — an endurance/legacy workout has neither and shows nothing).
 import { computed } from 'vue'
-import { formatLevel, zoneAccent, zoneLabel } from '@/utils/zones'
+import { formatLevel, zoneColorVar, zoneLabel } from '@/utils/zones'
 
 const props = withDefaults(
   defineProps<{
@@ -16,11 +16,10 @@ const props = withDefaults(
   { compact: false },
 )
 
-const accent = computed(() => zoneAccent(props.zone))
 const label = computed(() => zoneLabel(props.zone))
 const style = computed(() => ({
-  background: `var(--app-accent-${accent.value}-soft)`,
-  color: `var(--app-accent-${accent.value})`,
+  background: `color-mix(in srgb, ${zoneColorVar(props.zone)} 14%, transparent)`,
+  color: zoneColorVar(props.zone),
 }))
 </script>
 
