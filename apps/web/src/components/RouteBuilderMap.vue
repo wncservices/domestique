@@ -312,10 +312,10 @@ function schedulePreview() {
 // is where the route actually begins.
 function markerColor(isStart: boolean) {
   if (isStart) {
-    // The app's existing "ember" accent (styles.css), reused here rather
-    // than inventing a new colour — already means "distance/start of
-    // something" elsewhere in this app (App.vue's own distance stat tile).
-    return resolved.value === 'dark' ? '#ff8058' : '#e8502b'
+    // Mirrors --app-accent-ember (styles.css), the text-safe ember: ember-400
+    // on dark, ember-700 on light. A map layer cannot read a CSS variable, so
+    // this literal has to move with the token.
+    return resolved.value === 'dark' ? '#ff8058' : '#c03d1e'
   }
   // Matches RouteMap.vue's own per-theme route colour, so a regular
   // waypoint reads as "the same kind of thing" as a saved route's line.
