@@ -16,7 +16,7 @@ const regionId = useId()
       :aria-controls="regionId"
       @click="open = !open"
     >
-      <UIcon name="i-lucide-chevron-right" class="size-4 transition-transform" :class="{ 'rotate-90': open }" />
+      <UIcon name="i-lucide-chevron-right" aria-hidden="true" class="size-4 transition-transform" :class="{ 'rotate-90': open }" />
       {{ label }}
     </button>
     <div v-if="open" :id="regionId" class="mt-3">
