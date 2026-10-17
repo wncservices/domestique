@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { useColorMode } from '@/color-mode'
 import AppPage from '@/components/ui/AppPage.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import StatTile from '@/components/ui/StatTile.vue'
 import LibraryDuplicatesPanel from '@/components/LibraryDuplicatesPanel.vue'
 import PlanPanel from '@/components/PlanPanel.vue'
@@ -324,25 +326,25 @@ async function push(items: { accountId: string; slug: string }[]) {
       </div>
 
       <div v-if="loading" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <USkeleton v-for="n in 3" :key="n" class="h-72" />
+        <SkeletonCard v-for="n in 3" :key="n" :lines="5" class="h-72" />
       </div>
 
-      <UEmpty
+      <EmptyState
         v-else-if="!routes.length"
         icon="i-lucide-route"
         title="No routes yet"
-        description="Add one from the Add route page, or import from Komoot."
+        text="Add one from the Add route page, or import from Komoot."
       >
         <template #actions>
           <UButton to="/routes/new" icon="i-lucide-plus">Add a route</UButton>
         </template>
-      </UEmpty>
+      </EmptyState>
 
-      <UEmpty
+      <EmptyState
         v-else-if="!visibleRoutes.length"
         icon="i-lucide-search-x"
         title="Nothing matches"
-        :description="
+        :text="
           search
             ? `No route matches “${search}”.`
             : `No ${sportFilter} routes.`
