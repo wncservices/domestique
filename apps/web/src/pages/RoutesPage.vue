@@ -326,7 +326,7 @@ async function push(items: { accountId: string; slug: string }[]) {
       </div>
 
       <div v-if="loading" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <SkeletonCard v-for="n in 3" :key="n" :lines="5" class="h-72" />
+        <SkeletonCard v-for="n in 3" :key="n" :lines="5" label="Loading routes…" class="h-72" />
       </div>
 
       <EmptyState
