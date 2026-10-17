@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppPage from '@/components/ui/AppPage.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import GarminCoursesPanel from '@/components/GarminCoursesPanel.vue'
 import GarminDuplicatesPanel from '@/components/GarminDuplicatesPanel.vue'
@@ -13,7 +14,10 @@ const { config, canUpload, canImportKomoot, canSyncGarmin, canSyncWahoo, komootE
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <AppPage title="Add a route" subtitle="Upload a GPX file, or bring routes in from a provider.">
+    <template #actions>
+      <UButton to="/routes" icon="i-lucide-arrow-left" color="neutral" variant="ghost">Back to routes</UButton>
+    </template>
     <UploadPanel v-if="canUpload" @uploaded="refresh" />
 
     <UAlert
@@ -37,5 +41,5 @@ const { config, canUpload, canImportKomoot, canSyncGarmin, canSyncWahoo, komootE
 
     <WahooRoutesPanel v-if="canSyncWahoo" @imported="refresh" />
     <WahooDuplicatesPanel v-if="canSyncWahoo" />
-  </div>
+  </AppPage>
 </template>
