@@ -52,6 +52,8 @@ export function createAppRouter(load: PageLoader, history = createWebHistory()) 
   return createRouter({
     history,
     routes: buildRoutes(load),
-    scrollBehavior: (to, _from, saved) => saved ?? (to.hash ? false : { top: 0 }),
+    // A new page opens at the top; a hash or a query change on the same page
+    // (the Fitness/Season switch) leaves scrolling to the page itself.
+    scrollBehavior: (to, from, saved) => saved ?? (to.hash || to.path === from.path ? false : { top: 0 }),
   })
 }
