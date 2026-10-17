@@ -13,6 +13,7 @@ import type { SeasonReview as SeasonReviewData, BestEffortsResponse, DailyWellne
 import BestEffortsCard from '@/components/fitness/BestEffortsCard.vue'
 import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
@@ -534,8 +535,15 @@ onMounted(() => {
           <UButton icon="i-lucide-printer" color="neutral" variant="outline" aria-label="Print this review" :disabled="!season" @click="printSeason" />
         </div>
       </div>
-      <p v-if="loadingSeason && !season" class="text-sm text-muted py-6 text-center">Loading your season…</p>
-      <p v-else-if="seasonFailed && !season" class="text-sm text-muted py-6 text-center">The review could not be loaded.</p>
+      <SkeletonCard v-if="loadingSeason && !season" :lines="5" />
+      <UAlert
+        v-else-if="seasonFailed && !season"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        title="The review could not be loaded."
+        :actions="[{ label: 'Try again', color: 'error', variant: 'subtle', onClick: () => loadSeason() }]"
+      />
       <SeasonReview v-else-if="season" :review="season" />
     </section>
 
