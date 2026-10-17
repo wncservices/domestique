@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import type { DropdownMenuItem } from '@nuxt/ui'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { Crew, Person, Ride, RideSeriesInterval, RideSync, UpcomingRide } from '@/api/types'
@@ -7,6 +8,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import { usePagedList } from '@/composables/usePagedList'
 import { truncationNote } from '@/utils/pagination'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
+import AppPage from '@/components/ui/AppPage.vue'
 import CrewRideGoing from '@/components/CrewRideGoing.vue'
 import CrewTogetherDays from '@/components/CrewTogetherDays.vue'
 import RouteDetailModal from '@/components/RouteDetailModal.vue'
@@ -752,68 +754,149 @@ async function saveShare() {
   shareTarget.value = null
   await backgroundRefresh()
 }
+// Secondary actions live in labelled menus, not rows of icon buttons; the
+// same role gates as before decide what is offered, and the destructive
+// items sit last in their own group.
+function rideActions(crew: Crew, ride: Ride): DropdownMenuItem[][] {
+  const groups: DropdownMenuItem[][] = [
+    [
+      {
+        label: "Sync to the crew's devices now",
+        icon: 'i-lucide-refresh-cw',
+        disabled: syncingRide.value === ride.id,
+        onSelect: () => syncRide(ride),
+      },
+    ],
+  ]
+  if (crew.mine || ride.createdBy.toLowerCase() === (me.value?.user ?? '').toLowerCase()) {
+    const busy = deletingRide.value === ride.id || (!!ride.seriesId && deletingSeries.value === ride.seriesId)
+    const del: DropdownMenuItem[] = [
+      {
+        label: ride.seriesId ? 'Delete this ride' : 'Remove this ride',
+        icon: 'i-lucide-trash-2',
+        color: 'error',
+        disabled: busy,
+        onSelect: () => deleteRide(ride),
+      },
+    ]
+    if (ride.seriesId) {
+      del.push({
+        label: 'Delete this and future rides',
+        icon: 'i-lucide-calendar-x',
+        color: 'error',
+        disabled: busy,
+        onSelect: () => deleteRideSeries(ride),
+      })
+    }
+    groups.push(del)
+  }
+  return groups
+}
+
+function memberActions(crew: Crew, member: { rider: string; owner?: boolean }): DropdownMenuItem[][] {
+  const key = `${crew.id}:${member.rider}`
+  if (member.owner) {
+    return [
+      [
+        {
+          label: 'Remove owner grant',
+          icon: 'i-lucide-shield-off',
+          description: crew.owners.length === 1 ? 'Promote another owner first — a crew always needs at least one' : undefined,
+          disabled: crew.owners.length === 1 || togglingOwner.value === key,
+          onSelect: () => toggleOwner(crew, member.rider, false),
+        },
+      ],
+    ]
+  }
+  return [
+    [
+      {
+        label: 'Make owner',
+        icon: 'i-lucide-shield',
+        disabled: togglingOwner.value === key,
+        onSelect: () => toggleOwner(crew, member.rider, true),
+      },
+    ],
+    [
+      {
+        label: 'Remove from crew',
+        icon: 'i-lucide-user-minus',
+        color: 'error',
+        disabled: removing.value === key,
+        onSelect: () => removeMember(crew, member.rider),
+      },
+    ],
+  ]
+}
+
+function crewActions(crew: Crew): DropdownMenuItem[][] {
+  const selfKey = `${crew.id}:${me.value?.user}`
+  return [
+    [
+      crew.mine
+        ? { label: 'Delete crew', icon: 'i-lucide-trash-2', color: 'error', onSelect: () => openDelete(crew) }
+        : {
+            label: 'Leave crew',
+            icon: 'i-lucide-log-out',
+            color: 'error',
+            disabled: removing.value === selfKey,
+            onSelect: () => removeMember(crew, me.value?.user ?? ''),
+          },
+    ],
+  ]
+}
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
-    <UCard variant="outline">
-      <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 class="flex items-center gap-2 font-medium text-highlighted">
-              <UIcon name="i-lucide-users-round" />
-              Crews
-            </h2>
-            <p class="text-sm text-muted">
-              Share routes with riders you trust — a route reaches only its owner's own devices
-              until it's shared to a crew.
-            </p>
+  <AppPage title="Crews" subtitle="Share routes with riders you trust, and plan rides together.">
+    <template #actions>
+      <UButton icon="i-lucide-search" color="neutral" variant="outline" @click="searchOpen = true">
+        Search crews
+      </UButton>
+      <UButton icon="i-lucide-plus" @click="createOpen = true">Create crew</UButton>
+    </template>
+
+    <UAlert
+      v-if="error"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-triangle-alert"
+      :description="error"
+    />
+
+    <UAlert
+      v-if="crewsTruncated"
+      color="warning"
+      variant="subtle"
+      icon="i-lucide-info"
+      :description="`${crewsTruncated} Search for the crew you want by name.`"
+    />
+
+    <section v-if="myCrews.length" class="flex flex-col gap-4">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <UCard
+          v-for="crew in pagedCrews"
+          :key="crew.id"
+          variant="outline"
+          class="app-card-interactive cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          tabindex="0"
+          role="button"
+          :aria-label="`View ${crew.name}`"
+          @click="openDetail(crew)"
+          @keydown.enter="openDetail(crew)"
+          @keydown.space.prevent="openDetail(crew)"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <h3 class="min-w-0 truncate font-medium text-highlighted">{{ crew.name }}</h3>
+            <UIcon name="i-lucide-chevron-right" class="mt-0.5 size-4 shrink-0 text-dimmed" />
           </div>
-          <div class="flex items-center gap-2">
-            <UButton icon="i-lucide-search" color="neutral" variant="outline" @click="searchOpen = true">
-              Search crews
-            </UButton>
-            <UButton icon="i-lucide-plus" @click="createOpen = true">Create crew</UButton>
-          </div>
-        </div>
-      </template>
+          <p v-if="nextRideFor(crew.id)" class="mt-1 truncate text-sm text-muted">
+            Next ride: {{ nextRideFor(crew.id)!.routeName }} · {{ formatRideWhen(nextRideFor(crew.id)!) }}
+          </p>
+          <p v-else class="mt-1 truncate text-sm text-muted">No rides scheduled yet</p>
 
-      <UAlert
-        v-if="error"
-        color="error"
-        variant="subtle"
-        icon="i-lucide-triangle-alert"
-        :description="error"
-        class="mb-4"
-      />
-
-      <UAlert
-        v-if="crewsTruncated"
-        color="warning"
-        variant="subtle"
-        icon="i-lucide-info"
-        :description="`${crewsTruncated} Search for the crew you want by name.`"
-        class="mb-4"
-      />
-
-      <template v-if="myCrews.length">
-        <div class="flex flex-col divide-y divide-default">
-          <button
-            v-for="crew in pagedCrews"
-            :key="crew.id"
-            type="button"
-            class="flex flex-wrap items-center gap-3 py-3 text-left first:pt-0 last:pb-0 hover:bg-elevated/50"
-            @click="openDetail(crew)"
-          >
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm text-highlighted">{{ crew.name }}</p>
-              <p v-if="nextRideFor(crew.id)" class="truncate text-xs text-dimmed">
-                Next ride: {{ nextRideFor(crew.id)!.routeName }} · {{ formatRideWhen(nextRideFor(crew.id)!) }}
-              </p>
-              <p v-else class="truncate text-xs text-dimmed">No rides scheduled yet</p>
-            </div>
-
-            <UBadge color="neutral" variant="subtle" size="sm">
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            <UBadge color="neutral" variant="subtle" size="sm" class="tabular-nums">
               {{ crew.memberCount }} member{{ crew.memberCount === 1 ? '' : 's' }}
             </UBadge>
             <UBadge v-if="crew.mine" color="primary" variant="subtle" size="sm">Owner</UBadge>
@@ -823,25 +906,32 @@ async function saveShare() {
             <UBadge v-if="crew.mine && pendingFor(crew).length" color="warning" variant="subtle" size="sm">
               {{ pendingFor(crew).length }} waiting
             </UBadge>
-            <UIcon name="i-lucide-chevron-right" class="size-4 text-dimmed" />
-          </button>
-        </div>
+          </div>
+        </UCard>
+      </div>
 
-        <UPagination
-          v-if="myCrews.length > crewsPageSize"
-          v-model:page="crewsPage"
-          :total="myCrews.length"
-          :items-per-page="crewsPageSize"
-          class="mt-4 justify-center"
-        />
-      </template>
-
-      <UEmpty
-        v-else-if="!loading"
-        icon="i-lucide-users-round"
-        title="No crews yet"
-        description="Create one, or search for one to join."
+      <UPagination
+        v-if="myCrews.length > crewsPageSize"
+        v-model:page="crewsPage"
+        :total="myCrews.length"
+        :items-per-page="crewsPageSize"
+        class="justify-center"
       />
+    </section>
+
+    <!-- One line and the two ways in; no illustration. -->
+    <UCard v-else-if="!loading" variant="outline">
+      <div class="flex flex-col items-center gap-4 py-6 text-center">
+        <p class="max-w-md text-body text-toned">
+          A crew is a group of riders who share routes and plan rides together. Create one, or find one to join.
+        </p>
+        <div class="flex flex-wrap justify-center gap-2">
+          <UButton icon="i-lucide-plus" @click="createOpen = true">Create a crew</UButton>
+          <UButton icon="i-lucide-search" color="neutral" variant="outline" @click="searchOpen = true">
+            Find a crew to join
+          </UButton>
+        </div>
+      </div>
     </UCard>
 
     <UModal v-model:open="createOpen" title="Create a crew">
@@ -1076,52 +1166,16 @@ async function saveShare() {
                     @changed="onGoingChanged"
                   />
                 </div>
-                <UTooltip text="Sync to the crew's devices now">
+                <UDropdownMenu :items="rideActions(detailCrew, ride)" :content="{ align: 'end' }">
                   <UButton
                     size="sm"
                     color="neutral"
                     variant="ghost"
-                    icon="i-lucide-refresh-cw"
-                    :loading="syncingRide === ride.id"
-                    @click="syncRide(ride)"
+                    icon="i-lucide-ellipsis"
+                    aria-label="Ride actions"
+                    :loading="syncingRide === ride.id || deletingRide === ride.id || (!!ride.seriesId && deletingSeries === ride.seriesId)"
                   />
-                </UTooltip>
-                <template v-if="detailCrew.mine || ride.createdBy.toLowerCase() === (me?.user ?? '').toLowerCase()">
-                  <!-- A one-off ride keeps the plain button it always had;
-                       a series occurrence needs to ask which scope the
-                       rider means, so it gets a menu instead. -->
-                  <UTooltip v-if="!ride.seriesId" text="Remove this ride">
-                    <UButton
-                      size="sm"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-trash-2"
-                      :loading="deletingRide === ride.id"
-                      @click="deleteRide(ride)"
-                    />
-                  </UTooltip>
-                  <UDropdownMenu
-                    v-else
-                    :items="[
-                      [
-                        { label: 'Delete this ride', icon: 'i-lucide-trash-2', onSelect: () => deleteRide(ride) },
-                        {
-                          label: 'Delete this and future rides',
-                          icon: 'i-lucide-calendar-x',
-                          onSelect: () => deleteRideSeries(ride),
-                        },
-                      ],
-                    ]"
-                  >
-                    <UButton
-                      size="sm"
-                      color="neutral"
-                      variant="ghost"
-                      icon="i-lucide-trash-2"
-                      :loading="deletingRide === ride.id || deletingSeries === ride.seriesId"
-                    />
-                  </UDropdownMenu>
-                </template>
+                </UDropdownMenu>
               </div>
             </div>
             <div v-else class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-default py-6">
@@ -1390,55 +1444,28 @@ async function saveShare() {
                   <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">
                     {{ member.rider }}
                   </span>
-                  <template v-if="member.owner">
-                    <UBadge color="primary" variant="subtle" size="sm">Owner</UBadge>
-                    <UTooltip
-                      :text="detailCrew.owners.length === 1
-                        ? 'Promote another owner first — a crew always needs at least one'
-                        : 'Remove this owner grant'"
-                    >
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-shield-off"
-                        :disabled="detailCrew.owners.length === 1"
-                        :loading="togglingOwner === `${detailCrew.id}:${member.rider}`"
-                        @click="toggleOwner(detailCrew!, member.rider, false)"
+                  <UBadge v-if="member.owner" color="primary" variant="subtle" size="sm">Owner</UBadge>
+                  <UTooltip v-else text="May schedule a crew ride, the same as an owner">
+                    <label class="flex items-center gap-1.5 text-xs text-dimmed">
+                      <USwitch
+                        :model-value="member.canSchedule"
+                        size="sm"
+                        :loading="togglingCanSchedule === `${detailCrew.id}:${member.rider}`"
+                        @update:model-value="(v: boolean) => toggleCanSchedule(detailCrew!, member.rider, v)"
                       />
-                    </UTooltip>
-                  </template>
-                  <template v-else>
-                    <UTooltip text="May schedule a crew ride, the same as an owner">
-                      <label class="flex items-center gap-1.5 text-xs text-dimmed">
-                        <USwitch
-                          :model-value="member.canSchedule"
-                          size="sm"
-                          :loading="togglingCanSchedule === `${detailCrew.id}:${member.rider}`"
-                          @update:model-value="(v: boolean) => toggleCanSchedule(detailCrew!, member.rider, v)"
-                        />
-                        <span class="hidden sm:inline">Can schedule</span>
-                      </label>
-                    </UTooltip>
-                    <UTooltip text="Make this member an owner">
-                      <UButton
-                        size="xs"
-                        color="neutral"
-                        variant="ghost"
-                        icon="i-lucide-shield"
-                        :loading="togglingOwner === `${detailCrew.id}:${member.rider}`"
-                        @click="toggleOwner(detailCrew!, member.rider, true)"
-                      />
-                    </UTooltip>
+                      <span class="hidden sm:inline">Can schedule</span>
+                    </label>
+                  </UTooltip>
+                  <UDropdownMenu :items="memberActions(detailCrew, member)" :content="{ align: 'end' }">
                     <UButton
                       size="xs"
                       color="neutral"
                       variant="ghost"
-                      icon="i-lucide-x"
-                      :loading="removing === `${detailCrew.id}:${member.rider}`"
-                      @click="removeMember(detailCrew!, member.rider)"
+                      icon="i-lucide-ellipsis"
+                      :aria-label="`Actions for ${member.rider}`"
+                      :loading="togglingOwner === `${detailCrew.id}:${member.rider}` || removing === `${detailCrew.id}:${member.rider}`"
                     />
-                  </template>
+                  </UDropdownMenu>
                 </div>
 
                 <p v-if="!pendingFor(detailCrew).length && !approvedFor(detailCrew).length" class="px-2 text-xs text-dimmed">
@@ -1469,33 +1496,22 @@ async function saveShare() {
                   </UBadge>
                 </div>
               </div>
-              <UButton
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-log-out"
-                class="w-fit"
-                :loading="removing === `${detailCrew.id}:${me?.user}`"
-                @click="removeMember(detailCrew, me?.user ?? '')"
-              >
-                Leave crew
-              </UButton>
             </template>
           </section>
         </div>
       </template>
       <template #footer>
         <div class="flex w-full items-center justify-between">
-          <UButton
-            v-if="detailCrew?.mine"
-            size="sm"
-            color="error"
-            variant="ghost"
-            icon="i-lucide-trash-2"
-            @click="openDelete(detailCrew)"
-          >
-            Delete crew
-          </UButton>
+          <UDropdownMenu v-if="detailCrew" :items="crewActions(detailCrew)" :content="{ align: 'start' }">
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              icon="i-lucide-ellipsis"
+              aria-label="Crew actions"
+              :loading="removing === `${detailCrew.id}:${me?.user}`"
+            />
+          </UDropdownMenu>
           <span v-else />
           <UButton color="neutral" variant="ghost" @click="detailTarget = null">Close</UButton>
         </div>
@@ -1511,5 +1527,5 @@ async function saveShare() {
       @update:open="(v: boolean) => { if (!v) openRouteSlug = null }"
       @updated="backgroundRefresh"
     />
-  </div>
+  </AppPage>
 </template>
