@@ -147,7 +147,7 @@ const sections = [
 
     <UContainer class="max-w-5xl">
       <section class="grid items-center gap-10 py-16 sm:py-24 lg:grid-cols-2">
-       <div>
+        <div>
         <h1
           class="font-display max-w-2xl text-[length:var(--text-hero)] font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-5xl"
         >
@@ -179,7 +179,7 @@ const sections = [
         <p class="mt-4 text-[length:var(--text-body)] text-dimmed">
           Free to sign up — bring your own Garmin, Wahoo, or Komoot account.
         </p>
-       </div>
+        </div>
 
         <!-- An illustration, hidden from assistive tech so the invented name
              and numbers are never read out as someone's real day. -->
@@ -188,7 +188,7 @@ const sections = [
             <div class="flex flex-col gap-3">
               <div class="flex items-center justify-between gap-3">
                 <span class="text-[length:var(--text-label)] font-medium text-muted">Good morning, Alex</span>
-                <UBadge color="success" variant="subtle" icon="i-lucide-battery-full">Ready</UBadge>
+                <UBadge color="primary" variant="subtle" icon="i-lucide-battery-full">Ready</UBadge>
               </div>
               <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
                 <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">Endurance ride</h2>
