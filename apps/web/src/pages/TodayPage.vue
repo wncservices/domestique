@@ -324,7 +324,7 @@ async function dismissSuggestion() {
                 </div>
               </div>
               <p class="text-[length:var(--text-body)] text-muted">{{ headline }}</p>
-              <p v-if="extraCount > 0" class="text-[length:var(--text-label)] text-muted">+{{ extraCount }} more today, see the Plan page.</p>
+              <p v-if="extraCount > 0" class="text-[length:var(--text-label)] text-muted"><RouterLink to="/plan" class="underline underline-offset-2 hover:text-highlighted">+{{ extraCount }} more today</RouterLink>, see the Plan page.</p>
 
               <div v-if="!ridden" class="flex flex-wrap items-center gap-2">
                 <UButton v-if="canSyncGarmin" color="primary" icon="i-lucide-watch" :loading="pushing" @click="pushToGarmin">

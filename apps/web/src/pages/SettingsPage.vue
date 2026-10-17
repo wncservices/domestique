@@ -462,13 +462,11 @@ async function garminChanged(next: GarminConnection) {
 // Cards arrive asynchronously, so a section is only called empty once every
 // load behind it has settled; otherwise the fallback would flash first.
 const loaded = ref(false)
-// null until WeatherSettings has finished asking, then whether it shows.
-const weatherShown = ref<boolean | null>(null)
 const deploymentEmpty = computed(
   () => loaded.value && !autoSync.value?.canManage && !autoSchedule.value?.canManage && !garmin.value.consumer && !config.value?.source,
 )
 const basemapEmpty = computed(() => loaded.value && !basemap.value?.canManage)
-const notificationsEmpty = computed(() => !canManageTraining.value || weatherShown.value === false)
+const notificationsEmpty = computed(() => !canManageTraining.value)
 
 onMounted(async () => {
   // Wait for the shared state first. Whether Komoot is worth asking about
@@ -494,8 +492,6 @@ onMounted(async () => {
 <template>
   <AppPage title="Settings" subtitle="Your account, your devices and how Domestique trains and warns you.">
     <div class="flex flex-col gap-6 lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start lg:gap-10">
-      <!-- One nav for both widths: a horizontal scrolling row on a phone, a
-           sticky column from lg up, so the landmark is announced once. -->
       <!-- One nav for both widths: a horizontal scrolling row on a phone, a
            sticky column from lg up, so the landmark is announced once. -->
       <nav aria-label="Settings" class="flex gap-4 overflow-x-auto lg:sticky lg:top-20 lg:flex-col lg:gap-3 lg:overflow-visible">
@@ -746,8 +742,12 @@ onMounted(async () => {
 
           <!-- A rider's own setting. The card hides itself when the deployment
                has weather switched off. -->
-          <WeatherSettings v-if="canManageTraining" @visible="weatherShown = $event" />
-          <p v-if="notificationsEmpty" class="text-sm text-dimmed">Nothing to set here on this deployment.</p>
+          <WeatherSettings v-if="canManageTraining" />
+          <p v-if="canManageTraining" class="text-sm text-muted">
+            The morning summary email is set up on
+            <RouterLink to="/fitness#morning-summary" class="text-primary underline underline-offset-2">Fitness</RouterLink>.
+          </p>
+          <p v-if="notificationsEmpty" class="text-sm text-dimmed">Nothing to set here for your role.</p>
         </section>
 
         <section v-if="adminSections.length" id="deployment" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="deployment-title">
