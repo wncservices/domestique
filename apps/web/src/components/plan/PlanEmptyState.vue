@@ -21,6 +21,7 @@ const emit = defineEmits<{
   <EmptyState
     icon="i-lucide-flag"
     title="Start your plan"
+    display
     text="Pick what you're training for, and Domestique builds the weeks toward it."
   >
     <template #actions>

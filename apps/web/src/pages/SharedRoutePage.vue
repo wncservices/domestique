@@ -139,7 +139,7 @@ async function importToLibrary() {
       </div>
     </RouterLink>
 
-    <SkeletonCard v-if="loadingMe" :lines="5" />
+    <SkeletonCard v-if="loadingMe" :lines="5" label="Checking your sign-in…" />
 
     <div
       v-else-if="!me?.authenticated"
@@ -152,7 +152,7 @@ async function importToLibrary() {
       <UButton :to="signInHref" external icon="i-lucide-log-in" color="primary">Sign in</UButton>
     </div>
 
-    <SkeletonCard v-else-if="loadingRoute" :lines="5" />
+    <SkeletonCard v-else-if="loadingRoute" :lines="5" label="Loading this route…" />
 
     <UAlert
       v-else-if="errorKind === 'not-found'"
