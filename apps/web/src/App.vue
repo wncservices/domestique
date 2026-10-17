@@ -93,31 +93,31 @@ const stats = computed(() => [
 // form and an explanation, which is worse than not offering it.
 const links = computed(() =>
   [
-    { to: '/', label: 'Library', icon: 'i-lucide-route' },
-    canUpload.value ? { to: '/add', label: 'Add route', icon: 'i-lucide-plus' } : null,
+    { to: '/routes', label: 'Library', icon: 'i-lucide-route' },
+    canUpload.value ? { to: '/routes/new', label: 'Add route', icon: 'i-lucide-plus' } : null,
     canUpload.value && routingConfigured.value
-      ? { to: '/build', label: 'Build route', icon: 'i-lucide-pencil-ruler' }
+      ? { to: '/routes/build', label: 'Build route', icon: 'i-lucide-pencil-ruler' }
       : null,
     canManageCrews.value ? { to: '/crews', label: 'Crews', icon: 'i-lucide-users-round' } : null,
-    // Straight to the Plan sub-page rather than the bare /training that
+    // Straight to the Plan sub-page rather than the old /training path that
     // redirects there — riders come here to see what to ride, not to check
     // their fitness numbers. isActiveSection below still matches this link
     // on either sub-page, so it does not change what "active" means.
-    canManageTraining.value ? { to: '/training/plan', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
+    canManageTraining.value ? { to: '/plan', label: 'Training', icon: 'i-lucide-dumbbell' } : null,
     canManagePeople.value ? { to: '/people', label: 'People', icon: 'i-lucide-users' } : null,
     { to: '/settings', label: 'Settings', icon: 'i-lucide-settings' },
   ].filter((link) => link !== null),
 )
 
 // Training is the one section with sub-routes of its own
-// (/training/fitness, /training/plan — see TrainingPage.vue's own doc
+// (/fitness, /plan — see TrainingPage.vue's own doc
 // comment), sharing this single nav entry — an exact match against its
 // `to` would leave "Training" unhighlighted on whichever sub-page the link
 // itself does not point at. Every other link still wants an exact match:
-// Library's `to` is '/', and a prefix check there would make it "active"
-// on literally every route.
+// Library's `to` is a prefix of /routes/new and /routes/build, which have
+// their own entries, so a prefix check would double-highlight.
 function isActiveSection(to: string): boolean {
-  if (to.startsWith('/training/')) return route.path.startsWith('/training/')
+  if (to === '/plan') return route.path === '/plan' || route.path === '/fitness'
   return route.path === to
 }
 
@@ -166,7 +166,7 @@ onMounted(() => {
     <div v-if="!isSharedRoutePage" class="app-header sticky top-0 z-20">
       <UContainer class="max-w-5xl">
         <div class="flex items-center justify-between gap-4 py-3">
-          <RouterLink to="/" class="flex min-w-0 items-center gap-3">
+          <RouterLink to="/today" class="flex min-w-0 items-center gap-3">
             <span
               class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
               aria-hidden="true"

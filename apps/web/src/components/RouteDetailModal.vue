@@ -86,7 +86,7 @@ function openEditInfo() {
 // same-component transition, since /build is a different route entirely.
 function editRoute() {
   if (!props.route) return
-  router.push({ path: '/build', query: { edit: props.route.slug } })
+  router.push({ path: '/routes/build', query: { edit: props.route.slug } })
   emit('update:open', false)
 }
 
@@ -96,7 +96,7 @@ function editRoute() {
 // travels in the URL; the Plan page reads the rest from the library itself.
 function trainForRoute() {
   if (!props.route) return
-  router.push({ path: '/training/plan', query: { goalFromRoute: props.route.slug } })
+  router.push({ path: '/plan', query: { goalFromRoute: props.route.slug } })
   emit('update:open', false)
 }
 
