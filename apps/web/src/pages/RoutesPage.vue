@@ -333,10 +333,11 @@ async function push(items: { accountId: string; slug: string }[]) {
         v-else-if="!routes.length"
         icon="i-lucide-route"
         title="No routes yet"
+        :heading-level="3"
         text="Add one from the Add route page, or import from Komoot."
       >
         <template #actions>
-          <UButton to="/routes/new" icon="i-lucide-plus">Add a route</UButton>
+          <UButton v-if="canUpload" to="/routes/new" icon="i-lucide-plus">Add a route</UButton>
         </template>
       </EmptyState>
 
