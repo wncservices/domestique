@@ -757,40 +757,31 @@ async function saveShare() {
 // Secondary actions live in labelled menus, not rows of icon buttons; the
 // same role gates as before decide what is offered, and the destructive
 // items sit last in their own group.
-function rideActions(crew: Crew, ride: Ride): DropdownMenuItem[][] {
-  const groups: DropdownMenuItem[][] = [
-    [
-      {
-        label: "Sync to the crew's devices now",
-        icon: 'i-lucide-refresh-cw',
-        disabled: syncingRide.value === ride.id,
-        onSelect: () => syncRide(ride),
-      },
-    ],
+function canManageRide(crew: Crew, ride: Ride): boolean {
+  return crew.mine || ride.createdBy.toLowerCase() === (me.value?.user ?? '').toLowerCase()
+}
+
+function rideActions(ride: Ride): DropdownMenuItem[][] {
+  const busy = deletingRide.value === ride.id || (!!ride.seriesId && deletingSeries.value === ride.seriesId)
+  const del: DropdownMenuItem[] = [
+    {
+      label: ride.seriesId ? 'Delete this ride' : 'Remove this ride',
+      icon: 'i-lucide-trash-2',
+      color: 'error',
+      disabled: busy,
+      onSelect: () => deleteRide(ride),
+    },
   ]
-  if (crew.mine || ride.createdBy.toLowerCase() === (me.value?.user ?? '').toLowerCase()) {
-    const busy = deletingRide.value === ride.id || (!!ride.seriesId && deletingSeries.value === ride.seriesId)
-    const del: DropdownMenuItem[] = [
-      {
-        label: ride.seriesId ? 'Delete this ride' : 'Remove this ride',
-        icon: 'i-lucide-trash-2',
-        color: 'error',
-        disabled: busy,
-        onSelect: () => deleteRide(ride),
-      },
-    ]
-    if (ride.seriesId) {
-      del.push({
-        label: 'Delete this and future rides',
-        icon: 'i-lucide-calendar-x',
-        color: 'error',
-        disabled: busy,
-        onSelect: () => deleteRideSeries(ride),
-      })
-    }
-    groups.push(del)
+  if (ride.seriesId) {
+    del.push({
+      label: 'Delete this and future rides',
+      icon: 'i-lucide-calendar-x',
+      color: 'error',
+      disabled: busy,
+      onSelect: () => deleteRideSeries(ride),
+    })
   }
-  return groups
+  return [del]
 }
 
 function memberActions(crew: Crew, member: { rider: string; owner?: boolean }): DropdownMenuItem[][] {
@@ -849,7 +840,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
 
 <template>
   <AppPage title="Crews" subtitle="Share routes with riders you trust, and plan rides together.">
-    <template #actions>
+    <template v-if="myCrews.length" #actions>
       <UButton icon="i-lucide-search" color="neutral" variant="outline" @click="searchOpen = true">
         Search crews
       </UButton>
@@ -881,13 +872,14 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
           class="app-card-interactive cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
           tabindex="0"
           role="button"
-          :aria-label="`View ${crew.name}`"
+          :aria-labelledby="`crew-name-${crew.id}`"
+          :aria-describedby="`crew-meta-${crew.id}`"
           @click="openDetail(crew)"
           @keydown.enter="openDetail(crew)"
           @keydown.space.prevent="openDetail(crew)"
         >
           <div class="flex items-start justify-between gap-2">
-            <h3 class="min-w-0 truncate font-medium text-highlighted">{{ crew.name }}</h3>
+            <h3 :id="`crew-name-${crew.id}`" class="min-w-0 truncate font-medium text-highlighted">{{ crew.name }}</h3>
             <UIcon name="i-lucide-chevron-right" class="mt-0.5 size-4 shrink-0 text-dimmed" />
           </div>
           <p v-if="nextRideFor(crew.id)" class="mt-1 truncate text-sm text-muted">
@@ -895,7 +887,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
           </p>
           <p v-else class="mt-1 truncate text-sm text-muted">No rides scheduled yet</p>
 
-          <div class="mt-3 flex flex-wrap gap-1.5">
+          <div :id="`crew-meta-${crew.id}`" class="mt-3 flex flex-wrap gap-1.5">
             <UBadge color="neutral" variant="subtle" size="sm" class="tabular-nums">
               {{ crew.memberCount }} member{{ crew.memberCount === 1 ? '' : 's' }}
             </UBadge>
@@ -922,7 +914,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
     <!-- One line and the two ways in; no illustration. -->
     <UCard v-else-if="!loading" variant="outline">
       <div class="flex flex-col items-center gap-4 py-6 text-center">
-        <p class="max-w-md text-body text-toned">
+        <p class="max-w-md text-[length:var(--text-body)] text-toned">
           A crew is a group of riders who share routes and plan rides together. Create one, or find one to join.
         </p>
         <div class="flex flex-wrap justify-center gap-2">
@@ -1166,14 +1158,25 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                     @changed="onGoingChanged"
                   />
                 </div>
-                <UDropdownMenu :items="rideActions(detailCrew, ride)" :content="{ align: 'end' }">
+                <UButton
+                  size="sm"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-refresh-cw"
+                  aria-label="Sync now"
+                  :loading="syncingRide === ride.id"
+                  @click="syncRide(ride)"
+                >
+                  <span class="hidden sm:inline">Sync now</span>
+                </UButton>
+                <UDropdownMenu v-if="canManageRide(detailCrew, ride)" :items="rideActions(ride)" :content="{ align: 'end' }">
                   <UButton
                     size="sm"
                     color="neutral"
                     variant="ghost"
                     icon="i-lucide-ellipsis"
                     aria-label="Ride actions"
-                    :loading="syncingRide === ride.id || deletingRide === ride.id || (!!ride.seriesId && deletingSeries === ride.seriesId)"
+                    :loading="deletingRide === ride.id || (!!ride.seriesId && deletingSeries === ride.seriesId)"
                   />
                 </UDropdownMenu>
               </div>
@@ -1445,6 +1448,9 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                     {{ member.rider }}
                   </span>
                   <UBadge v-if="member.owner" color="primary" variant="subtle" size="sm">Owner</UBadge>
+                  <span v-if="member.owner && detailCrew.owners.length === 1" class="text-xs text-muted">
+                    Only owner
+                  </span>
                   <UTooltip v-else text="May schedule a crew ride, the same as an owner">
                     <label class="flex items-center gap-1.5 text-xs text-dimmed">
                       <USwitch
@@ -1456,7 +1462,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                       <span class="hidden sm:inline">Can schedule</span>
                     </label>
                   </UTooltip>
-                  <UDropdownMenu :items="memberActions(detailCrew, member)" :content="{ align: 'end' }">
+                  <UDropdownMenu v-if="!(member.owner && detailCrew.owners.length === 1)" :items="memberActions(detailCrew, member)" :content="{ align: 'end' }">
                     <UButton
                       size="xs"
                       color="neutral"
@@ -1510,7 +1516,9 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
               icon="i-lucide-ellipsis"
               aria-label="Crew actions"
               :loading="removing === `${detailCrew.id}:${me?.user}`"
-            />
+            >
+              <span class="hidden sm:inline">Crew actions</span>
+            </UButton>
           </UDropdownMenu>
           <span v-else />
           <UButton color="neutral" variant="ghost" @click="detailTarget = null">Close</UButton>
