@@ -55,7 +55,7 @@ async function signIn(page: Page, email: string, password: string) {
   await page.waitForURL((url) => url.hostname !== AUTH0_HOSTNAME)
 }
 
-test('test-rider can sign in and see the library', async ({ page }) => {
+test('test-rider can sign in and see the routes library', async ({ page }) => {
   const email = process.env.DOMESTIQUE_TEST_RIDER_EMAIL
   const password = process.env.DOMESTIQUE_TEST_RIDER_PASSWORD
   if (!email || !password) {
@@ -64,7 +64,10 @@ test('test-rider can sign in and see the library', async ({ page }) => {
 
   await signIn(page, email, password)
 
-  // The library page's own route count heading — see RoutesPage.vue.
+  // Signing in lands on Today, not the library, so go to the library
+  // explicitly before asserting on it.
+  await page.goto('/routes')
+  // The Routes page's own route count line — see RoutesPage.vue.
   await expect(page.getByText(/route(s)?$/i).first()).toBeVisible()
 })
 
@@ -77,7 +80,9 @@ test('test-admin can sign in and reach the People page', async ({ page }) => {
 
   await signIn(page, email, password)
 
-  await page.getByRole('link', { name: 'People' }).click()
+  // People lives in the avatar menu (AvatarMenu.vue), not as a visible link.
+  await page.getByRole('button', { name: /Account menu/ }).click()
+  await page.getByRole('menuitem', { name: 'People' }).click()
   await expect(page).toHaveURL(/\/people/)
 })
 
