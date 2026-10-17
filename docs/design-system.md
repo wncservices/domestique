@@ -244,7 +244,7 @@ layouts cannot disagree and the lists are testable without a DOM.
 
 ## Checklist for a new page or component
 
-- Wrap the page in `UContainer max-w-5xl`, matching every existing page.
+- Wrap the page in `AppPage` (`max-w-6xl`); the shell supplies the side padding.
 - Reach for `UCard variant="outline"` before `.app-card`.
 - No literal hex colours in `.vue`/`.ts` files outside the documented
   exceptions, each explained in its own comments. The guard test
