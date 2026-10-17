@@ -58,7 +58,7 @@ const windowStart = computed(() =>
 function deltaMeta(d: number) {
   const r = Math.round(d * 10) / 10
   if (r > 0) return { icon: 'i-lucide-trending-up', class: 'text-success' }
-  if (r < 0) return { icon: 'i-lucide-trending-down', class: 'text-warning' }
+  if (r < 0) return { icon: 'i-lucide-trending-down', class: 'text-[var(--app-accent-ember)]' }
   return { icon: 'i-lucide-minus', class: 'text-muted' }
 }
 
