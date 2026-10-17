@@ -239,7 +239,7 @@ one per page.
 | `/today` | `TodayPage.vue` | Redesigned: `AppPage`, calm-first card, `StatTile`, `DetailsToggle`, `SuggestionRow` |
 | `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` |
 | `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
-| `/routes`, `/routes/new`, `/routes/build` | `LibraryPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Old styling |
+| `/routes`, `/routes/new`, `/routes/build` | `RoutesPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Redesigned: `AppPage` with Add route / Build a route as page actions, library `StatTile` row, `SegmentedControl` (Grid / Map), slim sync banner, `RouteCard` with an actions menu. Add and Build are `AppPage`s with a "Back to routes" action |
 | `/crews`, `/settings`, `/people` | `CrewsPage.vue`, `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
 
 `TodayPage` reads the Plan and Fitness pages' endpoints and adds none. Its pure
@@ -260,6 +260,21 @@ views of a page: `v-model`, `items` (`label`, `value`, optional `icon`) and a re
 tablist with arrow-key movement; the page decides what each value shows. Never add a
 second tab style. The Fitness page binds it to `?tab=season` with `router.push`, so
 deep links and Back both work.
+
+### Routes page
+
+- **Page actions.** "Add route" (needs `routes:upload`) and "Build a route" (also needs a
+  routing engine) are buttons in `AppPage`'s `actions` slot. They are no longer in the avatar
+  menu. Hidden, not disabled, for a viewer.
+- **Stat row.** Routes, Distance, Ascent and Head units as `StatTile`s, two columns at phone width.
+- **Slim sync banner.** `PlanPanel` renders the full "Pending changes" card only when there are
+  changes, a failed push or a plan problem. Otherwise it is one line, "Everything is in sync", with
+  Refresh. Push is only ever enabled with changes, so it lives in the full card.
+- **Actions in a labelled menu.** A card with more than one secondary action puts them all in one
+  `UDropdownMenu` behind an icon button with `aria-label="Route actions"`. Every item has an icon and a
+  label; an offered-but-blocked item is disabled with the reason as its description, and a role that may
+  not do something does not see it. The card's own click (open the detail) is unchanged, and the
+  trigger stops click and key events so it does not also open it.
 
 ### Fitness page
 

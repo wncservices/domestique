@@ -10,7 +10,7 @@ import { menuItems, type MenuItem } from './navItems'
 
 defineProps<{ compact?: boolean }>()
 
-const { me, canUpload, routingConfigured } = useLibrary()
+const { me } = useLibrary()
 const { mode, cycle } = useColorMode()
 const route = useRoute()
 const toast = useToast()
@@ -94,18 +94,9 @@ const groups = computed(() => {
     signOut: signOutMode,
     logoutUrl: me.value.logoutUrl,
   }).map(toDropdown)
-  // Add and Build lived in the old header; Routes will own them as buttons
-  // later, until then the menu is where they stay reachable. Hidden rather
-  // than disabled for a viewer: the page would be an empty form.
-  const routes = [
-    canUpload.value ? { label: 'Add route', icon: 'i-lucide-plus', to: '/routes/new' } : null,
-    canUpload.value && routingConfigured.value
-      ? { label: 'Build route', icon: 'i-lucide-pencil-ruler', to: '/routes/build' }
-      : null,
-  ].filter((i) => i !== null)
   const signOutItems = all.filter((i) => i.label === 'Sign out')
   const rest = all.filter((i) => i.label !== 'Sign out')
-  return [routes, rest, signOutItems].filter((g) => g.length)
+  return [rest, signOutItems].filter((g) => g.length)
 })
 
 const displayName = computed(() => me.value?.name || me.value?.user || '')

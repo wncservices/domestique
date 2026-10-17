@@ -11,8 +11,8 @@ test('App.vue renders the router outlet', () => {
   assert.ok(app.includes('<RouterView'))
 })
 
-test('App.vue keeps LibraryPage alive', () => {
-  assert.ok(app.includes('KeepAlive include="LibraryPage"'))
+test('App.vue keeps RoutesPage alive', () => {
+  assert.ok(app.includes('KeepAlive include="RoutesPage"'))
 })
 
 test('App.vue links to the source (AGPL-3.0 section 13)', () => {
