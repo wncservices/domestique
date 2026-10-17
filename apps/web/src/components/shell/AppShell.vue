@@ -43,7 +43,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
   <!-- Desktop: full sidebar. Tablet: the same element narrowed to an icon
        rail. Phone: hidden, replaced by the tab bar below. -->
   <aside class="app-chrome fixed inset-y-0 left-0 z-20 hidden w-16 flex-col border-r border-default sm:flex lg:w-60">
-    <RouterLink to="/today" class="flex items-center gap-3 px-4 py-4">
+    <RouterLink to="/today" aria-label="Domestique, Today" class="flex items-center gap-3 px-4 py-4">
       <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
         <UIcon name="i-lucide-bike" class="size-5" />
       </span>
@@ -73,7 +73,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
     <AvatarMenu compact />
   </header>
 
-  <div class="px-4 py-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:pb-6 sm:pl-[calc(4rem+1.5rem)] sm:pr-6 lg:pl-[calc(15rem+2rem)] lg:pr-8">
+  <div class="px-4 py-6 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:pb-6 sm:pl-[calc(4rem+1.5rem)] sm:pr-6 lg:pl-[calc(15rem+2rem)] lg:pr-8 print:pl-0 print:pb-0">
     <slot />
   </div>
 
