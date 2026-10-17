@@ -9,7 +9,7 @@
 // — the "Replan the rest of this week" action needs to fire from inside the
 // success toast, and the field-specific wording needs the suggestion right
 // there. It only ever asks its parent to reload (`resolved`), the same way
-// TrainingFitnessPage already reloads its own profile/suggestions state
+// FitnessPage already reloads its own profile/suggestions state
 // after a sync.
 import { ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
