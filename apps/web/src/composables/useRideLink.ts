@@ -1,7 +1,7 @@
 // State and handlers for linking a ride to the planned session it was, when
 // the automatic match (same day, same sport, closest planned duration) got it
 // wrong or found nothing: a test ridden a day early, Tuesday's intervals done
-// on Wednesday. Kept out of TrainingPlanPage.vue for the same file-size reason
+// on Wednesday. Kept out of PlanPage.vue for the same file-size reason
 // useIndoor is.
 import { computed, ref, type Ref } from 'vue'
 import { api, ApiError } from '@/api/client'

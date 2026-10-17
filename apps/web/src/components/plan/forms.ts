@@ -1,5 +1,5 @@
 // Shared shapes for the goal and workout slide-over forms — split out of
-// TrainingPlanPage.vue (Task 6) so GoalSlideover.vue and WorkoutSlideover.vue
+// PlanPage.vue (Task 6) so GoalSlideover.vue and WorkoutSlideover.vue
 // can both import them without either owning the other's type.
 import type { GoalPriority, Sport, WorkoutStep } from '@/api/types'
 

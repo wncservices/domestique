@@ -308,7 +308,7 @@ needs):
 
 ### The Plan page as built
 
-`TrainingPlanPage.vue` answers "what do I ride today, and how is this week going" first — the
+`PlanPage.vue` answers "what do I ride today, and how is this week going" first — the
 shape JOIN and TrainerRoad converge on — with the season underneath. Top to bottom: the focus
 goal's header (days to go, phase, week N of M), a today card, a Monday–Sunday week strip that
 compares planned and completed sessions, a phase timeline for the whole plan, then goals and the

@@ -2,7 +2,7 @@
 // as a *local* calendar date, never a UTC instant — `new Date('2026-03-01')`
 // parses as UTC midnight, which renders as the previous day for anyone west
 // of UTC. Appending T00:00:00 forces the local-time constructor path instead.
-// WeekStrip, TodayCard, PlanGoalHeader and TrainingPlanPage each used to wrap
+// WeekStrip, TodayCard, PlanGoalHeader and PlanPage each used to wrap
 // this themselves; consolidated here so there's one place to get it right.
 export function localDate(ymd: string): Date {
   return new Date(`${ymd}T00:00:00`)
@@ -35,7 +35,7 @@ export function weekdayDateShort(ymd: string): string {
   return localDate(ymd).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
 }
 
-/** "Monday" — TrainingPlanPage's "Moved <workout> to <weekday>" toast. */
+/** "Monday" — PlanPage's "Moved <workout> to <weekday>" toast. */
 export function weekdayLong(ymd: string): string {
   return localDate(ymd).toLocaleDateString(undefined, { weekday: 'long' })
 }
