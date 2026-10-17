@@ -10,20 +10,26 @@
 // 1 km and never sends coordinates back, so there is nothing here to display or
 // to leak. The whole card is absent when this deployment has weather switched
 // off (the API answers 412).
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type { GeocodeResult, WeatherPrefs } from '@/api/types'
 import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import { describeError } from '@/utils/errorMessage'
 
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{ changed: []; visible: [shown: boolean | null] }>()
 
 const toast = useToast()
 
 const prefs = ref<WeatherPrefs | null>(null)
 const available = ref(true)
 const loading = ref(true)
+// null while loading, so the parent can tell "not yet known" from "empty".
+watch(
+  [available, loading],
+  ([a, l]) => emit('visible', l ? null : a),
+  { immediate: true },
+)
 const aboutWeather = ref(false)
 
 const changing = ref(false)
