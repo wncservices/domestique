@@ -161,7 +161,7 @@ const ariaLabel = computed(() => {
     </div>
     <p class="min-h-4 text-xs text-muted" aria-live="polite">
       <template v-if="activePoint">
-        <span class="font-mono tabular-nums text-default">{{ dateLabel(activePoint.t) }} · {{ formatLevel(activePoint.level) }}</span>
+        <span class="tabular-nums text-default">{{ dateLabel(activePoint.t) }} · {{ formatLevel(activePoint.level) }}</span>
         <template v-if="activePoint.reason"> — {{ activePoint.reason }}</template>
       </template>
       <template v-else-if="moves.length === 0">No change in this period.</template>

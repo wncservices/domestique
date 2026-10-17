@@ -302,7 +302,7 @@ watch(
           Replan
         </UButton>
         <div class="flex min-w-[10rem] flex-col items-end gap-1">
-          <span class="font-mono tabular-nums text-sm text-muted">
+          <span class="tabular-nums text-sm text-muted">
             {{ doneHours.toFixed(1) }} / {{ targetHours.toFixed(1) }} h
           </span>
           <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-32" />
@@ -359,7 +359,7 @@ watch(
               />
             </UDropdownMenu>
           </div>
-          <span class="font-mono tabular-nums text-[0.7rem] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
+          <span class="tabular-nums text-[length:var(--text-label)] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
           <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
           <IndoorBadge v-if="w.indoor" :description="w.description" compact />
           <CrewRideBadge v-if="w.crewRide" :crew-ride="w.crewRide" compact />
@@ -373,9 +373,9 @@ watch(
           </UTooltip>
         </div>
 
-        <div v-for="c in day.completed" :key="c.id" class="flex items-center gap-1 text-[0.7rem] text-muted">
+        <div v-for="c in day.completed" :key="c.id" class="flex items-center gap-1 text-[length:var(--text-label)] text-muted">
           <UIcon name="i-lucide-activity" class="size-3" />
-          <span class="font-mono tabular-nums">{{ formatDuration(c.durationSeconds) }}</span>
+          <span class="tabular-nums">{{ formatDuration(c.durationSeconds) }}</span>
           <UTooltip :text="rideLinkNote(c)">
             <UButton
               color="neutral"

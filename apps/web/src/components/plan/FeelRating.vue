@@ -110,7 +110,7 @@ function rateStress(value: string) {
 <template>
   <div class="flex flex-col gap-3">
     <div class="flex flex-col gap-1.5">
-      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">How did it feel?</p>
+      <p class="text-[length:var(--text-label)] text-muted">How did it feel?</p>
       <div class="flex flex-wrap gap-1.5" role="group" aria-label="How did it feel?">
         <UButton
           v-for="l in LEVELS"
@@ -129,7 +129,7 @@ function rateStress(value: string) {
 
     <template v-if="selected !== undefined">
       <div class="flex flex-col gap-1.5">
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Legs <span class="normal-case">(optional)</span></p>
+        <p class="text-[length:var(--text-label)] text-muted">Legs <span class="normal-case">(optional)</span></p>
         <div class="flex flex-wrap gap-1.5" role="group" aria-label="How were your legs?">
           <UButton
             v-for="l in LEGS"
@@ -147,7 +147,7 @@ function rateStress(value: string) {
       </div>
 
       <div class="flex flex-col gap-1.5">
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Life stress <span class="normal-case">(optional)</span></p>
+        <p class="text-[length:var(--text-label)] text-muted">Life stress <span class="normal-case">(optional)</span></p>
         <div class="flex flex-wrap gap-1.5" role="group" aria-label="How stressful has life been?">
           <UButton
             v-for="l in STRESS"

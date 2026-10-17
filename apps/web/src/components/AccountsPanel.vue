@@ -238,7 +238,7 @@ async function unlink(account: Account) {
         />
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm text-highlighted">{{ account.label }}</p>
-          <p class="font-mono text-xs text-dimmed">{{ account.id }}</p>
+          <p class="tabular-nums text-xs text-dimmed">{{ account.id }}</p>
         </div>
 
         <UBadge v-if="!account.implemented" color="warning" variant="subtle" size="sm">

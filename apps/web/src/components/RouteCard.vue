@@ -221,12 +221,12 @@ async function remove() {
 
     <dl class="flex gap-5">
       <div>
-        <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Distance</dt>
-        <dd class="font-mono tabular-nums">{{ distance }}</dd>
+        <dt class="text-[length:var(--text-label)] text-muted">Distance</dt>
+        <dd class="tabular-nums">{{ distance }}</dd>
       </div>
       <div>
-        <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Ascent</dt>
-        <dd class="font-mono tabular-nums">{{ ascent }}</dd>
+        <dt class="text-[length:var(--text-label)] text-muted">Ascent</dt>
+        <dd class="tabular-nums">{{ ascent }}</dd>
       </div>
     </dl>
 

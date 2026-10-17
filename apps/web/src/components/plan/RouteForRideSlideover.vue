@@ -169,9 +169,9 @@ function suited(c: RouteCandidate): string {
                   <RouteCandidatePreview :points="c.points" />
                   <div class="flex flex-wrap items-center gap-2">
                     <UBadge v-if="i === 0 && c.terrainFit >= 0.5" color="primary" variant="subtle" icon="i-lucide-star">Best fit</UBadge>
-                    <span class="font-mono tabular-nums text-sm text-highlighted">{{ (c.distanceM / 1000).toFixed(1) }} km</span>
-                    <span class="font-mono tabular-nums text-sm text-muted">{{ Math.round(c.ascentM) }} m up</span>
-                    <span class="font-mono tabular-nums text-sm text-muted">
+                    <span class="tabular-nums text-sm text-highlighted">{{ (c.distanceM / 1000).toFixed(1) }} km</span>
+                    <span class="tabular-nums text-sm text-muted">{{ Math.round(c.ascentM) }} m up</span>
+                    <span class="tabular-nums text-sm text-muted">
                       about {{ formatDuration(c.estimatedSeconds) }}
                     </span>
                   </div>

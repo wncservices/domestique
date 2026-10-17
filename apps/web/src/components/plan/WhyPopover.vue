@@ -45,7 +45,7 @@ const day = computed(() => (props.why?.day ? weekdayDateShort(props.why.day) : '
         <dl v-if="facts.length > 0" class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <template v-for="fact in facts" :key="`${fact.label}-${fact.value}`">
             <dt class="text-muted">{{ fact.label }}</dt>
-            <dd class="font-mono tabular-nums text-highlighted">{{ fact.value }}</dd>
+            <dd class="tabular-nums text-highlighted">{{ fact.value }}</dd>
           </template>
         </dl>
         <p v-if="day" class="text-xs text-dimmed">{{ day }}</p>

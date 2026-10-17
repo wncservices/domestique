@@ -50,7 +50,7 @@ function setOn(id: string, on: boolean | 'indeterminate') {
     <p v-if="diff.changes.length === 0" class="text-sm text-muted">Nothing in your plan changes.</p>
 
     <section v-for="day in days" :key="day.date" class="flex flex-col gap-2">
-      <h3 class="text-[0.7rem] uppercase tracking-wide text-dimmed">{{ weekdayDateShort(day.date) }}</h3>
+      <h3 class="text-[length:var(--text-label)] text-muted">{{ weekdayDateShort(day.date) }}</h3>
       <ul class="flex flex-col gap-2">
         <li
           v-for="c in day.changes"
@@ -78,7 +78,7 @@ function setOn(id: string, on: boolean | 'indeterminate') {
     </section>
 
     <section v-if="diff.leftAlone.length > 0" class="flex flex-col gap-2">
-      <h3 class="text-[0.7rem] uppercase tracking-wide text-dimmed">Left alone</h3>
+      <h3 class="text-[length:var(--text-label)] text-muted">Left alone</h3>
       <ul class="flex flex-col gap-1">
         <li v-for="n in diff.leftAlone" :key="n.workoutId" class="flex items-start gap-2 text-xs text-muted">
           <UIcon name="i-lucide-shield-check" class="mt-0.5 size-3.5 shrink-0" />

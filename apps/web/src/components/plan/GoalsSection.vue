@@ -94,7 +94,7 @@ const library = computed(() => props.workouts.filter((w) => !w.date))
       <div v-for="w in library" :key="w.id" class="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
         <div class="min-w-0">
           <span class="font-medium">{{ w.name }}</span>
-          <p class="font-mono tabular-nums text-sm text-muted">{{ formatDuration(w.plannedSeconds) }}</p>
+          <p class="tabular-nums text-sm text-muted">{{ formatDuration(w.plannedSeconds) }}</p>
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <UButton

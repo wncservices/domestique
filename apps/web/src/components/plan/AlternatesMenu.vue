@@ -164,7 +164,7 @@ const items = computed(() => {
     <UButton color="neutral" variant="outline" icon="i-lucide-shuffle" :loading="busy">Alternates</UButton>
 
     <template #option-description="{ item }">
-      <span class="font-mono tabular-nums">{{ item.description }}</span>
+      <span class="tabular-nums">{{ item.description }}</span>
       <span v-if="item.option?.warning" class="mt-0.5 flex items-center gap-1 text-warning">
         <UIcon name="i-lucide-triangle-alert" class="size-3 shrink-0" />
         {{ item.option.warning }}

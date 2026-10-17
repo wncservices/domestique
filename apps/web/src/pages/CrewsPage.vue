@@ -892,7 +892,7 @@ async function saveShare() {
             >
               <div class="min-w-0 flex-1">
                 <p class="truncate text-sm text-highlighted">{{ crew.name }}</p>
-                <p class="truncate font-mono text-xs text-dimmed">{{ crew.id }} · owner{{ crew.owners.length === 1 ? '' : 's' }} {{ crew.owners.join(', ') }}</p>
+                <p class="truncate tabular-nums text-xs text-dimmed">{{ crew.id }} · owner{{ crew.owners.length === 1 ? '' : 's' }} {{ crew.owners.join(', ') }}</p>
               </div>
               <UBadge color="neutral" variant="subtle" size="sm">
                 {{ crew.memberCount }} member{{ crew.memberCount === 1 ? '' : 's' }}

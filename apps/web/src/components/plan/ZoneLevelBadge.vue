@@ -30,6 +30,6 @@ const style = computed(() => ({
     :style="style"
   >
     <span class="truncate">{{ label }}</span>
-    <span class="font-mono tabular-nums">· {{ formatLevel(level) }}</span>
+    <span class="tabular-nums">· {{ formatLevel(level) }}</span>
   </span>
 </template>

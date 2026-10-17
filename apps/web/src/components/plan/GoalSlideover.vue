@@ -158,7 +158,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
                 :model-value="form.pacingIf"
                 @update:model-value="(v: number | undefined) => set('pacingIf', v ?? form.pacingIf)"
               />
-              <span class="w-12 text-right font-mono tabular-nums text-sm">{{ form.pacingIf.toFixed(2) }}</span>
+              <span class="w-12 text-right tabular-nums text-sm">{{ form.pacingIf.toFixed(2) }}</span>
             </div>
           </div>
         </UFormField>

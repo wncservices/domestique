@@ -66,7 +66,7 @@ const rampWarnings = computed(() => props.projection?.ramp?.warnings ?? [])
       <UIcon :name="TONE_ICON[tone]" class="size-5 mt-0.5 shrink-0" :class="TONE_TEXT[tone]" />
       <div>
         <p class="font-semibold" :class="TONE_TEXT[tone]" data-testid="race-day-headline">{{ headline }}</p>
-        <p class="mt-1 text-sm text-muted font-mono tabular-nums">{{ numbers }}</p>
+        <p class="mt-1 text-sm text-muted tabular-nums">{{ numbers }}</p>
       </div>
     </div>
 

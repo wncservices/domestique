@@ -874,7 +874,7 @@ async function confirmDeletePerson() {
             <p class="text-sm font-medium text-highlighted">These are dropped, and the merge cannot bring them back:</p>
             <ul class="mt-1 flex list-disc flex-col gap-1 pl-5 text-xs text-toned">
               <li v-for="(d, i) in mergePreview.dropped" :key="i">
-                <span class="font-mono text-highlighted">{{ d.table }}<template v-if="d.what"> ({{ d.what }})</template></span>:
+                <span class="tabular-nums text-highlighted">{{ d.table }}<template v-if="d.what"> ({{ d.what }})</template></span>:
                 {{ d.consequence }}
               </li>
             </ul>
@@ -897,7 +897,7 @@ async function confirmDeletePerson() {
               </thead>
               <tbody class="divide-y divide-default">
                 <tr v-for="t in mergePreview.tables" :key="t.table">
-                  <td class="p-2 font-mono">{{ t.table }}</td>
+                  <td class="p-2 tabular-nums">{{ t.table }}</td>
                   <td class="p-2 text-right">{{ t.moved }}</td>
                   <td class="p-2 text-right">{{ t.keptTarget }}</td>
                   <td class="p-2 text-right" :class="t.droppedSource ? 'text-warning' : ''">{{ t.droppedSource }}</td>

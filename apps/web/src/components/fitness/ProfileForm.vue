@@ -103,7 +103,7 @@ const experienceItems = computed(() => {
   <div class="flex flex-col gap-6">
     <!-- Thresholds -->
     <div>
-      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed mb-3">Thresholds</p>
+      <p class="text-[length:var(--text-label)] text-muted mb-3">Thresholds</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UFormField>
           <template #label>
@@ -238,7 +238,7 @@ const experienceItems = computed(() => {
 
     <!-- Availability -->
     <div>
-      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed mb-3">Availability</p>
+      <p class="text-[length:var(--text-label)] text-muted mb-3">Availability</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UFormField>
           <template #label>
@@ -311,7 +311,7 @@ const experienceItems = computed(() => {
 
     <!-- Trainer -->
     <div>
-      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed mb-3">Trainer</p>
+      <p class="text-[length:var(--text-label)] text-muted mb-3">Trainer</p>
       <label class="flex items-start gap-3 text-sm">
         <USwitch :model-value="profile.smartTrainer" class="mt-0.5" @update:model-value="(v: boolean) => update({ smartTrainer: v })" />
         <span>
@@ -327,7 +327,7 @@ const experienceItems = computed(() => {
 
     <!-- Automation -->
     <div v-if="canSyncGarmin">
-      <p class="text-[0.7rem] uppercase tracking-wide text-dimmed mb-3">Automation</p>
+      <p class="text-[length:var(--text-label)] text-muted mb-3">Automation</p>
       <label class="flex items-start gap-3 text-sm">
         <USwitch :model-value="profile.autoPushWorkouts" class="mt-0.5" @update:model-value="(v: boolean) => update({ autoPushWorkouts: v })" />
         <span>

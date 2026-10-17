@@ -277,7 +277,7 @@ onMounted(() => {
       <template v-if="!isSharedRoutePage">
         <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div v-for="stat in stats" :key="stat.label" class="app-card px-4 py-3">
-            <div class="flex items-center gap-1.5 text-[0.7rem] uppercase tracking-wide text-dimmed">
+            <div class="flex items-center gap-1.5 text-[length:var(--text-label)] text-muted">
               <span
                 class="flex size-4 items-center justify-center rounded"
                 :style="{ color: `var(--app-accent-${stat.color})` }"
@@ -286,7 +286,7 @@ onMounted(() => {
               </span>
               {{ stat.label }}
             </div>
-            <div class="font-mono mt-1 truncate text-2xl tabular-nums text-highlighted">
+            <div class="mt-1 truncate font-display text-[length:var(--text-hero)] leading-tight tabular-nums text-highlighted">
               {{ stat.value }}
             </div>
           </div>

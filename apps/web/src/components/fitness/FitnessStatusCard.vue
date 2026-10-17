@@ -102,7 +102,7 @@ function formatDelta(delta: number | undefined, suffix = ' in 7 days'): string |
 
     <div v-else-if="hasHistory">
       <div>
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Form today</p>
+        <p class="text-[length:var(--text-label)] text-muted">Form today</p>
         <div v-if="status" class="mt-1 flex items-center gap-2">
           <UIcon :name="STATUS_ICON[status.key]" class="size-5" :class="STATUS_TEXT_CLASS[status.color]" />
           <span class="text-xl font-semibold" :class="STATUS_TEXT_CLASS[status.color]">{{ status.label }}</span>
@@ -112,23 +112,23 @@ function formatDelta(delta: number | undefined, suffix = ' in 7 days'): string |
 
       <div class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div class="rounded-lg border border-default p-3">
-          <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Fitness (CTL)</p>
-          <p class="mt-1 font-mono tabular-nums text-lg">{{ ctl ? Math.round(ctl.value) : '–' }}</p>
+          <p class="text-[length:var(--text-label)] text-muted">Fitness (CTL)</p>
+          <p class="mt-1 tabular-nums text-lg">{{ ctl ? Math.round(ctl.value) : '–' }}</p>
           <p v-if="ctl && formatDelta(ctl.delta)" class="text-xs text-muted">{{ formatDelta(ctl.delta) }}</p>
         </div>
         <div class="rounded-lg border border-default p-3">
-          <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Fatigue (ATL)</p>
-          <p class="mt-1 font-mono tabular-nums text-lg">{{ atl ? Math.round(atl.value) : '–' }}</p>
+          <p class="text-[length:var(--text-label)] text-muted">Fatigue (ATL)</p>
+          <p class="mt-1 tabular-nums text-lg">{{ atl ? Math.round(atl.value) : '–' }}</p>
           <p v-if="atl && formatDelta(atl.delta)" class="text-xs text-muted">{{ formatDelta(atl.delta) }}</p>
         </div>
         <div class="rounded-lg border border-default p-3">
-          <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Form (TSB)</p>
-          <p class="mt-1 font-mono tabular-nums text-lg">{{ tsb ? Math.round(tsb.value) : '–' }}</p>
+          <p class="text-[length:var(--text-label)] text-muted">Form (TSB)</p>
+          <p class="mt-1 tabular-nums text-lg">{{ tsb ? Math.round(tsb.value) : '–' }}</p>
           <p v-if="tsb && formatDelta(tsb.delta)" class="text-xs text-muted">{{ formatDelta(tsb.delta) }}</p>
         </div>
         <div class="rounded-lg border border-default p-3">
-          <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Hours this week</p>
-          <p class="mt-1 font-mono tabular-nums text-lg">{{ hours.thisWeek.toFixed(1) }} h</p>
+          <p class="text-[length:var(--text-label)] text-muted">Hours this week</p>
+          <p class="mt-1 tabular-nums text-lg">{{ hours.thisWeek.toFixed(1) }} h</p>
           <p class="text-xs text-muted">last week {{ hours.lastWeek.toFixed(1) }} h</p>
         </div>
       </div>

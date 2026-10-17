@@ -713,7 +713,7 @@ onMounted(async () => {
         </div>
         <div>
           <dt class="text-dimmed">Library</dt>
-          <dd class="font-mono text-xs break-all text-highlighted">{{ config.source }}</dd>
+          <dd class="tabular-nums text-xs break-all text-highlighted">{{ config.source }}</dd>
         </div>
       </dl>
     </UCard>

@@ -263,11 +263,11 @@ const mapRoutes = computed(() =>
 
         <dl class="flex flex-wrap gap-5">
           <div>
-            <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Distance</dt>
-            <dd class="font-mono tabular-nums">{{ distance }}</dd>
+            <dt class="text-[length:var(--text-label)] text-muted">Distance</dt>
+            <dd class="tabular-nums">{{ distance }}</dd>
           </div>
           <div>
-            <dt class="flex items-center gap-1 text-[0.7rem] uppercase tracking-wide text-dimmed">
+            <dt class="flex items-center gap-1 text-[length:var(--text-label)] text-muted">
               Ascent
               <UTooltip v-if="canEdit" text="Recalculate from terrain data — fixes a route uploaded with no usable elevation of its own">
                 <UButton
@@ -282,14 +282,14 @@ const mapRoutes = computed(() =>
                 />
               </UTooltip>
             </dt>
-            <dd class="font-mono tabular-nums">{{ ascent }}</dd>
+            <dd class="tabular-nums">{{ ascent }}</dd>
           </div>
           <div>
-            <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Points</dt>
-            <dd class="font-mono tabular-nums">{{ route.pointCount }}</dd>
+            <dt class="text-[length:var(--text-label)] text-muted">Points</dt>
+            <dd class="tabular-nums">{{ route.pointCount }}</dd>
           </div>
           <div>
-            <dt class="text-[0.7rem] uppercase tracking-wide text-dimmed">Updated</dt>
+            <dt class="text-[length:var(--text-label)] text-muted">Updated</dt>
             <dd>{{ new Date(route.updatedAt).toLocaleDateString() }}</dd>
           </div>
         </dl>
@@ -312,7 +312,7 @@ const mapRoutes = computed(() =>
         </div>
 
         <div v-if="targetNames.length">
-          <h4 class="mb-1 text-[0.7rem] uppercase tracking-wide text-dimmed">Shared to</h4>
+          <h4 class="mb-1 text-[length:var(--text-label)] text-muted">Shared to</h4>
           <div class="flex flex-wrap gap-1.5">
             <UBadge v-for="name in targetNames" :key="name" color="neutral" variant="soft" size="sm">
               {{ name }}
@@ -327,7 +327,7 @@ const mapRoutes = computed(() =>
         />
 
         <div v-if="syncRows.length">
-          <h4 class="mb-1 text-[0.7rem] uppercase tracking-wide text-dimmed">Sync status</h4>
+          <h4 class="mb-1 text-[length:var(--text-label)] text-muted">Sync status</h4>
           <ul class="flex flex-col gap-1 text-sm text-toned">
             <li v-for="row in syncRows" :key="row.label">
               <span class="font-medium">{{ row.label }}</span>: {{ row.verb }}

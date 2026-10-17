@@ -150,7 +150,7 @@ async function schedule() {
         <template v-else-if="situation">
           <p class="text-sm text-muted">
             About
-            <span class="font-mono tabular-nums text-highlighted">{{ routeTime }}</span>
+            <span class="tabular-nums text-highlighted">{{ routeTime }}</span>
             on this route at an easy endurance pace. An estimate<template v-if="situation.routeAssumed">, assuming 25 km/h on the flat until you add your FTP and weight in Settings</template>.
           </p>
 

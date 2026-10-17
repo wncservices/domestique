@@ -91,10 +91,10 @@ function formatReadiness(day: DailyWellnessDTO): string {
         <tbody class="divide-y divide-default">
           <tr v-for="day in sorted" :key="day.date">
             <td class="whitespace-nowrap py-1.5 pr-3 text-muted">{{ formatDate(day.date) }}</td>
-            <td class="whitespace-nowrap py-1.5 pr-3 font-mono tabular-nums">{{ formatSleep(day) }}</td>
-            <td class="whitespace-nowrap py-1.5 pr-3 font-mono tabular-nums">{{ formatHrv(day) }}</td>
-            <td class="whitespace-nowrap py-1.5 pr-3 font-mono tabular-nums">{{ formatRestingHr(day) }}</td>
-            <td class="whitespace-nowrap py-1.5 font-mono tabular-nums">{{ formatReadiness(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums">{{ formatSleep(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums">{{ formatHrv(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 pr-3 tabular-nums">{{ formatRestingHr(day) }}</td>
+            <td class="whitespace-nowrap py-1.5 tabular-nums">{{ formatReadiness(day) }}</td>
           </tr>
         </tbody>
       </table>

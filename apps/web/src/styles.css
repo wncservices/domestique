@@ -7,13 +7,10 @@
  * falls back to the system font, which is invisible in review and only
  * shows up as "the redesign doesn't look like the mockup" in the field.
  * Variable-font packages for the two faces that have one (covers every
- * weight used with a single file); IBM Plex Mono ships no variable build,
- * so only the specific static weights actually used are pulled in. */
+ * weight used with a single file). There is no monospace face: numbers use
+ * tabular-nums in the body font. */
 @import "@fontsource-variable/bricolage-grotesque";
 @import "@fontsource-variable/plus-jakarta-sans";
-@import "@fontsource/ibm-plex-mono/400.css";
-@import "@fontsource/ibm-plex-mono/500.css";
-@import "@fontsource/ibm-plex-mono/600.css";
 
 /* Domestique's palette, layered over Nuxt UI's design tokens.
  *
@@ -97,10 +94,10 @@
   --color-violet-950: #24144a;
 
   /* Bricolage for the brand wordmark and page h1s only; Plus Jakarta Sans is
-   * the body default (set on body below, not per-element); Plex Mono is for
-   * anything tabular — distances, ascent, counts, ids. Declaring these here
-   * (Tailwind v4's `--font-*` namespace) is what makes `font-display` /
-   * `font-mono` work as utility classes; `--font-sans` also becomes the
+   * the body default (set on body below, not per-element). Numbers use
+   * `tabular-nums` in that face. Declaring these here
+   * (Tailwind v4's `--font-*` namespace) is what makes `font-display` work
+   * as a utility class; `--font-sans` also becomes the
    * `font-sans` utility, but body already opts every element in by default.
    *
    * The first name in each stack is " Variable" — @fontsource-variable's own
@@ -111,7 +108,6 @@
    * just moved one step earlier. */
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
 
   /* Type scale: five roles. 13px and 20px are reached through text-[13px] and
    * text-xl, so they need no token. */
@@ -133,11 +129,13 @@
   --color-zone-vo2max: var(--color-ember-700);
   --color-zone-anaerobic: #8f1f10;
 
-  /* Phase scale: a quiet neutral-to-teal ramp, deliberately unlike the zones. */
-  --color-phase-base: var(--color-neutral-400);
-  --color-phase-build: var(--color-primary-500);
-  --color-phase-peak: var(--color-primary-700);
-  --color-phase-taper: var(--color-primary-300);
+  /* Phase scale: a quiet neutral-to-teal ramp, deliberately unlike the zones.
+   * Every step holds 3:1 against a white card, which is why taper is a muted
+   * teal rather than the pale tint the ramp's shape suggests. */
+  --color-phase-base: var(--color-neutral-500);
+  --color-phase-build: var(--color-primary-700);
+  --color-phase-peak: var(--color-primary-900);
+  --color-phase-taper: #4f9d92;
 }
 
 :root {
@@ -211,9 +209,9 @@
   --color-zone-anaerobic: #ff4d3a;
 
   --color-phase-base: var(--color-neutral-500);
-  --color-phase-build: var(--color-primary-600);
-  --color-phase-peak: var(--color-primary-400);
-  --color-phase-taper: var(--color-primary-800);
+  --color-phase-build: var(--color-primary-700);
+  --color-phase-peak: var(--color-primary-300);
+  --color-phase-taper: #3f9a8c;
 
   --ui-bg: var(--color-neutral-950);
   --ui-bg-muted: var(--color-neutral-900);
