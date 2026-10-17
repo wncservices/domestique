@@ -535,7 +535,7 @@ onMounted(() => {
           <UButton icon="i-lucide-printer" color="neutral" variant="outline" aria-label="Print this review" :disabled="!season" @click="printSeason" />
         </div>
       </div>
-      <SkeletonCard v-if="loadingSeason && !season" :lines="5" />
+      <SkeletonCard v-if="loadingSeason && !season" :lines="5" label="Loading your season…" />
       <UAlert
         v-else-if="seasonFailed && !season"
         color="error"

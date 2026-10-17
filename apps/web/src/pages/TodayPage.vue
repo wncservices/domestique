@@ -258,13 +258,14 @@ async function dismissSuggestion() {
 
 <template>
   <AppPage :title="greeting(new Date().getHours(), name)" :subtitle="dateLabel">
-    <SkeletonCard v-if="libraryLoading || (canManageTraining && !week && !weekFailed)" :lines="4" />
+    <SkeletonCard v-if="libraryLoading || (canManageTraining && !week && !weekFailed)" :lines="4" label="Loading today…" />
 
     <!-- No training permission: say so plainly instead of a page of 403s. -->
     <EmptyState
       v-else-if="!canManageTraining"
       icon="i-lucide-lock"
       title="Training is for riders"
+      display
       text="Your account can look at the route library but has no training plan. Ask an admin if you should have one."
       data-testid="today-no-access"
     >
