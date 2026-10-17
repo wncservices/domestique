@@ -262,7 +262,7 @@ async function dismissSuggestion() {
 
     <!-- No training permission: say so plainly instead of a page of 403s. -->
     <EmptyState
-      v-else-if="!canManageTraining"
+      v-else-if="me && !canManageTraining"
       icon="i-lucide-lock"
       title="Training is for riders"
       display
