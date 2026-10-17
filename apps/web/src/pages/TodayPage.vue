@@ -67,9 +67,12 @@ const snapshots = ref<FitnessSnapshot[]>([])
 const ftpTests = ref<FtpTests | null>(null)
 const rideTogether = ref<RideTogether[]>([])
 const lifeEvents = ref<LifeEvent[]>([])
-const profileFailed = ref(false)
-const goalsFailed = ref(false)
-const fitnessFailed = ref(false)
+// True only once that read has succeeded. Until then (pending or failed) the
+// matching prompt stays hidden, so neither a slow nor a failed read looks like
+// "you have not set this up".
+const profileLoaded = ref(false)
+const goalsLoaded = ref(false)
+const fitnessLoaded = ref(false)
 const pushing = ref(false)
 const detailsOpen = ref(false)
 // Remembered for this visit only: a reload brings the suggestion back.
@@ -113,30 +116,24 @@ async function loadAll() {
       .riderProfile()
       .then((v) => {
         profile.value = v
-        profileFailed.value = false
+        profileLoaded.value = true
       })
-      .catch(() => {
-        profileFailed.value = true
-      }),
+      .catch(() => {}),
     api
       .goals()
       .then(async (v) => {
         goals.value = v
-        goalsFailed.value = false
+        goalsLoaded.value = true
         projection.value = v.length ? await quietly(api.projection(), null) : null
       })
-      .catch(() => {
-        goalsFailed.value = true
-      }),
+      .catch(() => {}),
     api
       .fitness()
       .then((v) => {
         snapshots.value = v.snapshots
-        fitnessFailed.value = false
+        fitnessLoaded.value = true
       })
-      .catch(() => {
-        fitnessFailed.value = true
-      }),
+      .catch(() => {}),
     quietly(api.ftpTests(), null).then((v) => (ftpTests.value = v)),
     quietly(api.rideTogether(), { proposals: [] }).then((v) => (rideTogether.value = v.proposals)),
     quietly(api.lifeEvents(), { events: [] }).then((v) => (lifeEvents.value = v.events)),
@@ -168,13 +165,12 @@ const dateLabel = computed(() =>
   localDate(week.value?.today ?? todayISO()).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }),
 )
 
-const eyebrow = computed(() => eyebrowFor(week.value?.focus))
+const eyebrow = computed(() => eyebrowFor(week.value?.focus, state.value.kind === 'rest'))
 const headline = computed(() => todayHeadline(workout.value, readiness.value))
 const showReadiness = computed(() => !!workout.value && !ridden.value && !!readiness.value && !readiness.value.today.lifeEvent)
 
 const hasFtp = computed(() => (profile.value.ftpWatts ?? 0) > 0)
-// Only a read that succeeded and found no FTP is an empty profile.
-const promptProfile = computed(() => !profileFailed.value && !hasFtp.value)
+const promptProfile = computed(() => profileLoaded.value && !hasFtp.value)
 const load = computed(() => (workout.value ? workoutLoad(workout.value, profile.value) : null))
 const watts = computed(() => (workout.value ? powerRange(workout.value, profile.value) : null))
 const detailLine = computed(() => {
@@ -203,7 +199,7 @@ async function reloadAfterSwap() {
 
 // ---- Tiles ----
 
-const form = computed(() => formTile(snapshots.value, fitnessFailed.value))
+const form = computed(() => formTile(snapshots.value, !fitnessLoaded.value))
 
 // The server's week focus when it has one, else the same fallback goal the
 // Plan page's header uses, so both pages name the same goal.
@@ -214,8 +210,8 @@ const focusGoal = computed(() => {
   return g ? { id: g.id, name: g.name, eventDate: g.eventDate } : undefined
 })
 const countdown = computed(() => countdownTile({ goal: focusGoal.value, projection: projection.value, today: week.value?.today ?? todayISO() }))
-// Goals that failed to load are not "no goal": a dash, no prompt.
-const goalUnknown = computed(() => goalsFailed.value && !focusGoal.value)
+// Goals still loading, or failed, are not "no goal": a dash, no prompt.
+const goalUnknown = computed(() => !goalsLoaded.value && !focusGoal.value)
 
 // ---- The week ----
 
