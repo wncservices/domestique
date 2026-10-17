@@ -237,7 +237,7 @@ one per page.
 | Path | Page | Status |
 |---|---|---|
 | `/today` | `TodayPage.vue` | Redesigned: `AppPage`, calm-first card, `StatTile`, `DetailsToggle`, `SuggestionRow` |
-| `/plan` | `TrainingPlanPage.vue` | Old styling; restyled in phase 4 |
+| `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` |
 | `/fitness` | `TrainingFitnessPage.vue` | Old styling |
 | `/routes`, `/routes/new`, `/routes/build` | `LibraryPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Old styling |
 | `/crews`, `/settings`, `/people` | `CrewsPage.vue`, `SettingsPage.vue`, `PeoplePage.vue` | Old styling |
@@ -251,6 +251,27 @@ headline and one tip, no goal swaps the countdown tile for a "Set a goal" link t
 of failed calls. A read that failed is a dash, never one of these prompts. One suggestion at most;
 dismissing it hides them all for the visit, and a weather one reuses the Plan page's persistent
 "Keep outdoors" dismissal.
+
+### Plan page
+
+- **Toolbar: one primary action plus an overflow.** `planActions(state)` in
+  `utils/planActions.ts` is pure and decides the order. The primary is Replan when the
+  week has gaps (the signal that also offers Fill: a week that has not ended, has a plan
+  focus and nothing planned) and "I have N minutes" otherwise; the other one, Life event,
+  FTP test and Export go in the overflow (an icon button, `aria-label="More actions"`).
+  On a week other than the current one Replan and "I have N minutes" are not offered, so
+  Life event leads. Export keeps its per-session and zip options as a nested menu
+  (`composables/useExportItems.ts`, shared with `ExportMenu`).
+- **Week tiles** give a session name two lines (`line-clamp-2`, never truncated to one),
+  a left bar in its zone colour (`zoneColorVar`), and duration and TSS. Hovering shows
+  the whole session; a tap selects it into the day card above. Below `sm` the week is a
+  horizontal row of fixed-width tiles.
+- **Season timeline** colours each week's bar and band with the phase ramp
+  (`--color-phase-*`). "You are here" is a marker on the current week and a sentence
+  under the chart ("You are here: week 5 of 16, Build"), so it never rests on colour alone.
+- **The FTP test suggestion** is a `SuggestionRow`; the protocol picker sits behind a
+  `DetailsToggle`. Goals and the workout library are collapsed by default once a goal
+  exists, open for a rider with none.
 
 ## Navigation
 

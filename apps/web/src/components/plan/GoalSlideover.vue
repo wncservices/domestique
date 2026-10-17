@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The goal form, moved from TrainingPlanPage.vue's UModal into a USlideover
+// The goal form, moved from PlanPage.vue's UModal into a USlideover
 // (design's "Goal and workout forms move from UModal to USlideover"). Pure
 // presentation: the page still owns goalForm/saveGoal/proposeGoal, this only
 // renders them and emits back — see forms.ts for the GoalForm shape.
