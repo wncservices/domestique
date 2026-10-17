@@ -4,7 +4,7 @@
 // and workouts first. See docs/training-plan.md for the phase history; this half owns the
 // synced fitness history (Phase B1) and the rider's own profile (FTP,
 // thresholds, availability — Phase E's free-text suggestion on top of it).
-import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
@@ -13,6 +13,8 @@ import type { SeasonReview as SeasonReviewData, BestEffortsResponse, DailyWellne
 import BestEffortsCard from '@/components/fitness/BestEffortsCard.vue'
 import CalendarFeedCard from '@/components/fitness/CalendarFeedCard.vue'
 import FitnessChart from '@/components/fitness/FitnessChart.vue'
+import AppPage from '@/components/ui/AppPage.vue'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
 import MorningSummaryCard from '@/components/fitness/MorningSummaryCard.vue'
 import PowerCurveChart from '@/components/fitness/PowerCurveChart.vue'
@@ -46,10 +48,11 @@ const TABS: { label: string; value: Tab; icon: string }[] = [
   { label: 'Fitness', value: 'fitness', icon: 'i-lucide-activity' },
   { label: 'Season', value: 'season', icon: 'i-lucide-calendar-range' },
 ]
+// push, not replace: the switch is a navigation, so Back returns to the other view.
 const tab = computed<Tab>({
   get: () => (route.query.tab === 'season' ? 'season' : 'fitness'),
   set: (value) => {
-    router.replace({ query: { ...route.query, tab: value === 'season' ? 'season' : undefined } })
+    router.push({ query: { ...route.query, tab: value === 'season' ? 'season' : undefined } })
   },
 })
 
@@ -484,21 +487,34 @@ async function onImported() {
   if (!dirty.value) await loadProfile()
 }
 
-onMounted(() => {
+// /fitness#profile is where Today sends a rider with no FTP. The cards above
+// the profile load after mount and move it, so scroll once they have settled.
+async function scrollToHash() {
+  if (route.hash !== '#profile') return
+  await nextTick()
+  document.getElementById('profile')?.scrollIntoView({ block: 'start' })
+}
+
+onMounted(async () => {
   api.me().then((m) => { me.value = m }).catch(() => {})
-  loadProfile()
-  loadFitness()
-  loadProjection()
-  loadProgression()
-  loadReadiness()
-  loadThresholdSuggestions()
-  loadBestEfforts(true)
+  await Promise.allSettled([
+    loadProfile(),
+    loadFitness(),
+    loadProjection(),
+    loadProgression(),
+    loadReadiness(),
+    loadThresholdSuggestions(),
+    loadBestEfforts(true),
+  ])
+  await scrollToHash()
 })
 </script>
 
 <template>
-  <div class="flex flex-col gap-6" :class="{ 'pb-20': dirty }">
-    <UTabs v-model="tab" :items="TABS" :content="false" data-no-print aria-label="Fitness page sections" />
+  <AppPage title="Fitness" subtitle="How your training is adding up." :class="{ 'pb-20': dirty }">
+    <template #actions>
+      <SegmentedControl v-model="tab" :items="TABS" label="Fitness views" data-no-print />
+    </template>
 
     <section v-if="tab === 'season'" class="flex flex-col gap-4" aria-label="Season review">
       <div class="flex flex-wrap items-center justify-between gap-2">
@@ -517,90 +533,98 @@ onMounted(() => {
     </section>
 
     <template v-if="tab === 'fitness'">
-    <ThresholdSuggestions
-      :suggestions="thresholdSuggestions"
-      @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
-    />
-
-    <FitnessStatusCard
-      :fitness="fitness"
-      :loading="loadingFitness"
-      :syncing="syncingMetrics"
-      :needs-setup="needsSetup"
-      @sync="syncMetrics"
-    />
-
-    <RaceDayCard :projection="projection" />
-
-    <ProgressionCard :levels="progressionLevels" :history="progressionHistory" />
-
-    <RecoveryCard :days="recoveryDays" />
-
-    <UCard v-if="hasFitnessHistory" variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Fitness, fatigue and form</h2>
-      </template>
-      <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
-    </UCard>
-
-    <BestEffortsCard :data="bestEfforts" :loading="loadingEfforts" :sport="effortSport" @update:sport="onEffortSport" @open-ride="openRide" />
-
-    <UCard v-if="effortSport === 'cycling' && hasCurve" variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Power curve</h2>
-      </template>
-      <PowerCurveChart :curve="bestEfforts!.curve" />
-    </UCard>
-
-    <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Recent rides</h2>
-      </template>
-      <RecentRides ref="recentRides" :sessions="fitness.sessions" />
-    </UCard>
-
-    <RideImportCard @done="onImported" />
-
-    <TrainingZones
-      :profile="profile"
-      :building-ftp-test="buildingFTPTest"
-      :building-max-hr-test="buildingMaxHRTest"
-      @build-ftp-test="buildFTPTest"
-      @build-max-hr-test="buildMaxHRTest"
-    />
-
-    <CalendarFeedCard />
-
-    <MorningSummaryCard />
-
-    <UCard variant="outline">
-      <template #header>
-        <h2 class="text-lg font-semibold">Your fitness profile</h2>
-      </template>
-      <p class="text-sm text-muted mb-4">
-        Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can
-        tell us is filled in for you and marked <UBadge color="info" variant="subtle" size="sm">auto-filled</UBadge> —
-        check it, and press Save to confirm. Anything you type yourself is never overwritten.
-      </p>
-      <ProfileForm
-        v-model:note="profileNote"
-        :profile="profile"
-        :detected="lastDetected"
-        :narration-enabled="!!me?.narrationEnabled"
-        :can-sync-garmin="canSyncGarmin"
-        :proposing="proposingProfileChange"
-        :explanation="proposalExplanation"
-        :building-ftp-test="buildingFTPTest"
-        :building-max-hr-test="buildingMaxHRTest"
-        @update:profile="(p: RiderProfile) => (profile = p)"
-        @propose="proposeProfileChange"
-        @build-ftp-test="buildFTPTest"
-        @build-max-hr-test="buildMaxHRTest"
+      <FitnessStatusCard
+        :fitness="fitness"
+        :loading="loadingFitness"
+        :syncing="syncingMetrics"
+        :needs-setup="needsSetup"
+        @sync="syncMetrics"
       />
-    </UCard>
 
+      <ThresholdSuggestions
+        :suggestions="thresholdSuggestions"
+        @resolved="(profileChanged: boolean) => { onThresholdResolved(profileChanged) }"
+      />
+
+      <RaceDayCard :projection="projection" />
+
+      <UCard v-if="hasFitnessHistory" variant="outline">
+        <template #header>
+          <h2 class="text-lg font-semibold">Fitness, fatigue and form</h2>
+        </template>
+        <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
+      </UCard>
+
+      <ProgressionCard :levels="progressionLevels" :history="progressionHistory" />
+
+      <BestEffortsCard :data="bestEfforts" :loading="loadingEfforts" :sport="effortSport" @update:sport="onEffortSport" @open-ride="openRide" />
+
+      <UCard v-if="effortSport === 'cycling' && hasCurve" variant="outline">
+        <template #header>
+          <h2 class="text-lg font-semibold">Power curve</h2>
+        </template>
+        <PowerCurveChart :curve="bestEfforts!.curve" />
+      </UCard>
+
+      <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
+        <template #header>
+          <h2 class="text-lg font-semibold">Recent rides</h2>
+        </template>
+        <RecentRides ref="recentRides" :sessions="fitness.sessions" />
+      </UCard>
+
+      <!-- Everything you set up once and then leave alone. Each card is unchanged;
+           only its place on the page moved. -->
+      <section class="flex flex-col gap-6" aria-labelledby="data-devices-heading">
+        <div>
+          <h2 id="data-devices-heading" class="font-display text-[length:var(--text-lead)] text-highlighted">Data and devices</h2>
+          <p class="mt-1 text-sm text-muted">Recovery, your profile, calendar and morning feeds, and ride imports.</p>
+        </div>
+
+        <RecoveryCard :days="recoveryDays" />
+
+        <UCard id="profile" class="scroll-mt-20" variant="outline">
+          <template #header>
+            <h3 class="text-lg font-semibold">Your fitness profile</h3>
+          </template>
+          <p class="text-sm text-muted mb-4">
+            Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can
+            tell us is filled in for you and marked <UBadge color="info" variant="subtle" size="sm">auto-filled</UBadge> —
+            check it, and press Save to confirm. Anything you type yourself is never overwritten.
+          </p>
+          <ProfileForm
+            v-model:note="profileNote"
+            :profile="profile"
+            :detected="lastDetected"
+            :narration-enabled="!!me?.narrationEnabled"
+            :can-sync-garmin="canSyncGarmin"
+            :proposing="proposingProfileChange"
+            :explanation="proposalExplanation"
+            :building-ftp-test="buildingFTPTest"
+            :building-max-hr-test="buildingMaxHRTest"
+            @update:profile="(p: RiderProfile) => (profile = p)"
+            @propose="proposeProfileChange"
+            @build-ftp-test="buildFTPTest"
+            @build-max-hr-test="buildMaxHRTest"
+          />
+        </UCard>
+
+        <TrainingZones
+          :profile="profile"
+          :building-ftp-test="buildingFTPTest"
+          :building-max-hr-test="buildingMaxHRTest"
+          @build-ftp-test="buildFTPTest"
+          @build-max-hr-test="buildMaxHRTest"
+        />
+
+        <CalendarFeedCard />
+
+        <MorningSummaryCard />
+
+        <RideImportCard @done="onImported" />
+      </section>
     </template>
 
     <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
-  </div>
+  </AppPage>
 </template>
