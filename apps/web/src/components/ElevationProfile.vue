@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import type { RouteBuilderElevationPoint } from '@/api/types'
+import { zoneColorVar } from '@/utils/zones'
 
 const props = defineProps<{
   points: RouteBuilderElevationPoint[]
@@ -55,18 +56,17 @@ interface Segment {
   color: string
 }
 
-// Climb-gradient colour scale — the same green→red-by-steepness convention
-// Strava/RideWithGPS use, so "red" reads as "steep" without an explicit
-// legend. Fixed hues rather than theme tokens on purpose: unlike the app's
-// own accent colours, these carry a universal meaning (steep = hot) that
-// shouldn't shift with light/dark mode.
+// Climb-gradient colours come from the zone scale, easy to steep: steepness is
+// effort, and a climb is where the zones get ridden. Descents take the quiet
+// recovery tone. Tokens rather than fixed hues, so each follows light and dark
+// and keeps its 3:1 against the card.
 const GRADIENT_BANDS: [threshold: number, color: string][] = [
-  [0, '#38bdf8'], // descending — cool blue, "not climbing"
-  [3, '#4ade80'], // 0-3%: easy
-  [6, '#eab308'], // 3-6%: moderate
-  [9, '#f97316'], // 6-9%: steep
-  [12, '#ef4444'], // 9-12%: very steep
-  [Infinity, '#991b1b'], // 12%+: extreme
+  [0, zoneColorVar('recovery')], // descending: "not climbing"
+  [3, zoneColorVar('endurance')], // 0-3%: easy
+  [6, zoneColorVar('tempo')], // 3-6%: moderate
+  [9, zoneColorVar('threshold')], // 6-9%: steep
+  [12, zoneColorVar('vo2max')], // 9-12%: very steep
+  [Infinity, zoneColorVar('anaerobic')], // 12%+: extreme
 ]
 function gradientColor(pct: number): string {
   for (const [threshold, color] of GRADIENT_BANDS) {
@@ -417,10 +417,10 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
       <line x1="0" :y1="HEIGHT - 0.5" :x2="WIDTH" :y2="HEIGHT - 0.5" stroke="currentColor" class="text-dimmed" stroke-width="1" />
 
       <!-- One path per segment, each in its own gradient-severity colour
-           (green = easy, red = steep, blue = descending) rather than a
+           (cool = easy, hot = steep, grey-teal = descending) rather than a
            single flat tone — SurfaceBreakdown's bar already owns "what the
            ground is made of"; this is "how hard the climb is" instead, so a
-           deliberately different colour language (heat scale, not a theme
+           deliberately different colour language (the zone scale, not a theme
            accent) rather than yet another flat --app-accent-*. -->
       <path
         v-for="(seg, i) in chart.segments"

@@ -52,3 +52,16 @@ export function zoneColorVar(zone: string): string {
   const id = zone === 'intervals' ? 'anaerobic' : ZONE_ORDER.includes(zone) ? zone : 'endurance'
   return `var(--color-zone-${id})`
 }
+
+/** The zone a relative effort falls in, as a fraction of threshold (1.0 is
+ *  threshold itself). The upper edges are the usual Coggan power zones; the
+ *  workout profile uses this to colour a step it knows only by its level. */
+export function zoneForLevel(level: number): string {
+  if (level <= 0.55) return 'recovery'
+  if (level <= 0.75) return 'endurance'
+  if (level <= 0.87) return 'tempo'
+  if (level <= 0.94) return 'sweet_spot'
+  if (level <= 1.05) return 'threshold'
+  if (level <= 1.2) return 'vo2max'
+  return 'anaerobic'
+}

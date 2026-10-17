@@ -8,7 +8,7 @@ import { computed, onMounted, ref, useTemplateRef } from 'vue'
 import type { LifeEvent, PeriodizationPhase, PeriodizationPlan, PeriodizationWeek, ProjectionEvent } from '@/api/types'
 import { eventTone, formatSigned, parseLocalDate } from '@/utils/fitnessMath'
 import { eventLabel, KIND_META, rangeLabel } from './lifeEvents'
-import { phaseBandFill, phaseDotStyle, phaseFill, phaseFillClass, phaseLabel, phaseOrder } from './phaseStyle'
+import { phaseBandFill, phaseDotStyle, phaseFill, phaseLabel, phaseOrder } from './phaseStyle'
 
 const props = defineProps<{
   plan: PeriodizationPlan
@@ -170,7 +170,7 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
     <template #header>
       <div class="flex items-center justify-between gap-3">
         <h2 class="text-lg font-semibold text-highlighted">Season</h2>
-        <span class="text-sm text-muted font-mono tabular-nums">{{ totalWeeks }} weeks</span>
+        <span class="text-sm text-muted tabular-nums">{{ totalWeeks }} weeks</span>
       </div>
     </template>
 
@@ -245,10 +245,9 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
           :width="Math.max(colWidth - 2, 1)"
           :height="barHeightFor(w)"
           rx="1.5"
-          :class="phaseFillClass(w.phase)"
           :fill="phaseFill(w.phase)"
           :fill-opacity="w.recovery ? 0.5 : 1"
-          :stroke="w.startDate === selectedStart ? 'var(--ui-primary)' : w.recovery ? phaseFill(w.phase) : 'none'"
+          :stroke="w.startDate === selectedStart ? 'var(--ui-text-highlighted)' : w.recovery ? phaseFill(w.phase) : 'none'"
           :stroke-width="w.startDate === selectedStart ? 2 : w.recovery ? 1 : 0"
           :stroke-dasharray="w.recovery && w.startDate !== selectedStart ? '2,2' : undefined"
         >
@@ -293,7 +292,7 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
  * Tailwind `focus-visible:` utility on an SVG `<g>` doesn't reliably paint
  * across browsers, so this is a plain scoped rule instead, confirmed to
  * actually render (see the Task 5 fix report). Deliberately a different
- * colour (`--ui-border-accented`) from the `--ui-primary` stroke a bar gets
+ * colour (`--ui-border-accented`) from the `--ui-text-highlighted` stroke a bar gets
  * for *being the selected week* above — a rider tabbing through needs to
  * tell "this is where my keyboard focus is" apart from "this is the week
  * I've picked", especially when both land on the same bar. */

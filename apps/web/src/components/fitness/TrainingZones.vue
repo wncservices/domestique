@@ -5,6 +5,7 @@
 import { computed } from 'vue'
 import type { RiderProfile } from '@/api/types'
 import { formatPace, hrZoneBasis, hrZones, paceZones, powerZones, type Zone } from '@/utils/fitnessMath'
+import { ZONE_ORDER, zoneColorVar } from '@/utils/zones'
 
 const props = defineProps<{
   profile: RiderProfile
@@ -14,24 +15,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{ buildFtpTest: []; buildMaxHrTest: [] }>()
 
-// A 7-step ramp built once from the app's own categorical accents —
-// border-accented → sky → primary → ember → violet — with two blend steps
-// (4 and 6) filled by color-mix so a 7-zone set (power) gets a distinct
-// shade per zone. A 5-zone set (HR, pace) uses the five named anchors
-// directly, skipping the two blends: steps 1, 2, 3, 5, 7.
-const ZONE_RAMP = [
-  'var(--ui-border-accented)',
-  'var(--app-accent-sky)',
-  'var(--app-accent-primary)',
-  'color-mix(in oklab, var(--app-accent-primary), var(--app-accent-ember))',
-  'var(--app-accent-ember)',
-  'color-mix(in oklab, var(--app-accent-ember), var(--app-accent-violet))',
-  'var(--app-accent-violet)',
-]
-const FIVE_ZONE_STEPS = [0, 1, 2, 4, 6]
+// Zone colours come from the zone scale. A 7-zone set (power) takes all seven
+// in effort order; a 5-zone set (HR, pace) takes recovery, endurance, tempo,
+// threshold and vo2max.
+const POWER_ZONES = ZONE_ORDER
+const FIVE_ZONES = ['recovery', 'endurance', 'tempo', 'threshold', 'vo2max']
 
 function colorsFor(count: number): string[] {
-  return count === 7 ? ZONE_RAMP : FIVE_ZONE_STEPS.map((i) => ZONE_RAMP[i]!)
+  return (count === 7 ? POWER_ZONES : FIVE_ZONES).map(zoneColorVar)
 }
 
 interface ZoneBar {
@@ -125,9 +116,9 @@ const paceBars = computed(() => {
     <div class="flex flex-col gap-6">
       <!-- Power -->
       <div>
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Power</p>
+        <p class="text-[length:var(--text-label)] text-muted">Power</p>
         <template v-if="powerBars">
-          <p class="mt-1 font-mono tabular-nums text-sm font-medium">FTP {{ profile.ftpWatts }} W</p>
+          <p class="mt-1 tabular-nums text-sm font-medium">FTP {{ profile.ftpWatts }} W</p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
             <div
               v-for="bar in powerBars"
@@ -136,7 +127,7 @@ const paceBars = computed(() => {
             />
           </div>
           <ul class="mt-2 flex flex-col gap-0.5 text-xs text-muted">
-            <li v-for="bar in powerBars" :key="bar.name" class="font-mono tabular-nums">
+            <li v-for="bar in powerBars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
           </ul>
@@ -150,9 +141,9 @@ const paceBars = computed(() => {
 
       <!-- Heart rate -->
       <div>
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Heart rate</p>
+        <p class="text-[length:var(--text-label)] text-muted">Heart rate</p>
         <template v-if="hrBars">
-          <p class="mt-1 font-mono tabular-nums text-sm font-medium">{{ hrBasis?.kind === 'threshold' ? 'Threshold HR' : 'Max HR' }} {{ hrBasis?.bpm }} bpm</p>
+          <p class="mt-1 tabular-nums text-sm font-medium">{{ hrBasis?.kind === 'threshold' ? 'Threshold HR' : 'Max HR' }} {{ hrBasis?.bpm }} bpm</p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
             <div
               v-for="bar in hrBars"
@@ -161,7 +152,7 @@ const paceBars = computed(() => {
             />
           </div>
           <ul class="mt-2 flex flex-col gap-0.5 text-xs text-muted">
-            <li v-for="bar in hrBars" :key="bar.name" class="font-mono tabular-nums">
+            <li v-for="bar in hrBars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
           </ul>
@@ -175,9 +166,9 @@ const paceBars = computed(() => {
 
       <!-- Pace -->
       <div>
-        <p class="text-[0.7rem] uppercase tracking-wide text-dimmed">Pace</p>
+        <p class="text-[length:var(--text-label)] text-muted">Pace</p>
         <template v-if="paceBars">
-          <p class="mt-1 font-mono tabular-nums text-sm font-medium">
+          <p class="mt-1 tabular-nums text-sm font-medium">
             Threshold pace {{ formatPace(paceThresholdSpeed) }}
           </p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
@@ -188,7 +179,7 @@ const paceBars = computed(() => {
             />
           </div>
           <ul class="mt-2 flex flex-col gap-0.5 text-xs text-muted">
-            <li v-for="bar in paceBars" :key="bar.name" class="font-mono tabular-nums">
+            <li v-for="bar in paceBars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
           </ul>

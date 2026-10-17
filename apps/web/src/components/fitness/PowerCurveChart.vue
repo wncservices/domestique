@@ -19,7 +19,7 @@ interface Line {
 // All time is drawn first so the two seasons sit on top of it.
 const LINES: Line[] = [
   { key: 'allTime', label: 'All time', varName: '--ui-text-highlighted', dashed: true },
-  { key: 'lastSeason', label: 'Last season', varName: '--app-accent-sky', dashed: false },
+  { key: 'lastSeason', label: 'Last season', varName: '--ui-text-muted', dashed: false },
   { key: 'season', label: 'This season', varName: '--app-accent-primary', dashed: false },
 ]
 
@@ -250,7 +250,7 @@ const ariaLabel = computed(() => {
         :style="readoutOnRight ? { left: `${activeX + 8}px` } : { right: `${WIDTH - activeX + 8}px` }"
       >
         <p class="font-medium">{{ windowLabel(activeSeconds) }}</p>
-        <p v-for="l in [...LINES].reverse()" :key="l.key" class="font-mono tabular-nums text-muted">
+        <p v-for="l in [...LINES].reverse()" :key="l.key" class="tabular-nums text-muted">
           {{ l.label }}
           {{ wattsAt(l, activeSeconds) === null ? '–' : `${Math.round(wattsAt(l, activeSeconds)!)} W` }}
         </p>

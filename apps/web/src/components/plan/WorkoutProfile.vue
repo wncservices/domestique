@@ -6,6 +6,7 @@
 // `interactive` so hovering a bar says which step it is and what it asks for.
 import { computed, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import type { RiderProfile, WorkoutStep } from '@/api/types'
+import { zoneColorVar, zoneForLevel } from '@/utils/zones'
 import { describeTarget, flattenSteps, formatClock, formatDuration } from '@/utils/workoutMath'
 
 const props = withDefaults(
@@ -64,7 +65,7 @@ const bars = computed(() => {
       y: props.height - barHeight,
       width,
       height: barHeight,
-      color: colorFor(step.intensity),
+      color: zoneColorVar(zoneForLevel(step.level)),
       label: labelFor(step.step, step.seconds),
     }
     x += (step.seconds / total) * WIDTH.value
@@ -100,12 +101,6 @@ const tooltip = computed(() => {
   const center = bar.x + bar.width / 2
   return { text: bar.label, left: Math.min(Math.max(center, 80), WIDTH.value - 80) }
 })
-
-function colorFor(intensity: WorkoutStep['intensity']): string {
-  if (intensity === 'interval') return 'var(--app-accent-ember)'
-  if (intensity === 'active') return 'var(--app-accent-sky)'
-  return 'var(--ui-border-accented)'
-}
 </script>
 
 <template>
@@ -138,7 +133,7 @@ function colorFor(intensity: WorkoutStep['intensity']): string {
     </svg>
     <div
       v-if="tooltip"
-      class="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-default bg-default px-2 py-1 font-mono text-xs tabular-nums text-highlighted shadow-sm"
+      class="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-default bg-default px-2 py-1 text-xs tabular-nums text-highlighted shadow-sm"
       :style="{ left: `${tooltip.left}px` }"
     >
       {{ tooltip.text }}
