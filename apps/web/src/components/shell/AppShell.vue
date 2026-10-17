@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useLibrary } from '@/composables/useLibrary'
 import AvatarMenu from './AvatarMenu.vue'
 import { navGroupLabels, navItems, type NavItem } from './navItems'
@@ -23,9 +23,16 @@ const groups = computed(() =>
 
 // Tooltips only earn their place on the icon rail; on the full sidebar the
 // label is already beside the icon.
+// Listener added on mount and removed on unmount: the shell remounts when
+// the rider moves between /shared/* and the rest of the app.
+const railOnly = ref(false)
 const wide = window.matchMedia('(min-width: 1024px)')
-const railOnly = ref(!wide.matches)
-wide.addEventListener('change', (e) => (railOnly.value = !e.matches))
+const onWide = (e: MediaQueryListEvent) => (railOnly.value = !e.matches)
+onMounted(() => {
+  railOnly.value = !wide.matches
+  wide.addEventListener('change', onWide)
+})
+onBeforeUnmount(() => wide.removeEventListener('change', onWide))
 
 const itemBase =
   'flex items-center gap-3 rounded-lg px-3 py-2 text-[length:var(--text-body)] text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary'
@@ -35,7 +42,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
 <template>
   <!-- Desktop: full sidebar. Tablet: the same element narrowed to an icon
        rail. Phone: hidden, replaced by the tab bar below. -->
-  <aside class="app-header fixed inset-y-0 left-0 z-20 hidden w-16 flex-col border-r border-default sm:flex lg:w-60">
+  <aside class="app-chrome fixed inset-y-0 left-0 z-20 hidden w-16 flex-col border-r border-default sm:flex lg:w-60">
     <RouterLink to="/today" class="flex items-center gap-3 px-4 py-4">
       <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
         <UIcon name="i-lucide-bike" class="size-5" />
@@ -58,7 +65,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
     <div class="border-t border-default p-2"><AvatarMenu /></div>
   </aside>
 
-  <header class="app-header sticky top-0 z-20 flex items-center justify-between gap-3 px-4 py-2 sm:hidden">
+  <header class="app-header sticky top-0 z-20 flex w-full items-center justify-between gap-3 px-4 py-2 sm:hidden">
     <RouterLink to="/today" class="flex min-w-0 items-center gap-2">
       <UIcon name="i-lucide-bike" class="size-5 shrink-0 text-primary" aria-hidden="true" />
       <span class="font-display truncate text-base font-semibold tracking-tight text-highlighted">Domestique</span>
@@ -72,7 +79,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
 
   <nav
     aria-label="Main"
-    class="app-header fixed inset-x-0 bottom-0 z-20 border-t border-default pb-[env(safe-area-inset-bottom)] sm:hidden"
+    class="app-chrome fixed inset-x-0 bottom-0 z-20 border-t border-default pb-[env(safe-area-inset-bottom)] sm:hidden"
   >
     <ul class="flex">
       <li v-for="item in visible" :key="item.to" class="min-w-0 flex-1">

@@ -280,6 +280,13 @@ body {
   }
 }
 
+/* Fixed navigation chrome (sidebar, tab bar): the frosted background without
+ * .app-header's bottom border, which would draw on the wrong edge. */
+.app-chrome {
+  background-color: var(--app-header-bg);
+  backdrop-filter: blur(12px);
+}
+
 .app-header {
   background-color: var(--app-header-bg);
   backdrop-filter: blur(12px);

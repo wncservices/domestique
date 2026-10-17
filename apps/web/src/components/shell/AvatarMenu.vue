@@ -124,6 +124,7 @@ const initial = computed(() => (displayName.value.trim()[0] ?? '?').toLocaleUppe
     color="primary"
     variant="subtle"
     size="sm"
+    aria-label="Sign in"
   >
     <span :class="compact ? 'hidden' : 'hidden lg:inline'">Sign in</span>
   </UButton>
@@ -131,7 +132,7 @@ const initial = computed(() => (displayName.value.trim()[0] ?? '?').toLocaleUppe
   <UDropdownMenu v-else-if="me" :items="groups" :content="{ align: compact ? 'end' : 'start', side: compact ? 'bottom' : 'top' }">
     <button
       type="button"
-      class="flex w-full min-w-0 items-center gap-3 rounded-lg p-2 text-left hover:bg-elevated"
+      class="flex w-full min-w-0 items-center gap-3 rounded-lg p-2 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
       :aria-label="`Account menu for ${displayName || 'this deployment'}`"
     >
       <span

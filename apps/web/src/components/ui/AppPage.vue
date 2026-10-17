@@ -2,8 +2,9 @@
 defineProps<{ title: string; subtitle?: string }>()
 </script>
 
+<!-- Width is capped once, by the wrapper in App.vue. -->
 <template>
-  <div class="mx-auto flex w-full max-w-6xl flex-col gap-6">
+  <div class="flex w-full flex-col gap-6">
     <header class="flex flex-wrap items-end justify-between gap-3">
       <div class="min-w-0">
         <h1 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ title }}</h1>
