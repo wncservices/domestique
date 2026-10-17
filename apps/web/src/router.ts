@@ -47,5 +47,11 @@ export function buildRoutes(load: PageLoader): RouteRecordRaw[] {
 }
 
 export function createAppRouter(load: PageLoader, history = createWebHistory()) {
-  return createRouter({ history, routes: buildRoutes(load) })
+  // Pages that own a hash (Settings sections, Fitness #profile) scroll
+  // themselves, so a hash navigation is left alone.
+  return createRouter({
+    history,
+    routes: buildRoutes(load),
+    scrollBehavior: (to, _from, saved) => saved ?? (to.hash ? false : { top: 0 }),
+  })
 }
