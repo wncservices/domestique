@@ -7,6 +7,7 @@ import type { AssignableRole, Person, RiderInfo, RiderMerge } from '@/api/types'
 import { roleColor } from '@/utils/role'
 import { usePagedList } from '@/composables/usePagedList'
 import { describeError } from '@/utils/errorMessage'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 
 const toast = useToast()
@@ -567,6 +568,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
         variant="subtle"
         icon="i-lucide-triangle-alert"
         :description="error"
+        :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => load() }]"
         class="mb-4"
       />
 
@@ -594,11 +596,12 @@ function personActions(person: Person): DropdownMenuItem[][] {
         </template>
       </UAlert>
 
-      <UEmpty
+      <EmptyState
         v-if="unavailable"
+        bare
         icon="i-lucide-key-round"
         title="Auth0 Management API access is not configured"
-        description="An administrator can set DOMESTIQUE_AUTH0_MGMT_CLIENT_ID and DOMESTIQUE_AUTH0_MGMT_CLIENT_SECRET to enable this page."
+        text="An administrator can set DOMESTIQUE_AUTH0_MGMT_CLIENT_ID and DOMESTIQUE_AUTH0_MGMT_CLIENT_SECRET to enable this page."
       />
 
       <template v-else-if="people.length">
@@ -694,11 +697,12 @@ function personActions(person: Person): DropdownMenuItem[][] {
         />
       </template>
 
-      <UEmpty
+      <EmptyState
         v-else-if="!loading"
+        bare
         icon="i-lucide-user-x"
         title="Nobody has access yet"
-        description="Invite the first rider above."
+        text="Invite the first rider above."
       />
     </UCard>
 
