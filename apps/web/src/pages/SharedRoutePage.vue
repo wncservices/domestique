@@ -14,6 +14,7 @@ import { useToast } from '@nuxt/ui/composables'
 import { ApiError, api } from '@/api/client'
 import type { Me, SharedRoute } from '@/api/types'
 import RouteMap from '@/components/RouteMap.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
@@ -138,7 +139,7 @@ async function importToLibrary() {
       </div>
     </RouterLink>
 
-    <USkeleton v-if="loadingMe" class="h-72 w-full" />
+    <SkeletonCard v-if="loadingMe" :lines="5" />
 
     <div
       v-else-if="!me?.authenticated"
@@ -151,7 +152,7 @@ async function importToLibrary() {
       <UButton :to="signInHref" external icon="i-lucide-log-in" color="primary">Sign in</UButton>
     </div>
 
-    <USkeleton v-else-if="loadingRoute" class="h-72 w-full" />
+    <SkeletonCard v-else-if="loadingRoute" :lines="5" />
 
     <UAlert
       v-else-if="errorKind === 'not-found'"

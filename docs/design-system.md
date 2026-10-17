@@ -2,7 +2,8 @@
 
 The frontend's visual language, and the rules for keeping a new page or
 component consistent with it. This is deliberately a doc, not a linter or a
-component library — see **Explicitly out of scope** at the bottom for why.
+component library — see **Explicitly out of scope** at the bottom for why. What can
+be checked mechanically is, by `apps/web/tests/designSystem.test.mjs`.
 
 ## Tokens
 
@@ -10,8 +11,8 @@ Every color, shadow, and font in the app is a CSS custom property defined in
 [`apps/web/src/styles.css`](../apps/web/src/styles.css) — **the only place
 `:root`/`.dark` are ever defined.** A component that reaches for its own
 `dark:` Tailwind variant instead of a token is the one way this system
-actually breaks; there is no automated check for it (see below), so this is
-the rule most worth catching in review.
+actually breaks; the guard test cannot see it, so this is the rule most worth
+catching in review.
 
 ### Palette
 
@@ -108,8 +109,8 @@ from running.) `primary` means *the brand* — the
 one interactive action or focal colour on a page; don't hand it out as "just
 another category" once there's more than one thing to colour. `ember` /
 `sky` / `violet` are *purely* categorical: they distinguish
-same-kind-different-instance items (four stat tiles, N route cards, the
-landing page's four features) and carry no meaning beyond "this one is not
+same-kind-different-instance items (N route cards, the landing page's four
+features) and carry no meaning beyond "this one is not
 that one." Never let a categorical accent collide with a semantic one in the
 same view — it's why ember is a coral and not an amber, the same reason the
 brand teal replaced an earlier orange (see the comment at the top of
@@ -118,11 +119,10 @@ brand teal replaced an earlier orange (see the comment at the top of
 **The icon-chip pattern** — a small `size-9`/`size-4` rounded square, tinted
 background (`var(--app-accent-{key}-soft)`) with the icon in the solid
 accent (`var(--app-accent-{key})`) — is the one way this app adds a
-categorical colour to something. It's used identically for the header logo
-mark, the landing page's four feature icons, and the library's four stat
-tiles. Reuse it rather than inventing a second way to show "this item has
-accent X"; see `Landing.vue`'s `features` array or `App.vue`'s `stats`
-computed for the concrete `{ ..., color: 'ember' }`-per-item shape.
+categorical colour to something. It's used identically for the logo mark
+and the landing page's four feature icons. Reuse it rather than inventing a
+second way to show "this item has accent X"; see `Landing.vue`'s `features`
+array for the concrete `{ ..., color: 'ember' }`-per-item shape.
 
 **Route lines stay one colour, deliberately.** A per-route categorical
 accent (`TrackPreview.vue`'s card preview and `RouteMap.vue`'s live map both
@@ -221,16 +221,27 @@ Pick in this order:
    `aria-expanded`; the content is not rendered while closed.
 4. **`SuggestionRow`** (`components/ui/SuggestionRow.vue`) — `icon`, `title`,
    `text`, an `actions` slot, and a `dismiss` event. A slim row, never a panel.
-5. **`UCard variant="outline"`** — the default panel. Anything that is
+5. **`EmptyState`** (`components/ui/EmptyState.vue`) — a page's empty list or
+   missing permission: `icon`, `title`, optional `text`, an `actions` slot. One
+   quiet block centred in a card; `bare` drops the card when it already sits in
+   one. Copy stays specific to the page; the markup does not.
+6. **`SkeletonCard`** (`components/ui/SkeletonCard.vue`) — a page's loading
+   state: a card-shaped `USkeleton` group, with `lines` (default 3). Never a
+   spinner. A button's own `:loading` is fine; it is not a page state.
+7. **`UCard variant="outline"`** — the default panel. Anything that is
    fundamentally a Nuxt UI component consumer: `PeoplePage.vue`,
    `SettingsPage.vue`, most of `CrewsPage.vue`, `RouteCard.vue`.
-6. **`.app-card` / `.app-card-interactive`** — only when you need the same
+8. **`.app-card` / `.app-card-interactive`** — only when you need the same
    shadow/hover language on something that is not semantically a Nuxt UI card.
    `.app-card-interactive` adds the hover lift for a tappable tile.
 
 **Calm first.** A card leads with a plain headline and one number. The dense
 layer goes behind `DetailsToggle`. Suggestions are `SuggestionRow`, at most
 one per page.
+
+**States.** Empty is `EmptyState`, loading is `SkeletonCard`, and a failed load is a
+`UAlert` (`color="error"`, `variant="subtle"`) with a Retry action wherever the page has
+something to retry. The guard test fails on a spinner icon in `pages/`.
 
 ## Page inventory
 
@@ -240,7 +251,7 @@ one per page.
 | `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` |
 | `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
 | `/routes`, `/routes/new`, `/routes/build` | `RoutesPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Redesigned: `AppPage` with Add route / Build a route as page actions, library `StatTile` row, `SegmentedControl` (Grid / Map), slim sync banner, `RouteCard` with an actions menu. Add and Build are `AppPage`s with a "Back to routes" action |
-| `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line empty state |
+| `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line `EmptyState` |
 | `/settings` | `SettingsPage.vue` | Redesigned: `AppPage` with a sectioned layout (see "Sectioned settings") |
 | `/people` | `PeoplePage.vue` | Restyled: `AppPage` with Refresh / Invite as page actions, the same list and states, one labelled actions menu per person |
 | landing page | `landing/Landing.vue` | Restyled: new type scale and colour roles; the hero is a static, `aria-hidden` illustration of the Today card (invented values, `StatTile`, zone-coloured week row) with no API call, so the separate bundle stays free of the API client, the shell and `maplibre-gl` |
@@ -312,7 +323,7 @@ deep links and Back both work.
 - **Crew cards.** A rider's own crews are `UCard`s in a two-column grid with `app-card-interactive`;
   the card opens the crew popup. Member count, ownership, auto-share and waiting requests are badges.
 - **Empty state, the line pattern.** One plain sentence saying what the thing is, then its actions as
-  buttons, centred inside a single card. No illustration, no `UEmpty`. Reuse it for other empty lists.
+  buttons, centred inside a single card: `EmptyState`. No illustration. Reuse it for other empty lists.
 - **Menus in the popup.** Each ride has "Ride actions" (sync now; delete last), each approved member
   "Actions for <rider>" (make or remove owner; remove from crew last), and the footer has "Crew actions"
   (delete crew for an owner, leave crew for a member). Destructive items are in their own last group.
@@ -381,7 +392,7 @@ layouts cannot disagree and the lists are testable without a DOM.
 - Reach for `UCard variant="outline"` before `.app-card`.
 - No literal hex colours in `.vue`/`.ts` files outside the documented
   exceptions, each explained in its own comments. The guard test
-  (`apps/web/tests/designSystem.test.mjs`) enforces this and allowlists four
+  (`apps/web/tests/designSystem.test.mjs`) enforces this and allowlists three
   files, matched on their path under `src/`:
   `components/RouteMap.vue`, `components/TrackPreview.vue` and
   `components/RouteBuilderMap.vue`, all map painting.
@@ -389,16 +400,17 @@ layouts cannot disagree and the lists are testable without a DOM.
   and pull from the existing accents. Effort uses the zone scale and nothing
   else does; training phases use the phase scale. Don't add a new scale
   without raising it as a deliberate decision first.
+- Empty list: `EmptyState`. Loading: `SkeletonCard`. Failed load: an error `UAlert` with Retry.
+- The guard test is the enforcement for hex colours, raw palette classes, `font-mono`,
+  `uppercase`, undocumented tokens and page-level spinners. Run `npm test` in `apps/web`.
 - Check both light and dark mode by hand. There's no automated visual test
   (see below), so this is the only check that happens.
 
 ## Explicitly out of scope
 
-No stylelint, no component library, no Storybook, no automated
-token-usage lint rule. This app already runs on a small dependency budget by
+No stylelint, no component library, no Storybook, no lint rule beyond
+the guard test. This app already runs on a small dependency budget by
 design (one screen, no state-management library — see the root `AGENTS.md`)
 and reviews harshly for tooling added ahead of an actual need. Enforcement
-here is this doc plus code review, the same way the rest of the frontend's
-consistency has held up so far — zero component `<style>` blocks and zero
-arbitrary-value Tailwind color classes exist anywhere in `apps/web/src`
-today, entirely by convention, with no tooling forcing it.
+here is the guard test for what a regex can see, plus this doc and code review
+for the rest (a `dark:` variant used instead of a token, say).
