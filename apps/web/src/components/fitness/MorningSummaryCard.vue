@@ -76,10 +76,10 @@ onMounted(load)
 <template>
   <UCard v-if="status?.available" variant="outline">
     <template #header>
-      <h2 class="flex items-center gap-2 text-lg font-semibold">
+      <h3 class="flex items-center gap-2 text-lg font-semibold">
         <UIcon name="i-lucide-mail" />
         Morning summary
-      </h2>
+      </h3>
       <p class="text-sm text-muted">One short email after your morning sync. Yours alone.</p>
     </template>
 

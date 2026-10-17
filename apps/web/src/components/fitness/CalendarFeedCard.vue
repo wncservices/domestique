@@ -95,10 +95,10 @@ onMounted(load)
 <template>
   <UCard v-if="available" variant="outline">
     <template #header>
-      <h2 class="flex items-center gap-2 text-lg font-semibold">
+      <h3 class="flex items-center gap-2 text-lg font-semibold">
         <UIcon name="i-lucide-calendar-days" />
         Calendar link
-      </h2>
+      </h3>
       <p class="text-sm text-muted">Your planned sessions in the calendar you already use. Yours alone.</p>
     </template>
 
