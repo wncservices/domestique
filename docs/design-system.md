@@ -109,7 +109,7 @@ colour (`success`/`warning`/`error`/`info`) means *status* and nothing else
 explicit; the icon, not the colour, is what actually distinguishes cycling
 from running.) `primary` means *the brand* — the
 one interactive action or focal colour on a page; don't hand it out as "just
-another category" once there's more than one thing to colour.  `sky` / `violet` are *purely* categorical: they distinguish
+another category" once there's more than one thing to colour. `sky` / `violet` are *purely* categorical: they distinguish
 same-kind-different-instance items (N route cards, the landing page's four
 features) and carry no meaning beyond "this one is not
 that one." `ember` now carries meaning (behind plan or missed, see Colour
