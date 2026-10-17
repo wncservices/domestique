@@ -27,6 +27,8 @@ import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
 import ReadinessChip from '@/components/plan/ReadinessChip.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import AppPage from '@/components/ui/AppPage.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import StatTile from '@/components/ui/StatTile.vue'
 import SuggestionRow from '@/components/ui/SuggestionRow.vue'
@@ -256,26 +258,30 @@ async function dismissSuggestion() {
 
 <template>
   <AppPage :title="greeting(new Date().getHours(), name)" :subtitle="dateLabel">
-    <USkeleton v-if="libraryLoading || (canManageTraining && !week && !weekFailed)" class="h-48 w-full rounded-[var(--radius-card)]" />
+    <SkeletonCard v-if="libraryLoading || (canManageTraining && !week && !weekFailed)" :lines="4" />
 
     <!-- No training permission: say so plainly instead of a page of 403s. -->
-    <UCard v-else-if="!canManageTraining" variant="outline" data-testid="today-no-access">
-      <div class="flex flex-col items-start gap-3">
-        <h2 class="font-display text-[length:var(--text-title)] text-highlighted">Training is for riders</h2>
-        <p class="text-[length:var(--text-body)] text-muted">
-          Your account can look at the route library but has no training plan. Ask an admin if you should have one.
-        </p>
+    <EmptyState
+      v-else-if="!canManageTraining"
+      icon="i-lucide-lock"
+      title="Training is for riders"
+      text="Your account can look at the route library but has no training plan. Ask an admin if you should have one."
+      data-testid="today-no-access"
+    >
+      <template #actions>
         <UButton to="/routes" color="neutral" variant="outline" icon="i-lucide-route">Browse routes</UButton>
-      </div>
-    </UCard>
+      </template>
+    </EmptyState>
 
     <template v-else>
-      <UCard v-if="weekFailed && !week" variant="outline">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-[length:var(--text-body)] text-muted">Today could not be loaded.</p>
-          <UButton color="neutral" variant="outline" icon="i-lucide-refresh-cw" @click="loadAll">Try again</UButton>
-        </div>
-      </UCard>
+      <UAlert
+        v-if="weekFailed && !week"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-triangle-alert"
+        title="Today could not be loaded."
+        :actions="[{ label: 'Try again', color: 'error', variant: 'subtle', icon: 'i-lucide-refresh-cw', onClick: () => loadAll() }]"
+      />
 
       <template v-else-if="week">
         <UAlert v-if="weekFailed" color="error" variant="subtle" icon="i-lucide-triangle-alert" title="Could not refresh today. Showing what was loaded earlier." />
