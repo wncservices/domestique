@@ -5,7 +5,6 @@
 import type {
   FitnessSnapshot,
   FtpTestSuggestion,
-  PeriodizationPhase,
   ProjectionResponse,
   ReadinessResponse,
   RideTogether,
@@ -15,6 +14,7 @@ import type {
   WeekFocus,
   Workout,
 } from '@/api/types'
+import { phaseLabel } from '../components/plan/phaseStyle.ts'
 import { formatSigned, formStatus, latestWithDelta } from './fitnessMath.ts'
 import { weekdayLong, weekdayShort } from './planDates.ts'
 import { flattenSteps, formatDuration, isPlanMadeSession } from './workoutMath.ts'
@@ -173,11 +173,13 @@ export function cardState(day: WeekDay | undefined): CardState {
   return { kind: 'planned' }
 }
 
-export function eyebrowFor(focus: Pick<WeekFocus, 'phase' | 'recovery' | 'weekNumber'> | undefined): string {
-  if (!focus?.phase) return "Today's ride"
-  const phase = (focus.phase as PeriodizationPhase).charAt(0).toUpperCase() + focus.phase.slice(1)
-  const rec = focus.recovery ? ' · recovery' : ''
-  return `Today's ride · ${phase}${rec}${focus.weekNumber ? ` week ${focus.weekNumber}` : ''}`
+export function eyebrowFor(
+  focus: Pick<WeekFocus, 'phase' | 'recovery' | 'weekNumber'> | undefined,
+  restDay = false,
+): string {
+  const lead = restDay ? 'Today' : "Today's ride"
+  if (!focus?.phase) return lead
+  return `${lead} · ${phaseLabel(focus.phase, focus.recovery)}${focus.weekNumber ? ` week ${focus.weekNumber}` : ''}`
 }
 
 /** The session the Swap menu belongs to: plan-made, unridden, not past, with no

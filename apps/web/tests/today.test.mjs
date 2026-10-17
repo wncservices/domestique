@@ -207,6 +207,9 @@ test('card state: rest day, ridden without a plan, planned', () => {
 test('eyebrow: names the phase and week when the plan has them', () => {
   assert.equal(eyebrowFor(undefined), "Today's ride")
   assert.equal(eyebrowFor({ phase: 'build', weekNumber: 3 }), "Today's ride · Build week 3")
+  assert.equal(eyebrowFor({ phase: 'base', weekNumber: 1 }, true), 'Today · Base week 1')
+  assert.equal(eyebrowFor({ phase: 'build', recovery: true, weekNumber: 2 }), "Today's ride · Build · recovery week 2")
+  assert.equal(eyebrowFor(undefined, true), 'Today')
 })
 
 test('swappable: plan-made, unridden, not past, no route', () => {
