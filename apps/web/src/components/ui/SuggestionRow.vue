@@ -1,5 +1,8 @@
 <script setup lang="ts">
-defineProps<{ icon: string; title: string; text?: string }>()
+withDefaults(defineProps<{ icon: string; title: string; text?: string; dismissLabel?: string; dismissing?: boolean }>(), {
+  dismissLabel: 'Dismiss',
+  dismissing: false,
+})
 defineEmits<{ dismiss: [] }>()
 </script>
 
@@ -14,6 +17,6 @@ defineEmits<{ dismiss: [] }>()
     <div v-if="$slots.actions" class="flex shrink-0 items-center gap-2">
       <slot name="actions" />
     </div>
-    <UButton icon="i-lucide-x" color="neutral" variant="ghost" size="xs" aria-label="Dismiss" @click="$emit('dismiss')" />
+    <UButton icon="i-lucide-x" color="neutral" variant="ghost" size="xs" :aria-label="dismissLabel" :loading="dismissing" :disabled="dismissing" @click="$emit('dismiss')" />
   </div>
 </template>
