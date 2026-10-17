@@ -166,7 +166,7 @@ async function unlink(account: Account) {
     <template #header>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 class="font-medium text-highlighted">Head units</h2>
+          <h3 class="font-medium text-highlighted">Head units</h3>
           <p class="text-sm text-muted">
             {{ myAccounts.length }} linked · routes are pushed to these
           </p>
