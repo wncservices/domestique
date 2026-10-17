@@ -290,6 +290,7 @@ async function push(items: { accountId: string; slug: string }[]) {
       :pushing="pushing"
       :failures="failures"
       :can-push="canPush"
+      :loading="loading"
       @push="push"
       @refresh="backgroundRefresh"
     />
