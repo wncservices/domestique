@@ -5,10 +5,14 @@
 // today (TodayCard) or the flat goals/workouts lists below it.
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import type { AnalysisStep, CompletedSession, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
+import type { DropdownMenuItem } from '@nuxt/ui'
+import { useExportItems } from '@/composables/useExportItems'
+import { hasGaps, planActions, type PlanActionId } from '@/utils/planActions'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
+import { workoutLoad } from '@/utils/today'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
+import { zoneColorVar, zoneLabel } from '@/utils/zones'
 import CrewRideBadge from './CrewRideBadge.vue'
-import ExportMenu from './ExportMenu.vue'
 import IndoorBadge from './IndoorBadge.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import { phaseChipStyle, phaseLabel } from './phaseStyle'
@@ -44,7 +48,7 @@ const emit = defineEmits<{
   // See TodayCard.vue's own 'rated' emit — a feel rating can move a
   // progression level, and the week/level state lives on the page.
   rated: []
-  // Opens TrainingPlanPage.vue's own confirm modal — this component never
+  // Opens PlanPage.vue's own confirm modal — this component never
   // calls the API itself, same as fill/move/open above.
   replan: []
   // Opens the page's manual "schedule an FTP test" modal.
@@ -75,6 +79,42 @@ const targetSeconds = computed(() =>
   Math.max(props.week.totals.plannedSeconds, (props.week.focus?.targetHours ?? 0) * 3600),
 )
 const targetHours = computed(() => targetSeconds.value / 3600)
+
+// One primary action, the rest in an overflow. Every handler is the page's own
+// (the same events the five separate buttons used to emit).
+const gaps = computed(() => hasGaps(props.week, props.canFill))
+const actions = computed(() => planActions({ isCurrentWeek: isCurrentWeek.value, hasGaps: gaps.value }))
+const { weekItems } = useExportItems()
+
+function run(id: PlanActionId) {
+  switch (id) {
+    case 'replan':
+      return emit('replan')
+    case 'train-now':
+      return emit('trainNow')
+    case 'life-event':
+      return emit('lifeEvent')
+    case 'ftp-test':
+      return emit('ftpTest')
+  }
+}
+
+// Export keeps its week options as a nested menu. A week with nothing planned
+// has nothing to export, so the entry is shown disabled rather than hidden.
+const overflowItems = computed<DropdownMenuItem[]>(() =>
+  actions.value.overflow.map((a): DropdownMenuItem => {
+    if (a.id !== 'export') return { label: a.label, icon: a.icon, onSelect: () => run(a.id) }
+    const children = weekItems(props.week)
+    return children.length
+      ? { label: a.label, icon: a.icon, children }
+      : { label: a.label, icon: a.icon, disabled: true }
+  }),
+)
+
+function loadOf(w: Workout): string | null {
+  const load = workoutLoad(w, props.profile)
+  return load ? `${load.tss} TSS` : null
+}
 
 const statusIcon: Record<string, string> = {
   done: 'i-lucide-circle-check',
@@ -150,7 +190,7 @@ function analysedSession(day: WeekDay) {
 
 // Only the date is kept, not the WeekDay object itself: @rated (onRated,
 // below) makes the parent reload the whole week, which replaces props.week
-// wholesale (TrainingPlanPage.vue's loadWeek) — a captured WeekDay would go
+// wholesale (PlanPage.vue's loadWeek) — a captured WeekDay would go
 // on pointing at the pre-reload data forever, so the modal's own steps/feel
 // would never reflect the rating it just caused. Looking the day back up by
 // date in the *current* props.week each time keeps it fresh, and if that
@@ -206,15 +246,8 @@ function rideLinkNote(c: CompletedSession): string {
   return `${c.linkedByHand ? 'Linked by you' : 'Matched'} to ${name ?? 'a planned session'}. Click to change.`
 }
 
-// A week that has not ended — this one or a later one the rider paged to; the
-// server refuses a past week, so the button is not offered for one.
-const canFillWeek = computed(
-  () =>
-    props.canFill &&
-    props.week.end >= props.week.today &&
-    !!props.week.focus &&
-    !props.week.days.some((d) => d.planned.length > 0),
-)
+// The Fill button below the strip is offered on the same signal as Replan
+// leading the toolbar: see hasGaps in utils/planActions.ts.
 
 // Mobile's horizontally-scrolling strip (the sm:grid breakpoint replaces it
 // with a grid on desktop, where this is a no-op — nothing to scroll) starts
@@ -242,7 +275,7 @@ watch(
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-1">
         <UButton color="neutral" variant="ghost" icon="i-lucide-chevron-left" aria-label="Previous week" @click="emit('prev')" />
-        <h2 class="text-lg font-semibold text-highlighted">{{ title }}</h2>
+        <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted tabular-nums">{{ title }}</h2>
         <UButton color="neutral" variant="ghost" icon="i-lucide-chevron-right" aria-label="Next week" @click="emit('next')" />
         <UButton v-if="!isCurrentWeek" color="neutral" variant="ghost" size="sm" @click="emit('thisWeek')">Today</UButton>
         <span
@@ -256,51 +289,12 @@ watch(
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
-        <UButton
-          v-if="isCurrentWeek"
-          color="neutral"
-          variant="outline"
-          size="sm"
-          icon="i-lucide-timer"
-          class="shrink-0 whitespace-nowrap"
-          aria-label="I have some minutes today"
-          @click="emit('trainNow')"
-        >
-          <span class="hidden sm:inline">I have ... minutes</span>
+        <UButton color="primary" size="sm" :icon="actions.primary.icon" class="shrink-0 whitespace-nowrap" @click="run(actions.primary.id)">
+          {{ actions.primary.label }}
         </UButton>
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="sm"
-          icon="i-lucide-calendar-off"
-          class="shrink-0 whitespace-nowrap"
-          aria-label="Add a life event"
-          @click="emit('lifeEvent')"
-        >
-          <span class="hidden sm:inline">Life event</span>
-        </UButton>
-        <UButton
-          color="neutral"
-          variant="outline"
-          size="sm"
-          icon="i-lucide-gauge"
-          class="shrink-0 whitespace-nowrap"
-          aria-label="Schedule an FTP test"
-          @click="emit('ftpTest')"
-        >
-          <span class="hidden sm:inline">FTP test</span>
-        </UButton>
-        <ExportMenu :week="week" label="Export" size="sm" label-from-sm />
-        <UButton
-          v-if="isCurrentWeek"
-          color="neutral"
-          variant="outline"
-          size="sm"
-          icon="i-lucide-refresh-ccw"
-          @click="emit('replan')"
-        >
-          Replan
-        </UButton>
+        <UDropdownMenu :items="overflowItems" :content="{ align: 'end' }">
+          <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-ellipsis" aria-label="More actions" />
+        </UDropdownMenu>
         <div class="flex min-w-[10rem] flex-col items-end gap-1">
           <span class="tabular-nums text-sm text-muted">
             {{ doneHours.toFixed(1) }} / {{ targetHours.toFixed(1) }} h
@@ -315,14 +309,14 @@ watch(
         v-for="day in week.days"
         :key="day.date"
         :data-date="day.date"
-        class="flex min-h-28 min-w-[7.5rem] snap-start flex-col gap-1 rounded-lg border p-2 sm:min-w-0"
+        class="flex min-h-28 min-w-[9.5rem] snap-start flex-col gap-1 rounded-[var(--radius-card)] border p-2 sm:min-w-0"
         :class="[tileClass(day), { 'bg-elevated': dragOverDate === day.date }]"
         @dragover="onDragOver($event, day.date)"
         @dragleave="dragOverDate === day.date && (dragOverDate = null)"
         @drop="onDrop($event, day.date)"
       >
         <div class="flex items-center justify-between gap-1">
-          <span class="text-xs font-medium">{{ weekdayShort(day.date) }} {{ dayNumber(day.date) }}</span>
+          <span class="text-xs font-medium tabular-nums">{{ weekdayShort(day.date) }} {{ dayNumber(day.date) }}</span>
           <UIcon v-if="statusIcon[day.status]" :name="statusIcon[day.status]" :class="statusColor[day.status]" class="size-3.5" />
         </div>
 
@@ -330,48 +324,60 @@ watch(
 
         <WeatherChip v-if="weatherOn(day.date)" :day="weatherOn(day.date)!" :attribution="weatherAttribution" compact />
 
-        <div
-          v-for="w in day.planned"
-          :key="w.id"
-          class="flex flex-col gap-0.5 rounded border bg-default p-1 cursor-pointer"
-          :class="w.id === selectedWorkoutId ? 'border-primary ring-1 ring-primary' : 'border-default hover:bg-elevated'"
-          role="button"
-          tabindex="0"
-          :aria-pressed="w.id === selectedWorkoutId"
-          :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
-          :draggable="canDrag(day.date, w)"
-          @dragstart="onDragStart($event, w)"
-          @click="emit('select', w, day.date)"
-          @keydown.enter.prevent="emit('select', w, day.date)"
-          @keydown.space.prevent="emit('select', w, day.date)"
-        >
-          <div class="flex items-center justify-between gap-1">
-            <span class="truncate text-xs font-medium">{{ w.name }}</span>
-            <UDropdownMenu v-if="!w.crewRide" :items="moveMenuItems(w, day.date)">
-              <UButton
-                color="neutral"
-                variant="ghost"
-                size="xs"
-                icon="i-lucide-ellipsis-vertical"
-                :aria-label="`Move ${w.name}`"
-                :ui="{ base: 'p-0.5' }"
-                @click.stop
-              />
-            </UDropdownMenu>
+        <UTooltip v-for="w in day.planned" :key="w.id" :delay-duration="400" :content="{ side: 'bottom' }">
+          <div
+            class="flex w-full flex-col gap-0.5 rounded border border-l-4 bg-default p-1.5 cursor-pointer"
+            :class="w.id === selectedWorkoutId ? 'border-primary ring-1 ring-primary' : 'border-default hover:bg-elevated'"
+            :style="{ borderLeftColor: zoneColorVar(w.zone ?? 'endurance') }"
+            role="button"
+            tabindex="0"
+            :aria-pressed="w.id === selectedWorkoutId"
+            :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
+            :draggable="canDrag(day.date, w)"
+            @dragstart="onDragStart($event, w)"
+            @click="emit('select', w, day.date)"
+            @keydown.enter.prevent="emit('select', w, day.date)"
+            @keydown.space.prevent="emit('select', w, day.date)"
+          >
+            <div class="flex items-start justify-between gap-1">
+              <!-- Two lines, never one: a long name is the point of the wider tile. -->
+              <span class="line-clamp-2 break-words text-xs font-medium text-highlighted">{{ w.name }}</span>
+              <UDropdownMenu v-if="!w.crewRide" :items="moveMenuItems(w, day.date)">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  icon="i-lucide-ellipsis-vertical"
+                  :aria-label="`Move ${w.name}`"
+                  :ui="{ base: 'p-0.5' }"
+                  @click.stop
+                />
+              </UDropdownMenu>
+            </div>
+            <span class="tabular-nums text-[length:var(--text-label)] text-muted">
+              {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template>
+            </span>
+            <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
+            <IndoorBadge v-if="w.indoor" :description="w.description" compact />
+            <CrewRideBadge v-if="w.crewRide" :crew-ride="w.crewRide" compact />
+            <UIcon v-if="w.route && !w.route.inactive" name="i-lucide-route" class="size-3 text-primary" :aria-label="`Route: ${w.route.name}`" />
+            <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
+              {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
+            </UBadge>
+            <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
+            <UIcon v-if="adjustmentNote(w.description)" name="i-lucide-wand-sparkles" class="size-3 text-info" :aria-label="adjustmentNote(w.description)" />
           </div>
-          <span class="tabular-nums text-[length:var(--text-label)] text-muted">{{ formatDuration(w.plannedSeconds) }}</span>
-          <ZoneLevelBadge v-if="w.zone && (w.level ?? 0) > 0" :zone="w.zone" :level="w.level!" compact />
-          <IndoorBadge v-if="w.indoor" :description="w.description" compact />
-          <CrewRideBadge v-if="w.crewRide" :crew-ride="w.crewRide" compact />
-          <UIcon v-if="w.route && !w.route.inactive" name="i-lucide-route" class="size-3 text-primary" :aria-label="`Route: ${w.route.name}`" />
-          <UBadge v-if="w.testProtocol" color="primary" variant="subtle" size="sm" icon="i-lucide-gauge" class="self-start">
-            {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
-          </UBadge>
-          <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
-          <UTooltip v-if="adjustmentNote(w.description)" :text="adjustmentNote(w.description)">
-            <UIcon name="i-lucide-wand-sparkles" class="size-3 text-info" />
-          </UTooltip>
-        </div>
+          <!-- Hover shows the whole session; a tap selects it into the day card above, which is the full detail. -->
+          <template #content>
+            <div class="flex max-w-64 flex-col gap-1 p-1 text-xs">
+              <span class="font-medium text-highlighted">{{ w.name }}</span>
+              <span class="tabular-nums text-muted">
+                {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template><template v-if="w.zone"> · {{ zoneLabel(w.zone) }}</template>
+              </span>
+              <span v-if="adjustmentNote(w.description)" class="text-muted">{{ adjustmentNote(w.description) }}</span>
+            </div>
+          </template>
+        </UTooltip>
 
         <div v-for="c in day.completed" :key="c.id" class="flex items-center gap-1 text-[length:var(--text-label)] text-muted">
           <UIcon name="i-lucide-activity" class="size-3" />
@@ -403,7 +409,7 @@ watch(
       </div>
     </div>
 
-    <div v-if="canFillWeek" class="mt-4 flex items-center gap-3">
+    <div v-if="gaps" class="mt-4 flex items-center gap-3">
       <UButton color="primary" variant="soft" icon="i-lucide-calendar-plus" :loading="filling" @click="emit('fill')">
         Fill this week
       </UButton>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The Plan page's header: which goal this week's training is for, and the
 // two ways to add to the plan (a goal, or a one-off workout). Renders
-// nothing when there is no focus and no goal at all — TrainingPlanPage.vue's
+// nothing when there is no focus and no goal at all — PlanPage.vue's
 // empty state (Task 5) takes over in that case, so this component doesn't
 // need its own "no goals yet" copy.
 import { computed } from 'vue'
@@ -32,7 +32,7 @@ function capitalize(phase: PeriodizationPhase): string {
 // The server only computes weekNumber/totalWeeks for the goal whose own
 // periodized plan actually has a week starting on the browsed date — see
 // internal/api/trainingweek.go's weekFocus. A focus without it is one
-// TrainingPlanPage.vue built locally (the goal picker's override, or its
+// PlanPage.vue built locally (the goal picker's override, or its
 // pickFallbackGoal fallback when the browsed week has no real focus at
 // all), so it gets its own, plainer meta line and no "Explain" button —
 // there's no periodized plan for *this* week to ask narration about.

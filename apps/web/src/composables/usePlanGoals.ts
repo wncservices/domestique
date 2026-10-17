@@ -1,4 +1,4 @@
-// Goal state and handlers for TrainingPlanPage.vue, split out (Task 6's file
+// Goal state and handlers for PlanPage.vue, split out (Task 6's file
 // size rule) once the goal/workout slide-overs replaced the page's own
 // UModals and the page was still over 450 lines. Everything here used to
 // live directly in the page's <script setup> with identical names; it is

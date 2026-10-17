@@ -32,6 +32,8 @@ import type {
   Why,
   Workout,
 } from '@/api/types'
+import AppPage from '@/components/ui/AppPage.vue'
+import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import FtpTestBanner from '@/components/plan/FtpTestBanner.vue'
 import FtpTestModal from '@/components/plan/FtpTestModal.vue'
 import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
@@ -839,6 +841,16 @@ async function confirmReplan() {
   }
 }
 
+// Goals and the library are set-up, not the daily view: collapsed once a goal
+// exists, open for a rider who has none yet. Decided once, when the goals first
+// finish loading, so opening or closing it by hand is never overridden.
+const goalsOpen = ref(true)
+const stopGoalsWatch = watch(loadingGoals, (loading) => {
+  if (loading) return
+  goalsOpen.value = goals.value.length === 0
+  stopGoalsWatch()
+})
+
 const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && profile.value.availableDays?.length))
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
@@ -896,7 +908,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <AppPage title="Plan">
     <PlanEmptyState
       v-if="!loadingGoals && goals.length === 0"
       :narration-enabled="!!me?.narrationEnabled"
@@ -1031,23 +1043,24 @@ onMounted(() => {
       />
     </template>
 
-    <GoalsSection
-      v-if="goals.length || workouts.length"
-      :goals="goals"
-      :workouts="workouts"
-      :focus-goal-id="effectiveFocus?.goalId"
-      :can-sync-garmin="canSyncGarmin"
-      :deleting-goal="deletingGoal"
-      :deleting-workout="deletingWorkout"
-      :pushing-workout="pushingWorkout"
-      @edit-goal="openEditGoal"
-      @delete-goal="deleteGoal"
-      @focus-goal="selectGoal"
-      @edit-workout="openEditWorkout"
-      @delete-workout="deleteWorkout"
-      @push-workout="pushWorkoutToGarmin"
-      @new-workout="openCreateWorkout"
-    />
+    <DetailsToggle v-if="goals.length || workouts.length" v-model:open="goalsOpen" label="Goals and workouts">
+      <GoalsSection
+        :goals="goals"
+        :workouts="workouts"
+        :focus-goal-id="effectiveFocus?.goalId"
+        :can-sync-garmin="canSyncGarmin"
+        :deleting-goal="deletingGoal"
+        :deleting-workout="deletingWorkout"
+        :pushing-workout="pushingWorkout"
+        @edit-goal="openEditGoal"
+        @delete-goal="deleteGoal"
+        @focus-goal="selectGoal"
+        @edit-workout="openEditWorkout"
+        @delete-workout="deleteWorkout"
+        @push-workout="pushWorkoutToGarmin"
+        @new-workout="openCreateWorkout"
+      />
+    </DetailsToggle>
 
     <GoalSlideover
       v-model:open="goalModalOpen"
@@ -1132,5 +1145,5 @@ onMounted(() => {
         </div>
       </template>
     </UModal>
-  </div>
+  </AppPage>
 </template>

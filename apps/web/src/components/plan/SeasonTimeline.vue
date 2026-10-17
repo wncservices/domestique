@@ -108,6 +108,15 @@ function weekIndexForDate(date?: string): number {
 const todayIndex = computed(() => weekIndexForDate(props.today))
 const eventIndex = computed(() => weekIndexForDate(props.eventDate))
 
+// The marker is a line and a triangle in the SVG, but a position drawn only in
+// colour or shape says nothing to a screen reader or a glance, so the same fact
+// is written out under the chart.
+const here = computed(() => {
+  const w = weeks.value[todayIndex.value]
+  if (!w) return null
+  return `You are here: week ${w.number} of ${totalWeeks.value}, ${phaseLabel(w.phase, w.recovery)}`
+})
+
 const TONE_FILL: Record<ReturnType<typeof eventTone>, string> = {
   success: 'var(--ui-success)',
   warning: 'var(--ui-warning)',
@@ -169,12 +178,12 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
   <UCard variant="outline">
     <template #header>
       <div class="flex items-center justify-between gap-3">
-        <h2 class="text-lg font-semibold text-highlighted">Season</h2>
-        <span class="text-sm text-muted tabular-nums">{{ totalWeeks }} weeks</span>
+        <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted">Season</h2>
+        <span class="text-[length:var(--text-label)] text-muted tabular-nums">{{ totalWeeks }} weeks</span>
       </div>
     </template>
 
-    <p v-if="showAdjustment" class="text-xs text-muted mb-2">
+    <p v-if="showAdjustment" class="mb-2 text-[length:var(--text-label)] text-muted tabular-nums">
       Upcoming weeks adjusted to {{ adjustmentPct }}% based on recent training.
     </p>
 
@@ -196,8 +205,14 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
         stroke-width="1"
         stroke-dasharray="2,2"
       >
-        <title>This week</title>
+        <title>You are here</title>
       </line>
+      <polygon
+        v-if="todayIndex >= 0"
+        :points="`${colX(todayIndex) + colWidth / 2 - 4},0 ${colX(todayIndex) + colWidth / 2 + 4},0 ${colX(todayIndex) + colWidth / 2},6`"
+        fill="currentColor"
+        class="text-highlighted"
+      />
 
       <rect
         v-for="b in eventBars"
@@ -272,7 +287,12 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       </g>
     </svg>
 
-    <div class="mt-2 flex flex-wrap gap-3 text-xs text-muted">
+    <p v-if="here" class="mt-2 flex items-center gap-1.5 text-[length:var(--text-body)] font-medium text-highlighted">
+      <UIcon name="i-lucide-map-pin" aria-hidden="true" class="size-4 text-primary" />
+      <span class="tabular-nums">{{ here }}</span>
+    </p>
+
+    <div class="mt-2 flex flex-wrap gap-3 text-[length:var(--text-label)] text-muted">
       <span v-for="b in eventBars" :key="`legend-${b.key}`" class="flex items-center gap-1.5">
         <span class="h-1 w-3 rounded-full" :style="{ background: b.fill }" aria-hidden="true" />
         {{ b.label }}

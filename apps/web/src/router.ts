@@ -23,7 +23,7 @@ export type PageLoader = (page: string) => () => Promise<unknown>
 export function buildRoutes(load: PageLoader): RouteRecordRaw[] {
   return [
     { path: '/today', component: load('TodayPage') },
-    { path: '/plan', component: load('TrainingPlanPage') },
+    { path: '/plan', component: load('PlanPage') },
     { path: '/fitness', component: load('TrainingFitnessPage') },
     { path: '/routes', component: load('LibraryPage') },
     { path: '/routes/new', component: load('AddPage') },
