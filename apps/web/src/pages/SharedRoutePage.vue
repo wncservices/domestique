@@ -124,7 +124,7 @@ async function importToLibrary() {
 
 <template>
   <div class="flex flex-col gap-5">
-    <RouterLink to="/today" class="flex min-w-0 items-center gap-3">
+    <RouterLink to="/" class="flex min-w-0 items-center gap-3">
       <span
         class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
         aria-hidden="true"
@@ -132,9 +132,9 @@ async function importToLibrary() {
         <UIcon name="i-lucide-bike" class="size-5" />
       </span>
       <div class="min-w-0">
-        <h1 class="font-display truncate text-base font-semibold tracking-tight text-highlighted">
+        <span class="font-display block truncate text-base font-semibold tracking-tight text-highlighted">
           Domestique
-        </h1>
+        </span>
         <p class="truncate text-[length:var(--text-label)] text-muted">A route shared with you.</p>
       </div>
     </RouterLink>
@@ -185,7 +185,7 @@ async function importToLibrary() {
       </div>
 
       <div class="flex flex-wrap items-start justify-between gap-2">
-        <h2 class="min-w-0 font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ sharedRoute.name }}</h2>
+        <h1 class="min-w-0 font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ sharedRoute.name }}</h1>
         <UBadge
           :color="sharedRoute.sport === 'running' ? 'neutral' : 'primary'"
           variant="subtle"
