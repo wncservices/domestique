@@ -21,20 +21,11 @@ function moved(to: RouteLocationGeneric) {
 export type PageLoader = (page: string) => () => Promise<unknown>
 
 export function buildRoutes(load: PageLoader): RouteRecordRaw[] {
-  // Plan and Fitness each get TrainingPage as their own layout (for its
-  // pills) rather than sharing one pathless parent: a parent with
-  // path '' normalises to '/' and shadows the '/' redirect below.
-  // Task 5 removes the pills and this wrapper.
-  const training = (path: string, page: string): RouteRecordRaw => ({
-    path,
-    component: load('TrainingPage'),
-    children: [{ path: '', component: load(page) }],
-  })
   return [
     // Task 7 replaces this with the real Today page; until then it is the plan.
     { path: '/today', component: load('TrainingPlanPage') },
-    training('/plan', 'TrainingPlanPage'),
-    training('/fitness', 'TrainingFitnessPage'),
+    { path: '/plan', component: load('TrainingPlanPage') },
+    { path: '/fitness', component: load('TrainingFitnessPage') },
     { path: '/routes', component: load('LibraryPage') },
     { path: '/routes/new', component: load('AddPage') },
     { path: '/routes/build', component: load('BuildRoutePage') },
