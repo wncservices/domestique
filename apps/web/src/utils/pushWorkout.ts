@@ -13,7 +13,7 @@ export async function pushWorkoutToGarmin(toast: ReturnType<typeof useToast>, w:
     if (res.course === 'failed') {
       toast.add({
         title: `${w.name} was sent, but its route was not`,
-        description: 'The route could not be sent to your devices. Try "Send to devices" on the day card.',
+        description: 'The route could not be sent to your devices. Try sending the route again from the Plan page.',
         icon: 'i-lucide-triangle-alert',
         color: 'warning',
       })
