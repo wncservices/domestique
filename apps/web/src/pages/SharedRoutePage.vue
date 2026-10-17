@@ -134,7 +134,7 @@ async function importToLibrary() {
         <h1 class="font-display truncate text-base font-semibold tracking-tight text-highlighted">
           Domestique
         </h1>
-        <p class="truncate text-xs text-muted">A route shared with you.</p>
+        <p class="truncate text-[length:var(--text-label)] text-muted">A route shared with you.</p>
       </div>
     </RouterLink>
 
@@ -145,7 +145,7 @@ async function importToLibrary() {
       class="app-card flex flex-col items-center gap-3 px-6 py-12 text-center"
     >
       <UIcon name="i-lucide-link" class="size-8 text-dimmed" />
-      <p class="max-w-xs text-sm text-toned">
+      <p class="max-w-xs text-[length:var(--text-body)] text-toned">
         Whoever sent you this link wants to share one route with you. Sign in to see it.
       </p>
       <UButton :to="signInHref" external icon="i-lucide-log-in" color="primary">Sign in</UButton>
@@ -178,36 +178,37 @@ async function importToLibrary() {
       :description="errorMessage"
     />
 
-    <div v-else-if="sharedRoute" class="flex flex-col gap-4">
-      <div>
-        <h2 class="font-display text-xl font-semibold text-highlighted">{{ sharedRoute.name }}</h2>
-        <p class="text-xs text-dimmed">Shared with you — you can view it, add it to your own library, or download it. Nothing else in this library is visible to you.</p>
-      </div>
-
-      <div class="h-64 overflow-hidden rounded-lg bg-elevated/50 sm:h-80">
+    <UCard v-else-if="sharedRoute" variant="outline" :ui="{ body: 'flex flex-col gap-4' }">
+      <div class="h-72 overflow-hidden rounded-lg bg-elevated/50 sm:h-96">
         <RouteMap :routes="mapRoutes" />
       </div>
 
-      <dl class="flex flex-wrap gap-5">
+      <div class="flex flex-wrap items-start justify-between gap-2">
+        <h2 class="min-w-0 font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ sharedRoute.name }}</h2>
+        <UBadge
+          :color="sharedRoute.sport === 'running' ? 'neutral' : 'primary'"
+          variant="subtle"
+          size="sm"
+          :icon="sharedRoute.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
+        >
+          {{ sharedRoute.sport }}
+        </UBadge>
+      </div>
+
+      <dl class="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
         <div>
           <dt class="text-[length:var(--text-label)] text-muted">Distance</dt>
-          <dd class="tabular-nums">{{ distance }}</dd>
+          <dd class="font-display text-[length:var(--text-lead)] text-highlighted">{{ distance }}</dd>
         </div>
         <div>
           <dt class="text-[length:var(--text-label)] text-muted">Ascent</dt>
-          <dd class="tabular-nums">{{ ascent }}</dd>
+          <dd class="font-display text-[length:var(--text-lead)] text-highlighted">{{ ascent }}</dd>
         </div>
       </dl>
 
-      <UBadge
-        :color="sharedRoute.sport === 'running' ? 'neutral' : 'primary'"
-        variant="subtle"
-        size="sm"
-        class="w-fit"
-        :icon="sharedRoute.sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'"
-      >
-        {{ sharedRoute.sport }}
-      </UBadge>
+      <p class="text-[length:var(--text-label)] text-muted">
+        Shared with you. You can view it, add it to your own library, or download it. Nothing else in this library is visible to you.
+      </p>
 
       <div class="flex flex-wrap items-center gap-2">
         <UButton
@@ -227,10 +228,10 @@ async function importToLibrary() {
              route to vue-router, which intercepts the click before
              `download` gets a chance to fire — same reasoning as every
              other GPX download button in this app. -->
-        <UButton :href="gpxUrl" external download icon="i-lucide-download" color="neutral" variant="ghost">
+        <UButton :href="gpxUrl" external download icon="i-lucide-download" color="neutral" variant="outline">
           Download GPX
         </UButton>
       </div>
-    </div>
+    </UCard>
   </div>
 </template>
