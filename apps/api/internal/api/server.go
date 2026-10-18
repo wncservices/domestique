@@ -3768,7 +3768,11 @@ func (s *Server) spaHandler() http.Handler {
 		if !landing && s.LandingHost != "" && s.authenticator().Mode() == auth.ModeOIDC &&
 			(missing || clean == "index.html") && !s.isPreviewHost(r) {
 			if auth.FromContext(r.Context()).Anonymous() {
-				http.Redirect(w, r, s.landingURLFor(r), http.StatusFound)
+				// G710 sees the request path reach a redirect, but it cannot open
+				// one: the host is always the configured LandingHost, and the path
+				// rides only as a query-escaped return_to that safeReturnTo has
+				// already confined to a path on this site (landingURLFor).
+				http.Redirect(w, r, s.landingURLFor(r), http.StatusFound) //nolint:gosec // G710: fixed host, path checked and escaped; see above
 				return
 			}
 		}
