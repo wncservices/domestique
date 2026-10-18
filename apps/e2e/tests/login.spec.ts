@@ -90,15 +90,24 @@ test('a wrong password is rejected, not silently accepted', async ({ page }) => 
   expect(redirectedToApp, 'a wrong password must not complete the OIDC login redirect').toBe(false)
 })
 
-// mode: oidc is the one mode where the SPA loads while signed out
-// (AvatarMenu.vue): a visitor must get a Sign in button that brings them
-// back to where they were, and no data.
-test('a signed-out visitor is offered sign-in, and nothing else', async ({ page }) => {
+// Signed out, an app page is not reachable: the visitor is sent to the landing
+// page (domestique.dev) with the page they asked for as return_to, and its Sign
+// in carries that on to /sso/login so they come back to it. The link is relative
+// when the app shell itself renders it (the preview host) and absolute on the
+// landing page, so the test reads it as a URL rather than as a fixed string.
+test('a signed-out visitor is offered sign-in, and nothing else', async ({ page, baseURL }) => {
   const assertNoBreakage = watchForBreakage(page)
   await page.goto('/routes')
   const signInLink = page.getByRole('link', { name: 'Sign in' }).first()
   await expect(signInLink).toBeVisible()
-  await expect(signInLink).toHaveAttribute('href', '/sso/login?return_to=%2Froutes')
+
+  const href = await signInLink.getAttribute('href')
+  const target = new URL(href ?? '', page.url())
+  const allowedHosts = new Set([new URL(baseURL ?? page.url()).host, 'app.domestique.dev'])
+  expect(allowedHosts.has(target.host), `Sign in goes to ${target.host}`).toBe(true)
+  expect(target.pathname).toBe('/sso/login')
+  expect(target.searchParams.get('return_to')).toBe('/routes')
+
   await expect(page.getByRole('heading', { level: 2, name: /^\d+ routes?$/ })).toHaveCount(0)
   assertNoBreakage()
 })
