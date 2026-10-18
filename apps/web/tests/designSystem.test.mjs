@@ -132,3 +132,22 @@ test('design: the page-spinner scanner catches a spinner and ignores a loading p
   assert.equal(hitsIn('<UButton :loading="saving">Save</UButton>', PAGE_SPINNER).length, 0)
   assert.equal(hitsIn('<!-- <UIcon name="i-lucide-loader" /> -->', PAGE_SPINNER).length, 0)
 })
+
+// Font sizes come from the type tokens (`text-[length:var(--text-body)]`).
+// Exact names with a boundary that also excludes `-`, so `text-left`,
+// `text-muted` and `text-sm-ish` pass while `sm:text-sm` does not.
+const RAW_TEXT_SIZE = /(?<![\w-])text-(?:xs|sm|base|lg|xl|2xl|3xl|4xl|5xl|6xl)(?![\w-])/
+
+test('design: no raw Tailwind font-size classes', () => {
+  assert.deepEqual(offenders(RAW_TEXT_SIZE, (f) => !f.rel.endsWith('.vue')), [])
+})
+
+test('design: the font-size scanner catches raw sizes and variants but not tokens or look-alikes', () => {
+  assert.equal(hitsIn('<p class="text-sm text-muted">', RAW_TEXT_SIZE).length, 1)
+  assert.equal(hitsIn('<p class="sm:text-sm">', RAW_TEXT_SIZE).length, 1)
+  assert.equal(hitsIn('<p class="md:hover:text-2xl">', RAW_TEXT_SIZE).length, 1)
+  assert.equal(hitsIn('<p class="text-[length:var(--text-body)]">', RAW_TEXT_SIZE).length, 0)
+  assert.equal(hitsIn('<p class="sm:text-[length:var(--text-display)]">', RAW_TEXT_SIZE).length, 0)
+  assert.equal(hitsIn('<p class="text-muted text-highlighted text-left text-center text-sm-ish text-xs-wide">', RAW_TEXT_SIZE).length, 0)
+  assert.equal(hitsIn('<!-- text-sm -->', RAW_TEXT_SIZE).length, 0)
+})
