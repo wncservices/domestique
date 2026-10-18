@@ -8,6 +8,7 @@ import { roleColor } from '@/utils/role'
 import { usePagedList } from '@/composables/usePagedList'
 import { describeError } from '@/utils/errorMessage'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 
 const toast = useToast()
@@ -698,8 +699,10 @@ function personActions(person: Person): DropdownMenuItem[][] {
         />
       </template>
 
+      <SkeletonCard v-else-if="loading" :lines="3" label="Loading people…" />
+
       <EmptyState
-        v-else-if="!loading"
+        v-else-if="!error"
         bare
         :heading-level="3"
         icon="i-lucide-user-x"

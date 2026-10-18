@@ -24,15 +24,22 @@ export function usePlanGoals(deps: {
 
   const goals = ref<Goal[]>([])
   const loadingGoals = ref(false)
+  // A failed read is not an empty plan: the page needs to tell them apart, and
+  // to know the first read has settled (loadingGoals is false before it starts).
+  const goalsError = ref('')
+  const goalsSettled = ref(false)
 
   async function loadGoals() {
     loadingGoals.value = true
+    goalsError.value = ''
     try {
       goals.value = await api.goals()
     } catch (err) {
-      toast.add({ title: 'Could not load goals', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+      goalsError.value = errorMessage(err)
+      toast.add({ title: 'Could not load goals', description: goalsError.value, icon: 'i-lucide-triangle-alert', color: 'error' })
     } finally {
       loadingGoals.value = false
+      goalsSettled.value = true
     }
   }
 
@@ -265,6 +272,8 @@ export function usePlanGoals(deps: {
     goals,
     loadingGoals,
     loadGoals,
+    goalsError,
+    goalsSettled,
     goalModalOpen,
     editingGoalId,
     goalForm,

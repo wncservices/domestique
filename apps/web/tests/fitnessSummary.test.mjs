@@ -49,3 +49,14 @@ test('summaryTiles words the form tile and rounds fitness', () => {
   assert.equal(tiles[1].value, '46')
   assert.equal(tiles[1].caption, '+6 in 7 days')
 })
+
+import { statusCardState } from '../src/utils/fitnessSummary.ts'
+
+test('statusCardState: a failed read is never empty', () => {
+  assert.equal(statusCardState({ hasHistory: false, loading: false, failed: true }), 'failed')
+  assert.equal(statusCardState({ hasHistory: false, loading: false, failed: false }), 'empty')
+  assert.equal(statusCardState({ hasHistory: false, loading: true, failed: false }), 'loading')
+})
+test('statusCardState: history in hand stays ready', () => {
+  assert.equal(statusCardState({ hasHistory: true, loading: true, failed: true }), 'ready')
+})
