@@ -148,7 +148,7 @@ const ariaLabel = computed(() => {
 
 <template>
   <div class="w-full">
-    <p v-if="!hasData" class="text-sm text-muted py-8 text-center">
+    <p v-if="!hasData" class="text-[length:var(--text-body)] text-muted py-8 text-center">
       Your curve appears once rides with a power meter have synced.
     </p>
 
@@ -246,7 +246,7 @@ const ariaLabel = computed(() => {
 
       <div
         v-if="activeSeconds !== null"
-        class="absolute top-2 bg-elevated border border-default rounded-md text-xs px-2 py-1 pointer-events-none"
+        class="absolute top-2 bg-elevated border border-default rounded-md text-[length:var(--text-label)] px-2 py-1 pointer-events-none"
         :style="readoutOnRight ? { left: `${activeX + 8}px` } : { right: `${WIDTH - activeX + 8}px` }"
       >
         <p class="font-medium">{{ windowLabel(activeSeconds) }}</p>
@@ -256,7 +256,7 @@ const ariaLabel = computed(() => {
         </p>
       </div>
 
-      <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted mt-3">
+      <div class="flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--text-label)] text-muted mt-3">
         <span v-for="l in [...LINES].reverse()" :key="l.key" class="flex items-center gap-1.5">
           <span
             class="w-4 border-t-2"

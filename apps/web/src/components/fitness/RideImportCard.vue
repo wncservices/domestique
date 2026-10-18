@@ -179,12 +179,12 @@ onBeforeUnmount(stopPolling)
       <h3 class="text-[length:var(--text-lead)] font-semibold">Import ride history</h3>
     </template>
 
-    <p class="text-sm text-muted">
+    <p class="text-[length:var(--text-body)] text-muted">
       Bring in rides from before you connected. <span class="text-highlighted">Strava:</span> download your account
       archive and upload the zip as it is. <span class="text-highlighted">Garmin:</span> request an export of your
       data from your account's data management page and upload that zip. Loose .fit and .fit.gz files work too.
     </p>
-    <p class="mt-2 text-sm text-muted">
+    <p class="mt-2 text-[length:var(--text-body)] text-muted">
       Only FIT files are read; GPX and TCX are counted but skipped. Your files are read, not kept.
     </p>
 
@@ -208,19 +208,19 @@ onBeforeUnmount(stopPolling)
       >
         Choose files
       </UButton>
-      <span v-if="coolingDown && !running" class="text-sm text-muted">You can import again at {{ cooldownTime }}.</span>
+      <span v-if="coolingDown && !running" class="text-[length:var(--text-body)] text-muted">You can import again at {{ cooldownTime }}.</span>
     </div>
 
     <div v-if="uploading" class="mt-4">
       <UProgress :model-value="Math.round(progress * 100)" :max="100" size="sm" />
-      <p class="mt-1 text-sm text-muted" role="status">
+      <p class="mt-1 text-[length:var(--text-body)] text-muted" role="status">
         {{ progress >= 1 ? 'Upload received, starting...' : `Uploading... ${Math.round(progress * 100)}%` }}
       </p>
     </div>
 
     <div v-else-if="running" class="mt-4">
       <UProgress size="sm" />
-      <p class="mt-1 text-sm text-muted" role="status">{{ phaseLine }}</p>
+      <p class="mt-1 text-[length:var(--text-body)] text-muted" role="status">{{ phaseLine }}</p>
     </div>
 
     <UAlert
@@ -248,7 +248,7 @@ onBeforeUnmount(stopPolling)
         <UIcon name="i-lucide-circle-check" class="mt-0.5 size-5 shrink-0 text-success" />
         <span>{{ resultLine }}</span>
       </p>
-      <p v-if="historyLine" class="mt-1 text-sm text-muted">{{ historyLine }}</p>
+      <p v-if="historyLine" class="mt-1 text-[length:var(--text-body)] text-muted">{{ historyLine }}</p>
     </div>
   </UCard>
 </template>

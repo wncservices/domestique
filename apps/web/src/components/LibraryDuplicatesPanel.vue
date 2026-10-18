@@ -120,7 +120,7 @@ async function deleteSelected() {
             <UIcon name="i-lucide-copy-x" />
             Duplicate routes
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="loading">Checking…</template>
             <template v-else>
               {{ groups.length }} route{{ groups.length === 1 ? '' : 's' }} imported more than once
@@ -155,7 +155,7 @@ async function deleteSelected() {
 
     <div class="flex flex-col gap-4">
       <div v-for="group in groups" :key="group.name" class="rounded-lg border border-default p-3">
-        <p class="mb-2 text-sm font-medium text-highlighted">{{ group.name }}</p>
+        <p class="mb-2 text-[length:var(--text-body)] font-medium text-highlighted">{{ group.name }}</p>
         <div class="flex flex-col divide-y divide-default">
           <label
             v-for="route in group.routes"
@@ -166,11 +166,11 @@ async function deleteSelected() {
               :model-value="toDelete.has(route.slug)"
               @update:model-value="(v: boolean | 'indeterminate') => toggle(route.slug, v === true)"
             />
-            <span class="flex-1 text-sm text-muted">
+            <span class="flex-1 text-[length:var(--text-body)] text-muted">
               {{ (route.distanceM / 1000).toFixed(1) }} km
               · {{ Math.round(route.ascentM) }} m
               · {{ pushSummary(route) }}
-              <span class="tabular-nums text-xs text-dimmed">· {{ route.slug }}</span>
+              <span class="tabular-nums text-[length:var(--text-label)] text-dimmed">· {{ route.slug }}</span>
             </span>
             <UBadge v-if="!toDelete.has(route.slug)" color="success" variant="subtle" size="sm">keep</UBadge>
           </label>
@@ -180,7 +180,7 @@ async function deleteSelected() {
 
     <UModal v-model:open="confirmingDelete" title="Delete these routes?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           {{ selectedCount }} route{{ selectedCount === 1 ? '' : 's' }} will be removed from the
           library. This cannot be undone.
         </p>

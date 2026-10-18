@@ -57,7 +57,7 @@ function schedule() {
           :recommended="recommended"
           :has-ftp="hasFtp"
         />
-        <p class="text-xs text-muted">
+        <p class="text-[length:var(--text-label)] text-muted">
           Whatever the plan has on that day makes way for the test. A session you built yourself stays.
         </p>
       </div>

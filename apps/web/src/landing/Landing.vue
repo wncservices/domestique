@@ -133,7 +133,7 @@ const sections = [
           >
             <UIcon name="i-lucide-bike" class="size-5" />
           </span>
-          <strong class="font-display text-base font-semibold tracking-tight text-highlighted">
+          <strong class="font-display text-[length:var(--text-lead)] font-semibold tracking-tight text-highlighted">
             Domestique
           </strong>
         </div>

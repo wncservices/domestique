@@ -898,10 +898,10 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
             <h3 :id="`crew-name-${crew.id}`" class="min-w-0 truncate font-medium text-highlighted">{{ crew.name }}</h3>
             <UIcon name="i-lucide-chevron-right" class="mt-0.5 size-4 shrink-0 text-dimmed" />
           </div>
-          <p v-if="nextRideFor(crew.id)" class="mt-1 truncate text-sm text-muted">
+          <p v-if="nextRideFor(crew.id)" class="mt-1 truncate text-[length:var(--text-body)] text-muted">
             Next ride: {{ nextRideFor(crew.id)!.routeName }} · {{ formatRideWhen(nextRideFor(crew.id)!) }}
           </p>
-          <p v-else class="mt-1 truncate text-sm text-muted">No rides scheduled yet</p>
+          <p v-else class="mt-1 truncate text-[length:var(--text-body)] text-muted">No rides scheduled yet</p>
 
           <div :id="`crew-meta-${crew.id}`" class="mt-3 flex flex-wrap gap-1.5">
             <UBadge color="neutral" variant="subtle" size="sm" class="tabular-nums">
@@ -958,7 +958,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
           <UFormField label="Name">
             <UInput v-model="createName" placeholder="Sunday club" class="w-full" />
           </UFormField>
-          <p class="text-xs text-dimmed">
+          <p class="text-[length:var(--text-label)] text-dimmed">
             You'll be its owner and first member — you can approve who else joins from here.
           </p>
           <div class="flex justify-end gap-2 pt-2">
@@ -991,8 +991,8 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
               class="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0"
             >
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm text-highlighted">{{ crew.name }}</p>
-                <p class="truncate tabular-nums text-xs text-dimmed">{{ crew.id }} · owner{{ crew.owners.length === 1 ? '' : 's' }} {{ crew.owners.join(', ') }}</p>
+                <p class="truncate text-[length:var(--text-body)] text-highlighted">{{ crew.name }}</p>
+                <p class="truncate tabular-nums text-[length:var(--text-label)] text-dimmed">{{ crew.id }} · owner{{ crew.owners.length === 1 ? '' : 's' }} {{ crew.owners.join(', ') }}</p>
               </div>
               <UBadge color="neutral" variant="subtle" size="sm">
                 {{ crew.memberCount }} member{{ crew.memberCount === 1 ? '' : 's' }}
@@ -1008,7 +1008,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                 Request to join
               </UButton>
               <template v-else-if="crew.membershipStatus === 'pending' && crew.membershipOrigin === 'invite'">
-                <span class="text-xs text-dimmed">{{ crew.owners.join(', ') }} invited you</span>
+                <span class="text-[length:var(--text-label)] text-dimmed">{{ crew.owners.join(', ') }} invited you</span>
                 <UButton
                   size="sm"
                   color="success"
@@ -1035,7 +1035,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
               </UBadge>
             </div>
           </div>
-          <p v-else class="text-sm text-dimmed">
+          <p v-else class="text-[length:var(--text-body)] text-dimmed">
             {{ searchQuery ? `No crew matches "${searchQuery}".` : "You're already in every crew that exists." }}
           </p>
         </div>
@@ -1065,7 +1065,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
 
     <UModal :open="!!deleteTarget" title="Delete this crew?" @update:open="deleteTarget = null">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           “{{ deleteTarget?.name }}” will be removed, along with its membership. Routes shared to
           it will stop reaching its members on the next push — nothing about the routes
           themselves changes.
@@ -1089,7 +1089,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
       <template #body>
         <div class="flex flex-col gap-3">
           <div class="flex items-center justify-between gap-3">
-            <p class="text-sm text-toned">
+            <p class="text-[length:var(--text-body)] text-toned">
               Which of your own routes should reach {{ shareTarget?.name }}?
             </p>
             <UButton
@@ -1108,10 +1108,10 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
             :items="shareOptions"
             class="max-h-72 overflow-y-auto"
           />
-          <p v-else class="text-xs text-dimmed">
+          <p v-else class="text-[length:var(--text-label)] text-dimmed">
             You don't have any routes of your own to share yet.
           </p>
-          <p v-if="claimableOrphanCount" class="text-xs text-dimmed">
+          <p v-if="claimableOrphanCount" class="text-[length:var(--text-label)] text-dimmed">
             {{ claimableOrphanCount }} route{{ claimableOrphanCount === 1 ? '' : 's' }} with no owner
             {{ claimableOrphanCount === 1 ? "isn't" : "aren't" }} listed here — claim
             {{ claimableOrphanCount === 1 ? 'it' : 'them' }} from the Library page first.
@@ -1145,7 +1145,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
         <div v-if="detailCrew" class="flex flex-col gap-4">
           <!-- Scheduled rides -->
           <section class="app-card flex flex-col gap-3 p-4">
-            <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+            <h3 class="flex items-center gap-2 text-[length:var(--text-body)] font-semibold text-highlighted">
               <UIcon name="i-lucide-calendar-days" class="size-4 text-primary" />
               Scheduled rides
             </h3>
@@ -1161,10 +1161,10 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                   <span class="text-[length:var(--text-label)] font-medium text-muted">
                     {{ rideMonth(ride.date) }}
                   </span>
-                  <span class="text-base font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>
+                  <span class="text-[length:var(--text-lead)] font-semibold text-highlighted">{{ rideDay(ride.date) }}</span>
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="flex items-center gap-1 truncate text-sm font-medium text-highlighted">
+                  <p class="flex items-center gap-1 truncate text-[length:var(--text-body)] font-medium text-highlighted">
                     <button
                       v-if="routeFor(ride.slug)"
                       type="button"
@@ -1179,7 +1179,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                       <UIcon name="i-lucide-repeat" class="size-3 shrink-0 text-dimmed" />
                     </UTooltip>
                   </p>
-                  <p class="truncate text-xs text-dimmed">
+                  <p class="truncate text-[length:var(--text-label)] text-dimmed">
                     <template v-if="ride.time">{{ ride.time }} · </template>Scheduled by {{ ride.createdBy }}
                   </p>
                   <CrewRideGoing
@@ -1217,7 +1217,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
             </div>
             <div v-else class="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-default py-6">
               <UIcon name="i-lucide-calendar-x" class="size-5 text-dimmed" />
-              <p class="text-xs text-dimmed">No rides scheduled yet.</p>
+              <p class="text-[length:var(--text-label)] text-dimmed">No rides scheduled yet.</p>
             </div>
 
             <form
@@ -1225,7 +1225,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
               class="flex flex-col gap-2 rounded-lg bg-elevated/60 p-3"
               @submit.prevent="scheduleRide"
             >
-              <p class="text-xs font-medium text-dimmed">Schedule a ride</p>
+              <p class="text-[length:var(--text-label)] font-medium text-dimmed">Schedule a ride</p>
               <UFormField label="Route">
                 <USelectMenu
                   v-model="scheduleSlug"
@@ -1244,8 +1244,8 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
               <div v-if="scheduleSelectedRoute" class="flex gap-3 rounded-lg bg-elevated p-2">
                 <TrackPreview :slug="scheduleSelectedRoute.slug" class="w-28 shrink-0" />
                 <div class="flex min-w-0 flex-1 flex-col justify-center gap-1">
-                  <p class="truncate text-sm font-medium text-highlighted">{{ scheduleSelectedRoute.name }}</p>
-                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-dimmed">
+                  <p class="truncate text-[length:var(--text-body)] font-medium text-highlighted">{{ scheduleSelectedRoute.name }}</p>
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[length:var(--text-label)] text-dimmed">
                     <span class="flex items-center gap-1">
                       <UIcon name="i-lucide-ruler" class="size-3.5" />
                       {{ (scheduleSelectedRoute.distanceM / 1000).toFixed(1) }} km
@@ -1329,7 +1329,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                    (Search, Share your routes) rather than soft, which
                    nothing else here uses for a toggle-like control. -->
               <div class="flex flex-wrap items-center gap-1.5">
-                <span class="text-xs text-dimmed">Quick pick:</span>
+                <span class="text-[length:var(--text-label)] text-dimmed">Quick pick:</span>
                 <UButton
                   v-for="preset in timePresets"
                   :key="preset.value"
@@ -1346,7 +1346,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                    fields competing for attention on every single schedule
                    otherwise, when most rides are one-off. -->
               <div class="flex flex-col gap-2 border-t border-default pt-2">
-                <label class="flex items-center gap-2 text-xs text-dimmed">
+                <label class="flex items-center gap-2 text-[length:var(--text-label)] text-dimmed">
                   <USwitch v-model="repeats" size="sm" />
                   Repeats
                 </label>
@@ -1366,7 +1366,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                 </div>
               </div>
             </form>
-            <p v-if="detailCrew.canSchedule && !scheduleRouteOptions.length" class="text-xs text-dimmed">
+            <p v-if="detailCrew.canSchedule && !scheduleRouteOptions.length" class="text-[length:var(--text-label)] text-dimmed">
               No routes to schedule yet — share one, or upload one of your own.
             </p>
           </section>
@@ -1382,7 +1382,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
           <!-- Roster -->
           <section class="app-card flex flex-col gap-4 p-4">
             <div class="flex items-center justify-between gap-3">
-              <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+              <h3 class="flex items-center gap-2 text-[length:var(--text-body)] font-semibold text-highlighted">
                 <UIcon name="i-lucide-users" class="size-4 text-primary" />
                 Roster
               </h3>
@@ -1396,7 +1396,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
               text="When on, any new route a member uploads with no explicit sharing choice of their own is shared here automatically. Existing routes are never touched by this — turning it on doesn't reach back and share anything already uploaded."
             >
               <label
-                class="flex w-fit items-center gap-2 rounded-lg bg-elevated/60 px-3 py-2 text-sm text-toned"
+                class="flex w-fit items-center gap-2 rounded-lg bg-elevated/60 px-3 py-2 text-[length:var(--text-body)] text-toned"
               >
                 <USwitch
                   :model-value="detailCrew.autoShare"
@@ -1443,7 +1443,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                   >
                     <UIcon name="i-lucide-clock" class="size-4" />
                   </div>
-                  <span class="min-w-0 flex-1 truncate text-sm text-toned">
+                  <span class="min-w-0 flex-1 truncate text-[length:var(--text-body)] text-toned">
                     <span class="font-medium text-highlighted">{{ member.rider }}</span>
                     {{ member.origin === 'invite' ? 'invited — awaiting their confirmation' : 'wants to join' }}
                   </span>
@@ -1474,19 +1474,19 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                   class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-elevated/60"
                 >
                   <div
-                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[length:var(--text-label)] font-semibold text-primary"
                   >
                     {{ initials(member.rider) }}
                   </div>
-                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">
+                  <span class="min-w-0 flex-1 truncate text-[length:var(--text-body)] font-medium text-highlighted">
                     {{ member.rider }}
                   </span>
                   <UBadge v-if="member.owner" color="primary" variant="subtle" size="sm">Owner</UBadge>
-                  <span v-if="member.owner && detailCrew.owners.length === 1" class="text-xs text-muted">
+                  <span v-if="member.owner && detailCrew.owners.length === 1" class="text-[length:var(--text-label)] text-muted">
                     Only owner
                   </span>
                   <UTooltip v-else text="May schedule a crew ride, the same as an owner">
-                    <label class="flex items-center gap-1.5 text-xs text-dimmed">
+                    <label class="flex items-center gap-1.5 text-[length:var(--text-label)] text-dimmed">
                       <USwitch
                         :model-value="member.canSchedule"
                         size="sm"
@@ -1508,7 +1508,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                   </UDropdownMenu>
                 </div>
 
-                <p v-if="!pendingFor(detailCrew).length && !approvedFor(detailCrew).length" class="px-2 text-xs text-dimmed">
+                <p v-if="!pendingFor(detailCrew).length && !approvedFor(detailCrew).length" class="px-2 text-[length:var(--text-label)] text-dimmed">
                   Nobody else has joined yet.
                 </p>
               </div>
@@ -1521,11 +1521,11 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                   class="flex items-center gap-3 rounded-lg px-2 py-1.5"
                 >
                   <div
-                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[length:var(--text-label)] font-semibold text-primary"
                   >
                     {{ initials(rider) }}
                   </div>
-                  <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ rider }}</span>
+                  <span class="min-w-0 flex-1 truncate text-[length:var(--text-body)] font-medium text-highlighted">{{ rider }}</span>
                   <UBadge
                     v-if="detailCrew.owners.some((o) => o.toLowerCase() === rider.toLowerCase())"
                     color="primary"

@@ -293,7 +293,7 @@ const roadPaths = computed(() => {
         <circle v-if="start" :cx="start.x" :cy="start.y" r="4" class="fill-primary" />
       </svg>
 
-      <p v-else class="text-sm text-muted">
+      <p v-else class="text-[length:var(--text-body)] text-muted">
         {{ failed ? 'track unavailable' : 'no track' }}
       </p>
     </template>

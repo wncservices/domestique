@@ -78,7 +78,7 @@ function formatReadiness(day: DailyWellnessDTO): string {
     </template>
 
     <div class="overflow-x-auto">
-      <table class="w-full min-w-[36rem] text-sm">
+      <table class="w-full min-w-[36rem] text-[length:var(--text-body)]">
         <thead>
           <tr class="text-left text-[length:var(--text-label)] text-muted">
             <th class="py-1.5 pr-3 font-medium">Date</th>

@@ -47,7 +47,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
       <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
         <UIcon name="i-lucide-bike" class="size-5" />
       </span>
-      <span class="font-display hidden text-base font-semibold tracking-tight text-highlighted lg:inline">Domestique</span>
+      <span class="font-display hidden text-[length:var(--text-lead)] font-semibold tracking-tight text-highlighted lg:inline">Domestique</span>
     </RouterLink>
 
     <nav aria-label="Main" class="flex flex-1 flex-col gap-4 overflow-y-auto px-2 py-2">
@@ -68,7 +68,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
   <header class="app-header sticky top-0 z-20 flex w-full items-center justify-between gap-3 px-4 py-2 sm:hidden">
     <RouterLink to="/today" class="flex min-w-0 items-center gap-2">
       <UIcon name="i-lucide-bike" class="size-5 shrink-0 text-primary" aria-hidden="true" />
-      <span class="font-display truncate text-base font-semibold tracking-tight text-highlighted">Domestique</span>
+      <span class="font-display truncate text-[length:var(--text-lead)] font-semibold tracking-tight text-highlighted">Domestique</span>
     </RouterLink>
     <AvatarMenu compact />
   </header>

@@ -205,7 +205,7 @@ function backToCredentials() {
           class="flex flex-col gap-3"
           @submit.prevent="verify"
         >
-          <p class="text-sm text-toned">{{ codeInstruction }}</p>
+          <p class="text-[length:var(--text-body)] text-toned">{{ codeInstruction }}</p>
           <UFormField label="Verification code">
             <UInput
               v-model="code"
@@ -217,7 +217,7 @@ function backToCredentials() {
               class="w-full"
             />
           </UFormField>
-          <p v-if="attemptsRemaining !== null" class="text-xs text-dimmed">
+          <p v-if="attemptsRemaining !== null" class="text-[length:var(--text-label)] text-dimmed">
             {{ attemptsRemaining }}
             {{ attemptsRemaining === 1 ? 'try' : 'tries' }} left before you have to sign in again.
           </p>
@@ -257,7 +257,7 @@ function backToCredentials() {
             />
           </UFormField>
 
-          <p class="text-xs text-dimmed">
+          <p class="text-[length:var(--text-label)] text-dimmed">
             Your password is not stored — it is used once to sign in, and your Edge becomes a
             place routes are sent.
           </p>

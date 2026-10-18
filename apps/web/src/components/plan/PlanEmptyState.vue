@@ -37,7 +37,7 @@ const emit = defineEmits<{
         >
           <UIcon name="i-lucide-flag" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Set a goal</span>
-          <span class="text-xs text-muted">
+          <span class="text-[length:var(--text-label)] text-muted">
             {{ narrationEnabled ? 'Describe it in a sentence, or pick an event date, distance and climbing.' : 'Pick an event date, distance and climbing. No route needed.' }}
           </span>
         </button>
@@ -49,7 +49,7 @@ const emit = defineEmits<{
         >
           <UIcon name="i-lucide-route" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Start from a route</span>
-          <span class="text-xs text-muted">Pick a route in your library and press Train for this route.</span>
+          <span class="text-[length:var(--text-label)] text-muted">Pick a route in your library and press Train for this route.</span>
         </button>
 
         <button
@@ -60,7 +60,7 @@ const emit = defineEmits<{
         >
           <UIcon :name="starting ? 'i-lucide-loader-circle' : 'i-lucide-wand-sparkles'" class="size-5 text-muted" :class="{ 'animate-spin': starting }" />
           <span class="font-medium text-highlighted">Keep training</span>
-          <span class="text-xs text-muted">Twelve rolling weeks of steady base, no event needed.</span>
+          <span class="text-[length:var(--text-label)] text-muted">Twelve rolling weeks of steady base, no event needed.</span>
         </button>
       </div>
     </template>

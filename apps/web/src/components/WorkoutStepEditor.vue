@@ -255,7 +255,7 @@ function addCooldown() {
               @update:model-value="(v: string | number) => update(index, { name: String(v) })"
             />
             <template v-if="isRepeatBlock(step)">
-              <span class="text-sm text-muted">repeat</span>
+              <span class="text-[length:var(--text-body)] text-muted">repeat</span>
               <UInput
                 type="number"
                 min="2"
@@ -263,7 +263,7 @@ function addCooldown() {
                 class="w-20"
                 @update:model-value="(v: string | number) => update(index, { repeat: Number(v) })"
               />
-              <span class="text-sm text-muted">times</span>
+              <span class="text-[length:var(--text-body)] text-muted">times</span>
             </template>
             <template v-else>
               <USelect
@@ -341,7 +341,7 @@ function addCooldown() {
                   class="w-full sm:w-24"
                   @update:model-value="(v: string | number) => setTarget(index, step, 'targetHigh', v, thresholdFor(step.target, profile ?? {}))"
                 />
-                <span v-if="otherUnitHint(index, step, thresholdFor(step.target, profile ?? {}))" class="text-xs text-muted tabular-nums">
+                <span v-if="otherUnitHint(index, step, thresholdFor(step.target, profile ?? {}))" class="text-[length:var(--text-label)] text-muted tabular-nums">
                   {{ otherUnitHint(index, step, thresholdFor(step.target, profile ?? {})) }}
                 </span>
               </template>

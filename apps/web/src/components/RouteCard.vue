@@ -300,7 +300,7 @@ async function remove() {
         />
       </UDropdownMenu>
     </div>
-    <p v-if="route.description" class="line-clamp-2 text-sm text-toned">{{ route.description }}</p>
+    <p v-if="route.description" class="line-clamp-2 text-[length:var(--text-body)] text-toned">{{ route.description }}</p>
 
     <dl class="flex flex-wrap gap-x-5 gap-y-1 tabular-nums">
       <div class="min-w-0">
@@ -334,13 +334,13 @@ async function remove() {
       icon="i-lucide-triangle-alert"
       :title="`Unknown target${route.unknownTargets.length === 1 ? '' : 's'}`"
       :description="`${route.unknownTargets.join(', ')} — this route will never sync there.`"
-      :ui="{ title: 'text-sm', description: 'text-xs' }"
+      :ui="{ title: 'text-[length:var(--text-body)]', description: 'text-[length:var(--text-label)]' }"
     />
 
     <!-- A caption row, not tags: the sync badge is a real status signal, the
          other two are muted text with a dotted underline marking them as
          hoverable. -->
-    <div class="mt-auto flex flex-wrap items-center gap-x-1.5 gap-y-1 pt-1 text-xs text-dimmed">
+    <div class="mt-auto flex flex-wrap items-center gap-x-1.5 gap-y-1 pt-1 text-[length:var(--text-label)] text-dimmed">
       <SyncBadge v-if="route.syncState.length" :statuses="route.syncState" :accounts="accounts" />
       <!-- syncState only ever shows the viewer's own devices, so an empty
            list has two meanings: the route reaches nobody, or it reaches
@@ -394,17 +394,17 @@ async function remove() {
     <UModal v-model:open="editingTargets" title="Choose target devices">
       <template #body>
         <div class="flex flex-col gap-3">
-          <p class="text-sm text-toned">
+          <p class="text-[length:var(--text-body)] text-toned">
             Which head units should “{{ route.name }}” sync to?
           </p>
           <!-- Defensive, not the normal path: the trigger button is already
                disabled once targetOptions is empty, so this only fires if a
                crew is removed out from under an already-open modal. -->
-          <p v-if="!targetOptions.length" class="text-xs text-dimmed">
+          <p v-if="!targetOptions.length" class="text-[length:var(--text-label)] text-dimmed">
             No crews left to share with — close this and join or create one first.
           </p>
           <UCheckboxGroup v-else v-model="draftTargets" :items="targetOptions" />
-          <p v-if="targetOptions.length && !draftTargets.length" class="text-xs text-dimmed">
+          <p v-if="targetOptions.length && !draftTargets.length" class="text-[length:var(--text-label)] text-dimmed">
             Nothing selected — this route will not sync to any account until targets are set
             again.
           </p>
@@ -429,7 +429,7 @@ async function remove() {
 
     <UModal v-model:open="confirming" title="Delete this route?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           “{{ route.name }}” will be removed from the library, and queued for removal from
           every device that currently holds it.
         </p>

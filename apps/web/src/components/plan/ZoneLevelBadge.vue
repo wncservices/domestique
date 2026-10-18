@@ -26,7 +26,7 @@ const style = computed(() => ({
 <template>
   <span
     class="inline-flex items-center gap-1 rounded-full font-medium whitespace-nowrap"
-    :class="compact ? 'px-1.5 py-0.5 text-[0.65rem]' : 'px-2 py-0.5 text-xs'"
+    :class="compact ? 'px-1.5 py-0.5 text-[0.65rem]' : 'px-2 py-0.5 text-[length:var(--text-label)]'"
     :style="style"
   >
     <span class="truncate">{{ label }}</span>

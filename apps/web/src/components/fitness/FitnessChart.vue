@@ -251,7 +251,7 @@ const ariaLabel = computed(() => {
 <template>
   <div class="w-full">
     <div class="flex flex-wrap items-center justify-between mb-3 gap-2">
-      <p class="text-sm text-muted">CTL, ATL and TSB over time</p>
+      <p class="text-[length:var(--text-body)] text-muted">CTL, ATL and TSB over time</p>
       <UFieldGroup>
         <UButton
           v-for="r in RANGES"
@@ -267,7 +267,7 @@ const ariaLabel = computed(() => {
       </UFieldGroup>
     </div>
 
-    <p v-if="!hasEnoughHistory" class="text-sm text-muted py-8 text-center">Not enough history in this range yet.</p>
+    <p v-if="!hasEnoughHistory" class="text-[length:var(--text-body)] text-muted py-8 text-center">Not enough history in this range yet.</p>
 
     <div v-else ref="wrapperEl" class="relative w-full">
       <svg
@@ -411,7 +411,7 @@ const ariaLabel = computed(() => {
 
       <div
         v-if="crosshairSnapshot"
-        class="absolute top-2 bg-elevated border border-default rounded-md text-xs px-2 py-1 pointer-events-none max-w-[13rem]"
+        class="absolute top-2 bg-elevated border border-default rounded-md text-[length:var(--text-label)] px-2 py-1 pointer-events-none max-w-[13rem]"
         :style="readoutOnRight ? { left: `${crosshairX + 8}px` } : { right: `${WIDTH - crosshairX + 8}px` }"
       >
         <p class="font-medium">
@@ -425,7 +425,7 @@ const ariaLabel = computed(() => {
       </div>
     </div>
 
-    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted mt-3">
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--text-label)] text-muted mt-3">
       <span v-for="s in SERIES" :key="s.key" class="flex items-center gap-1.5">
         <span class="size-2 rounded-full" :style="{ background: `var(${s.varName})` }" />
         {{ s.label }}

@@ -80,7 +80,7 @@ onMounted(load)
         <UIcon name="i-lucide-mail" />
         Morning summary
       </h3>
-      <p class="text-sm text-muted">One short email after your morning sync. Yours alone.</p>
+      <p class="text-[length:var(--text-body)] text-muted">One short email after your morning sync. Yours alone.</p>
     </template>
 
     <div class="flex flex-col gap-4">
@@ -91,7 +91,7 @@ onMounted(load)
         @update:model-value="(value: boolean) => toggle(value)"
       />
 
-      <p class="text-sm text-muted">
+      <p class="text-[length:var(--text-body)] text-muted">
         It goes to <span class="font-medium text-highlighted">{{ status.email }}</span>, the address on your account.
         It says what today's session is, whether to ride it as planned, and a warning if the weather looks bad. It
         leaves out your sleep, heart rate and fitness numbers: the app has those, mail is not the place for them.
@@ -101,7 +101,7 @@ onMounted(load)
         <UButton color="neutral" variant="soft" icon="i-lucide-send" :loading="sending" @click="sendTest">
           Send me a test
         </UButton>
-        <p class="text-xs text-muted">Proves the mail setup works. Sent to the address above only.</p>
+        <p class="text-[length:var(--text-label)] text-muted">Proves the mail setup works. Sent to the address above only.</p>
       </div>
     </div>
   </UCard>

@@ -67,7 +67,7 @@ onMounted(load)
         <UIcon name="i-lucide-map-pin" />
         Where do your rides start?
       </h3>
-      <p class="text-sm text-muted">Used to make a route for a planned ride. Your own, for this account only.</p>
+      <p class="text-[length:var(--text-body)] text-muted">Used to make a route for a planned ride. Your own, for this account only.</p>
     </template>
 
     <div class="flex flex-col gap-3">

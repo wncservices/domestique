@@ -1092,7 +1092,7 @@ const pageState = computed(() =>
 
     <UModal v-model:open="replanModalOpen" title="Replan the rest of this week?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           Rebuilds today → Sunday from your current levels, availability and readiness. Rides you've done, sessions you made
           yourself and indoor versions you chose stay.
         </p>
