@@ -303,19 +303,19 @@ async function dismissSuggestion() {
 
             <!-- Rest day: the headline is the card, plus one tip. -->
             <template v-if="state.kind === 'rest'">
-              <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ state.title }}</h2>
+              <h2 class="text-[length:var(--text-title)] leading-tight text-highlighted">{{ state.title }}</h2>
               <p class="text-[length:var(--text-body)] text-muted">{{ state.text }}</p>
             </template>
 
             <!-- Something ridden with nothing planned. -->
             <template v-else-if="state.kind === 'ridden'">
-              <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ state.title }}</h2>
+              <h2 class="text-[length:var(--text-title)] leading-tight text-highlighted">{{ state.title }}</h2>
               <p class="text-[length:var(--text-body)] text-muted tabular-nums">{{ state.text }}</p>
             </template>
 
             <template v-else-if="workout">
               <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
-                <h2 class="min-w-0 font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ workout.name }}</h2>
+                <h2 class="min-w-0 text-[length:var(--text-title)] leading-tight text-highlighted">{{ workout.name }}</h2>
                 <div
                   v-if="workout.plannedSeconds > 0"
                   class="font-display text-[length:var(--text-hero)] leading-none text-highlighted tabular-nums"

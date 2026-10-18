@@ -16,7 +16,7 @@ import type {
 } from '@/api/types'
 import { phaseLabel } from '../components/plan/phaseStyle.ts'
 import { formatSigned, formStatus, latestWithDelta } from './fitnessMath.ts'
-import { formWords } from './fitnessSummary.ts'
+import { formWords, weekDelta } from './fitnessSummary.ts'
 import { weekdayLong, weekdayShort } from './planDates.ts'
 import { flattenSteps, formatDuration, isPlanMadeSession } from './workoutMath.ts'
 import { zoneColorVar } from './zones.ts'
@@ -78,7 +78,8 @@ export function formTile(snapshots: FitnessSnapshot[], failed = false): Tile {
   const ctl = latestWithDelta(snapshots, 'ctl', 7)
   const parts = [status.label]
   if (ctl) {
-    const delta = ctl.delta === undefined ? '' : `, ${Math.round(ctl.delta) >= 0 ? 'up' : 'down'} ${Math.abs(Math.round(ctl.delta))} this week`
+    const change = weekDelta(ctl.delta)
+    const delta = change ? `, ${change}` : ''
     parts.push(`fitness ${Math.round(ctl.value)}${delta}`)
   }
   return { label: 'Form', value: formatSigned(tsb.value), caption: parts.join(' · '), tone: formWords(tsb.value).tone }

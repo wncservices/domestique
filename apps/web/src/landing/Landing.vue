@@ -149,7 +149,7 @@ const sections = [
       <section class="grid items-center gap-10 py-16 sm:py-24 lg:grid-cols-2">
         <div>
         <h1
-          class="font-display max-w-2xl text-[length:var(--text-hero)] font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-5xl"
+          class="font-display max-w-2xl text-[length:var(--text-hero)] font-semibold leading-[1.1] tracking-tight text-highlighted sm:text-[length:var(--text-display)]"
         >
           Your routes. Your training.<br />Every head unit.
         </h1>
@@ -191,7 +191,7 @@ const sections = [
                 <UBadge color="primary" variant="subtle" icon="i-lucide-battery-full">Ready</UBadge>
               </div>
               <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
-                <h2 class="font-display text-[length:var(--text-title)] leading-tight text-highlighted">Endurance ride</h2>
+                <h2 class="text-[length:var(--text-title)] leading-tight text-highlighted">Endurance ride</h2>
                 <div class="font-display text-[length:var(--text-hero)] leading-none text-highlighted tabular-nums">1h 30m</div>
               </div>
               <p class="text-[length:var(--text-body)] text-muted">
@@ -226,7 +226,7 @@ const sections = [
       </section>
 
       <section v-for="section in sections" :key="section.id" class="pb-16" :aria-labelledby="`section-${section.id}`">
-        <h2 :id="`section-${section.id}`" class="font-display text-[length:var(--text-title)] font-semibold tracking-tight text-highlighted">
+        <h2 :id="`section-${section.id}`" class="text-[length:var(--text-title)] font-semibold tracking-tight text-highlighted">
           {{ section.title }}
         </h2>
         <p class="mt-1 text-muted">{{ section.lead }}</p>

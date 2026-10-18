@@ -95,7 +95,7 @@ onMounted(load)
 <template>
   <UCard v-if="available" variant="outline">
     <template #header>
-      <h3 class="flex items-center gap-2 text-lg font-semibold">
+      <h3 class="flex items-center gap-2 text-[length:var(--text-lead)] font-semibold">
         <UIcon name="i-lucide-calendar-days" />
         Calendar link
       </h3>

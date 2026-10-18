@@ -546,7 +546,7 @@ onMounted(() => {
     <section v-if="tab === 'season'" class="flex flex-col gap-4" aria-label="Season review">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
-          <h2 class="text-lg font-semibold">{{ season?.period.label ?? 'Season review' }}</h2>
+          <h2 class="text-[length:var(--text-title)] font-semibold">{{ season?.period.label ?? 'Season review' }}</h2>
           <p v-if="season" class="text-sm text-muted">{{ season.period.from }} to {{ season.period.to }}</p>
         </div>
         <div class="flex items-center gap-2" data-no-print>
@@ -584,7 +584,7 @@ onMounted(() => {
 
       <UCard v-if="hasFitnessHistory" variant="outline">
         <template #header>
-          <h2 class="text-lg font-semibold">Fitness, fatigue and form</h2>
+          <h2 class="text-[length:var(--text-title)] font-semibold">Fitness, fatigue and form</h2>
         </template>
         <FitnessChart :snapshots="fitness!.snapshots" :projection="projection" />
       </UCard>
@@ -595,14 +595,14 @@ onMounted(() => {
 
       <UCard v-if="effortSport === 'cycling' && hasCurve" variant="outline">
         <template #header>
-          <h2 class="text-lg font-semibold">Power curve</h2>
+          <h2 class="text-[length:var(--text-title)] font-semibold">Power curve</h2>
         </template>
         <PowerCurveChart :curve="bestEfforts!.curve" />
       </UCard>
 
       <UCard v-if="fitness && fitness.sessions.length > 0" variant="outline">
         <template #header>
-          <h2 class="text-lg font-semibold">Recent rides</h2>
+          <h2 class="text-[length:var(--text-title)] font-semibold">Recent rides</h2>
         </template>
         <RecentRides ref="recentRides" :sessions="fitness.sessions" />
       </UCard>
@@ -611,7 +611,7 @@ onMounted(() => {
            only its place on the page moved. -->
       <section class="flex flex-col gap-6" aria-labelledby="data-devices-heading">
         <div>
-          <h2 id="data-devices-heading" class="font-display text-[length:var(--text-lead)] text-highlighted">Data and devices</h2>
+          <h2 id="data-devices-heading" class="text-[length:var(--text-title)] text-highlighted">Data and devices</h2>
           <p class="mt-1 text-sm text-muted">Recovery, your profile, calendar and morning feeds, and ride imports.</p>
         </div>
 
@@ -619,7 +619,7 @@ onMounted(() => {
 
         <UCard id="profile" class="scroll-mt-20" variant="outline">
           <template #header>
-            <h3 class="text-lg font-semibold">Your fitness profile</h3>
+            <h3 class="text-[length:var(--text-lead)] font-semibold">Your fitness profile</h3>
           </template>
           <p class="text-sm text-muted mb-4">
             Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can

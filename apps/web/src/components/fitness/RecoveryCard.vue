@@ -74,7 +74,7 @@ function formatReadiness(day: DailyWellnessDTO): string {
 <template>
   <UCard v-if="sorted.length > 0" variant="outline">
     <template #header>
-      <h3 class="text-lg font-semibold">Recovery</h3>
+      <h3 class="text-[length:var(--text-lead)] font-semibold">Recovery</h3>
     </template>
 
     <div class="overflow-x-auto">

@@ -37,7 +37,7 @@ const library = computed(() => props.workouts.filter((w) => !w.date))
 <template>
   <UCard variant="outline">
     <template #header>
-      <h2 class="text-lg font-semibold text-highlighted">Goals and workouts</h2>
+      <h2 class="text-[length:var(--text-title)] font-semibold text-highlighted">Goals and workouts</h2>
     </template>
 
     <div v-if="goals.length === 0" class="text-sm text-muted">No goals yet.</div>

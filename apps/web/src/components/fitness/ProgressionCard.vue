@@ -85,7 +85,7 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
   <UCard v-if="levels.length > 0" variant="outline">
     <template #header>
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <h2 class="text-lg font-semibold">Progression</h2>
+        <h2 class="text-[length:var(--text-title)] font-semibold">Progression</h2>
         <div class="flex items-center gap-2">
           <UFieldGroup>
             <UButton
