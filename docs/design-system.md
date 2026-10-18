@@ -272,7 +272,8 @@ something to retry. The guard test fails on a spinner icon in `pages/`.
 | Path | Page | Status |
 |---|---|---|
 | `/today` | `TodayPage.vue` | Redesigned: `AppPage`, calm-first card, `StatTile`, `DetailsToggle`, `SuggestionRow` |
-| `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle`; the day card (`TodayCard`) and its outcome, difficulty and step-result chips are restyled to the colour roles and type tokens, keeping the workout profile and watts range visible |
+| `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` (the workout library moved to `/workouts`); the day card (`TodayCard`) and its outcome, difficulty and step-result chips are restyled to the colour roles and type tokens, keeping the workout profile and watts range visible |
+| `/workouts` | `WorkoutsPage.vue` | New: `AppPage` with Build a workout as the page action, the undated workout library as one divided list card (push, export, edit, delete per row), one-line `EmptyState`, `SkeletonCard` while loading, `UAlert` with Retry on failure. The builder state is `useWorkoutEditor`, shared with the Plan page |
 | `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
 | `/routes`, `/routes/new`, `/routes/build` | `RoutesPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Redesigned: `AppPage` with Add route / Build a route as page actions, library `StatTile` row, `SegmentedControl` (Grid / Map), slim sync banner, `RouteCard` with an actions menu. Add and Build are `AppPage`s with a "Back to routes" action |
 | `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line `EmptyState` |
@@ -388,7 +389,7 @@ deep links work and a tab switch does not add a history entry.
   (`--color-phase-*`). "You are here" is a marker on the current week and a sentence
   under the chart ("You are here: week 5 of 16, Build"), so it never rests on colour alone.
 - **The FTP test suggestion** is a `SuggestionRow`; the protocol picker sits behind a
-  `DetailsToggle`. Goals and the workout library are collapsed by default once a goal
+  `DetailsToggle`. Goals are collapsed by default once a goal
   exists, open for a rider with none.
 
 ## Navigation
@@ -397,7 +398,7 @@ deep links work and a tab switch does not add a history entry.
 and the avatar menu are data in `components/shell/navItems.ts`, so the three
 layouts cannot disagree and the lists are testable without a DOM.
 
-- **Groups:** *You* (Today, Plan, Fitness) and *Shared* (Routes, Crews). Group
+- **Groups:** *You* (Today, Plan, Workouts, Fitness) and *Shared* (Routes, Crews). Group
   labels are sentence case.
 - **Breakpoints:** phone below 640px (`sm`), a labelled bottom tab bar with the
   avatar top right; tablet 640-1023px, a sidebar narrowed to icons with
