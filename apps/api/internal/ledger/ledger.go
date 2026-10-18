@@ -37,12 +37,9 @@ func Debt(target, carriedIn, completed, plannedRemaining float64) float64 {
 
 var weekdays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
-// Target is a week's plan TSS scaled by how many of the rider's available days
-// are not blacked out. weekStart is the Monday, YYYY-MM-DD.
-func Target(planTSS float64, availableDays []string, weekStart string, blackout map[string]bool) float64 {
-	if len(availableDays) == 0 {
-		return 0
-	}
+// OpenDays is how many of the rider's available days in the week beginning
+// weekStart (the Monday, YYYY-MM-DD) are not blacked out.
+func OpenDays(availableDays []string, weekStart string, blackout map[string]bool) int {
 	monday, err := time.Parse("2006-01-02", weekStart)
 	if err != nil {
 		return 0
@@ -58,7 +55,30 @@ func Target(planTSS float64, availableDays []string, weekStart string, blackout 
 			}
 		}
 	}
-	return planTSS * float64(usable) / float64(len(availableDays))
+	return usable
+}
+
+// Target is a week's plan TSS scaled by how many of the rider's available days
+// are not blacked out. weekStart is the Monday, YYYY-MM-DD.
+func Target(planTSS float64, availableDays []string, weekStart string, blackout map[string]bool) float64 {
+	if len(availableDays) == 0 {
+		return 0
+	}
+	return planTSS * float64(OpenDays(availableDays, weekStart, blackout)) / float64(len(availableDays))
+}
+
+// EffectiveTarget is the target a week owes now: the one fixed when it opened,
+// scaled down by the available days lost to life events since. openDays is
+// what the week had when it opened (0 for a row that did not record it), and
+// the target never grows back past what was fixed.
+func EffectiveTarget(target float64, openDays, daysNow int) float64 {
+	if openDays <= 0 || daysNow >= openDays {
+		return target
+	}
+	if daysNow < 0 {
+		daysNow = 0
+	}
+	return target * float64(daysNow) / float64(openDays)
 }
 
 // Settle closes last week. Only the debt that week incurred itself (not what it

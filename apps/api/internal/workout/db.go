@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS load_ledger (
     week_start     TEXT NOT NULL,
     target_tss     DOUBLE PRECISION NOT NULL DEFAULT 0,
     carried_in_tss DOUBLE PRECISION NOT NULL DEFAULT 0,
+    open_days      INTEGER NOT NULL DEFAULT 0,
     forgiven_tss   DOUBLE PRECISION NOT NULL DEFAULT 0,
     last_pass_date TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,

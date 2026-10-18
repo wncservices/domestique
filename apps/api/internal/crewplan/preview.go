@@ -323,7 +323,7 @@ func (p *previewer) leave(w workout.Workout) {
 		reason = "you chose to keep it as planned"
 	case w.Flags.Swapped:
 		reason = "you swapped it for another version"
-	case w.Flags.Adapted():
+	case len(w.Flags.EasedBy()) > 0:
 		reason = "it has already been adjusted"
 	case w.CrewRideID != "":
 		reason = "it is another crew ride"

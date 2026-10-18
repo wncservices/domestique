@@ -11,17 +11,20 @@ import (
 type LedgerWeek struct {
 	Rider, WeekStart        string
 	TargetTSS, CarriedInTSS float64
-	ForgivenTSS             float64
-	LastPassDate            string
+	// OpenDays is how many of the rider's available days were not blacked out
+	// when the week opened; 0 for a row that predates the column.
+	OpenDays     int
+	ForgivenTSS  float64
+	LastPassDate string
 }
 
 // GetLedgerWeek returns the row, or ok=false when the week was never opened.
 func (d *DB) GetLedgerWeek(ctx context.Context, rider, weekStart string) (LedgerWeek, bool, error) {
 	var w LedgerWeek
 	err := d.db.QueryRowContext(ctx, d.query(`
-SELECT rider, week_start, target_tss, carried_in_tss, forgiven_tss, last_pass_date
+SELECT rider, week_start, target_tss, carried_in_tss, open_days, forgiven_tss, last_pass_date
 FROM load_ledger WHERE rider = ? AND week_start = ?`), normalizeRider(rider), weekStart).
-		Scan(&w.Rider, &w.WeekStart, &w.TargetTSS, &w.CarriedInTSS, &w.ForgivenTSS, &w.LastPassDate)
+		Scan(&w.Rider, &w.WeekStart, &w.TargetTSS, &w.CarriedInTSS, &w.OpenDays, &w.ForgivenTSS, &w.LastPassDate)
 	if errors.Is(err, sql.ErrNoRows) {
 		return LedgerWeek{}, false, nil
 	}
@@ -63,16 +66,17 @@ WHERE rider = ? AND week_start = ? AND last_pass_date <> ?`), day, now, rider, w
 	return n == 1, created, nil
 }
 
-// OpenLedgerWeek records the week's target and what was carried into it,
+// OpenLedgerWeek records the week's target, what was carried into it and how
+// many available days it had then,
 // creating the row if needed and leaving last_pass_date and forgiven alone.
-func (d *DB) OpenLedgerWeek(ctx context.Context, rider, weekStart string, target, carriedIn float64) error {
+func (d *DB) OpenLedgerWeek(ctx context.Context, rider, weekStart string, target, carriedIn float64, openDays int) error {
 	now := d.timestamp()
 	_, err := d.db.ExecContext(ctx, d.query(`
-INSERT INTO load_ledger (rider, week_start, target_tss, carried_in_tss, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO load_ledger (rider, week_start, target_tss, carried_in_tss, open_days, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (rider, week_start) DO UPDATE SET
-    target_tss = excluded.target_tss, carried_in_tss = excluded.carried_in_tss, updated_at = excluded.updated_at`),
-		normalizeRider(rider), weekStart, target, carriedIn, now, now)
+    target_tss = excluded.target_tss, carried_in_tss = excluded.carried_in_tss, open_days = excluded.open_days, updated_at = excluded.updated_at`),
+		normalizeRider(rider), weekStart, target, carriedIn, openDays, now, now)
 	if err != nil {
 		return fmt.Errorf("workout: open ledger week: %w", err)
 	}

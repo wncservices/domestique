@@ -68,7 +68,7 @@ func TestLedgerOpenAndForgiveRoundTrip(t *testing.T) {
 		if _, ok, _ := db.GetLedgerWeek(ctx, "wilant", "2026-10-12"); ok {
 			t.Fatal("forgiving an unopened week created a row")
 		}
-		if err := db.OpenLedgerWeek(ctx, "Wilant", "2026-10-12", 400, 12.5); err != nil {
+		if err := db.OpenLedgerWeek(ctx, "Wilant", "2026-10-12", 400, 12.5, 5); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := db.ClaimLedgerDay(ctx, "wilant", "2026-10-12", "2026-10-13"); err != nil {
@@ -77,14 +77,14 @@ func TestLedgerOpenAndForgiveRoundTrip(t *testing.T) {
 		if err := db.SetLedgerForgiven(ctx, "wilant", "2026-10-12", 7); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.OpenLedgerWeek(ctx, "wilant", "2026-10-12", 410, 12.5); err != nil {
+		if err := db.OpenLedgerWeek(ctx, "wilant", "2026-10-12", 410, 12.5, 6); err != nil {
 			t.Fatal(err)
 		}
 		got, ok, err := db.GetLedgerWeek(ctx, "wilant", "2026-10-12")
 		if err != nil || !ok {
 			t.Fatalf("get = ok %v, err %v", ok, err)
 		}
-		want := LedgerWeek{Rider: "wilant", WeekStart: "2026-10-12", TargetTSS: 410, CarriedInTSS: 12.5, ForgivenTSS: 7, LastPassDate: "2026-10-13"}
+		want := LedgerWeek{Rider: "wilant", WeekStart: "2026-10-12", TargetTSS: 410, CarriedInTSS: 12.5, OpenDays: 6, ForgivenTSS: 7, LastPassDate: "2026-10-13"}
 		if got != want {
 			t.Errorf("got %+v, want %+v", got, want)
 		}
@@ -95,7 +95,7 @@ func TestDeleteRiderRemovesLedger(t *testing.T) {
 	eachEngine(t, func(t *testing.T, db *DB) {
 		ctx := t.Context()
 		for _, r := range []string{"wilant", "other"} {
-			if err := db.OpenLedgerWeek(ctx, r, "2026-10-12", 400, 0); err != nil {
+			if err := db.OpenLedgerWeek(ctx, r, "2026-10-12", 400, 0, 0); err != nil {
 				t.Fatal(err)
 			}
 		}

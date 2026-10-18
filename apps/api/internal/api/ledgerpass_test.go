@@ -35,6 +35,16 @@ func (h *ledgerHarness) at(day, hour, min int) {
 
 func newLedgerHarness(t *testing.T, ftp float64) *ledgerHarness {
 	t.Helper()
+	// The week is built on Monday afternoon, after the morning slot, so no
+	// repayment has happened yet; backdating makes every session look
+	// untouched, as one made days ago does.
+	return newLedgerHarnessBuiltOn(t, ftp, 5)
+}
+
+// newLedgerHarnessBuiltOn saves the goal, and so builds the plan, at 13:00 on
+// the given October day (the 5th is the week's Monday).
+func newLedgerHarnessBuiltOn(t *testing.T, ftp float64, day int) *ledgerHarness {
+	t.Helper()
 	h := &ledgerHarness{seasonHarness: newSeasonHarness(t)}
 	h.profile(t, ledgerDays, ftp)
 	h.now = utcNoon(2026, time.October, 5)
@@ -42,15 +52,12 @@ func newLedgerHarness(t *testing.T, ftp float64) *ledgerHarness {
 	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
 		t.Fatal(err)
 	}
+	h.at(day, 13, 0)
 	g, err := h.store.CreateGoal(context.Background(), workout.CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", EventDate: "2027-04-14"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.goal = g
-	// The week is built on Monday afternoon, after the morning slot, so no
-	// repayment has happened yet; backdating makes every session look
-	// untouched, as one made days ago does.
-	h.at(5, 13, 0)
 	h.srv.AutoScheduleTick(context.Background())
 	h.backdate(t)
 	return h
@@ -190,12 +197,15 @@ func TestLedgerLogsCarryNoLoadValues(t *testing.T) {
 			return a
 		},
 	}))
+	// Two mornings, so the Monday-style settle line is exercised too.
 	h.at(7, 7, 0)
 	h.tick()
-	re := regexp.MustCompile(`(?i)tss\D{0,4}\d`)
+	h.at(12, 7, 0)
+	h.tick()
+	re := regexp.MustCompile(`(?i)(debt|gain|tss|load|target)\w*[=: ]+\S*\d`)
 	for _, line := range strings.Split(logs.String(), "\n") {
-		if strings.Contains(line, "rider=wilant") && re.MatchString(line) {
-			t.Errorf("a log line carries a load value next to the rider: %s", line)
+		if m := re.FindString(line); m != "" {
+			t.Errorf("a log line carries a load value (%q): %s", m, line)
 		}
 	}
 	if !strings.Contains(logs.String(), "load repaid") {
@@ -203,31 +213,172 @@ func TestLedgerLogsCarryNoLoadValues(t *testing.T) {
 	}
 }
 
+// The plan's TSS target against what the scheduler built is not owed load: a
+// fresh, fully built week owes nothing on its first morning.
+func TestUntouchedWeekOwesNothing(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	before := h.thisWeek(t)
+	h.at(5, 7, 0)
+	h.tick()
+	if got := repaidSince(before, h.thisWeek(t)); len(got) != 0 {
+		t.Errorf("%d sessions repaid on the first morning of an untouched week", len(got))
+	}
+	row, ok, err := h.store.GetLedgerWeek(context.Background(), "wilant", "2026-10-05")
+	if err != nil || !ok || row.TargetTSS <= 0 || row.OpenDays != 7 {
+		t.Errorf("row = %+v ok=%v err=%v, want opened with a target and 7 open days", row, ok, err)
+	}
+}
+
+// A goal saved on Thursday plans Thursday to Sunday; the days before it were
+// never planned, so they owe nothing.
+func TestMidWeekGoalOwesNothingForPastDays(t *testing.T) {
+	h := newLedgerHarnessBuiltOn(t, 250, 8)
+	ctx := context.Background()
+	for _, w := range h.thisWeek(t) {
+		if w.Date == "2026-10-08" {
+			if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+				Rider: "wilant", Provider: "garmin", ExternalID: "thu", Sport: "cycling", Date: w.Date,
+				DurationSeconds: workout.PlannedSeconds(w.Steps), TrainingLoad: workout.PlannedTSSOrHours(w, 250),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	before := h.thisWeek(t)
+	if len(before) == 0 {
+		t.Fatal("setup: no sessions this week")
+	}
+	h.at(9, 7, 0)
+	h.tick()
+	if got := repaidSince(before, h.thisWeek(t)); len(got) != 0 {
+		t.Errorf("%d sessions repaid for days that were never planned", len(got))
+	}
+}
+
+// A life event added after the week opened lowers what it owes: the removed
+// session is not debt.
+func TestLifeEventAfterOpenLowersTheTarget(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	h.at(5, 7, 0)
+	h.tick() // opens the week with all seven days
+	var mon, thu workout.Workout
+	for _, w := range h.thisWeek(t) {
+		switch w.Date {
+		case "2026-10-05":
+			mon = w
+		case "2026-10-08":
+			thu = w
+		}
+	}
+	// Monday is ridden as planned, so only the event can make Tuesday owe.
+	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "mon", Sport: "cycling", Date: mon.Date,
+		DurationSeconds: workout.PlannedSeconds(mon.Steps), TrainingLoad: workout.PlannedTSSOrHours(mon, 250),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Thursday is taken out by a trip: the event, and the session it removed.
+	if _, err := h.store.CreateLifeEvent(ctx, workout.LifeEvent{Rider: "wilant", Kind: "travel", Option: "no_bike", Start: thu.Date, End: thu.Date}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.DeleteWorkout(ctx, thu.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := h.thisWeek(t)
+
+	h.at(6, 7, 0)
+	h.tick()
+	if got := repaidSince(before, h.thisWeek(t)); len(got) != 0 {
+		t.Errorf("%d sessions repaid for a day a life event took out", len(got))
+	}
+}
+
 // A repayment is not an easing: the session stays the plan's, so readiness can
-// still reach it, and a later morning never makes it bigger a second time.
+// still ease it, and a later morning never makes it bigger a second time.
 func TestReadinessCanStillEaseARepaidSession(t *testing.T) {
 	h := newLedgerHarness(t, 250)
-	h.at(7, 7, 0)
-	h.tick()
-	repaidNow := repaidSince(nil, h.thisWeek(t))
-	if len(repaidNow) == 0 {
-		t.Fatal("setup: nothing was repaid")
+	ctx := context.Background()
+	// Open the week with a large carried-in debt, so repayment goes on to
+	// upgrade an endurance day to a structured session after lengthening.
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 100, 2000, 7); err != nil {
+		t.Fatal(err)
 	}
-	for _, w := range repaidNow {
-		if !scheduler.IsGenerated(w) {
-			t.Errorf("%s no longer counts as an untouched plan session after being repaid", w.Name)
+	// A level above the bottom rung, so an easing has a rung to step down to.
+	for _, z := range []workout.Zone{workout.ZoneSweetSpot, workout.ZoneTempo, workout.ZoneThreshold, workout.ZoneVO2Max} {
+		if err := h.store.SaveLevel(ctx, workout.ProgressionLevel{Rider: "wilant", Sport: "cycling", Zone: z, Level: 4, Reason: "test"}); err != nil {
+			t.Fatal(err)
 		}
-		if len(w.Flags.EasedBy()) != 0 {
-			t.Errorf("%s reads as eased: %v", w.Name, w.Flags.EasedBy())
+	}
+	// Every ride is already as long as a day may be, so lengthening has nowhere
+	// to go and the debt can only be paid by upgrading a day. The week has no
+	// structured session left, so one is owed.
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{Rider: "wilant", HoursPerAvailableDay: 0.5, AvailableDays: ledgerDays, FTPWatts: 250}); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range h.thisWeek(t) {
+		if workout.IsStructuredZone(w.Zone) {
+			if err := h.store.DeleteWorkout(ctx, w.ID); err != nil {
+				t.Fatal(err)
+			}
 		}
+	}
+	before := h.thisWeek(t)
+	h.at(6, 7, 0)
+	h.tick()
+	var upgraded workout.Workout
+	for _, w := range repaidSince(before, h.thisWeek(t)) {
+		if workout.IsStructuredZone(w.Zone) {
+			upgraded = w
+		}
+	}
+	if upgraded.ID == "" {
+		t.Fatal("setup: no session was upgraded to a structured one")
+	}
+	if !scheduler.IsGenerated(upgraded) || len(upgraded.Flags.EasedBy()) != 0 {
+		t.Fatalf("a repaid session reads as touched: %+v", upgraded.Flags)
 	}
 
-	h.at(8, 7, 0) // the next morning: the same sessions are not lengthened again
+	// The morning of that session the rider is run down.
+	loc, _ := time.LoadLocation("Europe/Brussels")
+	day, _ := time.ParseInLocation("2006-01-02", upgraded.Date, loc)
+	h.now = time.Date(day.Year(), day.Month(), day.Day(), 7, 0, 0, 0, loc).UTC()
+	if err := h.store.SaveWellness(ctx, workout.DailyWellness{
+		Rider: "wilant", Date: upgraded.Date, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52,
+		SleepScore: 53, SleepSeconds: 5*3600 + 20*60, ReadinessScore: 44, ReadinessLevel: "LOW", RestingHR: 61,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Form of -60: a rest verdict, which swaps a hard session for an easy one.
+	if _, err := h.conn.Exec(`INSERT INTO fitness_snapshots (rider, date, ctl, atl, tsb) VALUES ('wilant', ?, 40, 100, -60)`, upgraded.Date); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.AdaptWorkouts(ctx)
+
+	got, err := h.store.GetWorkout(ctx, upgraded.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Flags.EasedBy()) == 0 || !repaid(got) {
+		t.Errorf("rules = %v, want load_repaid followed by a readiness easing", got.Flags.AdaptedRules)
+	}
+	if got.Name == upgraded.Name || len(got.Steps) == len(upgraded.Steps) && secs(got) == secs(upgraded) {
+		t.Errorf("the session was not swapped for an easy ride: %q", got.Name)
+	}
+	if !strings.Contains(got.Description, scheduler.AdjustedMarker) || len(got.Flags.AdaptedRules) != 2 {
+		t.Errorf("flags %v and description %q disagree", got.Flags.AdaptedRules, got.Description)
+	}
+	if adj, err := h.store.LatestAdjustments(ctx, "wilant", workout.SubjectWorkout, []string{upgraded.ID}); err != nil || adj[upgraded.ID].Rule != why.ReadinessRest {
+		t.Errorf("the latest reason is %+v (%v), want the readiness easing", adj[upgraded.ID], err)
+	}
+
+	// A later morning's pass leaves the eased session as the easing made it.
+	eased := byID(h.thisWeek(t))
+	h.at(int(day.Day())+1, 7, 0)
 	h.tick()
-	was := byID(repaidNow)
 	for _, w := range h.thisWeek(t) {
-		if prev, ok := was[w.ID]; ok && secs(w) != secs(prev) {
-			t.Errorf("%s was lengthened a second time: %.0fs -> %.0fs", w.Name, secs(prev), secs(w))
+		if w.ID == upgraded.ID && (secs(w) != secs(eased[w.ID]) || len(w.Flags.AdaptedRules) != len(eased[w.ID].Flags.AdaptedRules)) {
+			t.Errorf("the eased session was changed again by a later morning pass")
 		}
 	}
 }
@@ -269,7 +420,7 @@ func TestRecoveryWeekIsNotRepaid(t *testing.T) {
 func TestMondayPassRollsAndForgives(t *testing.T) {
 	h := newLedgerHarness(t, 250)
 	ctx := context.Background()
-	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0); err != nil {
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{

@@ -21,13 +21,14 @@ fatigued week therefore does not silently lower the season's load.
 
 ## Storage
 
-Table `load_ledger(rider, week_start, target_tss, carried_in_tss, forgiven_tss, last_pass_date, created_at, updated_at)`.
+Table `load_ledger(rider, week_start, target_tss, carried_in_tss, open_days, forgiven_tss, last_pass_date, created_at, updated_at)`.
 
 | Column | Meaning |
 |---|---|
 | `week_start` | the week's Monday |
 | `target_tss` | the week's target, fixed by the first morning pass of that week |
 | `carried_in_tss` | debt rolled in from the previous week |
+| `open_days` | how many available days were not blacked out when the week opened |
 | `forgiven_tss` | debt written off at the end of this week |
 | `last_pass_date` | the local date of the last repayment pass; compare-and-set, so one pass per rider per day across replicas |
 
@@ -47,9 +48,19 @@ debt = target_tss + carried_in_tss − completed − planned_remaining
 - Missed, eased and cut-short sessions all grow the debt by themselves, because they
   lower planned or completed TSS. An over-budget ride shrinks it. Debt below 0 is
   treated as 0.
-- **Life events.** The target is fixed as the plan week's `TargetTSS` × (available
-  days not blacked out ÷ available days), using `lifeevents.Blackout`. Illness and
-  travel lower the target and never become debt.
+- **The target counts load the plan built, not load it merely wished for.** At
+  open, `target_tss` = the plan week's `TargetTSS` × (available days not blacked
+  out ÷ available days), but never more than the planned TSS of the rider's
+  goal-linked workouts dated in that week at that moment. A plan target the
+  scheduler's sessions fall short of, or the days of a week before a goal existed
+  (saved on a Thursday, auto-schedule switched on mid-week), are therefore not
+  debt. Debt at open is just `carried_in_tss`, and grows only as planned sessions
+  are missed, eased or cut short.
+- **Life events.** `open_days` records the available, un-blacked-out days at open.
+  Each pass scales the target by (days un-blacked-out now ÷ `open_days`), so an
+  event added after the week opened lowers the target instead of becoming debt.
+  Settling last week uses the same scaled target. Illness and travel lower the
+  target and never become debt.
 
 ## Morning pass
 

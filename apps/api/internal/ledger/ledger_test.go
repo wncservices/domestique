@@ -72,3 +72,25 @@ func TestRepayable(t *testing.T) {
 		t.Fatal("blackout day must not be repayable")
 	}
 }
+
+func TestOpenDaysAndEffectiveTarget(t *testing.T) {
+	days := []string{"mon", "wed", "fri", "sun"}
+	if got := OpenDays(days, "2026-10-05", nil); got != 4 {
+		t.Errorf("OpenDays = %d, want 4", got)
+	}
+	if got := OpenDays(days, "2026-10-05", map[string]bool{"2026-10-07": true, "2026-10-06": true}); got != 3 {
+		t.Errorf("OpenDays with wed out = %d, want 3", got)
+	}
+	cases := []struct {
+		target    float64
+		open, now int
+		want      float64
+	}{
+		{400, 4, 4, 400}, {400, 4, 3, 300}, {400, 4, 0, 0}, {400, 4, 5, 400}, {400, 0, 2, 400},
+	}
+	for _, c := range cases {
+		if got := EffectiveTarget(c.target, c.open, c.now); got != c.want {
+			t.Errorf("EffectiveTarget(%v,%d,%d) = %v, want %v", c.target, c.open, c.now, got, c.want)
+		}
+	}
+}
