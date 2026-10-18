@@ -184,7 +184,7 @@ onMounted(async () => {
             <UIcon name="i-lucide-watch" />
             Sync back from Wahoo
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="!connection.connected">Connect Wahoo to sync routes back</template>
             <template v-else-if="loading">Loading routes…</template>
             <template v-else-if="!routes.length">No routes on that account.</template>
@@ -222,20 +222,22 @@ onMounted(async () => {
       color="error"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      :description="error"
+      :text="error"
       class="mb-4"
     />
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-if="!connection.connected"
       icon="i-lucide-log-in"
       title="Not connected to Wahoo"
-      description="Connect your account to sync back the routes already on it."
+      text="Connect your account to sync back the routes already on it."
     >
       <template #actions>
         <UButton to="/settings" icon="i-lucide-settings" color="neutral">Go to Settings</UButton>
       </template>
-    </UEmpty>
+    </EmptyState>
 
     <div v-if="connection.connected && importedCount" class="mb-3 flex justify-end">
       <USwitch v-model="showImported" :label="`Show ${importedCount} already imported`" />
@@ -255,7 +257,7 @@ onMounted(async () => {
         :data="pagedRoutes"
         :columns="columns"
         :loading="loading"
-        :ui="{ td: 'text-sm' }"
+        :ui="{ td: 'text-[length:var(--text-body)]' }"
       />
       <UPagination
         v-if="visibleRoutes.length > routesPageSize"
@@ -265,18 +267,22 @@ onMounted(async () => {
         class="mt-4 justify-center"
       />
     </template>
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else-if="connection.connected && routes.length"
       icon="i-lucide-check"
       title="Everything is imported"
-      :description="`All ${routes.length} routes on that account are already in the library.`"
+      :text="`All ${routes.length} routes on that account are already in the library.`"
     />
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else-if="connection.connected"
       icon="i-lucide-watch"
       title="Nothing to sync"
-      description="Create a route in the Wahoo app and refresh."
+      text="Create a route in the Wahoo app and refresh."
     />
   </UCard>
 </template>
