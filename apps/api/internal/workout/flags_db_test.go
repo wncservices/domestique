@@ -1,6 +1,7 @@
 package workout
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -164,6 +165,63 @@ func TestBackfillSetsEditedAtOnlyForEditedRows(t *testing.T) {
 		}
 		if u.EditedAt != "" || u.UpdatedAt != "2026-10-01T08:00:00Z" {
 			t.Errorf("untouched: edited_at %q updated_at %q", u.EditedAt, u.UpdatedAt)
+		}
+	})
+}
+
+// The parity switch is process-wide and other tests in this package create rows
+// without flags, so these tests must not run in parallel with anything and turn
+// it off again when they finish.
+func disableLegacyParityCheck() { parityCheck.Store(false) }
+
+func withParityCheck(t *testing.T) {
+	t.Helper()
+	EnableLegacyParityCheck()
+	t.Cleanup(disableLegacyParityCheck)
+}
+
+func TestParityCheckRejectsMismatch(t *testing.T) {
+	withParityCheck(t)
+	eachEngine(t, func(t *testing.T, db *DB) {
+		_, err := db.CreateWorkout(t.Context(), CreateWorkoutRequest{
+			Rider: "wilant", Name: "Tempo", Sport: model.SportCycling, Date: "2026-10-05", Steps: exampleSteps(),
+			GoalID: "g", Description: GeneratedDescription, Flags: Flags{Origin: OriginRider},
+		})
+		if !errors.Is(err, ErrFlagsDisagree) {
+			t.Fatalf("err = %v, want ErrFlagsDisagree", err)
+		}
+		all, err := db.ListWorkouts(t.Context(), "wilant")
+		if err != nil || len(all) != 0 {
+			t.Fatalf("rows = %d (%v), want none written", len(all), err)
+		}
+	})
+}
+
+func TestParityCheckAcceptsMatch(t *testing.T) {
+	withParityCheck(t)
+	eachEngine(t, func(t *testing.T, db *DB) {
+		ctx := t.Context()
+		w, err := db.CreateWorkout(ctx, CreateWorkoutRequest{
+			Rider: "wilant", Name: "Tempo", Sport: model.SportCycling, Date: "2026-10-05", Steps: exampleSteps(),
+			GoalID: "g", Description: GeneratedDescription, Flags: Flags{Origin: OriginPlan},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		noted := w.Description + " " + AdjustedMarker + " Tired."
+		_, err = db.UpdateWorkout(ctx, w.ID, UpdateWorkoutRequest{Description: &noted})
+		if !errors.Is(err, ErrFlagsDisagree) {
+			t.Fatalf("update without flags: err = %v, want ErrFlagsDisagree", err)
+		}
+		got, _ := db.GetWorkout(ctx, w.ID)
+		if got.Description != GeneratedDescription {
+			t.Fatalf("a refused update wrote %q", got.Description)
+		}
+
+		next := w.Flags.WithAdaptation(why.ReadinessRest)
+		if _, err = db.UpdateWorkout(ctx, w.ID, UpdateWorkoutRequest{Description: &noted, Flags: &next}); err != nil {
+			t.Fatalf("update with flags: %v", err)
 		}
 	})
 }
