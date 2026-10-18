@@ -18,13 +18,53 @@ env:
   GOLANGCI_LINT_VERSION: v2.14.0
 
 jobs:
+  changes:
+    # The Go jobs take most of CI's time and a change that only touches the
+    # frontend cannot break them, so they are skipped for it. A job skipped by
+    # its `if` reports as passed, which keeps the required checks green; a
+    # workflow-level paths filter would leave them pending forever instead.
+    # Anything outside the UI-only paths below (or a diff that cannot be read)
+    # runs everything.
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.diff.outputs.api }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! changed="$(git diff --name-only "$BASE...$HEAD")" || [ -z "$changed" ]; then
+            echo "api=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Go tests that read a frontend file (rideanalysis checks
+          # fitnessMath.ts against the Go formulas) make that file API-relevant.
+          mirrored="$( (grep -rhoE '\.\./\.\./\.\./web/[A-Za-z0-9_./-]+' --include='*_test.go' apps/api || true) \
+            | sed 's#^\.\./\.\./\.\./#apps/#' | sort -u)"
+          api=false
+          while IFS= read -r f; do
+            if [ -n "$mirrored" ] && printf '%s\n' "$mirrored" | grep -qxF "$f"; then api=true; break; fi
+            case "$f" in
+              apps/web/*|apps/e2e/*|docs/*|*.md) ;;
+              *) api=true; break ;;
+            esac
+          done <<< "$changed"
+          echo "api=$api" >> "$GITHUB_OUTPUT"
+          echo "Go jobs needed: $api"
+
   api:
     # The required check keeps its name; the work is in api-tests below. This
-    # job builds, checks formatting, and fails if any test shard did.
+    # job builds, checks formatting, and fails if any test shard did. Skipped
+    # (and so passed) when the change is frontend only.
     name: API — build & tests
     runs-on: ubuntu-latest
-    needs: api-tests
-    if: ${{ !cancelled() }}
+    needs: [changes, api-tests]
+    if: ${{ !cancelled() && needs.changes.outputs.api == 'true' }}
     steps:
       - name: Every test shard passed
         run: |
@@ -59,6 +99,8 @@ jobs:
   api-tests:
     name: API tests (${{ matrix.name }})
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -139,6 +181,8 @@ jobs:
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' }}
     steps:
       - uses: actions/checkout@v7
         with:
