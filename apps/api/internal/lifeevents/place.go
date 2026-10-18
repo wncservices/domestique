@@ -9,6 +9,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -590,7 +591,7 @@ func (p *planner) move(s scoped, to string) {
 	p.diff.Changes = append(p.diff.Changes, Change{
 		ID: OpMove + ":" + w.ID, Op: OpMove, WorkoutID: w.ID, Date: w.Date, ToDate: to, Name: w.Name, Kind: s.event.Kind,
 		Reason: reason, Default: true,
-		Update: &workout.UpdateWorkoutRequest{Date: &to, Description: &description},
+		Update: &workout.UpdateWorkoutRequest{Date: &to, Description: &description, Flags: movedFlags(w, w.Date)},
 	})
 }
 
@@ -613,6 +614,21 @@ func movedDescription(w workout.Workout, from, reason string) string {
 		d += " " + scheduler.AdjustedMarker + " " + lifeNote(reason)
 	}
 	return d
+}
+
+// movedFlags is the typed form of what movedDescription writes: the first
+// original date stays when the session was already moved, and the adjusted
+// marker is there exactly when movedDescription appends it.
+func movedFlags(w workout.Workout, from string) *workout.Flags {
+	f := workout.LegacyFlags(w)
+	if scheduler.IsPlanSession(w) {
+		f = f.WithAdaptation(why.LifeEvent)
+	}
+	if f.MovedFrom == "" {
+		f.MovedFrom = from
+	}
+	f.MovedBy = workout.MovedByLife
+	return &f
 }
 
 // lifeNote is reason as the note a session carries: it always starts "Life
@@ -691,9 +707,16 @@ func (p *planner) indoorSession(s scoped) {
 		Reason: reason, Default: true,
 		Update: &workout.UpdateWorkoutRequest{
 			Name: &name, Steps: &steps, Zone: &zone, Level: &level, Indoor: &yes, OutdoorSteps: &outdoor,
-			Description: &description,
+			Description: &description, Flags: lifeAdaptedFlags(w),
 		},
 	})
+}
+
+// lifeAdaptedFlags is w's flags with one more life-event adaptation, for the
+// update whose description gets replaceMarked's marker.
+func lifeAdaptedFlags(w workout.Workout) *workout.Flags {
+	f := workout.LegacyFlags(w).WithAdaptation(why.LifeEvent)
+	return &f
 }
 
 // replaceMarked is description with note and the adjusted marker appended. A

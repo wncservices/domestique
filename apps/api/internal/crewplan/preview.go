@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -406,7 +407,7 @@ func (p *previewer) shorten(kind Kind) {
 		p.diff.Changes = append(p.diff.Changes, Change{
 			ID: OpShorten + ":" + w.ID, Op: OpShorten, WorkoutID: w.ID, Date: w.Date, Name: w.Name,
 			Reason: capitalise(reason) + ".",
-			Update: &workout.UpdateWorkoutRequest{Steps: &req.Steps, Description: &desc},
+			Update: &workout.UpdateWorkoutRequest{Steps: &req.Steps, Description: &desc, Flags: adaptedFlags(w, why.Legacy)},
 		})
 	}
 }
@@ -487,16 +488,29 @@ func easeChange(w workout.Workout, profile workout.RiderProfile, row workout.Wor
 		reason = "eased the day after your crew ride"
 	}
 	desc := w.Description + " " + scheduler.AdjustedMarker + " " + reason + ". Replaces: " + w.Name + "."
+	rule := why.CrewRideEve
+	if after {
+		rule = why.CrewRideAfter
+	}
 	return Change{
 		ID: OpEase + ":" + w.ID, Op: OpEase, WorkoutID: w.ID, Date: w.Date, Name: w.Name,
 		Reason: capitalise(reason) + ".",
-		Update: &workout.UpdateWorkoutRequest{Name: &easy.Name, Steps: &easy.Steps, Zone: &easy.Zone, Level: &easy.Level, Description: &desc},
+		Update: &workout.UpdateWorkoutRequest{Name: &easy.Name, Steps: &easy.Steps, Zone: &easy.Zone, Level: &easy.Level, Description: &desc, Flags: adaptedFlags(w, rule)},
 		Eve:    !after, After: after,
 		RideDate: row.Date, RideKind: string(KindForSeconds(workout.PlannedSeconds(row.Steps))),
 	}
 }
 
 // ---------- small helpers ----------
+
+// adaptedFlags is w's flags with one more adaptation by rule, for the update
+// that appends scheduler.AdjustedMarker to its description. It starts from what
+// w was before the change and gets a fresh slice every time, so two changes can
+// never share a backing array.
+func adaptedFlags(w workout.Workout, rule why.Rule) *workout.Flags {
+	f := workout.LegacyFlags(w).WithAdaptation(rule)
+	return &f
+}
 
 // fixedRow is the session a preview stands in for the ride's fixed row.
 func fixedRow(r Ride) workout.Workout {

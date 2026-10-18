@@ -185,6 +185,7 @@ func (p *planner) replace(w workout.Workout, ev Event, name string, zone workout
 		Reason: reason, Default: true, ReKeepIndoor: true,
 		Update: &workout.UpdateWorkoutRequest{
 			Name: &name, Steps: &newSteps, Zone: &zone, Level: &level, Description: &description,
+			Flags: lifeAdaptedFlags(w),
 		},
 	})
 }

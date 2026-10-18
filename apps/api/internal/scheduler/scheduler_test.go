@@ -640,3 +640,22 @@ func TestEnduranceZoneTargetWithOnlyMaxHRIsUnchanged(t *testing.T) {
 		t.Errorf("FTP still wins: got %v [%v, %v]", tt, low, high)
 	}
 }
+
+func TestWeekWorkoutsCarryPlanOrigin(t *testing.T) {
+	week := periodization.Week{StartDate: "2026-01-05", Phase: periodization.PhaseBase, TargetHours: 8}
+	profile := workout.RiderProfile{AvailableDays: []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}}
+	out, err := WeekWorkouts(week, profile, nil, "wilant", "goal-1", model.SportCycling)
+	if err != nil || len(out) == 0 {
+		t.Fatalf("out = %d, err = %v", len(out), err)
+	}
+	for _, req := range out {
+		w := workout.Workout{GoalID: req.GoalID, Description: req.Description}
+		if !req.Flags.Equivalent(workout.LegacyFlags(w)) || req.Flags.Origin != workout.OriginPlan {
+			t.Errorf("%s: flags %+v, text says %+v", req.Name, req.Flags, workout.LegacyFlags(w))
+		}
+	}
+	e := BuildEnduranceSession(1, false, model.SportCycling, profile)
+	if e.Flags.Origin != workout.OriginPlan {
+		t.Errorf("endurance flags = %+v", e.Flags)
+	}
+}
