@@ -246,6 +246,28 @@ func mailFailureText(stage string, code int) string {
 
 // ---------- the pass after the morning sync ----------
 
+// inMorningSlot is morningSlotOf for the deployment's own schedule.
+func (s *Server) inMorningSlot(now time.Time) bool {
+	sched, err := s.syncSchedule()
+	if err != nil {
+		return false
+	}
+	return morningSlotOf(sched, now)
+}
+
+// morningSlotOf is the gate for work that belongs to the day's first sync slot:
+// the latest slot at or before now is the day's first, on the same local date as
+// now, and it is still before 12:00 local. A pass that runs late (the process
+// was down at 06:30) still counts until noon.
+func morningSlotOf(sched syncschedule.Schedule, now time.Time) bool {
+	now = now.In(sched.Location())
+	slot := sched.Last(now).In(sched.Location())
+	if !sched.FirstOfDay(slot) || slot.Format(dateLayout) != now.Format(dateLayout) {
+		return false
+	}
+	return now.Hour() < summaryNoonHour
+}
+
 // sendMorningSummaries mails every opted-in rider their day, once, after the
 // first sync slot of the local day. Called from the metrics pass after it has
 // been recorded as done, so nothing here can delay or fail a sync.
@@ -266,11 +288,7 @@ func (s *Server) sendMorningSummaries(ctx context.Context, sched syncschedule.Sc
 	}
 	loc := sched.Location()
 	now := s.now().In(loc)
-	slot := sched.Last(now).In(loc)
-	if !sched.FirstOfDay(slot) || slot.Format(dateLayout) != now.Format(dateLayout) {
-		return
-	}
-	if now.Hour() >= summaryNoonHour {
+	if !morningSlotOf(sched, now) {
 		return
 	}
 
