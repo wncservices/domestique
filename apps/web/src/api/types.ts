@@ -1149,9 +1149,6 @@ export interface ProgressionResponse {
   history: ProgressionPoint[]
 }
 
-/** How hard today should be allowed to be — readiness only ever makes a day
- *  easier, never harder. Mirrors internal/readiness.Verdict. See
- *  docs/superpowers/specs/2026-09-28-readiness-design.md. */
 /** GET/PUT /api/training/checkin — mirrors apps/api/internal/api's checkInDTO.
  *  Scores are 1-5, 0 meaning not answered; the note is at most 500 characters.
  *  PUT sends the same body without date. */
@@ -1163,6 +1160,10 @@ export interface CheckIn {
   note: string
 }
 
+/** How today should go: `push` is a green light (everything at or above the
+ *  rider's own usual), `ready` changes nothing, `caution` and `rest` ease the
+ *  day. Mirrors internal/readiness.Verdict. See
+ *  docs/superpowers/specs/2026-10-18-readiness-v2-design.md. */
 export type ReadinessVerdict = 'ready' | 'push' | 'caution' | 'rest'
 
 /** One rider's Garmin recovery signals for one calendar day — mirrors
