@@ -78,6 +78,7 @@ const doneHours = computed(() => props.week.totals.completedSeconds / 3600)
 const targetSeconds = computed(() =>
   Math.max(props.week.totals.plannedSeconds, (props.week.focus?.targetHours ?? 0) * 3600),
 )
+// The progress bar below stays hours-based; only this label leads with TSS.
 // With a TSS target the label leads with it ("420 TSS · 7.5 h"); otherwise the
 // familiar "done / target h".
 const loadLabel = computed(() =>

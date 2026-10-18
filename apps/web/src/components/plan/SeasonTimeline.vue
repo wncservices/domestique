@@ -72,6 +72,11 @@ const ctlLabel = computed(() => {
   if (!first || !last) return ''
   return `Planned fitness (CTL), from ${Math.round(first.plannedCtl ?? 0)} to ${Math.round(last.plannedCtl ?? 0)}`
 })
+// Start and end values, so the line's scale is readable.
+const ctlRange = computed(() => {
+  const vals = weeks.value.filter((w) => w.plannedCtl !== undefined).map((w) => Math.round(w.plannedCtl ?? 0))
+  return vals.length > 1 ? `: ${vals[0]} to ${vals[vals.length - 1]}` : ''
+})
 const shortfallText = computed(() => {
   const n = Math.round(props.plan.shortfall ?? 0)
   return isCtl.value && n > 0 ? `Target fitness out of reach by ${n} CTL at your maximum ramp.` : ''
@@ -312,11 +317,25 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
         </rect>
       </g>
 
+      <!-- A halo in the page background under a text-coloured line, so it reads
+           over every phase colour in both themes. -->
       <polyline
         v-if="isCtl && ctlPoints.length > 1"
         :points="ctlPoints.join(' ')"
         fill="none"
-        stroke="var(--ui-primary)"
+        stroke="var(--ui-bg)"
+        stroke-width="4.5"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        vector-effect="non-scaling-stroke"
+        pointer-events="none"
+        aria-hidden="true"
+      />
+      <polyline
+        v-if="isCtl && ctlPoints.length > 1"
+        :points="ctlPoints.join(' ')"
+        fill="none"
+        stroke="var(--ui-text-highlighted)"
         stroke-width="2"
         stroke-linejoin="round"
         stroke-linecap="round"
@@ -356,6 +375,10 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       <span v-for="b in eventBars" :key="`legend-${b.key}`" class="flex items-center gap-1.5">
         <span class="h-1 w-3 rounded-full" :style="{ background: b.fill }" aria-hidden="true" />
         {{ b.label }}
+      </span>
+      <span v-if="isCtl && ctlPoints.length > 1" class="flex items-center gap-1.5 tabular-nums">
+        <span class="h-0.5 w-3 rounded-full bg-[var(--ui-text-highlighted)]" aria-hidden="true" />
+        Planned fitness (CTL), own scale{{ ctlRange }}
       </span>
       <span v-for="phase in phaseOrder" :key="phase" class="flex items-center gap-1.5">
         <span class="size-2.5 rounded-full" :class="phaseDotStyle(phase).class" :style="phaseDotStyle(phase).style" />
