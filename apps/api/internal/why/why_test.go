@@ -288,3 +288,20 @@ func TestInputsSurviveAJSONRoundTrip(t *testing.T) {
 		t.Errorf("numbers = %v", nums)
 	}
 }
+
+func TestTitlesForLoadRules(t *testing.T) {
+	for rule, want := range map[why.Rule]string{
+		why.LoadRepaid:   "Load made up",
+		why.LoadRolled:   "Load carried to next week",
+		why.LoadForgiven: "Load forgiven",
+	} {
+		if got := why.Title(rule); got != want {
+			t.Errorf("Title(%s) = %q, want %q", rule, got, want)
+		}
+	}
+	rec := why.NewRecord(why.LoadRepaid, "s", why.LoadRepaidInputs{DebtBefore: 80.4, TSSAdded: 31.6})
+	want := []why.Fact{{Label: "Load owed", Value: "80 TSS"}, {Label: "Added", Value: "32 TSS"}}
+	if got := why.Facts(why.LoadRepaid, rec.Inputs); !reflect.DeepEqual(got, want) {
+		t.Errorf("Facts = %#v, want %#v", got, want)
+	}
+}

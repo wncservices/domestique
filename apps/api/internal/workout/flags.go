@@ -85,6 +85,19 @@ func IsLifeRule(r why.Rule) bool { return r == why.LifeEvent || r == why.Illness
 // Adapted reports whether any automatic adjustment has been made.
 func (f Flags) Adapted() bool { return len(f.AdaptedRules) > 0 }
 
+// EasedBy returns the adaptation rules that changed the session's content,
+// which is every rule except why.LoadRepaid: making a session bigger to pay
+// back owed load must not stop the next pass from touching it again.
+func (f Flags) EasedBy() []why.Rule {
+	var out []why.Rule
+	for _, r := range f.AdaptedRules {
+		if r != why.LoadRepaid {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // WithAdaptation returns a copy with r appended. It always copies the slice so
 // two derived values can never write over each other's backing array.
 func (f Flags) WithAdaptation(r why.Rule) Flags {

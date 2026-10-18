@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -186,6 +187,59 @@ func TestIsPlanMadeAndAutoReplaceableTable(t *testing.T) {
 		}
 		if got := AutoReplaceable(c.w); got != c.auto {
 			t.Errorf("%s: AutoReplaceable = %v, want %v", c.name, got, c.auto)
+		}
+	}
+}
+
+func TestLoadRepaidDoesNotLockASession(t *testing.T) {
+	w := workout.Workout{GoalID: "g", Flags: workout.Flags{
+		Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.LoadRepaid},
+	}}
+	if !IsGenerated(w) || !IsPlanSession(w) {
+		t.Error("a session that only carries load_repaid should still be generated")
+	}
+}
+
+func TestAnyOtherRuleStillLocks(t *testing.T) {
+	w := workout.Workout{GoalID: "g", Flags: workout.Flags{
+		Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.LoadRepaid, why.ReadinessRest},
+	}}
+	if IsGenerated(w) || IsPlanSession(w) {
+		t.Error("load_repaid plus another rule must lock the session")
+	}
+}
+
+func TestStructuredZonesMatchesTheScheduler(t *testing.T) {
+	days := []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+	for _, sport := range []model.Sport{model.SportCycling, model.SportRunning} {
+		for _, phase := range []periodization.Phase{
+			periodization.PhaseBase, periodization.PhaseBuild, periodization.PhasePeak, periodization.PhaseTaper,
+		} {
+			for n := 0; n <= 7; n++ {
+				week := periodization.Week{StartDate: "2026-01-05", Phase: phase, TargetHours: 10}
+				profile := workout.RiderProfile{AvailableDays: days[:n]}
+				out, err := WeekWorkouts(week, profile, nil, "r", "g", sport)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := StructuredZones(phase, sport, n)
+				want := structuredZones(out)
+				if len(got) != len(want) {
+					t.Fatalf("%s %s n=%d: StructuredZones = %v, scheduler gave %v", sport, phase, n, got, want)
+				}
+				seen := map[workout.Zone]int{}
+				for _, z := range got {
+					seen[z]++
+				}
+				for _, z := range want {
+					seen[z]--
+				}
+				for z, c := range seen {
+					if c != 0 {
+						t.Errorf("%s %s n=%d: zone %s differs: %v vs %v", sport, phase, n, z, got, want)
+					}
+				}
+			}
 		}
 	}
 }

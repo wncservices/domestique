@@ -4,6 +4,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
@@ -54,7 +56,18 @@ func RiderKept(w workout.Workout) bool {
 func IsPlanSession(w workout.Workout) bool {
 	return w.GoalID != "" && w.CrewRideID == "" &&
 		w.Flags.Origin == workout.OriginPlan &&
-		!w.Flags.Adapted() && !w.Flags.Swapped
+		len(w.Flags.EasedBy()) == 0 && !w.Flags.Swapped
+}
+
+// StructuredZones is the zones of the structured sessions a phase's zone mix
+// calls for given n available days, in slot order: exactly what the scheduler
+// builds, because it reads the same table.
+func StructuredZones(phase periodization.Phase, sport model.Sport, n int) []workout.Zone {
+	var out []workout.Zone
+	for _, s := range structuredSlotsFor(phase, sport, n) {
+		out = append(out, workout.Zone(s.zone))
+	}
+	return out
 }
 
 // IsGenerated reports whether w was made by the scheduler and has not
