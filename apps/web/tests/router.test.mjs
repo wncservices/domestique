@@ -44,7 +44,7 @@ test('route table: redirects land on the new paths', async () => {
 })
 
 test('route table: new paths stay put', async () => {
-  for (const p of ['/today', '/plan', '/fitness', '/routes', '/routes/new', '/routes/build', '/crews']) {
+  for (const p of ['/today', '/plan', '/workouts', '/fitness', '/routes', '/routes/new', '/routes/build', '/crews']) {
     assert.equal(await settle(p), p)
   }
 })

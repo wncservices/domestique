@@ -55,12 +55,11 @@ import RouteForRideSlideover from '@/components/plan/RouteForRideSlideover.vue'
 import TrainNowSlideover from '@/components/plan/TrainNowSlideover.vue'
 import TomorrowForecastBanner from '@/components/plan/TomorrowForecastBanner.vue'
 import WeekStrip from '@/components/plan/WeekStrip.vue'
-import type { WorkoutForm } from '@/components/plan/forms'
-import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import { planPageState } from '@/utils/planPageState'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
+import { useWorkoutEditor } from '@/composables/useWorkoutEditor'
 import { useIndoor } from '@/composables/useIndoor'
 import { useRideLink } from '@/composables/useRideLink'
 import { useWeather } from '@/composables/useWeather'
@@ -160,81 +159,24 @@ async function loadWorkouts() {
   }
 }
 
-const workoutModalOpen = ref(false)
-const editingWorkoutId = ref<string | null>(null)
-const editingWhy = ref<Why | undefined>(undefined)
-const workoutForm = ref<WorkoutForm>(freshWorkoutForm())
-
-function openCreateWorkout() {
-  editingWorkoutId.value = null
-  editingWhy.value = undefined
-  workoutForm.value = freshWorkoutForm()
-  workoutModalOpen.value = true
-}
-
-async function openEditWorkout(w: Workout) {
-  editingWorkoutId.value = w.id
-  editingWhy.value = w.why
-  workoutForm.value = {
-    name: w.name,
-    sport: w.sport,
-    date: w.date ?? '',
-    goalId: w.goalId ?? NO_GOAL,
-    description: w.description ?? '',
-    steps: w.steps,
-    zone: w.zone,
-    level: w.level,
-    indoor: w.indoor,
-  }
-  workoutModalOpen.value = true
-}
-
-const goalOptions = computed(() => [{ value: NO_GOAL, label: 'No goal' }, ...goals.value.map((g) => ({ value: g.id, label: g.name }))])
-
-const savingWorkout = ref(false)
-
-async function saveWorkout() {
-  if (!workoutForm.value.name.trim() || workoutForm.value.steps.length === 0) return
-  savingWorkout.value = true
-  try {
-    const req = {
-      name: workoutForm.value.name.trim(),
-      sport: workoutForm.value.sport,
-      date: workoutForm.value.date || undefined,
-      goalId: workoutForm.value.goalId === NO_GOAL ? undefined : workoutForm.value.goalId || undefined,
-      description: workoutForm.value.description || undefined,
-      steps: workoutForm.value.steps,
-    }
-    if (editingWorkoutId.value) {
-      await api.updateWorkout(editingWorkoutId.value, req)
-    } else {
-      await api.createWorkout(req)
-    }
-    toast.add({ title: `Saved ${workoutForm.value.name.trim()}`, icon: 'i-lucide-dumbbell', color: 'success' })
-    workoutModalOpen.value = false
+const {
+  open: workoutModalOpen,
+  editingId: editingWorkoutId,
+  editingWhy,
+  form: workoutForm,
+  goalOptions,
+  saving: savingWorkout,
+  openCreate: openCreateWorkout,
+  openEdit: openEditWorkout,
+  save: saveWorkout,
+} = useWorkoutEditor({
+  toast,
+  goals,
+  reload: async () => {
     await loadWorkouts()
     await loadWeek()
-  } catch (err) {
-    toast.add({ title: 'Could not save workout', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
-  } finally {
-    savingWorkout.value = false
-  }
-}
-
-const deletingWorkout = ref('')
-
-async function deleteWorkout(w: Workout) {
-  deletingWorkout.value = w.id
-  try {
-    await api.deleteWorkout(w.id)
-    await loadWorkouts()
-    await loadWeek()
-  } catch (err) {
-    toast.add({ title: `Could not delete ${w.name}`, description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
-  } finally {
-    deletingWorkout.value = ''
-  }
-}
+  },
+})
 
 // --- the indoor version: preview, convert and revert (useIndoor). The
 // reload re-reads the week and the list so the badge, length and buttons
@@ -845,7 +787,7 @@ async function confirmReplan() {
   }
 }
 
-// Goals and the library are set-up, not the daily view: collapsed once a goal
+// Goals are set-up, not the daily view: collapsed once a goal
 // exists, open for a rider who has none yet. Decided once, when the goals first
 // finish loading, so opening or closing it by hand is never overridden.
 const goalsOpen = ref(true)
@@ -1066,25 +1008,17 @@ const pageState = computed(() =>
 
     <!-- Not while goals are loading or failed: GoalsSection would say "No goals yet". -->
     <DetailsToggle
-      v-if="pageState !== 'loading' && pageState !== 'failed' && (goals.length || workouts.length)"
+      v-if="pageState !== 'loading' && pageState !== 'failed' && goals.length"
       v-model:open="goalsOpen"
-      label="Goals and workouts"
+      label="Goals"
     >
       <GoalsSection
         :goals="goals"
-        :workouts="workouts"
         :focus-goal-id="effectiveFocus?.goalId"
-        :can-sync-garmin="canSyncGarmin"
         :deleting-goal="deletingGoal"
-        :deleting-workout="deletingWorkout"
-        :pushing-workout="pushingWorkout"
         @edit-goal="openEditGoal"
         @delete-goal="deleteGoal"
         @focus-goal="selectGoal"
-        @edit-workout="openEditWorkout"
-        @delete-workout="deleteWorkout"
-        @push-workout="pushWorkoutToGarmin"
-        @new-workout="openCreateWorkout"
       />
     </DetailsToggle>
 
