@@ -1,8 +1,11 @@
 package workout
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/wncservices/domestique/apps/api/internal/why"
 )
@@ -171,4 +174,27 @@ func LegacyFlags(w Workout) Flags {
 		}
 	}
 	return f
+}
+
+// ErrFlagsDisagree is returned, while the parity check is on, by a write whose
+// typed flags and description markers say different things.
+var ErrFlagsDisagree = errors.New("workout: flags disagree with description markers")
+
+var parityCheck atomic.Bool
+
+// EnableLegacyParityCheck makes CreateWorkout and UpdateWorkout refuse a row
+// whose flags are not Equivalent to what its description markers say. It is a
+// process-wide switch for tests (and internal/testdb): it proves a migrated
+// writer sets both in step, and costs nothing while off.
+func EnableLegacyParityCheck() { parityCheck.Store(true) }
+
+// checkParity reports ErrFlagsDisagree for a row as it will be stored.
+func checkParity(w Workout) error {
+	if !parityCheck.Load() {
+		return nil
+	}
+	if legacy := LegacyFlags(w); !w.Flags.Equivalent(legacy) {
+		return fmt.Errorf("%w: workout %q has %+v, description says %+v", ErrFlagsDisagree, w.ID, w.Flags, legacy)
+	}
+	return nil
 }

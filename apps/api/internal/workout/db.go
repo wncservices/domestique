@@ -1483,6 +1483,12 @@ func (d *DB) insertWorkout(ctx context.Context, q sqlRunner, req CreateWorkoutRe
 		origin = OriginRider
 	}
 
+	f.Origin = origin
+	if err := checkParity(Workout{ID: id, GoalID: req.GoalID, Description: req.Description,
+		TestProtocol: req.TestProtocol, CrewRideID: req.CrewRideID, Flags: f}); err != nil {
+		return "", err
+	}
+
 	ts := d.timestamp()
 	_, err = q.ExecContext(ctx, d.query(`
         INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id,
@@ -1589,6 +1595,10 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 			return Workout{}, fmt.Errorf("workout: encode planned snapshot: %w", err)
 		}
 		planned = string(encoded)
+	}
+
+	if err := checkParity(current); err != nil {
+		return Workout{}, err
 	}
 
 	// edited_at and updated_at are one value: edited_at is the part of
