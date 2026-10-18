@@ -242,6 +242,20 @@ CREATE TABLE IF NOT EXISTS session_links (
 );
 CREATE INDEX IF NOT EXISTS session_links_rider_idx ON session_links (rider);
 
+-- load_ledger is the weekly TSS target, what was carried into the week and
+-- what was forgiven out of it, one row per rider per Monday. last_pass_date is
+-- the compare-and-set that makes the daily repayment pass run once per day.
+CREATE TABLE IF NOT EXISTS load_ledger (
+    rider          TEXT NOT NULL,
+    week_start     TEXT NOT NULL,
+    target_tss     DOUBLE PRECISION NOT NULL DEFAULT 0,
+    carried_in_tss DOUBLE PRECISION NOT NULL DEFAULT 0,
+    forgiven_tss   DOUBLE PRECISION NOT NULL DEFAULT 0,
+    last_pass_date TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY (rider, week_start)
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_weeks (
     goal_id    TEXT NOT NULL,
     week_start TEXT NOT NULL,
@@ -352,6 +366,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM session_analyses WHERE rider = ?`,
 		`DELETE FROM completed_sessions WHERE rider = ?`,
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
+		`DELETE FROM load_ledger WHERE rider = ?`,
 		`DELETE FROM daily_wellness WHERE rider = ?`,
 		`DELETE FROM progression_history WHERE rider = ?`,
 		`DELETE FROM progression_levels WHERE rider = ?`,
