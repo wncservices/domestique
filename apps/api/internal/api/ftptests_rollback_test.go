@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"github.com/wncservices/domestique/apps/api/internal/api"
 )
 
 // If the replaced session cannot be removed, the test that was just created is
@@ -12,7 +14,7 @@ func TestSchedulingRollsTheTestBackWhenTheReplacedSessionCannotBeDeleted(t *test
 	h := newReplanHarness(t)
 	ctx := context.Background()
 	goal := h.scheduleSetup(250)
-	if _, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600)); err != nil {
+	if _, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600))); err != nil {
 		t.Fatal(err)
 	}
 	// DeleteWorkout removes the row and then its push rows; without that table

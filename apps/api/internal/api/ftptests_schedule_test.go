@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -92,21 +93,21 @@ func TestSchedulingReplacesOnlyThatDaysPlanMadeSessionAndItsGarminCopy(t *testin
 	ctx := context.Background()
 	goal := h.scheduleSetup(250)
 
-	onDay, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600))
+	onDay, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Long ride", replanSaturday, 3600))
+	other, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Long ride", replanSaturday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mine, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	mine, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "My own ride", Date: replanFriday, Description: "mine",
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	someoneElses, err := h.training.CreateWorkout(ctx, generated("sam", goal.ID, "Endurance ride", replanFriday, 3600))
+	someoneElses, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("sam", goal.ID, "Endurance ride", replanFriday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}

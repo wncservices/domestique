@@ -39,8 +39,9 @@ const (
 	CrewRideEve        Rule = "crew_ride_eve"
 	CrewRideAfter      Rule = "crew_ride_after"
 	CrewRideShorten    Rule = "crew_ride_shorten"
-	Legacy             Rule = "legacy"     // an adaptation the backfill could not name
-	LifeEvent          Rule = "life_event" // a life event's move, ease or shortening
+	Legacy             Rule = "legacy"             // an adaptation the backfill could not name
+	LifeEvent          Rule = "life_event"         // a life event's move, ease or shortening
+	RideTogetherMove   Rule = "ride_together_move" // a ride-together answer moved the session
 )
 
 // Fact is one label/value row in the popover.

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -51,12 +52,12 @@ func newTomorrowHarness(t *testing.T) *tomorrowHarness {
 
 func (h *tomorrowHarness) hard(date string) workout.Workout {
 	h.t.Helper()
-	w, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	w, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goalID, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Date: date, Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -316,17 +317,17 @@ func TestEaseTomorrowRefusesWithA409AndChangesNothing(t *testing.T) {
 		{"tomorrow's workout is already adjusted", func(h *tomorrowHarness) {
 			w := h.hard(tmTomorrow)
 			d := w.Description + " " + scheduler.AdjustedMarker + " eased earlier"
-			if _, err := h.store.UpdateWorkout(context.Background(), w.ID, workout.UpdateWorkoutRequest{Description: &d}); err != nil {
+			if _, err := h.store.UpdateWorkout(context.Background(), w.ID, workout.UpdateWorkoutRequest{Description: &d, Flags: api.LegacyFlagsAfter(w, d)}); err != nil {
 				t.Fatal(err)
 			}
 			h.snapshot(40, 100)
 		}},
 		{"tomorrow's workout is the rider's own", func(h *tomorrowHarness) {
-			if _, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+			if _, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 				Rider: "wilant", Sport: model.SportCycling, Name: "My intervals", Date: tmTomorrow, Description: "mine",
 				Zone: workout.ZoneThreshold, Level: 5,
 				Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-			}); err != nil {
+			})); err != nil {
 				t.Fatal(err)
 			}
 			h.snapshot(40, 100)
@@ -343,11 +344,11 @@ func TestEaseTomorrowRefusesWithA409AndChangesNothing(t *testing.T) {
 		}},
 		{"tomorrow has no workout at all", func(h *tomorrowHarness) { h.snapshot(40, 100) }},
 		{"tomorrow's workout is an easy one", func(h *tomorrowHarness) {
-			if _, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+			if _, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 				Rider: "wilant", GoalID: h.goalID, Sport: model.SportCycling, Name: "Endurance ride", Date: tmTomorrow,
 				Description: scheduler.GeneratedDescription, Zone: workout.ZoneEndurance,
 				Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-			}); err != nil {
+			})); err != nil {
 				t.Fatal(err)
 			}
 			h.snapshot(40, 100)
@@ -554,11 +555,11 @@ func TestSkippedHardDaysDoNotMakeTomorrowAThirdHardDay(t *testing.T) {
 // A caution the click could only answer with a 500 must never be offered.
 func TestNoCautionBannerForAWorkoutWithNoLadderToStepDown(t *testing.T) {
 	h := newTomorrowHarness(t)
-	if _, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goalID, Sport: model.SportCycling, Name: "Intervals", Date: tmTomorrow,
 		Description: scheduler.GeneratedDescription, Zone: "intervals", Level: 3,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	h.hard(tmToday)

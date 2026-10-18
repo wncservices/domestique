@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -91,24 +92,24 @@ func TestReplanKeepsSurvivorsAndRebuildsTheRest(t *testing.T) {
 
 	// Rider-built: no GoalID at all. Must survive untouched, whatever day
 	// it lands on.
-	riderBuilt, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	riderBuilt, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "My own ride", Date: replanThursday,
 		Description: "Whatever I feel like today.",
 		Steps:       []workout.WorkoutStep{{Name: "Ride", Duration: workout.DurationTime, Seconds: 1800, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Plan-made, but dated before today: must survive even though nobody
 	// rode it — replan never touches the past.
-	beforeToday, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", replanMonday, 3600))
+	beforeToday, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", replanMonday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Plan-made, dated today, and already ridden: must survive.
-	riddenToday, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Sweet spot", replanToday, 3600))
+	riddenToday, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Sweet spot", replanToday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +125,7 @@ func TestReplanKeepsSurvivorsAndRebuildsTheRest(t *testing.T) {
 	// ("Endurance ride"/"Long ride") so a fresh row reusing a recycled slug
 	// id (workout ids are slugified names, freed once the old row is
 	// deleted — see workout.DB.uniqueID) can never be mistaken for survival.
-	if _, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Placeholder — replace me", replanFriday, 3600)); err != nil {
+	if _, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Placeholder — replace me", replanFriday, 3600))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -365,7 +366,7 @@ func TestReplanRemovesFromGarminAndPushesTheRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	notRidden, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600))
+	notRidden, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +453,7 @@ func TestReplanAdjustedCountExcludesEarlierSurvivorAdjustments(t *testing.T) {
 	// replan leaves it alone entirely.
 	adjustedSurvivor := generated("wilant", goal.ID, "Endurance ride", replanMonday, 3600)
 	adjustedSurvivor.Description += " " + scheduler.AdjustedMarker + " Rescheduled by an earlier tick."
-	if _, err := h.training.CreateWorkout(ctx, adjustedSurvivor); err != nil {
+	if _, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(adjustedSurvivor)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -484,10 +485,10 @@ func TestReplanNeverTouchesAnotherRidersWorkouts(t *testing.T) {
 	}
 	h.baseProfile(ctx, "other")
 
-	if _, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600)); err != nil {
+	if _, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600))); err != nil {
 		t.Fatal(err)
 	}
-	othersWorkout, err := h.training.CreateWorkout(ctx, generated("other", otherGoal.ID, "Endurance ride", replanFriday, 3600))
+	othersWorkout, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("other", otherGoal.ID, "Endurance ride", replanFriday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}

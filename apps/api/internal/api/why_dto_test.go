@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -32,10 +33,10 @@ type whyWorkoutOut struct {
 
 func plainWorkout(t *testing.T, h *trainingHarness, rider, name, date string) workout.Workout {
 	t.Helper()
-	wk, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	wk, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.SportCycling, Name: name, Date: date,
 		Steps: []workout.WorkoutStep{{Name: "ride", Duration: workout.DurationTime, Seconds: 3600, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

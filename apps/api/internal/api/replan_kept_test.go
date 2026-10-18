@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/crewplan"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -22,7 +23,7 @@ func TestReplanLeavesAKeptSessionAloneWhichEverFeatureKeptIt(t *testing.T) {
 			ctx := context.Background()
 			kept := h.hardSession(t, "2026-10-10", 60)
 			d := scheduler.GeneratedDescription + " " + marker
-			if _, err := h.store.UpdateWorkout(ctx, kept.ID, workout.UpdateWorkoutRequest{Description: &d}); err != nil {
+			if _, err := h.store.UpdateWorkout(ctx, kept.ID, workout.UpdateWorkoutRequest{Description: &d, Flags: api.LegacyFlagsAfter(kept, d)}); err != nil {
 				t.Fatal(err)
 			}
 			if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/replan", ""); resp.StatusCode != http.StatusOK {

@@ -363,6 +363,7 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 
 	req, _ := fitnesstest.BuildTestWorkout(protocol, ftp)
 	req.Rider, req.TestProtocol, req.Date = rider, protocol, body.Date
+	req.Flags = workout.Flags{Origin: workout.OriginTest}
 	if body.Date != "" {
 		_, focus, _, err := s.focusPlan(ctx, rider, now)
 		if err != nil {
@@ -628,8 +629,9 @@ func (s *Server) easeBeforeFTPTests(ctx context.Context, rider string, workouts 
 		easy := scheduler.EasyVariant(wk, profile)
 		note := adapter.Note(adapter.Change{Reason: scheduler.EasedBeforeTestReason})
 		description := wk.Description + " " + note + " Replaces: " + wk.Name + "."
+		flags := workout.CurrentFlags(wk).WithAdaptation(why.FTPTestEve)
 		update := workout.UpdateWorkoutRequest{
-			Name: &easy.Name, Steps: &easy.Steps, Zone: &easy.Zone, Level: &easy.Level, Description: &description,
+			Name: &easy.Name, Steps: &easy.Steps, Zone: &easy.Zone, Level: &easy.Level, Description: &description, Flags: &flags,
 		}
 		s.keepIndoor(&update, wk, profile, easy.Zone)
 		if _, err := s.Training.UpdateWorkout(ctx, wk.ID, update); err != nil {

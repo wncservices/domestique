@@ -295,9 +295,9 @@ func timedStep(name string, intensity workout.Intensity, sec, watts float64) wor
 // seedWorkout creates a cycling workout on date and returns it.
 func (h *wrHarness) seedWorkout(rider, name string, zone workout.Zone, date string, steps ...workout.WorkoutStep) workout.Workout {
 	h.t.Helper()
-	wk, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	wk, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.SportCycling, Name: name, Date: date, Zone: zone, Steps: steps,
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}

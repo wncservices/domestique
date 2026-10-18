@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -68,11 +69,11 @@ func assertTrainerShape(t *testing.T, steps []workout.WorkoutStep) {
 // variant is still long enough to be shortened indoors.
 func tomorrowLongHard(h *tomorrowHarness, date string) workout.Workout {
 	h.t.Helper()
-	w, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	w, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goalID, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Date: date, Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 5, Steps: longRideSteps(9600),
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestAFatigueSwapKeepsAnIndoorSessionIndoor(t *testing.T) {
 	}
 	req := generated("wilant", goal.ID, "VO2max intervals", now.Format("2006-01-02"), 3600)
 	req.Steps = longRideSteps(9600)
-	hard, err := h.store.CreateWorkout(ctx, req)
+	hard, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(req))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,11 +286,11 @@ func TestAStruggledSessionStepDownKeepsTheNextIndoorSessionIndoor(t *testing.T) 
 	if _, err := h.store.SaveProfile(ctx, adaptProfile(false)); err != nil {
 		t.Fatal(err)
 	}
-	struggled, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	struggled, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12", Date: "2026-03-17",
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,11 +303,11 @@ func TestAStruggledSessionStepDownKeepsTheNextIndoorSessionIndoor(t *testing.T) 
 	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{SessionID: sess.ID, Rider: "wilant", WorkoutID: struggled.ID, Outcome: "struggled"}); err != nil {
 		t.Fatal(err)
 	}
-	next, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	next, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8", Date: "2026-03-21",
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneThreshold, Level: 4,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +341,7 @@ func TestEasingTheDayBeforeAnFTPTestKeepsAnIndoorSessionIndoor(t *testing.T) {
 	}
 	req := hardGenerated("wilant", goal.ID, "Threshold intervals", replanThursday)
 	req.Steps = longRideSteps(9600)
-	hard, err := h.training.CreateWorkout(ctx, req)
+	hard, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(req))
 	if err != nil {
 		t.Fatal(err)
 	}

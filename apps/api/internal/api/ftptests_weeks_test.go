@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -19,10 +20,10 @@ func TestAScheduledTestDoesNotStopTheTickFillingThatWeek(t *testing.T) {
 	_, nextMon := weekBounds(h.now)                          // now is Wednesday 2026-10-07
 	testDay := nextMon.AddDate(0, 0, 5).Format("2006-01-02") // Saturday, one of the rider's days
 
-	if _, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "FTP Test (ramp)", GoalID: h.goal.ID, Date: testDay,
 		Description: "The ramp test.", TestProtocol: "ramp",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,10 +72,10 @@ func TestReplacingAPlannedSessionWithATestSticksAcrossTicks(t *testing.T) {
 	if err := h.store.DeleteWorkout(ctx, victim.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "FTP Test (ramp)", GoalID: h.goal.ID, Date: victim.Date,
 		Description: "The ramp test.", TestProtocol: "ramp",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 

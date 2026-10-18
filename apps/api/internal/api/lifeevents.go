@@ -512,7 +512,9 @@ func (s *Server) keepThroughReturn(ctx context.Context, wk workout.Workout) erro
 		return nil
 	}
 	description := strings.TrimRight(wk.Description, " \n") + " " + lifeevents.KeptMarker
-	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &description})
+	flags := workout.CurrentFlags(wk)
+	flags.Kept = workout.KeptLife
+	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &description, Flags: &flags})
 	return err
 }
 

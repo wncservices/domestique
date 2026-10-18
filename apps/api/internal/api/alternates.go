@@ -305,8 +305,10 @@ func (s *Server) handleAlternateApply(w http.ResponseWriter, r *http.Request) {
 	name, zone, level, steps := opt.Name, opt.Zone, opt.Level, opt.Steps
 	description := addNote(wk.Description, fmt.Sprintf("%s %s, was %s (%s).",
 		scheduler.SwappedMarker, opt.Kind, wk.Name, swapDuration(workout.PlannedSeconds(wk.Steps))))
+	flags := workout.CurrentFlags(wk)
+	flags.Swapped = true
 	req := workout.UpdateWorkoutRequest{
-		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description,
+		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description, Flags: &flags,
 		// Kept by the store when the session already has one, so it is always
 		// the plan's version, never the previous swap's.
 		PlannedSnapshot: plannedSnapshotOf(wk),
@@ -359,8 +361,11 @@ func (s *Server) handleAlternateRevert(w http.ResponseWriter, r *http.Request) {
 		outdoor = append([]workout.WorkoutStep{}, *snap.OutdoorSteps...)
 	}
 	description := addNote(snap.Description, scheduler.SwappedMarker+" "+revertPlannedNote)
+	flags := workout.CurrentFlags(wk)
+	flags.Swapped = true
+	flags = flagsFollowingText(flags, wk, description)
 	req := workout.UpdateWorkoutRequest{
-		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description,
+		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description, Flags: &flags,
 		Indoor: &indoorFlag, OutdoorSteps: &outdoor, ClearPlannedSnapshot: true,
 	}
 	if snap.Sport != "" {

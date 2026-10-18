@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -69,9 +70,9 @@ func TestAnAutomaticMoveRecordsItsRuleOnceAndASecondPassAddsNothing(t *testing.T
 	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{Rider: "wilant", HoursPerAvailableDay: 1.5, AvailableDays: []string{"tue", "fri", "sat"}}); err != nil {
 		t.Fatal(err)
 	}
-	tempo, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Tempo ride", "2026-03-24", 3600))
-	easy, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", "2026-03-27", 3600))
-	_, _ = h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Long ride", "2026-03-28", 5400))
+	tempo, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Tempo ride", "2026-03-24", 3600)))
+	easy, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", "2026-03-27", 3600)))
+	_, _ = h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Long ride", "2026-03-28", 5400)))
 
 	h.srv.AdaptWorkouts(ctx)
 
@@ -163,11 +164,11 @@ func TestAChangeThatCannotBeAppliedRecordsNothing(t *testing.T) {
 	}
 	// A running sweet-spot session is a structured zone with no ladder for its
 	// sport, so the step-down is chosen and then cannot be built.
-	w, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	w, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goalID, Sport: model.SportRunning, Name: "Sweet spot run",
 		Date: tmToday, Description: scheduler.GeneratedDescription, Zone: workout.ZoneSweetSpot, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

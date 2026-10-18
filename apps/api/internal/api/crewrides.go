@@ -320,6 +320,7 @@ func (s *Server) fixedSessionRequest(ctx context.Context, in goingInput) (workou
 		Description: crewRideDescription(in.crew.Name, in.route.Name, est),
 		Zone:        workout.ZoneEndurance,
 		CrewRideID:  in.ride.ID,
+		Flags:       workout.Flags{Origin: workout.OriginCrew},
 		Steps: []workout.WorkoutStep{{
 			Name: "Crew ride", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
 			Seconds: est.Seconds(), Target: workout.TargetOpen,

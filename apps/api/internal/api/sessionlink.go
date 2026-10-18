@@ -148,6 +148,10 @@ func (s *Server) handleLinkSession(w http.ResponseWriter, r *http.Request) {
 		date := sess.Date
 		req := workout.UpdateWorkoutRequest{Date: &date}
 		req.Description = recordManualMove(target, req)
+		if req.Description != nil && *req.Description != target.Description {
+			flags := riderEditFlags(target, req)
+			req.Flags = &flags
+		}
 		if _, err := s.Training.UpdateWorkout(ctx, target.ID, req); err != nil {
 			s.fail(w, err)
 			return

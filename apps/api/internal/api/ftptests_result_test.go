@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -87,7 +88,7 @@ func newFTPResultHarnessAt(t *testing.T, protocol string, watts, seconds int, pr
 		t.Fatalf("unknown protocol %q", protocol)
 	}
 	req.Rider, req.Date, req.TestProtocol = "wilant", start.Format("2006-01-02"), protocol
-	test, err := h.srv.Training.CreateWorkout(ctx, req)
+	test, err := h.srv.Training.CreateWorkout(ctx, api.LegacyFlagged(req))
 	if err != nil {
 		t.Fatal(err)
 	}

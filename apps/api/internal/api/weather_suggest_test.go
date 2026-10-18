@@ -112,7 +112,7 @@ func (h *weatherHarness) planned(rider, name, date string, mutate ...func(*worko
 	for _, m := range mutate {
 		m(&req)
 	}
-	w, err := h.training.CreateWorkout(context.Background(), req)
+	w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(req))
 	if err != nil {
 		h.t.Fatal(err)
 	}

@@ -34,10 +34,10 @@ func summaryOnWeatherHarness(t *testing.T) (*weatherHarness, *notifier, *morning
 
 func seedTodayWorkout(t *testing.T, h *weatherHarness, rider string) workout.Workout {
 	t.Helper()
-	w, err := h.training.CreateWorkout(t.Context(), workout.CreateWorkoutRequest{
+	w, err := h.training.CreateWorkout(t.Context(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: rider, Name: "Endurance ride", Date: "2026-03-25", Zone: workout.ZoneEndurance,
 		Steps: []workout.WorkoutStep{{Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 7200, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

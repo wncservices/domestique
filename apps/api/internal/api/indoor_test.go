@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -70,10 +71,10 @@ func (h *pushHarness) indoorSetup(smart bool) string {
 
 func (h *pushHarness) indoorRide(goalID, date string, mainSecs float64) workout.Workout {
 	h.t.Helper()
-	w, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goalID, Sport: model.SportCycling, Name: "Long ride", Date: date,
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneEndurance, Steps: longRideSteps(mainSecs),
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -209,10 +210,10 @@ func TestConvertIsRefusedForRiddenPastRunningAndOtherRiders(t *testing.T) {
 	past := h.indoorRide(goal, indoorYesterday, 3600)
 	today := h.indoorRide(goal, indoorToday, 3600)
 	future := h.indoorRide(goal, indoorFuture, 3600)
-	run, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	run, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportRunning, Name: "Easy run", Date: indoorFuture,
 		Steps: []workout.WorkoutStep{{Name: "Run", Duration: workout.DurationTime, Seconds: 1800, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,10 +263,10 @@ func TestRevertRestoresTheOriginalStepsExactly(t *testing.T) {
 			{Name: "Off", Intensity: workout.IntensityRecovery, Duration: workout.DurationOpen},
 		}},
 	}
-	orig, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	orig, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal, Sport: model.SportCycling, Name: "Hill repeats", Date: indoorFuture,
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneThreshold, Level: 3, Steps: nested,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

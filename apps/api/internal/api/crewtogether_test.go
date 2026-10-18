@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -49,7 +50,7 @@ func (h *crewPlanHarness) togetherSetup() togetherSetup {
 	ctx := context.Background()
 	mk := func(rider string, goal workout.Goal, date string) workout.Workout {
 		req := genZone(rider, goal.ID, "Long ride", date, workout.ZoneEndurance, 3*3600)
-		w, err := h.training.CreateWorkout(ctx, req)
+		w, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(req))
 		if err != nil {
 			h.t.Fatal(err)
 		}
@@ -256,7 +257,7 @@ func TestNoProposalWithoutTwoOpenRidersEachWithAQualifyingRide(t *testing.T) {
 	t.Run("a hard session the day before Saturday pushes it to Sunday", func(t *testing.T) {
 		h := newCrewPlanHarness(t)
 		ts := h.togetherSetup()
-		if _, err := h.training.CreateWorkout(context.Background(), genZone("sam", ts.sGoal.ID, "Threshold", cpFriday, workout.ZoneThreshold, 5400)); err != nil {
+		if _, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(genZone("sam", ts.sGoal.ID, "Threshold", cpFriday, workout.ZoneThreshold, 5400))); err != nil {
 			t.Fatal(err)
 		}
 		h.optIn("wilant", ts.crewID, "sat", "sun")
@@ -314,9 +315,9 @@ func TestAProposalGoesStaleWhenItsPremiseStopsHoldingAndIsHidden(t *testing.T) {
 	})
 	t.Run("the day was filled", func(t *testing.T) {
 		h, ts, _ := setup(t)
-		if _, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		if _, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 			Rider: "wilant", Sport: model.SportCycling, Name: "My own ride", Date: cpSaturday, Description: "mine", Steps: step(3600),
-		}); err != nil {
+		})); err != nil {
 			t.Fatal(err)
 		}
 		// Saturday is no longer free for wilant: the week is proposed again for Sunday.

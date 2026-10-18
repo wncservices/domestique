@@ -12,6 +12,7 @@ import (
 	"github.com/muktihari/fit/profile/filedef"
 	"github.com/muktihari/fit/profile/typedef"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -65,13 +66,13 @@ func TestConvertingAPushedWorkoutUpdatesItsCopyUnderTheSameRemoteIDAndRevertDoes
 func TestFlaggingAnFTPTestIndoorRePushesItWithoutChangingItsSteps(t *testing.T) {
 	h := newPushHarness(t)
 	h.indoorSetup(false)
-	test, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	test, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "FTP Test (twenty minute)", Date: tomorrow(),
 		TestProtocol: "twenty_minute", Steps: []workout.WorkoutStep{
 			{Name: "Warmup", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime, Seconds: 600, Target: workout.TargetOpen},
 			{Name: "Effort", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 1200, Target: workout.TargetOpen},
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

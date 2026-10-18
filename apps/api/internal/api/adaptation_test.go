@@ -39,9 +39,9 @@ func TestAMissedKeySessionIsMadeUpInPlaceOfTheNextEasyDay(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tempo, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Tempo ride", "2026-03-24", 3600))
-	easy, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", "2026-03-27", 3600))
-	_, _ = h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Long ride", "2026-03-28", 5400))
+	tempo, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Tempo ride", "2026-03-24", 3600)))
+	easy, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", "2026-03-27", 3600)))
+	_, _ = h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Long ride", "2026-03-28", 5400)))
 
 	h.srv.AdaptWorkouts(ctx)
 
@@ -102,8 +102,8 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 
 	today := now.Format("2006-01-02")
 	inThreeDays := now.AddDate(0, 0, 3).Format("2006-01-02")
-	hard, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "VO2max intervals", today, 3600))
-	later, _ := h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "VO2max intervals", inThreeDays, 3600))
+	hard, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "VO2max intervals", today, 3600)))
+	later, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "VO2max intervals", inThreeDays, 3600)))
 
 	h.srv.AdaptWorkouts(ctx)
 
@@ -143,12 +143,12 @@ func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	struggledWorkout, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,12 +169,12 @@ func TestAStruggledKeySessionStepsTheNextSameZoneWorkoutDown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	nextThreshold, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	nextThreshold, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
 		Date: "2026-03-21", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 4,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,12 +249,12 @@ func TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle(t
 		t.Fatal(err)
 	}
 
-	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	struggledWorkout, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,21 +275,21 @@ func TestASecondAdaptationPassDoesNotStepDownASecondWorkoutFromTheSameStruggle(t
 	// exposed the bug: stepDownTarget always picks "the next untouched one,"
 	// so once the first is touched a naive re-run just advances to the
 	// second.
-	firstTarget, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	firstTarget, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
 		Date: "2026-03-20", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 4,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondTarget, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	secondTarget, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x6",
 		Date: "2026-03-22", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 4,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 2400}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,12 +349,12 @@ func TestAMissedSessionRescheduledOntoAStepDownCandidateIsNotAlsoSteppedDown(t *
 		t.Fatal(err)
 	}
 
-	struggledWorkout, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	struggledWorkout, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Date: "2026-03-16", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,12 +375,12 @@ func TestAMissedSessionRescheduledOntoAStepDownCandidateIsNotAlsoSteppedDown(t *
 	// window, dated after the struggled session, and never ridden — every
 	// condition stepDownTarget's own candidate search checks, on top of
 	// being this week's own missed key session.
-	missed, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	missed, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal.ID, Sport: model.SportCycling, Name: "Threshold 3x8",
 		Date: "2026-03-17", Description: scheduler.GeneratedDescription,
 		Zone: workout.ZoneThreshold, Level: 4,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3000}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,8 +413,8 @@ func TestARidersOwnWorkoutsAreNeverAdapted(t *testing.T) {
 	}
 	mine := generated("wilant", goal.ID, "Tempo ride", "2026-03-24", 3600)
 	mine.Description = "my own session"
-	own, _ := h.store.CreateWorkout(ctx, mine)
-	_, _ = h.store.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", "2026-03-27", 3600))
+	own, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(mine))
+	_, _ = h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", "2026-03-27", 3600)))
 
 	h.srv.AdaptWorkouts(ctx)
 

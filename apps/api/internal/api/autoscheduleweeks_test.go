@@ -127,10 +127,10 @@ func TestAutoScheduleTickLeavesRiderChangesToNextWeekAlone(t *testing.T) {
 	if err := h.store.DeleteWorkout(ctx, deleted.ID); err != nil {
 		t.Fatal(err)
 	}
-	own, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	own, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: edited.Sport, Name: "Coffee ride", Date: nextMon.AddDate(0, 0, 2).Format("2006-01-02"),
 		Steps: edited.Steps,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

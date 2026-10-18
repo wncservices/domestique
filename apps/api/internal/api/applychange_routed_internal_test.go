@@ -17,10 +17,10 @@ func TestApplyChangeRefusesToDeleteARoutedEasyDay(t *testing.T) {
 	ctx := t.Context()
 	step := []workout.WorkoutStep{{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3600, Target: workout.TargetOpen}}
 	create := func(name, date string) workout.Workout {
-		w, err := s.Training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		w, err := s.Training.CreateWorkout(ctx, legacyFlagged(workout.CreateWorkoutRequest{
 			Rider: "wilant", GoalID: "g", Sport: model.SportCycling, Name: name, Date: date,
 			Description: scheduler.GeneratedDescription, Steps: step,
-		})
+		}))
 		if err != nil {
 			t.Fatal(err)
 		}

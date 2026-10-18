@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 )
 
@@ -18,7 +19,7 @@ func TestAnFTPTestIsNotScheduledOverAKeptSession(t *testing.T) {
 			goal := h.scheduleSetup(250)
 			req := generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600)
 			req.Description += " " + marker
-			kept, err := h.training.CreateWorkout(ctx, req)
+			kept, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(req))
 			if err != nil {
 				t.Fatal(err)
 			}

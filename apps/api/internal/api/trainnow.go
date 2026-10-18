@@ -356,8 +356,10 @@ func (s *Server) replaceWithSuggestion(ctx context.Context, wk workout.Workout, 
 	name, zone, level, steps := sg.Name, sg.Zone, sg.Level, sg.Steps
 	description := addNote(wk.Description, fmt.Sprintf("%s for a %d-minute day, was %s (%s).",
 		scheduler.SwappedMarker, minutes, wk.Name, swapDuration(workout.PlannedSeconds(wk.Steps))))
+	flags := workout.CurrentFlags(wk)
+	flags.Swapped = true
 	req := workout.UpdateWorkoutRequest{
-		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description,
+		Name: &name, Zone: &zone, Level: &level, Steps: &steps, Description: &description, Flags: &flags,
 		PlannedSnapshot: plannedSnapshotOf(wk),
 	}
 	// A suggestion is built for its own sport; the snapshot keeps the session's,

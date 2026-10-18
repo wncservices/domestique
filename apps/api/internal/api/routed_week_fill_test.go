@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -24,11 +25,11 @@ func TestAGoalEditFillsTheCurrentWeekAroundARoutedRide(t *testing.T) {
 	if _, err := h.conn.Exec(`DELETE FROM scheduled_weeks`); err != nil {
 		t.Fatal(err)
 	}
-	routed, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	routed, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goal.ID, Sport: model.SportCycling, Name: "Loop", Date: "2026-10-10",
 		Description: "Sized to Loop.",
 		Steps:       []workout.WorkoutStep{{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3600, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

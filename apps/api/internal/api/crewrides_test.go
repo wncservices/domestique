@@ -388,7 +388,7 @@ func TestAutoPushNeverSendsACrewRide(t *testing.T) {
 	}
 	h.mustGo("wilant", today.ID)
 	// A plain plan-made session today is the control: it is pushed.
-	if _, err := h.training.CreateWorkout(context.Background(), generated("wilant", goal.ID, "Control ride", cpToday, 3600)); err != nil {
+	if _, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(generated("wilant", goal.ID, "Control ride", cpToday, 3600))); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.training.SaveProfile(context.Background(), workout.RiderProfile{Rider: "wilant", AutoPushWorkouts: true, HoursPerAvailableDay: 1, AvailableDays: []string{"wed"}}); err != nil {

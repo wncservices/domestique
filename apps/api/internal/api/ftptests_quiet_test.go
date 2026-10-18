@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -16,9 +17,9 @@ func TestARecentlyReadTestSilencesTheBannerEvenIfUnreadable(t *testing.T) {
 		t.Fatal("precondition: a stale FTP should be suggested")
 	}
 	ctx := context.Background()
-	w, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	w, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "FTP Test (ramp)", Date: "2031-03-16", TestProtocol: "ramp",
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

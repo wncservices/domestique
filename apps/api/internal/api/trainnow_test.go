@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -220,10 +221,10 @@ func TestTrainNowPlannedIsTheNextUndoneSessionWhenTodaysIsRiddenOrMissing(t *tes
 func TestTrainNowATestIsNeverThePlannedBase(t *testing.T) {
 	h := newReplanHarness(t)
 	goal := h.tnSetup(false)
-	if _, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal, Sport: model.SportCycling, Name: "FTP Test (ramp)", Date: indoorToday,
 		Description: "A test.", TestProtocol: "ramp", Steps: altSteps(t, "threshold", 4),
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	_, out := h.tnGet("wilant", "cyclists", "?minutes=60")
@@ -417,10 +418,10 @@ func TestApplyReplacesTodaysUntouchedPlanSessionInPlaceAndRevertUndoesIt(t *test
 func TestApplyAddsBesideEverythingThatIsNotAnUntouchedPlanSession(t *testing.T) {
 	cases := map[string]func(h *pushHarness, goal string) workout.Workout{
 		"a rider-built session": func(h *pushHarness, goal string) workout.Workout {
-			w, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+			w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 				Rider: "wilant", Sport: model.SportCycling, Name: "My ride", Date: indoorToday, Description: "mine",
 				Steps: altSteps(t, "threshold", 4),
-			})
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -429,7 +430,7 @@ func TestApplyAddsBesideEverythingThatIsNotAnUntouchedPlanSession(t *testing.T) 
 		"an adjusted session": func(h *pushHarness, goal string) workout.Workout {
 			w := h.altRung(goal, indoorToday, "threshold", 4)
 			desc := w.Description + " " + scheduler.AdjustedMarker + " eased."
-			got, err := h.training.UpdateWorkout(context.Background(), w.ID, workout.UpdateWorkoutRequest{Description: &desc})
+			got, err := h.training.UpdateWorkout(context.Background(), w.ID, workout.UpdateWorkoutRequest{Description: &desc, Flags: api.LegacyFlagsAfter(w, desc)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -443,10 +444,10 @@ func TestApplyAddsBesideEverythingThatIsNotAnUntouchedPlanSession(t *testing.T) 
 			return h.stored(w.ID)
 		},
 		"an FTP test": func(h *pushHarness, goal string) workout.Workout {
-			w, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+			w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 				Rider: "wilant", GoalID: goal, Sport: model.SportCycling, Name: "FTP Test (ramp)", Date: indoorToday,
 				Description: "A test.", TestProtocol: "ramp", Steps: altSteps(t, "threshold", 4),
-			})
+			}))
 			if err != nil {
 				t.Fatal(err)
 			}
