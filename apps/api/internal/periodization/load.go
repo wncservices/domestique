@@ -296,7 +296,7 @@ func (r loadRun) taper(weeks []Week, st loadState) []Week {
 		}
 		return c - a
 	}
-	l := lo
+	var l float64
 	switch {
 	case tsb(lo) <= r.load.TaperTSB:
 		l = lo
