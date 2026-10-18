@@ -1064,7 +1064,12 @@ const pageState = computed(() =>
       />
     </template>
 
-    <DetailsToggle v-if="goals.length || workouts.length" v-model:open="goalsOpen" label="Goals and workouts">
+    <!-- Not while goals are loading or failed: GoalsSection would say "No goals yet". -->
+    <DetailsToggle
+      v-if="pageState !== 'loading' && pageState !== 'failed' && (goals.length || workouts.length)"
+      v-model:open="goalsOpen"
+      label="Goals and workouts"
+    >
       <GoalsSection
         :goals="goals"
         :workouts="workouts"

@@ -6,6 +6,7 @@
 import { computed } from 'vue'
 import type { FitnessResponse } from '@/api/types'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import StatTile from '@/components/ui/StatTile.vue'
 import { formStatus, latestWithDelta } from '@/utils/fitnessMath'
 import { statusCardState, summaryTiles } from '@/utils/fitnessSummary'
@@ -58,8 +59,10 @@ const explanation = computed(() => {
       :actions="[{ label: 'Set up from my devices', icon: 'i-lucide-refresh-cw', loading: syncing, onClick: () => emit('sync') }]"
     />
 
+    <SkeletonCard v-if="state === 'loading'" :lines="2" label="Loading your fitness…" />
+
     <UAlert
-      v-if="state === 'failed'"
+      v-else-if="state === 'failed'"
       color="error"
       variant="subtle"
       icon="i-lucide-triangle-alert"
