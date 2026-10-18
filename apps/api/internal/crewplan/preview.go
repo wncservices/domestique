@@ -407,7 +407,7 @@ func (p *previewer) shorten(kind Kind) {
 		p.diff.Changes = append(p.diff.Changes, Change{
 			ID: OpShorten + ":" + w.ID, Op: OpShorten, WorkoutID: w.ID, Date: w.Date, Name: w.Name,
 			Reason: capitalise(reason) + ".",
-			Update: &workout.UpdateWorkoutRequest{Steps: &req.Steps, Description: &desc, Flags: adaptedFlags(w, why.Legacy)},
+			Update: &workout.UpdateWorkoutRequest{Steps: &req.Steps, Description: &desc, Flags: adaptedFlags(w, why.CrewRideShorten)},
 		})
 	}
 }
@@ -508,7 +508,7 @@ func easeChange(w workout.Workout, profile workout.RiderProfile, row workout.Wor
 // w was before the change and gets a fresh slice every time, so two changes can
 // never share a backing array.
 func adaptedFlags(w workout.Workout, rule why.Rule) *workout.Flags {
-	f := workout.LegacyFlags(w).WithAdaptation(rule)
+	f := workout.CurrentFlags(w).WithAdaptation(rule)
 	return &f
 }
 

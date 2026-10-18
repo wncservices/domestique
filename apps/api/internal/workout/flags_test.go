@@ -80,3 +80,15 @@ func TestWithAdaptationDoesNotAlias(t *testing.T) {
 		t.Error("Adapted wrong")
 	}
 }
+
+func TestCurrentFlagsPrefersStoredColumns(t *testing.T) {
+	stored := Flags{Origin: OriginPlan, AdaptedRules: []why.Rule{why.ReadinessRest}}
+	w := Workout{GoalID: "g", Description: GeneratedDescription, Flags: stored}
+	if got := CurrentFlags(w); len(got.AdaptedRules) != 1 || got.AdaptedRules[0] != why.ReadinessRest {
+		t.Errorf("stored flags lost: %+v", got)
+	}
+	w.Flags = Flags{}
+	if got := CurrentFlags(w); got.Origin != OriginPlan {
+		t.Errorf("legacy fallback = %+v", got)
+	}
+}
