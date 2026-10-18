@@ -284,7 +284,9 @@ func (s *Server) countAdjustedAmong(ctx context.Context, rider string, ids []str
 	}
 	n := 0
 	for _, wk := range workouts {
-		if want[wk.ID] && wk.Flags.Adapted() {
+		// EasedBy, not Adapted: a session only made longer to pay back owed load
+		// was not eased.
+		if want[wk.ID] && len(wk.Flags.EasedBy()) > 0 {
 			n++
 		}
 	}

@@ -352,10 +352,13 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 }
 
 // lifeRamped is a plan-made session whose only automatic change is a life
-// event's return ramp (not a readiness easing, not a swap, not a move).
+// event's return ramp (not a readiness easing, not a swap, not a move). A load
+// repayment is not a change of that kind: it makes the session bigger and never
+// locks it, so a repaid-then-ramped session is still the ramp's to redo.
 func lifeRamped(w workout.Workout) bool {
+	eased := w.Flags.EasedBy()
 	return w.GoalID != "" && w.Flags.Origin == workout.OriginPlan && !w.Flags.Swapped &&
-		len(w.Flags.AdaptedRules) == 1 && workout.IsLifeRule(w.Flags.AdaptedRules[0])
+		len(eased) == 1 && workout.IsLifeRule(eased[0])
 }
 
 func (p *planner) leave(w workout.Workout, why string) {

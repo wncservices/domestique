@@ -191,6 +191,10 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		// the push, so an adjustment reaches the rider's watch in the same
 		// pass that makes it rather than half an hour later.
 		s.AdaptWorkouts(ctx)
+		// After adaptation so a week's owed load is measured on the plan as
+		// easing and moving left it, and before the push so a lengthened
+		// session reaches the watch in this same pass.
+		s.repayLoad(ctx)
 		s.autoPushWorkouts(ctx)
 	})
 }
