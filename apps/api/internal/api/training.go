@@ -1372,7 +1372,8 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		req.Zone = &zone
 	}
 	req.Description = recordManualMove(wk, req)
-	if req.Description != nil && *req.Description != wk.Description {
+	goalChanged := req.GoalID != nil && *req.GoalID != wk.GoalID
+	if (req.Description != nil && *req.Description != wk.Description) || goalChanged {
 		flags := riderEditFlags(wk, req)
 		req.Flags = &flags
 	}
@@ -1431,7 +1432,10 @@ func riderEditFlags(wk workout.Workout, req workout.UpdateWorkoutRequest) workou
 	if req.GoalID != nil {
 		goalID = *req.GoalID
 	}
-	desc := *req.Description
+	desc := wk.Description
+	if req.Description != nil {
+		desc = *req.Description
+	}
 	f = flagsFollowingText(f, wk, desc)
 	if f.Origin == workout.OriginPlan && (goalID == "" || !strings.HasPrefix(desc, workout.GeneratedDescription)) {
 		f.Origin = workout.OriginRider
@@ -1442,8 +1446,10 @@ func riderEditFlags(wk workout.Workout, req workout.UpdateWorkoutRequest) workou
 // flagsFollowingText makes f agree with what desc, the description now being
 // stored on wk, says: markers the new text no longer carries are gone, and a
 // move note it carries is the move. It keeps the origin and the exact rule ids
-// of whatever adaptation is left. It exists for the writers that replace the
-// whole description (a rider's PUT, "Back to planned version") rather than
+// of whatever adaptation is left. Clamping Swapped, Kept and the move to the new
+// text is deliberate parity with today's behaviour, where a rewrite wiped the
+// markers. It exists for the writers that replace the
+// whole description (a rider's PATCH, "Back to planned version") rather than
 // append a note.
 func flagsFollowingText(f workout.Flags, wk workout.Workout, desc string) workout.Flags {
 	after := wk
