@@ -15,7 +15,10 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/secrets"
+	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -296,14 +299,16 @@ func TestLifeEventAfterOpenLowersTheTarget(t *testing.T) {
 	}
 }
 
-// A repayment is not an easing: the session stays the plan's, so readiness can
-// still ease it, and a later morning never makes it bigger a second time.
-func TestReadinessCanStillEaseARepaidSession(t *testing.T) {
+// upgradedWeek opens a week with a large carried-in debt and every ride as long
+// as a day may be, so Tuesday morning's pass upgrades one endurance day to a
+// structured session. It returns the harness and that session.
+func upgradedWeek(t *testing.T) (*ledgerHarness, workout.Workout) {
+	t.Helper()
 	h := newLedgerHarness(t, 250)
 	ctx := context.Background()
 	// Open the week with a large carried-in debt, so repayment goes on to
 	// upgrade an endurance day to a structured session after lengthening.
-	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 100, 2000, 7); err != nil {
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 100, 2000, 7, false); err != nil {
 		t.Fatal(err)
 	}
 	// A level above the bottom rung, so an easing has a rung to step down to.
@@ -337,6 +342,14 @@ func TestReadinessCanStillEaseARepaidSession(t *testing.T) {
 	if upgraded.ID == "" {
 		t.Fatal("setup: no session was upgraded to a structured one")
 	}
+	return h, upgraded
+}
+
+// A repayment is not an easing: the session stays the plan's, so readiness can
+// still ease it, and a later morning never makes it bigger a second time.
+func TestReadinessCanStillEaseARepaidSession(t *testing.T) {
+	h, upgraded := upgradedWeek(t)
+	ctx := context.Background()
 	if !scheduler.IsGenerated(upgraded) || len(upgraded.Flags.EasedBy()) != 0 {
 		t.Fatalf("a repaid session reads as touched: %+v", upgraded.Flags)
 	}
@@ -422,7 +435,7 @@ func TestRecoveryWeekIsNotRepaid(t *testing.T) {
 func TestMondayPassRollsAndForgives(t *testing.T) {
 	h := newLedgerHarness(t, 250)
 	ctx := context.Background()
-	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0, 0); err != nil {
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0, 0, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
@@ -492,12 +505,12 @@ func TestRepaidIndoorRideStaysIndoor(t *testing.T) {
 }
 
 // The week strip reads the ledger: what was carried into the current week and
-// what was forgiven when it opened, and the debt the morning pass works from.
+// and what was forgiven when it opened.
 // Another week shows none of it.
 func TestWeekFocusShowsCarriedAndForgiven(t *testing.T) {
 	h := newLedgerHarness(t, 250)
 	ctx := context.Background()
-	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0, 0); err != nil {
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0, 0, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
@@ -513,7 +526,6 @@ func TestWeekFocusShowsCarriedAndForgiven(t *testing.T) {
 
 	type focusOut struct {
 		Focus *struct {
-			DebtTSS     float64 `json:"debtTss"`
 			CarriedTSS  float64 `json:"carriedTss"`
 			ForgivenTSS float64 `json:"forgivenTss"`
 		} `json:"focus"`
@@ -537,20 +549,207 @@ func TestWeekFocusShowsCarriedAndForgiven(t *testing.T) {
 	if want := math.Round(last.ForgivenTSS); cur.Focus.ForgivenTSS != want || want == 0 {
 		t.Errorf("forgivenTss = %v, want %v", cur.Focus.ForgivenTSS, want)
 	}
-	debt, err := h.srv.WeekDebtForTest(ctx, "wilant", "2026-10-12", row)
+	if other := get("/api/training/week?start=2026-10-05"); other.Focus != nil &&
+		(other.Focus.CarriedTSS != 0 || other.Focus.ForgivenTSS != 0) {
+		t.Errorf("a past week shows ledger figures: %+v", other.Focus)
+	}
+}
+
+// The week gets one upgrade, not one per morning: when readiness deletes or
+// eases the upgraded session the structured count drops again, and the next
+// morning must not upgrade a second day.
+func TestUpgradeIsOncePerWeekAcrossDays(t *testing.T) {
+	h, upgraded := upgradedWeek(t)
+	ctx := context.Background()
+	row, _, _ := h.store.GetLedgerWeek(ctx, "wilant", "2026-10-05")
+	if row.UpgradedAt != "2026-10-06" {
+		t.Errorf("upgraded_at = %q, want the day the upgrade landed", row.UpgradedAt)
+	}
+	if err := h.store.DeleteWorkout(ctx, upgraded.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := h.thisWeek(t)
+	h.at(7, 7, 0)
+	h.tick()
+	for _, w := range repaidSince(before, h.thisWeek(t)) {
+		if workout.IsStructuredZone(w.Zone) {
+			t.Errorf("a second upgrade landed on %s (%s)", w.Date, w.Name)
+		}
+	}
+}
+
+// An upgrade rewrites the description, which would drop a rider's move note
+// and make the flags and the text disagree. A moved session is left alone.
+func TestRiderMovedSessionIsNeverUpgraded(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	var logs bytes.Buffer
+	h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 100, 2000, 7, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{Rider: "wilant", HoursPerAvailableDay: 0.5, AvailableDays: ledgerDays, FTPWatts: 250}); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range h.thisWeek(t) {
+		if workout.IsStructuredZone(w.Zone) {
+			if err := h.store.DeleteWorkout(ctx, w.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, w := range h.thisWeek(t) {
+		if w.Zone != workout.ZoneEndurance {
+			continue
+		}
+		flags := workout.CurrentFlags(w)
+		flags.MovedFrom, flags.MovedBy = "2026-10-03", workout.MovedByRider
+		desc := w.Description + " Rescheduled by you, moved from 2026-10-03."
+		if _, err := h.store.UpdateWorkout(ctx, w.ID, workout.UpdateWorkoutRequest{Description: &desc, Flags: &flags}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := h.thisWeek(t)
+	h.at(6, 7, 0)
+	h.tick()
+	for _, w := range repaidSince(before, h.thisWeek(t)) {
+		if workout.IsStructuredZone(w.Zone) {
+			t.Errorf("moved session %s was upgraded", w.Date)
+		}
+	}
+	if strings.Contains(logs.String(), "could not update a workout") {
+		t.Errorf("an update was refused:\n%s", logs.String())
+	}
+}
+
+// A recovery week's shortfall is the plan's easing; it must not roll into the
+// full week after it.
+func TestRecoveryWeekDebtDoesNotRollIntoTheNextWeek(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	profile, _, _ := h.store.GetProfile(ctx, "wilant")
+	plan, err := periodization.Build(h.goal, profile, h.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if debt > 5 {
-		if cur.Focus.DebtTSS != math.Round(debt) {
-			t.Errorf("debtTss = %v, want %v", cur.Focus.DebtTSS, math.Round(debt))
+	var recovery string
+	for i, w := range plan.Weeks {
+		if w.Recovery && w.StartDate > "2026-10-05" && i+1 < len(plan.Weeks) && !plan.Weeks[i+1].Recovery {
+			recovery = w.StartDate
+			break
 		}
-	} else if cur.Focus.DebtTSS != 0 {
-		t.Errorf("debtTss = %v, want it omitted at %.1f", cur.Focus.DebtTSS, debt)
 	}
+	if recovery == "" {
+		t.Fatal("setup: no recovery week followed by a full one")
+	}
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", recovery, 400, 0, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	monday, _ := time.Parse("2006-01-02", recovery)
+	next := monday.AddDate(0, 0, 7)
+	loc, _ := time.LoadLocation("Europe/Brussels")
+	h.now = time.Date(next.Year(), next.Month(), next.Day(), 7, 0, 0, 0, loc).UTC()
+	h.tick()
 
-	if other := get("/api/training/week?start=2026-10-05"); other.Focus != nil &&
-		(other.Focus.CarriedTSS != 0 || other.Focus.ForgivenTSS != 0 || other.Focus.DebtTSS != 0) {
-		t.Errorf("a past week shows ledger figures: %+v", other.Focus)
+	row, ok, err := h.store.GetLedgerWeek(ctx, "wilant", next.Format("2006-01-02"))
+	if err != nil || !ok || row.TargetTSS <= 0 {
+		t.Fatalf("the week after was not opened: %+v ok=%v err=%v", row, ok, err)
+	}
+	if row.CarriedInTSS != 0 {
+		t.Errorf("carried in %.2f from a recovery week, want 0", row.CarriedInTSS)
+	}
+	last, _, _ := h.store.GetLedgerWeek(ctx, "wilant", recovery)
+	if last.ForgivenTSS <= 0 {
+		t.Errorf("forgiven %.2f, want the whole recovery shortfall", last.ForgivenTSS)
+	}
+}
+
+// A rider whose provider sync failed this tick has rides the app has not seen
+// yet: their week must not be read as missed.
+func TestRiderWhoseSyncFailedIsLeftAlone(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	before := h.thisWeek(t)
+	h.srv.NoteMetricsFailureForTest("wilant")
+	h.at(7, 7, 0)
+	h.tick()
+	if got := repaidSince(before, h.thisWeek(t)); len(got) != 0 {
+		t.Errorf("%d sessions repaid for a rider whose sync failed", len(got))
+	}
+	if _, ok, _ := h.store.GetLedgerWeek(context.Background(), "wilant", "2026-10-05"); ok {
+		t.Error("the day was claimed for a rider whose sync failed")
+	}
+}
+
+// linkGarmin gives the harness a stored Garmin session for the rider, last
+// refreshed at updatedAt.
+func linkGarmin(t *testing.T, h *ledgerHarness, updatedAt string) {
+	t.Helper()
+	key, err := secrets.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	box, err := secrets.New(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	links, err := providerlink.UseDB(h.conn, h.srv.Source.(*source.DB).DSN(), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := links.Save("garmin", "wilant", providerlink.Connection{Secret: `{"oauth1Token":"t"}`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.conn.Exec(`UPDATE provider_links SET updated_at = ? WHERE provider = 'garmin' AND rider = 'wilant'`, updatedAt); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.Links = links
+}
+
+// An expired Garmin session cannot sync, so the rider's recent rides are
+// unknown: same rule as a failed sync. A healthy one is repaid as usual.
+func TestRiderWithAnExpiredGarminSessionIsLeftAlone(t *testing.T) {
+	for name, tc := range map[string]struct {
+		updatedAt string
+		repaid    bool
+	}{
+		"expired": {"2020-01-01T00:00:00Z", false},
+		"healthy": {"2026-10-01T00:00:00Z", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newLedgerHarness(t, 250)
+			linkGarmin(t, h, tc.updatedAt)
+			before := h.thisWeek(t)
+			h.at(7, 7, 0)
+			h.tick()
+			if got := len(repaidSince(before, h.thisWeek(t))) > 0; got != tc.repaid {
+				t.Errorf("repaid = %v, want %v", got, tc.repaid)
+			}
+		})
+	}
+}
+
+// Ramp days after an illness are eased on purpose: they are neither a day to
+// repay onto nor load the rider owes.
+func TestIllnessReturnRampIsNotRepaidOnto(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 100, 2000, 7, false); err != nil {
+		t.Fatal(err)
+	}
+	// A mild illness ending Monday: ramp days Tuesday to Thursday.
+	if _, err := h.store.CreateLifeEvent(ctx, workout.LifeEvent{Rider: "wilant", Kind: "illness", Option: "mild", Start: "2026-10-04", End: "2026-10-05"}); err != nil {
+		t.Fatal(err)
+	}
+	before := h.thisWeek(t)
+	h.at(6, 7, 0) // Tuesday morning: Wednesday and Thursday are ramp days
+	h.tick()
+	changed := repaidSince(before, h.thisWeek(t))
+	if len(changed) == 0 {
+		t.Fatal("setup: nothing repaid; the rest of the week should still be")
+	}
+	for _, w := range changed {
+		if w.Date <= "2026-10-08" {
+			t.Errorf("%s (%s) is inside the return ramp and was repaid", w.Date, w.Name)
+		}
 	}
 }

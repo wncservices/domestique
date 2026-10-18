@@ -49,7 +49,9 @@ func RiderKept(w workout.Workout) bool {
 
 // IsPlanSession reports whether w is a session the scheduler made and nothing
 // has changed since: a goal, the generated description, no crew ride, and
-// neither AdjustedMarker nor SwappedMarker. It says nothing about whether the
+// neither AdjustedMarker nor SwappedMarker. A load_repaid adaptation (and
+// the AdjustedMarker it writes) does not count as an easing: repaying load
+// makes a session bigger without taking it out of the plan (EasedBy skips it). It says nothing about whether the
 // rider asked for it to be left alone (RiderKept), so it is for the places that
 // must still *move* such a session out of a day a life event took, or replace
 // it at the rider's own request, not change its content automatically.

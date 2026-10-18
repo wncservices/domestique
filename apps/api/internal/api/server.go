@@ -84,6 +84,12 @@ type Server struct {
 	metricsMu       sync.Mutex
 	lastMetricsSync time.Time
 
+	// metricsFailed is the riders the latest metrics pass could not fully
+	// sync (an error, or a provider that failed). The load ledger reads it so a
+	// ride the app has not seen yet is never counted as a missed one.
+	metricsFailedMu sync.Mutex
+	metricsFailed   map[string]bool
+
 	// Clock, when set, replaces time.Now for the parts of training that
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time

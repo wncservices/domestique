@@ -1436,7 +1436,6 @@ export interface WeekFocus {
   targetHours?: number
   targetTss?: number
   /** Load ledger figures, whole TSS, current week only (mirror weekFocusDTO). */
-  debtTss?: number
   carriedTss?: number
   forgivenTss?: number
 }

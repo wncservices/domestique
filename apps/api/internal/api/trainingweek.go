@@ -9,7 +9,6 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/compliance"
-	"github.com/wncservices/domestique/apps/api/internal/ledger"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -30,10 +29,8 @@ type weekFocusDTO struct {
 	TargetHours float64 `json:"targetHours,omitempty"`
 	TargetTSS   float64 `json:"targetTss,omitempty"`
 	// The load ledger's figures, whole TSS, for the current week only and only
-	// where the ledger runs. DebtTSS is what the morning pass is working off
-	// (omitted at or under ledger.MinDebt, so rounding is not nagged about),
-	// CarriedTSS what last week rolled in, ForgivenTSS what it let go of.
-	DebtTSS     float64 `json:"debtTss,omitempty"`
+	// where the ledger runs. CarriedTSS is what last week rolled in, ForgivenTSS
+	// what it let go of. The debt itself is not sent: the strip never shows it.
 	CarriedTSS  float64 `json:"carriedTss,omitempty"`
 	ForgivenTSS float64 `json:"forgivenTss,omitempty"`
 }
@@ -265,16 +262,5 @@ func (s *Server) fillLedgerFigures(ctx context.Context, rider, weekStart string,
 		} else if found {
 			f.ForgivenTSS = math.Round(last.ForgivenTSS)
 		}
-	}
-	if row.TargetTSS == 0 {
-		return
-	}
-	debt, err := s.weekDebt(ctx, rider, weekStart, row)
-	if err != nil {
-		s.logger().Warn("load ledger: could not work out the debt for the strip", "rider", rider, "err", err)
-		return
-	}
-	if debt > ledger.MinDebt {
-		f.DebtTSS = math.Round(debt)
 	}
 }

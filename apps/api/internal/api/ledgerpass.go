@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
+	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/ledger"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -37,13 +38,38 @@ func (s *Server) repayLoad(ctx context.Context) {
 		return
 	}
 	seen := map[string]bool{}
+	skipped := 0
 	for _, g := range goals {
 		if seen[g.Rider] || ctx.Err() != nil {
 			continue
 		}
 		seen[g.Rider] = true
+		// A rider whose rides cannot be read right now would have them counted
+		// as missed. Leave them untouched; nothing is claimed, so the next
+		// tick of the morning slot tries again.
+		if s.metricsFailedRider(g.Rider) || s.garminSessionExpired(g.Rider) {
+			skipped++
+			continue
+		}
 		s.repayRider(ctx, g.Rider)
 	}
+	if skipped > 0 {
+		s.logger().Warn("load ledger: riders skipped, their rides could not be read", "riders", skipped)
+	}
+}
+
+// garminSessionExpired reports whether the rider has a stored Garmin session
+// past its expected life, the same fact checkGarminExpiry counts. A rider with
+// no Garmin link, or one that cannot be read, is not expired.
+func (s *Server) garminSessionExpired(rider string) bool {
+	if s.Links == nil {
+		return false
+	}
+	link, err := s.Links.Get(garminProvider, rider)
+	if err != nil {
+		return false
+	}
+	return garmin.Session{ObtainedAt: link.UpdatedAt}.Expired(s.now())
 }
 
 // ledgerPlanWeek is the rider's focus goal's plan and its entry for the week
@@ -109,7 +135,9 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 		s.logger().Warn("load ledger: could not read life events", "rider", rider, "err", err)
 		return
 	}
-	blackout := lifeevents.Blackout(events)
+	// The return ramp after an illness is eased on purpose, so its days are
+	// neither repaid onto nor part of what the week owes.
+	blackout := lifeevents.NoTestDays(events)
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
 		s.logger().Warn("load ledger: could not read sessions", "rider", rider, "err", err)
@@ -172,6 +200,7 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 	actions := ledger.PlanRepayment(ledger.RepayInput{
 		Debt: debt, Week: week, From: now.AddDate(0, 0, 1).Format(dateLayout), To: sunday,
 		Profile: profile, Phase: planWeek.Phase, Recovery: planWeek.Recovery, Levels: levels, Blackout: blackout,
+		UpgradedAlready: row.UpgradedAt != "",
 	})
 	byID := make(map[string]workout.Workout, len(week))
 	for _, w := range week {
@@ -189,6 +218,11 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 		if gain > 0 {
 			debt -= gain
 			applied++
+			if a.Kind == "upgrade" {
+				if err := s.Training.MarkLedgerUpgraded(ctx, rider, weekStart, today); err != nil {
+					s.logger().Warn("load ledger: could not record the upgrade", "rider", rider, "err", err)
+				}
+			}
 		}
 	}
 	// Counts only: a TSS next to a rider's name is a fitness value.
@@ -236,9 +270,9 @@ func (s *Server) openLedgerWeek(ctx context.Context, rider string, monday time.T
 		}
 		lastTarget := ledger.EffectiveTarget(last.TargetTSS, last.OpenDays, ledger.OpenDays(profile.AvailableDays, lastStart, blackout))
 		lastDebt := ledger.Debt(lastTarget, last.CarriedInTSS, done, 0)
-		rolled, forgiven = ledger.Settle(lastDebt, last.CarriedInTSS, target, reduced)
+		rolled, forgiven = ledger.Settle(lastDebt, last.CarriedInTSS, target, reduced, last.Reduced)
 	}
-	if err := s.Training.OpenLedgerWeek(ctx, rider, weekStart, target, rolled, openDays); err != nil {
+	if err := s.Training.OpenLedgerWeek(ctx, rider, weekStart, target, rolled, openDays, reduced); err != nil {
 		return workout.LedgerWeek{}, err
 	}
 	if found {
@@ -293,7 +327,9 @@ func (s *Server) applyRepayment(ctx context.Context, rider string, wk workout.Wo
 	if gain <= minRepaidGain {
 		return 0, nil
 	}
-	reason := fmt.Sprintf("Load made up: +%d TSS.", int(math.Round(gain)))
+	// No figure in the text: the description reaches the calendar feed and the
+	// head unit. The Why popover keeps the number through LoadRepaidInputs.
+	reason := "Load made up."
 	withReason := *req.Description + " " + reason
 	req.Description = &withReason
 
@@ -350,6 +386,6 @@ func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row work
 			remaining += workout.PlannedTSSOrHours(w, profile.FTPWatts)
 		}
 	}
-	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, lifeevents.Blackout(events)))
+	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, lifeevents.NoTestDays(events)))
 	return ledger.Debt(target, row.CarriedInTSS, completed, remaining), nil
 }

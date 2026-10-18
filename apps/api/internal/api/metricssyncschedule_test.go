@@ -217,6 +217,10 @@ func TestEveryRiderFailingIsWarnedAndNotRecorded(t *testing.T) {
 
 	h.srv.RunMetricsSyncIfMissed(context.Background())
 
+	// The load ledger reads this: a rider whose sync failed has rides it has not seen.
+	if !h.srv.MetricsFailedForTest("other") {
+		t.Error("a rider whose sync errored was not marked as failed")
+	}
 	out := logs.String()
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "metrics sync: every rider failed") {
 		t.Errorf("want a Warn about every rider failing, got:\n%s", out)

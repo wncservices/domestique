@@ -245,12 +245,16 @@ CREATE INDEX IF NOT EXISTS session_links_rider_idx ON session_links (rider);
 -- load_ledger is the weekly TSS target, what was carried into the week and
 -- what was forgiven out of it, one row per rider per Monday. last_pass_date is
 -- the compare-and-set that makes the daily repayment pass run once per day.
+-- reduced marks a recovery or taper week; upgraded_at is the day the week's one
+-- upgrade landed, so it holds across days even if that session is later eased.
 CREATE TABLE IF NOT EXISTS load_ledger (
     rider          TEXT NOT NULL,
     week_start     TEXT NOT NULL,
     target_tss     DOUBLE PRECISION NOT NULL DEFAULT 0,
     carried_in_tss DOUBLE PRECISION NOT NULL DEFAULT 0,
     open_days      INTEGER NOT NULL DEFAULT 0,
+    reduced        %[2]s NOT NULL DEFAULT FALSE,
+    upgraded_at    TEXT NOT NULL DEFAULT '',
     forgiven_tss   DOUBLE PRECISION NOT NULL DEFAULT 0,
     last_pass_date TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,

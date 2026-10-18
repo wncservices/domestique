@@ -21,14 +21,16 @@ fatigued week therefore does not silently lower the season's load.
 
 ## Storage
 
-Table `load_ledger(rider, week_start, target_tss, carried_in_tss, open_days, forgiven_tss, last_pass_date, created_at, updated_at)`.
+Table `load_ledger(rider, week_start, target_tss, carried_in_tss, open_days, reduced, upgraded_at, forgiven_tss, last_pass_date, created_at, updated_at)`.
 
 | Column | Meaning |
 |---|---|
 | `week_start` | the week's Monday |
 | `target_tss` | the week's target, fixed by the first morning pass of that week |
 | `carried_in_tss` | debt rolled in from the previous week |
-| `open_days` | how many available days were not blacked out when the week opened |
+| `open_days` | how many available days were not blacked out (event days and an illness's return ramp) when the week opened |
+| `reduced` | the week is a recovery or taper week; settling it forgives everything, nothing rolls out of it |
+| `upgraded_at` | the local date the week's one upgrade landed, `''` before; keeps the upgrade to once a week even if that session is later eased or deleted |
 | `forgiven_tss` | debt written off at the end of this week |
 | `last_pass_date` | the local date of the last repayment pass; compare-and-set, so one pass per rider per day across replicas |
 
@@ -60,7 +62,10 @@ debt = target_tss + carried_in_tss − completed − planned_remaining
   Each pass scales the target by (days un-blacked-out now ÷ `open_days`), so an
   event added after the week opened lowers the target instead of becoming debt.
   Settling last week uses the same scaled target. Illness and travel lower the
-  target and never become debt.
+  target and never become debt. The blackout is `lifeevents.NoTestDays`: the
+  event days plus an illness's return ramp, whose easing is deliberate.
+  Dropping an available day from the profile mid-week scales the effective
+  target the same way a blackout does (fewer open days now than at open).
 
 ## Morning pass
 
@@ -76,26 +81,34 @@ summary). For each rider with a CTL-basis focus goal:
    - Settle last week's row, if one exists:
      - `own = max(0, last_debt − last.carried_in_tss)` is last week's own debt.
      - `rolled = min(own, 0.10 × target_tss)` is carried in. It is 0 when this week
-       is recovery or taper.
+       is recovery or taper, and 0 when *last* week was (`reduced`): a reduced
+       week's shortfall is the plan's easing, so all of it is forgiven.
      - Everything else is written to last week's `forgiven_tss`: the unpaid carried
        part plus `own − rolled`.
    - Set `carried_in_tss = rolled`.
 3. **Repay** while debt > 5 TSS and the week is neither recovery nor taper. Only
    sessions dated tomorrow…Sunday are touched, and only if *repayable*: plan-made,
-   generated, not eased, not rider-kept, not routed, not a test, not crew.
+   generated, not eased, not rider-kept, not routed, not a test, not crew, and not
+   on a blackout or return-ramp day. A rider whose provider sync failed in this
+   tick's metrics pass, or whose Garmin session has expired, is skipped whole
+   (Warn with a count, day not claimed): their recent rides are unknown, not missed.
    1. Lengthen endurance and long rides, longest first. Each gets at most
       `+min(30 %, 45 min)`, never past `HoursPerAvailableDay`, and the main step is
       rebuilt with `BuildEnduranceSession`. Indoor rides stay indoor (`keepIndoor`),
       so the trainer cap may give less.
-   2. Upgrade one endurance day to a structured session, at most once a week, when:
+   2. Upgrade one endurance day to a structured session, at most once a week
+      (`upgraded_at`, so it holds across days), never a session the rider moved
+      (`Flags.MovedFrom`: the upgrade rewrites the description), when:
       - debt is still above 20 TSS;
       - the week has fewer structured sessions than the phase allows
         (`scheduler.StructuredSlotCount`);
-      - neither neighbouring day is hard;
+      - neither neighbouring day is hard, an FTP test or a crew ride;
       - FTP is set.
       The zone is the phase's first structured zone, at the rider's level, picked by
       `workoutlib.Pick` within the session's current seconds.
-   3. Each change records `load_repaid` with inputs `{debtBefore, tssAdded}`.
+   3. Each change records `load_repaid` with inputs `{debtBefore, tssAdded}`. The
+      description note is "Load made up." with no figure, since the description
+      reaches the calendar feed and the head unit; the Why popover keeps the number.
 
 ## Eligibility
 
@@ -109,8 +122,8 @@ summary). For each rider with a CTL-basis focus goal:
 
 ## Plan page
 
-- `weekFocusDTO` gains `debtTss`, `carriedTss` and `forgivenTss` (all `omitempty`).
-  `types.ts` mirrors them.
+- `weekFocusDTO` gains `carriedTss` and `forgivenTss` (both `omitempty`).
+  `types.ts` mirrors them. The debt is not sent: the strip never shows it.
 - The week strip reads, after the load label, `· +N TSS carried` and/or
   `· M forgiven` (integers).
 - `why.Title` has titles for `load_repaid` ("Load made up"), `load_rolled` and

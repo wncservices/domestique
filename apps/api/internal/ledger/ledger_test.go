@@ -32,28 +32,37 @@ func TestTargetScalesByBlackoutDays(t *testing.T) {
 
 func TestSettle(t *testing.T) {
 	// own = 60-20 = 40, capped at 10% of 300 = 30.
-	rolled, forgiven := Settle(60, 20, 300, false)
+	rolled, forgiven := Settle(60, 20, 300, false, false)
 	if !near(rolled, 30) || !near(forgiven, 30) {
 		t.Fatalf("got (%v, %v), want (30, 30)", rolled, forgiven)
 	}
 	// own below the cap rolls whole; the carried-in part is never re-rolled.
-	rolled, forgiven = Settle(25, 20, 300, false)
+	rolled, forgiven = Settle(25, 20, 300, false, false)
 	if !near(rolled, 5) || !near(forgiven, 20) {
 		t.Fatalf("got (%v, %v), want (5, 20)", rolled, forgiven)
 	}
 	// a reduced week receives nothing; the whole debt is forgiven.
-	rolled, forgiven = Settle(60, 0, 300, true)
+	rolled, forgiven = Settle(60, 0, 300, true, false)
 	if rolled != 0 || !near(forgiven, 60) {
 		t.Fatalf("got (%v, %v), want (0, 60)", rolled, forgiven)
 	}
 	// debt that is all carry-in rolls nothing.
-	if rolled, _ = Settle(20, 20, 300, false); rolled != 0 {
+	if rolled, _ = Settle(20, 20, 300, false, false); rolled != 0 {
 		t.Fatalf("carried-in debt rolled %v", rolled)
 	}
 }
 
+// A recovery or taper week's shortfall was the plan's easing, not a debt: it
+// rolls into nothing even when the next week is a full one.
+func TestSettleForgivesAReducedLastWeekWhole(t *testing.T) {
+	rolled, forgiven := Settle(60, 0, 300, false, true)
+	if rolled != 0 || !near(forgiven, 60) {
+		t.Fatalf("got (%v, %v), want (0, 60)", rolled, forgiven)
+	}
+}
+
 func TestSettleFirstWeek(t *testing.T) {
-	if r, f := Settle(0, 0, 300, false); r != 0 || f != 0 {
+	if r, f := Settle(0, 0, 300, false, false); r != 0 || f != 0 {
 		t.Fatalf("got (%v, %v)", r, f)
 	}
 }
