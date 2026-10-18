@@ -606,15 +606,37 @@ async function deleteRide(ride: Ride) {
 
 const deletingSeries = ref('')
 
-// Cancels every not-yet-happened occurrence of a series — the ride passed
-// in is just whichever row the rider clicked; only its seriesId matters.
-async function deleteRideSeries(ride: Ride) {
+// Cancelling a series takes every upcoming occurrence off every member's
+// calendar at once, so it asks first. Same pattern as openDelete: the detail
+// popup closes rather than stacking a second modal, and comes back after.
+const seriesTarget = ref<{ crew: Crew; ride: Ride; upcoming: number } | null>(null)
+
+function askDeleteSeries(ride: Ride) {
   const crew = detailCrew.value
   if (!crew || !ride.seriesId) return
-  deletingSeries.value = ride.seriesId
+  const today = todayISO()
+  const upcoming = rides.value.filter((r) => r.seriesId === ride.seriesId && r.date >= today).length
+  seriesTarget.value = { crew, ride, upcoming }
+  detailTarget.value = null
+}
+
+function closeSeriesConfirm() {
+  const crew = seriesTarget.value?.crew
+  seriesTarget.value = null
+  if (crew) openDetail(crew)
+}
+
+// Cancels every not-yet-happened occurrence of a series — the ride is just
+// whichever row the rider clicked; only its seriesId matters.
+async function deleteRideSeries() {
+  const target = seriesTarget.value
+  if (!target?.ride.seriesId) return
+  const { crew, ride } = target
+  deletingSeries.value = ride.seriesId!
   try {
-    await api.deleteRideSeries(crew.id, ride.seriesId, todayISO())
-    await Promise.all([loadRides(crew.id), loadUpcomingRides()])
+    await api.deleteRideSeries(crew.id, ride.seriesId!, todayISO())
+    await loadUpcomingRides()
+    closeSeriesConfirm()
   } catch (err) {
     toast.add({
       title: 'Could not cancel the series',
@@ -779,7 +801,7 @@ function rideActions(ride: Ride): DropdownMenuItem[][] {
       icon: 'i-lucide-calendar-x',
       color: 'error',
       disabled: busy,
-      onSelect: () => deleteRideSeries(ride),
+      onSelect: () => askDeleteSeries(ride),
     })
   }
   return [del]
@@ -1026,6 +1048,22 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
       <template #footer>
         <div class="flex justify-end">
           <UButton color="neutral" variant="ghost" @click="searchOpen = false">Close</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal :open="!!seriesTarget" title="Cancel the whole series?" @update:open="closeSeriesConfirm">
+      <template #body>
+        <p class="text-[length:var(--text-body)] text-toned">
+          {{ seriesTarget?.upcoming === 1 ? 'The one upcoming ride' : `All ${seriesTarget?.upcoming ?? 0} upcoming rides` }}
+          of “{{ seriesTarget?.ride.routeName }}” will be cancelled for everyone in
+          {{ seriesTarget?.crew.name }}. Rides that already happened stay as they are.
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="!!deletingSeries" @click="closeSeriesConfirm">Keep them</UButton>
+          <UButton color="error" :loading="!!deletingSeries" @click="deleteRideSeries">Cancel the series</UButton>
         </div>
       </template>
     </UModal>
