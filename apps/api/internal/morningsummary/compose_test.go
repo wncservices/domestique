@@ -137,17 +137,55 @@ func TestWeatherOnlyWhenBad(t *testing.T) {
 	}
 }
 
-func TestFTPTestSuggestionOnlyWhenDatedToday(t *testing.T) {
-	in := base()
-	in.FTPTest = "2026-10-03"
-	if _, body := Compose(in); !strings.Contains(body, "Today would be a good day for your FTP test.") {
+// The suggester never picks today (tomorrow at the earliest), so the email
+// names the day it chose when that falls in the coming week.
+func TestFTPTestSuggestionNamesTheComingDay(t *testing.T) {
+	in := base() // Saturday 3 October
+	in.FTPTest = "2026-10-06"
+	if _, body := Compose(in); !strings.Contains(body, "An FTP test would help: Tuesday looks right.") {
 		t.Errorf("no suggestion:\n%s", body)
 	}
-	for _, other := range []string{"", "2026-10-04", "2026-10-02"} {
+	in.FTPTest = "2026-10-04"
+	if _, body := Compose(in); !strings.Contains(body, "An FTP test would help: tomorrow looks right.") {
+		t.Errorf("tomorrow is not named as tomorrow:\n%s", body)
+	}
+	for _, other := range []string{"", "2026-10-03", "2026-10-02", "2026-10-10", "not a date"} {
 		in.FTPTest = other
 		if _, body := Compose(in); strings.Contains(body, "FTP test") {
-			t.Errorf("a suggestion dated %q is not for today:\n%s", other, body)
+			t.Errorf("a suggestion dated %q is not in the coming week:\n%s", other, body)
 		}
+	}
+}
+
+// A day inside a life event is a planned break, not a rest day. Which kind of
+// event (illness is health data) never reaches a mailbox.
+func TestABreakDayIsNamedWithoutItsKind(t *testing.T) {
+	in := base()
+	in.Workouts = nil
+	in.Break = true
+	in.FTPTest = "2026-10-04"
+	subject, body := Compose(in)
+	if subject != "Domestique: a planned break today" {
+		t.Errorf("subject = %q", subject)
+	}
+	if !strings.Contains(body, "Today is part of a planned break. Nothing is planned.") {
+		t.Errorf("body:\n%s", body)
+	}
+	for _, banned := range []string{"Rest day", "FTP test", "illness", "travel", "busy"} {
+		if strings.Contains(strings.ToLower(body), strings.ToLower(banned)) {
+			t.Errorf("a break-day summary says %q:\n%s", banned, body)
+		}
+	}
+}
+
+// A session the rider kept inside the event (a gym session on a trip) is still
+// theirs to ride, so it is listed as usual.
+func TestABreakDayStillListsAKeptSession(t *testing.T) {
+	in := base()
+	in.Break = true
+	subject, body := Compose(in)
+	if !strings.Contains(subject, "today's ride") || !strings.Contains(body, "Threshold 3 x 10") {
+		t.Errorf("subject %q body:\n%s", subject, body)
 	}
 }
 
