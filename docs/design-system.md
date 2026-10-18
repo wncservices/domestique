@@ -204,7 +204,12 @@ for a heading nested in a card body; a figure in a definition list is
 Light: a teal-tinted near-white ground with white cards. Dark: the ground is
 `#0b1211` (`--ui-bg`), cards sit one step lighter (`--ui-bg-elevated` for
 `UCard`, `--app-card-bg` for `.app-card`) and carry no shadow, only the
-border. `--ui-bg-muted` stays between the two.
+border (`--ui-border`, neutral-700 in dark, so a card has a visible edge).
+`--ui-bg-muted` stays between the two.
+
+Grey text is set for contrast, not left at Nuxt UI's defaults, which fail WCAG AA
+on this palette. `text-muted` is neutral-600 in light; `text-dimmed` is `#5f746c` in
+light and `#7a8e86` in dark. All clear 4.5:1 on both the ground and a card.
 
 ### Shape
 
