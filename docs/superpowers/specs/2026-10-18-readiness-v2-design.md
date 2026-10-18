@@ -31,7 +31,7 @@ Every rule produces a signal with a **source** and a **severity** (`amber` or
 
 | Source | Amber | Severe |
 |---|---|---|
-| hrv, band available (≥ 14 nights of `HRVLastNight` in the last 60) | 7-night mean of ln(HRV) below baseline mean − 0.5 SD | below the band on today **and** yesterday |
+| hrv, band available (≥ 14 nights of `HRVLastNight` in the last 60) | 7-night mean of ln(HRV) below baseline mean − 0.5 SD | the 7-night mean is below the band **and** today's and yesterday's nights are each below baseline mean − 1.0 SD |
 | hrv, no band | Garmin status UNBALANCED, LOW or POOR | status LOW or POOR on today and yesterday (today's rule) |
 | sleep | score 40–59, **or** 3-night shortfall against the own 28-night median of `SleepSeconds` (≥ 7 nights) of at least 2.5 h | score 1–39 |
 | resting_hr | +4 to +6 bpm over the 28-day median (≥ 7 readings) | +7 or more |

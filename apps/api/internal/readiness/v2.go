@@ -46,6 +46,7 @@ const (
 	hrvBandNights   = 60
 	hrvBandMin      = 14 // nights with a reading before a rider's own range means anything
 	hrvBandSDs      = 0.5
+	hrvSevereSDs    = 1.0 // each of the last two nights this far under the mean
 	sleepMedianDays = 28
 	sleepMedianMin  = 7
 	sleepDebtNights = 3
@@ -76,7 +77,8 @@ func Evaluate(in Input) Assessment {
 		if bandOK {
 			// The rider's own range replaces Garmin's status words.
 			lo := baseMean - hrvBandSDs*baseSD
-			if r, sig, ok := hrvBandSevere(today, in.History, lo); ok {
+			deep := baseMean - hrvSevereSDs*baseSD
+			if r, sig, ok := hrvBandSevere(today, in.History, deep); ok && !math.IsNaN(band7) && band7 < lo {
 				severe.add(SourceHRV, r, sig)
 			} else if !math.IsNaN(band7) && band7 < lo {
 				amber.add(SourceHRV, "HRV is below your usual range", bandSignal(band7, baseMean))
@@ -252,8 +254,11 @@ func meanOf(v []float64) float64 {
 	return s / float64(len(v))
 }
 
-// hrvBandSevere is "below the band on today and yesterday": both nights' ln
-// under lo. A missing reading on either night is not below anything.
+// hrvBandSevere is "well below the band on today and yesterday": both nights'
+// ln under lo, which the caller sets a full SD under the mean (the amber edge
+// is half an SD, so one soft week is not Rest). The caller also requires the
+// 7-night mean to be under the band. A missing reading on either night is not
+// below anything.
 func hrvBandSevere(today Day, history []Day, lo float64) (string, Signal, bool) {
 	todayDate, ok := parseDate(today.Date)
 	if !ok || today.HRVLastNight <= 0 || math.Log(today.HRVLastNight) >= lo {

@@ -422,7 +422,9 @@ severe or amber signal and all of: today's data present; an HRV band whose 7-nig
 above its centre; a 28-night sleep median with last night's sleep at or above it; and no poor-legs
 check-in (an answered check-in needs legs 3 or more). HRV is judged against the
 rider's own band (at least 14 nights in the 60 before today, ln mean +/- 0.5 SD); where a band
-exists Garmin's HRV status strings are not used. Sleep debt is measured against the rider's own
+exists Garmin's HRV status strings are not used. HRV is severe only when the 7-night mean is
+under the band and both today's and yesterday's nights are under mean - 1.0 SD (amber's edge is
+0.5 SD), so a soft week is not Rest. Sleep debt is measured against the rider's own
 28-night median. The adapter acts on today's generated endurance or long cycling ride:
 Caution shortens it to max(80%, 30 min) keeping its name, Rest swaps it for a 45-minute
 "Recovery ride"; hard-session rules are unchanged. Check-in

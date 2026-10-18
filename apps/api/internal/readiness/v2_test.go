@@ -346,6 +346,57 @@ func TestHRVBelowBandTwoDaysIsRest(t *testing.T) {
 	}
 }
 
+// hrvTwoNights builds a band history whose nights 2-6 are low (so the 7-night
+// mean is under the band) and sets yesterday and today to the given values.
+func hrvTwoNights(prev, now float64) Assessment {
+	h := hrvHistory(40, 60)
+	for i := range h {
+		d, _ := parseDate(h[i].Date)
+		age := date(v2Today).Sub(d)
+		switch {
+		case age == 24*time.Hour:
+			h[i].HRVLastNight = prev
+		case age > 24*time.Hour && age <= 6*24*time.Hour:
+			h[i].HRVLastNight = 55
+		}
+	}
+	return eval(Day{HRVLastNight: now}, h, nil)
+}
+
+func TestHRVSevereNeedsTwoNightsAFullSDBelowTheMean(t *testing.T) {
+	a := hrvTwoNights(57, 57)
+	if hasSignal(a, "hrv", "severe") || !hasSignal(a, "hrv", "amber") {
+		t.Fatalf("between half and one SD is amber, not Rest: %+v", a)
+	}
+	a = hrvTwoNights(50, 50)
+	if a.Verdict != Rest || !hasSignal(a, "hrv", "severe") {
+		t.Fatalf("a full SD under on both nights is Rest: %+v", a)
+	}
+	a = hrvTwoNights(57, 50)
+	if hasSignal(a, "hrv", "severe") {
+		t.Fatalf("both nights must be under the severe edge: %+v", a)
+	}
+}
+
+func TestHRVSevereNeedsTheSevenNightMeanBelowTheBand(t *testing.T) {
+	// Two very low nights after a high week: the mean is still in the band.
+	h := hrvHistory(40, 60)
+	for i := range h {
+		d, _ := parseDate(h[i].Date)
+		age := date(v2Today).Sub(d)
+		if age > 24*time.Hour && age <= 6*24*time.Hour {
+			h[i].HRVLastNight = 90
+		}
+		if age == 24*time.Hour {
+			h[i].HRVLastNight = 50
+		}
+	}
+	a := eval(Day{HRVLastNight: 50}, h, nil)
+	if hasSignal(a, "hrv", "severe") {
+		t.Fatalf("%+v", a.Signals)
+	}
+}
+
 // --- check-in -------------------------------------------------------------------
 
 func TestCheckInLegsOneAloneIsRest(t *testing.T) {
