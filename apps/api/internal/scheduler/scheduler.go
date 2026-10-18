@@ -169,8 +169,43 @@ func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels 
 // structured sessions toward the wanted effort lengths (workoutlib.PickNear)
 // and names its long ride for a climbing route. Without it, or in any other
 // week, the output is exactly what it is without the option.
+//
+// WithTargetTSS rebuilds a week that falls short of its TSS with the
+// structured target levels lifted (see that option), never more than one rung
+// above what the week would pick without the lift.
 func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
 	o := applyOptions(opts)
+	out, err := buildWeek(week, profile, levels, rider, goalID, sport, o)
+	if err != nil || o.targetTSS <= 0 || o.levelBoost != 0 || sport != model.SportCycling || profile.FTPWatts <= 0 {
+		return out, err
+	}
+	// Building with levelBoost set and the target cleared is what stops the
+	// retry from recursing.
+	for _, boost := range []float64{0.5, 1.0} {
+		if plannedTSS(out, profile.FTPWatts) >= o.targetTSS {
+			break
+		}
+		b := o
+		b.targetTSS, b.levelBoost = 0, boost
+		if out, err = buildWeek(week, profile, levels, rider, goalID, sport, b); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// plannedTSS sums workout.PlannedTSS over a week's requests; a session it
+// cannot size counts 0.
+func plannedTSS(reqs []workout.CreateWorkoutRequest, ftp float64) float64 {
+	var sum float64
+	for _, r := range reqs {
+		tss, _ := workout.PlannedTSS(workout.Workout{Sport: r.Sport, Steps: r.Steps}, ftp)
+		sum += tss
+	}
+	return sum
+}
+
+func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, o options) ([]workout.CreateWorkoutRequest, error) {
 	demand := o.demand
 	if !biases(week) {
 		demand = nil
@@ -187,6 +222,18 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 	}
 
 	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days)
+	if o.levelBoost != 0 && week.Phase != periodization.PhaseTaper {
+		// The taper opener is deliberately easy, so only the other phases'
+		// structured slots are lifted. Boost and route demand each move the
+		// pick, so the ladder is clamped below at the pick without the boost
+		// plus one: together they never reach more than one rung above the
+		// rider's level.
+		for i, k := range kinds {
+			if k == slotStructured {
+				targetLevels[i] += o.levelBoost
+			}
+		}
+	}
 	dropped, targetHours := applyFixed(o.fixed, week, weekStart, days, kinds)
 
 	// Cap every structured slot's time budget at the share it would have
@@ -215,6 +262,9 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 		}
 		capSeconds := shares[i] * targetHours * 3600
 		rung, ok := workoutlib.PickNear(ladder, targetLevels[i], capSeconds, demand.wantFor(zones[i]))
+		if ok && o.levelBoost != 0 {
+			rung = clampToBoostedCeiling(ladder, rung, targetLevels[i]-o.levelBoost, capSeconds, demand.wantFor(zones[i]))
+		}
 		if !ok {
 			kinds[i] = slotEndurance
 			continue
@@ -590,4 +640,36 @@ func enduranceZoneTarget(sport model.Sport, profile workout.RiderProfile) (worko
 		return workout.TargetHeartRate, low, high
 	}
 	return workout.TargetOpen, 0, 0
+}
+
+// clampToBoostedCeiling keeps a boosted pick within one rung of what the week
+// picks without the boost (unboostedTarget). A route demand can already take
+// the pick one rung up, so boost and demand together would otherwise reach two
+// rungs above the rider's level. Over the ceiling, the fitting rung at or under
+// it nearest the wanted work length wins (the lower on a tie).
+func clampToBoostedCeiling(l workoutlib.Ladder, picked workoutlib.Rung, unboostedTarget, maxSeconds float64, want int) workoutlib.Rung {
+	plain, ok := workoutlib.Pick(l, unboostedTarget, maxSeconds)
+	if !ok || picked.Level <= plain.Level+1 {
+		return picked
+	}
+	dist := func(r workoutlib.Rung) int {
+		if want <= 0 {
+			return -r.Level // nothing to follow: the highest rung under the ceiling
+		}
+		if d := r.WorkSeconds - want; d >= 0 {
+			return d
+		} else {
+			return -d
+		}
+	}
+	best, bestDist := plain, dist(plain)
+	for _, r := range l.Rungs {
+		if r.Level > plain.Level+1 || workoutlib.TotalSeconds(r) > maxSeconds {
+			continue
+		}
+		if d := dist(r); d < bestDist {
+			best, bestDist = r, d
+		}
+	}
+	return best
 }

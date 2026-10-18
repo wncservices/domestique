@@ -9,6 +9,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
+	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
 
 // Thursday 2026-03-19. Its week runs Mon 16th to Sun 22nd.
@@ -370,7 +371,7 @@ func TestStruggleReasonOmitsHitCountWithNoHardSteps(t *testing.T) {
 }
 
 func TestSevenDayOverloadedTSSSwapsTodaysHardSession(t *testing.T) {
-	// One planned+analysed hour a day at FTP (200W): estimatePlannedTSS ~=
+	// One planned+analysed hour a day at FTP (200W): the planned TSS ~=
 	// 100 each. Analysed TSS of 260 across two rides is well past 1.3x the
 	// 200 planned across those same two days.
 	ws := []workout.Workout{
@@ -425,66 +426,23 @@ func TestAnAnalysedRiderOwnedWorkoutIsNeverChanged(t *testing.T) {
 	}
 }
 
-func TestEstimatePlannedTSS(t *testing.T) {
-	hourAt := func(low, high float64) []workout.WorkoutStep {
-		return []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600, Target: workout.TargetPower, TargetLow: low, TargetHigh: high}}
+func TestOverloadUsesStepByStepPlannedTSS(t *testing.T) {
+	const ftp = 250
+	l, ok := workoutlib.LadderFor(model.SportCycling, "threshold")
+	if !ok {
+		t.Fatal("no threshold ladder")
 	}
-
-	tests := []struct {
-		name  string
-		steps []workout.WorkoutStep
-		ftp   float64
-		want  float64
-	}{
-		{
-			name:  "an hour exactly at FTP scores ~100",
-			steps: hourAt(200, 200),
-			ftp:   200,
-			want:  100,
-		},
-		{
-			name:  "a power target uses its mid-point",
-			steps: hourAt(150, 250), // mid 200, same IF as above
-			ftp:   200,
-			want:  100,
-		},
-		{
-			name:  "no power target falls back to the easy default IF",
-			steps: []workout.WorkoutStep{{Name: "Endurance", Duration: workout.DurationTime, Seconds: 3600}},
-			ftp:   200,
-			want:  defaultPlannedIF * defaultPlannedIF * 100,
-		},
-		{
-			name: "a power target nested in a repeat block still counts",
-			steps: []workout.WorkoutStep{
-				{Name: "Warmup", Duration: workout.DurationTime, Seconds: 600},
-				{Name: "Intervals", Repeat: 4, Steps: hourAt(300, 300)},
-			},
-			// PlannedSeconds: 600 + 4*3600 = 15000s = 4.1666h; IF = 300/200 = 1.5
-			ftp:  200,
-			want: (600.0/3600 + 4*3600.0/3600) * 1.5 * 1.5 * 100,
-		},
-		{
-			name:  "no FTP means no estimate at all",
-			steps: hourAt(200, 200),
-			ftp:   0,
-			want:  0,
-		},
-		{
-			name:  "no time-based steps means no estimate",
-			steps: []workout.WorkoutStep{{Name: "Open", Duration: workout.DurationOpen}},
-			ftp:   200,
-			want:  0,
-		},
+	req := workoutlib.Instantiate(l, l.Rungs[3], workout.RiderProfile{FTPWatts: ftp})
+	w := workout.Workout{ID: "t", Date: "2026-03-18", Sport: model.SportCycling, Steps: req.Steps}
+	want, sized := workout.PlannedTSS(w, ftp)
+	if !sized {
+		t.Fatal("structured threshold session not sized")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := workout.Workout{Steps: tt.steps}
-			got := estimatePlannedTSS(w, tt.ftp)
-			if diff := got - tt.want; diff > 0.01 || diff < -0.01 {
-				t.Errorf("estimatePlannedTSS() = %v, want %v", got, tt.want)
-			}
-		})
+	today := time.Date(2026, 3, 19, 0, 0, 0, 0, time.UTC)
+	analyses := map[string]workout.SessionAnalysis{"t": {TSS: 1000}}
+	_, planned, _ := overloadedWeek([]workout.Workout{w}, analyses, ftp, today)
+	if planned != want {
+		t.Errorf("planned TSS = %v, want the step-by-step %v", planned, want)
 	}
 }
 

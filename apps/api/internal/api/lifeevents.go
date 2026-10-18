@@ -405,7 +405,13 @@ func (s *Server) refillRequests(ctx context.Context, rider string, freed []strin
 			if !ok {
 				continue
 			}
-			reqs, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, rider, g.ID, g.Sport, fixedOption(workouts, week))
+			// Only the TSS target is added to this path's options: it has never read
+			// the route demand, but a capped week must hold the sessions fillWeek made.
+			opts := []scheduler.Option{fixedOption(workouts, week)}
+			if week.LoadCapped {
+				opts = append(opts, scheduler.WithTargetTSS(week.TargetTSS))
+			}
+			reqs, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, rider, g.ID, g.Sport, opts...)
 			if err != nil {
 				return nil, err
 			}

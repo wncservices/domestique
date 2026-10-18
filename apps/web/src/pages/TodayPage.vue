@@ -49,7 +49,7 @@ import {
   powerRange,
   swappableWorkout,
   todayHeadline,
-  weekHoursLabel,
+  weekLoadLabel,
   weekTiles,
   workoutLoad,
 } from '@/utils/today'
@@ -219,7 +219,7 @@ const goalUnknown = computed(() => !goalsLoaded.value && !focusGoal.value)
 
 const tiles = computed(() => weekTiles(week.value?.days ?? [], week.value?.today ?? ''))
 const weekLabel = computed(() =>
-  week.value ? weekHoursLabel(week.value.totals.completedSeconds, week.value.totals.plannedSeconds, week.value.focus?.targetHours) : '',
+  week.value ? weekLoadLabel(week.value.totals.completedSeconds, week.value.totals.plannedSeconds, week.value.focus) : '',
 )
 
 // ---- Suggestion ----

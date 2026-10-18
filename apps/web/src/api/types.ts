@@ -1408,6 +1408,11 @@ export interface PeriodizationWeek {
    *  training — see PeriodizationPlan.adjustment. Never true for the
    *  current week, or for a Peak/Taper week. */
   adjusted?: boolean
+  /** Only on the "ctl" load basis: the week's TSS target, the CTL the plan
+   *  expects at its start, and whether the available hours cut the target short. */
+  targetTss?: number
+  plannedCtl?: number
+  loadCapped?: boolean
 }
 
 // ---------- Training week (Plan page) ----------
@@ -1429,6 +1434,7 @@ export interface WeekFocus {
   phase?: PeriodizationPhase
   recovery?: boolean
   targetHours?: number
+  targetTss?: number
 }
 
 export interface WeekDay {
@@ -1583,6 +1589,11 @@ export interface PeriodizationPlan {
    *  on target. Below 1 means recent weeks were undertrained relative to
    *  what they asked for; above 1 means overtrained. */
   adjustment?: number
+  /** "ctl" when weeks are sized from the rider's fitness, "hours" from the profile alone. */
+  loadBasis: 'ctl' | 'hours'
+  /** Dated goal on the ctl basis: the CTL asked for, and how far short the plan falls at the maximum ramp. */
+  targetCtl?: number
+  shortfall?: number
 }
 
 /** POST /api/training/goals/{id}/schedule's response — see

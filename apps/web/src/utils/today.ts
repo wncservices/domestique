@@ -123,6 +123,20 @@ export function weekHoursLabel(completedSeconds: number, plannedSeconds: number,
   return `${(completedSeconds / 3600).toFixed(1)} / ${(target / 3600).toFixed(1)} h`
 }
 
+/** The week's load line. With a TSS target (the "ctl" load basis) it reads
+ *  "420 TSS · 2.6 / 7.5 h": the target in TSS, then the hours done against the
+ *  hours target; without one it is `weekHoursLabel`, unchanged. */
+export function weekLoadLabel(
+  completedSeconds: number,
+  plannedSeconds: number,
+  focus?: { targetHours?: number; targetTss?: number },
+): string {
+  const tss = focus?.targetTss ?? 0
+  if (tss <= 0) return weekHoursLabel(completedSeconds, plannedSeconds, focus?.targetHours)
+  const hours = (Math.max(plannedSeconds, (focus?.targetHours ?? 0) * 3600) / 3600).toFixed(1)
+  return `${Math.round(tss)} TSS \u00b7 ${(completedSeconds / 3600).toFixed(1)} / ${hours} h`
+}
+
 export interface WeekTile {
   date: string
   label: string

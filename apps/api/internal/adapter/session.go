@@ -70,11 +70,6 @@ const overloadRatioTrigger = 1.3
 // ahead of it the next same-zone workout may sit to be the one stepped down.
 const stepDownWindowDays = 7
 
-// defaultPlannedIF is the intensity factor estimatePlannedTSS assumes for a
-// workout with no power-target step (an open-ended endurance ride, say) — a
-// deliberately easy default rather than a guess at a harder one.
-const defaultPlannedIF = 0.65
-
 // Change is one adjustment to a planned workout.
 type Change struct {
 	WorkoutID string
@@ -614,7 +609,7 @@ func struggleReason(w workout.Workout, a workout.SessionAnalysis) string {
 // and an analysis of it — a planned day nobody rode says nothing about how
 // hard the rider actually went, and an analysed ride with nothing planned
 // was not part of what the plan asked for. Skipped entirely without an FTP:
-// estimatePlannedTSS has no threshold to measure a power target against, and
+// the planned TSS has no threshold to measure a power target against, and
 // TSB and the struggle trigger above already cover fatigue without it.
 func overloadedWeek(workouts []workout.Workout, analyses map[string]workout.SessionAnalysis, ftpWatts float64, today time.Time) (analysedTSS, plannedTSS float64, ok bool) {
 	if ftpWatts <= 0 {
@@ -636,57 +631,9 @@ func overloadedWeek(workouts []workout.Workout, analyses map[string]workout.Sess
 			continue
 		}
 		analysedTSS += a.TSS
-		plannedTSS += estimatePlannedTSS(w, ftpWatts)
+		plannedTSS += workout.PlannedTSSOrHours(w, ftpWatts)
 	}
 	return analysedTSS, plannedTSS, plannedTSS > 0 && analysedTSS >= overloadRatioTrigger*plannedTSS
-}
-
-// estimatePlannedTSS is the TSS a planned workout would score if ridden
-// exactly as planned — hours x IF^2 x 100, the standard formula. IF is the
-// mid-point of the first power-target step found in the workout (its
-// intended hard effort) divided by FTP, or defaultPlannedIF when nothing in
-// the workout targets power at all. This never touches a real ride's TSS —
-// it exists only so overloadedWeek has something to compare analysed TSS
-// against for a day that was never itself ridden and scored.
-func estimatePlannedTSS(w workout.Workout, ftpWatts float64) float64 {
-	if ftpWatts <= 0 {
-		return 0
-	}
-	hours := workout.PlannedSeconds(w.Steps) / 3600
-	if hours <= 0 {
-		return 0
-	}
-	intensity := defaultPlannedIF
-	if mid, ok := firstPowerTargetMid(w.Steps); ok {
-		intensity = mid / ftpWatts
-	}
-	return hours * intensity * intensity * 100
-}
-
-// EstimatePlannedTSS is estimatePlannedTSS for a caller outside this
-// package — the readiness forecast estimates a planned session's load the
-// same way overloadedWeek does, rather than carrying its own copy of the
-// formula.
-func EstimatePlannedTSS(w workout.Workout, ftpWatts float64) float64 {
-	return estimatePlannedTSS(w, ftpWatts)
-}
-
-// firstPowerTargetMid returns the midpoint of the first power-target step
-// found in steps, descending into repeat blocks (their own Steps are what
-// actually repeats — see WorkoutStep's own doc comment).
-func firstPowerTargetMid(steps []workout.WorkoutStep) (float64, bool) {
-	for _, s := range steps {
-		if s.Repeat > 1 {
-			if mid, ok := firstPowerTargetMid(s.Steps); ok {
-				return mid, true
-			}
-			continue
-		}
-		if s.Target == workout.TargetPower {
-			return (s.TargetLow + s.TargetHigh) / 2, true
-		}
-	}
-	return 0, false
 }
 
 // Note is the text appended to a generated workout's description for a

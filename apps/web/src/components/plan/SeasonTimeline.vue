@@ -52,6 +52,41 @@ const totalWeeks = computed(() => weeks.value.length)
 // ratio finite; every bar still falls back to the 4px minimum below.
 const maxTargetHours = computed(() => Math.max(1, ...weeks.value.map((w) => w.targetHours ?? 0)))
 
+// On the "ctl" load basis a week is sized in TSS, so the bars follow that and
+// a polyline of the planned CTL sits over them on its own scale.
+const isCtl = computed(() => props.plan.loadBasis === 'ctl')
+const maxTargetTss = computed(() => Math.max(1, ...weeks.value.map((w) => w.targetTss ?? 0)))
+const maxPlannedCtl = computed(() => Math.max(1, ...weeks.value.map((w) => w.plannedCtl ?? 0)))
+const ctlPoints = computed(() =>
+  weeks.value
+    .map((w, i) =>
+      w.plannedCtl === undefined
+        ? null
+        : `${(colX(i) + colWidth.value / 2).toFixed(1)},${(BAR_BASELINE - (w.plannedCtl / maxPlannedCtl.value) * BAR_MAX_HEIGHT).toFixed(1)}`,
+    )
+    .filter((p): p is string => p !== null),
+)
+const ctlLabel = computed(() => {
+  const first = weeks.value.find((w) => w.plannedCtl !== undefined)
+  const last = [...weeks.value].reverse().find((w) => w.plannedCtl !== undefined)
+  if (!first || !last) return ''
+  return `Planned fitness (CTL), from ${Math.round(first.plannedCtl ?? 0)} to ${Math.round(last.plannedCtl ?? 0)}`
+})
+// Start and end values, so the line's scale is readable.
+const ctlRange = computed(() => {
+  const vals = weeks.value.filter((w) => w.plannedCtl !== undefined).map((w) => Math.round(w.plannedCtl ?? 0))
+  return vals.length > 1 ? `: ${vals[0]} to ${vals[vals.length - 1]}` : ''
+})
+const shortfallText = computed(() => {
+  const n = Math.round(props.plan.shortfall ?? 0)
+  return isCtl.value && n > 0 ? `Target fitness out of reach by ${n} CTL at your maximum ramp.` : ''
+})
+
+function weekLoad(w: PeriodizationWeek): string {
+  const hours = (w.targetHours ?? 0).toFixed(1)
+  return isCtl.value && w.targetTss !== undefined ? `${Math.round(w.targetTss)} TSS \u00b7 ${hours} h` : `${hours} h`
+}
+
 const colWidth = computed(() => (WIDTH.value - PADDING_X * 2) / Math.max(totalWeeks.value, 1))
 
 function colX(i: number): number {
@@ -59,6 +94,10 @@ function colX(i: number): number {
 }
 
 function barHeightFor(w: PeriodizationWeek): number {
+  if (isCtl.value) {
+    if (!w.targetTss) return 4
+    return Math.max(4, (w.targetTss / maxTargetTss.value) * BAR_MAX_HEIGHT)
+  }
   if (!w.targetHours) return 4
   return Math.max(4, (w.targetHours / maxTargetHours.value) * BAR_MAX_HEIGHT)
 }
@@ -256,7 +295,7 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
         :key="w.number"
         role="button"
         tabindex="0"
-        :aria-label="`Week ${w.number}, ${w.phase}, ${(w.targetHours ?? 0).toFixed(1)} h`"
+        :aria-label="`Week ${w.number}, ${w.phase}, ${weekLoad(w)}`"
         class="week-bar cursor-pointer outline-none"
         @click="selectWeek(w)"
         @keydown="onKeydown($event, w)"
@@ -274,9 +313,39 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
           :stroke-width="w.startDate === selectedStart ? 2 : w.recovery ? 1 : 0"
           :stroke-dasharray="w.recovery && w.startDate !== selectedStart ? '2,2' : undefined"
         >
-          <title>Week {{ w.number }}, {{ phaseLabel(w.phase, w.recovery) }}, {{ (w.targetHours ?? 0).toFixed(1) }} h</title>
+          <title>Week {{ w.number }}, {{ phaseLabel(w.phase, w.recovery) }}, {{ weekLoad(w) }}</title>
         </rect>
       </g>
+
+      <!-- A halo in the page background under a text-coloured line, so it reads
+           over every phase colour in both themes. -->
+      <polyline
+        v-if="isCtl && ctlPoints.length > 1"
+        :points="ctlPoints.join(' ')"
+        fill="none"
+        stroke="var(--ui-bg)"
+        stroke-width="4.5"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        vector-effect="non-scaling-stroke"
+        pointer-events="none"
+        aria-hidden="true"
+      />
+      <polyline
+        v-if="isCtl && ctlPoints.length > 1"
+        :points="ctlPoints.join(' ')"
+        fill="none"
+        stroke="var(--ui-text-highlighted)"
+        stroke-width="2"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        vector-effect="non-scaling-stroke"
+        pointer-events="none"
+        role="img"
+        :aria-label="ctlLabel"
+      >
+        <title>{{ ctlLabel }}</title>
+      </polyline>
 
       <g v-for="b in bands" :key="`${b.start}-${b.end}`">
         <rect :x="bandX(b)" :y="BAND_Y" :width="bandWidth(b)" :height="BAND_HEIGHT" rx="3" :fill="phaseBandFill(b.phase)" />
@@ -295,6 +364,8 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       </g>
     </svg>
 
+    <p v-if="shortfallText" class="mt-2 text-[length:var(--text-label)] text-muted">{{ shortfallText }}</p>
+
     <p v-if="here" class="mt-2 flex items-center gap-1.5 text-[length:var(--text-body)] font-medium text-highlighted">
       <UIcon name="i-lucide-map-pin" aria-hidden="true" class="size-4 text-primary" />
       <span class="tabular-nums">{{ here }}</span>
@@ -304,6 +375,10 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       <span v-for="b in eventBars" :key="`legend-${b.key}`" class="flex items-center gap-1.5">
         <span class="h-1 w-3 rounded-full" :style="{ background: b.fill }" aria-hidden="true" />
         {{ b.label }}
+      </span>
+      <span v-if="isCtl && ctlPoints.length > 1" class="flex items-center gap-1.5 tabular-nums">
+        <span class="h-0.5 w-3 rounded-full bg-[var(--ui-text-highlighted)]" aria-hidden="true" />
+        Planned fitness (CTL), own scale{{ ctlRange }}
       </span>
       <span v-for="phase in phaseOrder" :key="phase" class="flex items-center gap-1.5">
         <span class="size-2.5 rounded-full" :class="phaseDotStyle(phase).class" :style="phaseDotStyle(phase).style" />

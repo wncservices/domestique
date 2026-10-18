@@ -230,7 +230,11 @@ func explainPlanPrompt(goal workout.Goal, plan periodization.Plan) string {
 	if current.Recovery {
 		sb.WriteString(" (a deliberate recovery week)")
 	}
-	fmt.Fprintf(&sb, ", targeting %.1f hours.\n\n", current.TargetHours)
+	fmt.Fprintf(&sb, ", targeting %.1f hours", current.TargetHours)
+	if plan.LoadBasis == "ctl" {
+		fmt.Fprintf(&sb, ", about %.0f TSS", current.TargetTSS)
+	}
+	sb.WriteString(".\n\n")
 
 	sb.WriteString("The plan's phases:\n")
 	for _, ph := range summarizePhases(plan.Weeks) {

@@ -528,6 +528,19 @@ have a workout, and record the week. The plan is built from today, so a
 future week is that plan's later week (its own phase and recovery flag) but
 uses the rider's levels *now*.
 
+**Weeks are sized in TSS from CTL, with available hours as the cap.**
+`periodization.BuildWithLoad` takes a `LoadInput` built by `api.loadInput`, which
+`reconciledPeriodizationPlan` alone calls, so every plan reader sees the same
+weeks. A week the hours cap held back is `LoadCapped`, and `scheduler.WithTargetTSS`
+then steps its structured rungs up (at most one rung above the rider's level, route bias included; the taper opener excluded)
+toward the week's TSS. The old hours model is the fallback when there is no FTP,
+no available hours or no fitness snapshot, and `adapter.Reconcile` runs only on
+that fallback: CTL already reflects what was ridden, so compliance on top would
+count it twice. There is one TSS estimator, `workout.PlannedTSS` (with
+`PlannedTSSOrHours` as its fallback); the first-step estimator is gone, and
+`adapter.PlannedTSS` only forwards. The Plan page shows TSS and hours, and a
+planned-CTL line on its own scale, not the fitness chart's.
+
 ## Only today's session goes to the head unit
 
 `pushWorkoutsForRider` (`internal/api/workoutpush.go`) is the one automatic

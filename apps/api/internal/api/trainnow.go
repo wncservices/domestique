@@ -218,11 +218,14 @@ func (s *Server) levelMapReadOnly(ctx context.Context, rider string, profile wor
 // weekStart, in plan (date) order: what scheduler.WeekWorkouts would build.
 func weekZones(plan *periodization.Plan, weekStart time.Time, profile workout.RiderProfile, levels map[string]float64, rider string, goal *workout.Goal, workouts []workout.Workout) []string {
 	start := weekStart.Format(dateLayout)
+	// The same option gate as the filled week (no route demand: it moves rungs,
+	// not zones), so the zones cannot drift from what fillWeek built.
+	sc := seasonContext{plan: *plan, profile: profile, levels: levels}
 	for _, week := range plan.Weeks {
 		if week.StartDate != start {
 			continue
 		}
-		reqs, err := scheduler.WeekWorkouts(week, profile, levels, rider, goal.ID, goal.Sport, fixedOption(workouts, week))
+		reqs, err := scheduler.WeekWorkouts(week, profile, levels, rider, goal.ID, goal.Sport, append(sc.weekOptions(week), fixedOption(workouts, week))...)
 		if err != nil {
 			return nil
 		}

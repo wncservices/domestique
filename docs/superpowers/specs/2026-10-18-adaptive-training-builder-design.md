@@ -63,7 +63,7 @@ does the opposite of the last part:
 | # | Sub-project | Depends on |
 |---|---|---|
 | 0 | Adaptation state in columns, not description text | — |
-| 1 | Load model: weekly TSS budget from CTL and a ramp target | 0 |
+| 1 | Load model: weekly TSS budget from CTL and a ramp target (shipped) | 0 |
 | 2 | Load ledger: debt, repayment, carry-over, green-day push | 1 |
 | 3 | Readiness v2: HRV band, sleep debt, check-in, four verdicts | 0 (uses 2 for debt) |
 | 4 | Daily re-optimiser for today → Sunday | 2, 3 |
