@@ -96,7 +96,7 @@ const newMenuItems = computed(() => [
             <RaceDayChip v-if="focus" :projection="projection ?? null" :goal-id="focus.goalId" />
           </div>
           <!-- Each segment is unbreakable so a wrap falls at a separator, never inside "week 1 of 13". -->
-          <p v-if="focus" class="text-sm text-muted">
+          <p v-if="focus" class="text-[length:var(--text-body)] text-muted">
             <template v-for="(part, i) in metaParts" :key="i">
               <span v-if="i > 0" aria-hidden="true"> · </span>
               <span class="whitespace-nowrap">{{ part }}</span>

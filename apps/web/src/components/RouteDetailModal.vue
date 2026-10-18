@@ -228,7 +228,7 @@ const mapRoutes = computed(() =>
         <div class="h-64 overflow-hidden rounded-lg bg-elevated/50 sm:h-80">
           <USkeleton v-if="loadingTrack" class="size-full" />
           <div v-else-if="trackFailed" class="grid size-full place-items-center">
-            <p class="text-sm text-muted">track unavailable</p>
+            <p class="text-[length:var(--text-body)] text-muted">track unavailable</p>
           </div>
           <RouteMap v-else :routes="mapRoutes" />
         </div>
@@ -328,7 +328,7 @@ const mapRoutes = computed(() =>
 
         <div v-if="syncRows.length">
           <h4 class="mb-1 text-[length:var(--text-label)] text-muted">Sync status</h4>
-          <ul class="flex flex-col gap-1 text-sm text-toned">
+          <ul class="flex flex-col gap-1 text-[length:var(--text-body)] text-toned">
             <li v-for="row in syncRows" :key="row.label">
               <span class="font-medium">{{ row.label }}</span>: {{ row.verb }}
               <span v-if="row.updatedAt" class="text-dimmed">(last push {{ new Date(row.updatedAt).toLocaleDateString() }})</span>

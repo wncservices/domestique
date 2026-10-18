@@ -118,7 +118,7 @@ const paceBars = computed(() => {
       <div>
         <p class="text-[length:var(--text-label)] text-muted">Power</p>
         <template v-if="powerBars">
-          <p class="mt-1 tabular-nums text-sm font-medium">FTP {{ profile.ftpWatts }} W</p>
+          <p class="mt-1 tabular-nums text-[length:var(--text-body)] font-medium">FTP {{ profile.ftpWatts }} W</p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
             <div
               v-for="bar in powerBars"
@@ -126,7 +126,7 @@ const paceBars = computed(() => {
               :style="{ width: `${bar.widthPercent}%`, backgroundColor: bar.color }"
             />
           </div>
-          <ul class="mt-2 flex flex-col gap-0.5 text-xs text-muted">
+          <ul class="mt-2 flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
             <li v-for="bar in powerBars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
@@ -143,7 +143,7 @@ const paceBars = computed(() => {
       <div>
         <p class="text-[length:var(--text-label)] text-muted">Heart rate</p>
         <template v-if="hrBars">
-          <p class="mt-1 tabular-nums text-sm font-medium">{{ hrBasis?.kind === 'threshold' ? 'Threshold HR' : 'Max HR' }} {{ hrBasis?.bpm }} bpm</p>
+          <p class="mt-1 tabular-nums text-[length:var(--text-body)] font-medium">{{ hrBasis?.kind === 'threshold' ? 'Threshold HR' : 'Max HR' }} {{ hrBasis?.bpm }} bpm</p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
             <div
               v-for="bar in hrBars"
@@ -151,7 +151,7 @@ const paceBars = computed(() => {
               :style="{ width: `${bar.widthPercent}%`, backgroundColor: bar.color }"
             />
           </div>
-          <ul class="mt-2 flex flex-col gap-0.5 text-xs text-muted">
+          <ul class="mt-2 flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
             <li v-for="bar in hrBars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
@@ -168,7 +168,7 @@ const paceBars = computed(() => {
       <div>
         <p class="text-[length:var(--text-label)] text-muted">Pace</p>
         <template v-if="paceBars">
-          <p class="mt-1 tabular-nums text-sm font-medium">
+          <p class="mt-1 tabular-nums text-[length:var(--text-body)] font-medium">
             Threshold pace {{ formatPace(paceThresholdSpeed) }}
           </p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
@@ -178,13 +178,13 @@ const paceBars = computed(() => {
               :style="{ width: `${bar.widthPercent}%`, backgroundColor: bar.color }"
             />
           </div>
-          <ul class="mt-2 flex flex-col gap-0.5 text-xs text-muted">
+          <ul class="mt-2 flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
             <li v-for="bar in paceBars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
           </ul>
         </template>
-        <p v-else class="mt-1 text-sm text-muted">Add your threshold pace in the profile below.</p>
+        <p v-else class="mt-1 text-[length:var(--text-body)] text-muted">Add your threshold pace in the profile below.</p>
       </div>
     </div>
   </UCard>

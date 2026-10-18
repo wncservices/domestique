@@ -64,9 +64,9 @@ const unchanged = computed(() => choice.value === (props.ride?.analysis?.workout
   <UModal v-model:open="open" :title="title" description="Pick the planned session this ride was.">
     <template #body>
       <div class="flex flex-col gap-4">
-        <p class="tabular-nums text-sm text-muted">{{ summary }}</p>
+        <p class="tabular-nums text-[length:var(--text-body)] text-muted">{{ summary }}</p>
         <URadioGroup v-model="choice" :items="items" />
-        <p class="text-xs text-muted">
+        <p class="text-[length:var(--text-label)] text-muted">
           The ride is scored again against the session you pick. An FTP test reads its result from it.
         </p>
       </div>

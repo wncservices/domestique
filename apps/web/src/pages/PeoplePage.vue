@@ -614,8 +614,8 @@ function personActions(person: Person): DropdownMenuItem[][] {
             class="flex flex-wrap items-center gap-3 py-2 first:pt-0 last:pb-0"
           >
             <div class="min-w-0 flex-1 basis-full sm:basis-0">
-              <p class="truncate text-sm text-highlighted">{{ person.name || person.email }}</p>
-              <p class="truncate text-xs text-dimmed">{{ person.email }} · {{ lastSeen(person) }}</p>
+              <p class="truncate text-[length:var(--text-body)] text-highlighted">{{ person.name || person.email }}</p>
+              <p class="truncate text-[length:var(--text-label)] text-dimmed">{{ person.email }} · {{ lastSeen(person) }}</p>
             </div>
             <UBadge v-if="person.bindingStatus === 'bound'" color="neutral" variant="subtle" size="sm" icon="i-lucide-link">
               {{ person.boundRider }}
@@ -673,7 +673,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
               />
             </UDropdownMenu>
             <div v-if="person.flagText || person.suggestRider" class="flex basis-full flex-col items-start gap-2">
-              <p v-if="person.flagText" class="text-xs text-warning">{{ person.flagText }}</p>
+              <p v-if="person.flagText" class="text-[length:var(--text-label)] text-warning">{{ person.flagText }}</p>
               <UButton
                 v-if="person.suggestRider"
                 size="xs"
@@ -683,7 +683,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
               >
                 {{ isOwn(person) ? 'This is me: link to' : 'Link to' }} {{ person.suggestRider }}
               </UButton>
-              <p v-if="person.suggestRider" class="text-xs text-dimmed">
+              <p v-if="person.suggestRider" class="text-[length:var(--text-label)] text-dimmed">
                 Signed in as {{ person.boundRider }}, but {{ person.suggestRider }} has data and nobody is bound to it.
               </p>
             </div>
@@ -731,7 +731,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
           <UFormField label="Role">
             <USelect v-model="inviteRole" :items="roleOptions" class="w-full" />
           </UFormField>
-          <p class="text-xs text-dimmed">
+          <p class="text-[length:var(--text-label)] text-dimmed">
             They'll get an email to set their own password. Nothing is shared over chat or in this app.
           </p>
           <div class="flex justify-end gap-2 pt-2">
@@ -755,7 +755,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
       @update:open="blockTarget = null"
     >
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           <template v-if="blockTarget?.blocked">
             {{ blockTarget?.email }} will be able to sign in again, and a fresh signup with this
             email will no longer be refused.
@@ -788,7 +788,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
 
     <UModal :open="!!bindTarget" title="Which rider is this?" @update:open="bindTarget = null">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           {{ bindTarget?.email }} signs in as the rider it is bound to, whatever its name says.
           <template v-if="bindTarget?.bindingStatus === 'conflict'">
             Accounts claiming
@@ -808,7 +808,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
           :icon="needsConfirm ? 'i-lucide-triangle-alert' : 'i-lucide-info'"
           :description="`${bindInfo.rider}: ${bindInfo.hasData ? 'has data here' : 'has no data'}, ${bindInfo.bindings} account${bindInfo.bindings === 1 ? '' : 's'} bound.`"
         />
-        <p v-if="ownBlocked" class="mt-2 text-sm text-error">
+        <p v-if="ownBlocked" class="mt-2 text-[length:var(--text-body)] text-error">
           Your own sign-in can only go onto a rider nobody is bound to. Ask another admin, or run
           <code>domestique bind-identity</code> on the server.
         </p>
@@ -818,7 +818,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
           class="mt-3"
           label="I know this account belongs to that rider, and give it their data"
         />
-        <p class="mt-3 text-xs text-dimmed">
+        <p class="mt-3 text-[length:var(--text-label)] text-dimmed">
           Their current sign-ins end, and they sign in again as this rider.
         </p>
       </template>
@@ -834,7 +834,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
 
     <UModal :open="!!mergeFrom" :title="`Merge ${mergeFrom} into another rider`" @update:open="closeMerge">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           Moves everything <span class="text-highlighted">{{ mergeFrom }}</span> owns (routes, devices, training,
           crews, sign-in bindings) onto the rider below. Where both have a row on the same key the target's is
           kept and {{ mergeFrom }}'s is dropped. Training goals and plans are added together, not merged. This cannot
@@ -861,7 +861,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
         >
           Check what would happen
         </UButton>
-        <p v-if="mergePreviewing" class="mt-3 text-sm text-muted">Checking what would happen…</p>
+        <p v-if="mergePreviewing" class="mt-3 text-[length:var(--text-body)] text-muted">Checking what would happen…</p>
         <UAlert v-if="mergeError" class="mt-3" color="error" variant="subtle" icon="i-lucide-triangle-alert" :description="mergeError" />
         <template v-if="mergePreview">
           <UAlert
@@ -883,21 +883,21 @@ function personActions(person: Person): DropdownMenuItem[][] {
             :description="w"
           />
           <div v-if="mergePreview.dropped.length" class="mt-3 rounded-md bg-warning/10 p-3 ring ring-warning/40">
-            <p class="text-sm font-medium text-highlighted">These are dropped, and the merge cannot bring them back:</p>
-            <ul class="mt-1 flex list-disc flex-col gap-1 pl-5 text-xs text-toned">
+            <p class="text-[length:var(--text-body)] font-medium text-highlighted">These are dropped, and the merge cannot bring them back:</p>
+            <ul class="mt-1 flex list-disc flex-col gap-1 pl-5 text-[length:var(--text-label)] text-toned">
               <li v-for="(d, i) in mergePreview.dropped" :key="i">
                 <span class="tabular-nums text-highlighted">{{ d.table }}<template v-if="d.what"> ({{ d.what }})</template></span>:
                 {{ d.consequence }}
               </li>
             </ul>
           </div>
-          <p class="mt-3 text-sm text-highlighted">
+          <p class="mt-3 text-[length:var(--text-body)] text-highlighted">
             {{ mergePreview.moved }} moved · {{ mergePreview.keptTarget }} kept from {{ mergePreview.into }} ·
             {{ mergePreview.droppedSource }} dropped from {{ mergePreview.from }} ·
             {{ mergePreview.merged }} merged
           </p>
           <div class="mt-2 max-h-56 overflow-auto rounded-md ring ring-default">
-            <table class="w-full text-left text-xs">
+            <table class="w-full text-left text-[length:var(--text-label)]">
               <thead class="text-dimmed">
                 <tr>
                   <th class="p-2 font-normal">Table</th>
@@ -940,7 +940,7 @@ function personActions(person: Person): DropdownMenuItem[][] {
 
     <UModal :open="!!deleteTarget" title="Delete this person?" @update:open="deleteTarget = null">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           Permanently deletes {{ deleteTarget?.email }}'s sign-in. There is no undo.
         </p>
         <UFormField

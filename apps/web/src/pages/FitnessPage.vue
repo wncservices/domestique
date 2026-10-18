@@ -548,7 +548,7 @@ onMounted(() => {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
           <h2 class="text-[length:var(--text-title)] font-semibold">{{ season?.period.label ?? 'Season review' }}</h2>
-          <p v-if="season" class="text-sm text-muted">{{ season.period.from }} to {{ season.period.to }}</p>
+          <p v-if="season" class="text-[length:var(--text-body)] text-muted">{{ season.period.from }} to {{ season.period.to }}</p>
         </div>
         <div class="flex items-center gap-2" data-no-print>
           <SeasonPicker v-if="seasonPeriod" :available="seasonChoices" :model-value="seasonPeriod" @update:model-value="pickSeason" />
@@ -615,7 +615,7 @@ onMounted(() => {
       <section class="flex flex-col gap-6" aria-labelledby="data-devices-heading">
         <div>
           <h2 id="data-devices-heading" class="text-[length:var(--text-title)] text-highlighted">Data and devices</h2>
-          <p class="mt-1 text-sm text-muted">Recovery, your profile, calendar and morning feeds, and ride imports.</p>
+          <p class="mt-1 text-[length:var(--text-body)] text-muted">Recovery, your profile, calendar and morning feeds, and ride imports.</p>
         </div>
 
         <RecoveryCard :days="recoveryDays" />
@@ -624,7 +624,7 @@ onMounted(() => {
           <template #header>
             <h3 class="text-[length:var(--text-lead)] font-semibold">Your fitness profile</h3>
           </template>
-          <p class="text-sm text-muted mb-4">
+          <p class="text-[length:var(--text-body)] text-muted mb-4">
             Sizes your plan and sets your workout targets. Whatever your Garmin account or your recent training can
             tell us is filled in for you and marked <UBadge color="info" variant="subtle" size="sm">auto-filled</UBadge> —
             check it, and press Save to confirm. Anything you type yourself is never overwritten.

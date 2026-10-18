@@ -107,7 +107,7 @@ onMounted(async () => {
             <UIcon name="i-lucide-copy-x" />
             Duplicate courses on Garmin
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="loading">Checking…</template>
             <template v-else>
               {{ groups.length }} course{{ groups.length === 1 ? '' : 's' }} pushed more than once
@@ -142,7 +142,7 @@ onMounted(async () => {
 
     <div class="flex flex-col gap-4">
       <div v-for="group in groups" :key="group.name" class="rounded-lg border border-default p-3">
-        <p class="mb-2 text-sm font-medium text-highlighted">{{ group.name }}</p>
+        <p class="mb-2 text-[length:var(--text-body)] font-medium text-highlighted">{{ group.name }}</p>
         <div class="flex flex-col divide-y divide-default">
           <label
             v-for="course in group.courses"
@@ -153,7 +153,7 @@ onMounted(async () => {
               :model-value="toDelete.has(course.id)"
               @update:model-value="(v: boolean | 'indeterminate') => toggle(course.id, v === true)"
             />
-            <span class="flex-1 text-sm text-muted">
+            <span class="flex-1 text-[length:var(--text-body)] text-muted">
               {{ (course.distanceM / 1000).toFixed(1) }} km
               · {{ Math.round(course.ascentM) }} m
               <span v-if="course.createdAt">· {{ new Date(course.createdAt).toLocaleDateString() }}</span>
@@ -166,7 +166,7 @@ onMounted(async () => {
 
     <UModal v-model:open="confirmingDelete" title="Delete these courses from Garmin?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           {{ selectedCount }} course{{ selectedCount === 1 ? '' : 's' }} will be removed from
           Garmin. This cannot be undone.
         </p>

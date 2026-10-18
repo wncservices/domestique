@@ -47,7 +47,7 @@ function setOn(id: string, on: boolean | 'indeterminate') {
       :title="line"
     />
 
-    <p v-if="diff.changes.length === 0" class="text-sm text-muted">Nothing in your plan changes.</p>
+    <p v-if="diff.changes.length === 0" class="text-[length:var(--text-body)] text-muted">Nothing in your plan changes.</p>
 
     <section v-for="day in days" :key="day.date" class="flex flex-col gap-2">
       <h3 class="text-[length:var(--text-label)] text-muted">{{ weekdayDateShort(day.date) }}</h3>
@@ -65,13 +65,13 @@ function setOn(id: string, on: boolean | 'indeterminate') {
             @update:model-value="(on: boolean | 'indeterminate') => setOn(c.id, on)"
           />
           <div class="flex min-w-0 flex-col gap-0.5">
-            <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-highlighted">
+            <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[length:var(--text-body)] font-medium text-highlighted">
               <UBadge color="neutral" variant="subtle" size="sm" :icon="OP_META[c.op].icon">{{ OP_META[c.op].label }}</UBadge>
               <span class="truncate">{{ c.name || 'Session' }}</span>
               <span v-if="c.toDate" class="font-normal text-muted">→ {{ weekdayAndDay(c.toDate) }}</span>
             </p>
-            <p class="text-xs text-muted">{{ c.reason }}</p>
-            <p v-if="!c.default" class="text-xs text-dimmed">You made this one, so it is only removed if you tick it.</p>
+            <p class="text-[length:var(--text-label)] text-muted">{{ c.reason }}</p>
+            <p v-if="!c.default" class="text-[length:var(--text-label)] text-dimmed">You made this one, so it is only removed if you tick it.</p>
           </div>
         </li>
       </ul>
@@ -80,7 +80,7 @@ function setOn(id: string, on: boolean | 'indeterminate') {
     <section v-if="diff.leftAlone.length > 0" class="flex flex-col gap-2">
       <h3 class="text-[length:var(--text-label)] text-muted">Left alone</h3>
       <ul class="flex flex-col gap-1">
-        <li v-for="n in diff.leftAlone" :key="n.workoutId" class="flex items-start gap-2 text-xs text-muted">
+        <li v-for="n in diff.leftAlone" :key="n.workoutId" class="flex items-start gap-2 text-[length:var(--text-label)] text-muted">
           <UIcon name="i-lucide-shield-check" class="mt-0.5 size-3.5 shrink-0" />
           <span><span class="text-default">{{ n.name || 'Session' }}</span> ({{ weekdayAndDay(n.date) }}): {{ n.reason }}</span>
         </li>

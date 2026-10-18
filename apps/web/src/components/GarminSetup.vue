@@ -66,7 +66,7 @@ async function clear() {
     />
 
     <!-- Not this viewer's job. Say what is missing and who can fix it. -->
-    <div v-if="!props.consumer.canManage" class="flex items-start gap-3 text-sm">
+    <div v-if="!props.consumer.canManage" class="flex items-start gap-3 text-[length:var(--text-body)]">
       <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0 text-dimmed" />
       <p class="text-muted">
         {{
@@ -85,8 +85,8 @@ async function clear() {
             :class="props.consumer.configured ? 'text-primary' : 'text-dimmed'"
           />
           <div>
-            <p class="text-sm font-medium text-highlighted">Garmin app keys</p>
-            <p class="text-sm text-muted">
+            <p class="text-[length:var(--text-body)] font-medium text-highlighted">Garmin app keys</p>
+            <p class="text-[length:var(--text-body)] text-muted">
               <template v-if="props.consumer.source === 'settings'">
                 Set here{{ props.consumer.updatedBy ? ` by ${props.consumer.updatedBy}` : '' }}.
                 Used for everyone's sign-in.
@@ -149,7 +149,7 @@ async function clear() {
           >
             Save
           </UButton>
-          <p class="text-xs text-dimmed">
+          <p class="text-[length:var(--text-label)] text-dimmed">
             Stored encrypted. Never shown again, here or anywhere else.
           </p>
         </div>
@@ -158,7 +158,7 @@ async function clear() {
 
     <UModal v-model:open="confirmingClear" title="Remove Garmin app keys?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           Riders will not be able to sign in unless the deployment supplies them another way.
         </p>
       </template>

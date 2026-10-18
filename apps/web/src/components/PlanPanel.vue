@@ -162,7 +162,7 @@ const columns: TableColumn<PlanItem>[] = [
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 class="font-medium text-highlighted">Pending changes</h2>
-          <p v-if="plan" class="text-sm text-muted">
+          <p v-if="plan" class="text-[length:var(--text-body)] text-muted">
             {{ changes.length }} change{{ changes.length === 1 ? '' : 's' }},
             {{ plan.inSync }} already in sync
           </p>
@@ -207,9 +207,9 @@ const columns: TableColumn<PlanItem>[] = [
       v-if="changes.length"
       :data="changes"
       :columns="columns"
-      :ui="{ td: 'text-sm', th: 'text-[length:var(--text-label)] text-muted' }"
+      :ui="{ td: 'text-[length:var(--text-body)]', th: 'text-[length:var(--text-label)] text-muted' }"
     />
-    <p v-else class="text-sm text-muted">Nothing is waiting to be pushed.</p>
+    <p v-else class="text-[length:var(--text-body)] text-muted">Nothing is waiting to be pushed.</p>
 
     <UAlert
       v-for="failure in failures"

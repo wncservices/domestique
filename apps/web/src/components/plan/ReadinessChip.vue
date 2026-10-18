@@ -35,10 +35,10 @@ const ariaLabel = computed(() => `Readiness: ${config.value.label} — show reas
 
     <template #content>
       <div class="max-w-64 p-3">
-        <ul v-if="reasons.length > 0" class="flex flex-col gap-1 pl-4 text-sm text-muted list-disc">
+        <ul v-if="reasons.length > 0" class="flex flex-col gap-1 pl-4 text-[length:var(--text-body)] text-muted list-disc">
           <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
         </ul>
-        <p v-else class="text-sm text-muted">No concerns today.</p>
+        <p v-else class="text-[length:var(--text-body)] text-muted">No concerns today.</p>
       </div>
     </template>
   </UPopover>

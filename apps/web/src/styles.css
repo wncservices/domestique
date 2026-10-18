@@ -109,8 +109,8 @@
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
 
-  /* Type scale: five roles. 13px and 20px are reached through text-[13px] and
-   * text-xl, so they need no token. */
+  /* Type scale: five roles plus the landing display size. Raw Tailwind size
+   * classes are banned (designSystem.test.mjs); use text-[length:var(--text-*)]. */
   --text-label: 0.75rem;
   --text-body: 0.875rem;
   --text-lead: 1rem;

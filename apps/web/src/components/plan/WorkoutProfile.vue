@@ -104,7 +104,7 @@ const tooltip = computed(() => {
 </script>
 
 <template>
-  <p v-if="totalSeconds === 0" class="text-xs text-dimmed border-t border-dashed border-default pt-2">
+  <p v-if="totalSeconds === 0" class="text-[length:var(--text-label)] text-dimmed border-t border-dashed border-default pt-2">
     No timed steps
   </p>
   <div v-else class="relative" @pointerleave="hovered = null">
@@ -133,7 +133,7 @@ const tooltip = computed(() => {
     </svg>
     <div
       v-if="tooltip"
-      class="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-default bg-default px-2 py-1 text-xs tabular-nums text-highlighted shadow-sm"
+      class="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-default bg-default px-2 py-1 text-[length:var(--text-label)] tabular-nums text-highlighted shadow-sm"
       :style="{ left: `${tooltip.left}px` }"
     >
       {{ tooltip.text }}

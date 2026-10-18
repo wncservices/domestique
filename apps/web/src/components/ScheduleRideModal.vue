@@ -148,7 +148,7 @@ async function schedule() {
         <UAlert v-else-if="error" color="warning" variant="subtle" icon="i-lucide-calendar-x" :title="error" />
 
         <template v-else-if="situation">
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             About
             <span class="tabular-nums text-highlighted">{{ routeTime }}</span>
             on this route at an easy endurance pace. An estimate<template v-if="situation.routeAssumed">, assuming 25 km/h on the flat until you add your FTP and weight in Settings</template>.
@@ -158,7 +158,7 @@ async function schedule() {
             <USelect v-model="workoutId" :items="sessionItems" value-key="value" placeholder="Pick a ride" class="w-full" />
           </UFormField>
 
-          <p v-if="situation.sessions.length === 0" class="text-sm text-muted">Nothing outdoors is planned on this day.</p>
+          <p v-if="situation.sessions.length === 0" class="text-[length:var(--text-body)] text-muted">Nothing outdoors is planned on this day.</p>
           <URadioGroup v-model="choice" :items="choiceItems" value-key="value" />
         </template>
       </div>

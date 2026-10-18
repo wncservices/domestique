@@ -68,7 +68,7 @@ function awardsText(session: CompletedSession): string {
       v-for="session in visible"
       :id="rowId(session.id)"
       :key="session.id"
-      class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5 text-sm first:pt-0 transition-colors"
+      class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5 text-[length:var(--text-body)] first:pt-0 transition-colors"
       :class="highlighted === session.id ? 'bg-elevated' : ''"
     >
       <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
@@ -86,7 +86,7 @@ function awardsText(session: CompletedSession): string {
           New best!
         </UBadge>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 tabular-nums text-xs sm:text-sm">
+      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 tabular-nums text-[length:var(--text-label)] sm:text-[length:var(--text-body)]">
         <span>{{ formatDuration(session.durationSeconds) }}</span>
         <span v-if="formatDistance(session.distanceM)">{{ formatDistance(session.distanceM) }}</span>
         <span v-if="session.avgPowerWatts">{{ Math.round(session.avgPowerWatts) }} W</span>

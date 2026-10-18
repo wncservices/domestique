@@ -40,19 +40,19 @@ const canConfirm = computed(() => !props.busy && !props.error && (isConvert.valu
   <UModal v-model:open="open" :title="title">
     <template #body>
       <div class="flex flex-col gap-3">
-        <p v-if="workout" class="text-sm font-medium text-highlighted">{{ workout.name }}</p>
+        <p v-if="workout" class="text-[length:var(--text-body)] font-medium text-highlighted">{{ workout.name }}</p>
 
         <UAlert v-if="error" color="error" variant="subtle" icon="i-lucide-triangle-alert" :title="error" />
 
         <template v-else-if="isConvert">
-          <p v-if="loading" class="text-sm text-muted">Working out the indoor version…</p>
+          <p v-if="loading" class="text-[length:var(--text-body)] text-muted">Working out the indoor version…</p>
           <template v-else-if="preview">
-            <dl class="flex flex-col gap-2 text-sm">
+            <dl class="flex flex-col gap-2 text-[length:var(--text-body)]">
               <div class="flex flex-wrap items-baseline justify-between gap-2">
                 <dt class="text-muted">Length on the trainer</dt>
                 <dd class="tabular-nums text-highlighted">
                   {{ formatDuration(preview.plannedSeconds) }}
-                  <span v-if="changedLength" class="text-xs text-muted">(outdoors {{ formatDuration(preview.originalSeconds!) }})</span>
+                  <span v-if="changedLength" class="text-[length:var(--text-label)] text-muted">(outdoors {{ formatDuration(preview.originalSeconds!) }})</span>
                 </dd>
               </div>
               <div class="flex flex-wrap items-center justify-between gap-2">
@@ -70,13 +70,13 @@ const canConfirm = computed(() => !props.busy && !props.error && (isConvert.valu
                 </dd>
               </div>
             </dl>
-            <p class="text-sm text-toned">{{ preview.note }}</p>
-            <p class="text-xs text-muted">You can go back to the outdoor version until you edit or ride it.</p>
+            <p class="text-[length:var(--text-body)] text-toned">{{ preview.note }}</p>
+            <p class="text-[length:var(--text-label)] text-muted">You can go back to the outdoor version until you edit or ride it.</p>
           </template>
         </template>
 
         <template v-else>
-          <p class="text-sm text-toned">
+          <p class="text-[length:var(--text-body)] text-toned">
             Restores the outdoor steps this session had before it was made indoor<template v-if="workout?.outdoorPlannedSeconds">
               — {{ formatDuration(workout.outdoorPlannedSeconds) }}</template>.
           </p>

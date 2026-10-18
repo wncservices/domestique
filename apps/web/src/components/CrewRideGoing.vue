@@ -126,10 +126,10 @@ async function apply() {
       >
         {{ mine ? 'Going' : "I'm going" }}
       </UButton>
-      <span v-if="going.length > 0" class="text-xs text-muted">
+      <span v-if="going.length > 0" class="text-[length:var(--text-label)] text-muted">
         {{ going.length }} going: {{ names }}
       </span>
-      <span v-else class="text-xs text-dimmed">Nobody yet</span>
+      <span v-else class="text-[length:var(--text-label)] text-dimmed">Nobody yet</span>
     </template>
 
     <UModal v-model:open="open" :title="title" :ui="{ content: 'sm:max-w-lg' }">
@@ -144,7 +144,7 @@ async function apply() {
             :title="line"
           />
 
-          <p v-if="preview.diff.changes.length === 0" class="text-sm text-muted">Nothing else in your plan changes.</p>
+          <p v-if="preview.diff.changes.length === 0" class="text-[length:var(--text-body)] text-muted">Nothing else in your plan changes.</p>
 
           <ul v-else class="flex flex-col gap-2">
             <li
@@ -160,12 +160,12 @@ async function apply() {
                 @update:model-value="(on: boolean | 'indeterminate') => setOn(c.id, on)"
               />
               <div class="flex min-w-0 flex-col gap-0.5">
-                <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium text-highlighted">
+                <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[length:var(--text-body)] font-medium text-highlighted">
                   <UBadge color="neutral" variant="subtle" size="sm" :icon="OP_META[c.op]?.icon">{{ OP_META[c.op]?.label ?? c.op }}</UBadge>
                   <span class="truncate">{{ c.name || 'Session' }}</span>
                   <span class="font-normal text-muted">{{ weekdayAndDay(c.date) }}</span>
                 </p>
-                <p class="text-xs text-muted">{{ c.reason }}</p>
+                <p class="text-[length:var(--text-label)] text-muted">{{ c.reason }}</p>
               </div>
             </li>
           </ul>
@@ -173,7 +173,7 @@ async function apply() {
           <section v-if="preview.diff.leftAlone.length > 0" class="flex flex-col gap-2">
             <h3 class="text-[length:var(--text-label)] text-muted">Left alone</h3>
             <ul class="flex flex-col gap-1">
-              <li v-for="n in preview.diff.leftAlone" :key="n.workoutId" class="flex items-start gap-2 text-xs text-muted">
+              <li v-for="n in preview.diff.leftAlone" :key="n.workoutId" class="flex items-start gap-2 text-[length:var(--text-label)] text-muted">
                 <UIcon name="i-lucide-shield-check" class="mt-0.5 size-3.5 shrink-0" />
                 <span><span class="text-default">{{ n.name || 'Session' }}</span> ({{ weekdayAndDay(n.date) }}): {{ n.reason }}</span>
               </li>

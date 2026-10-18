@@ -36,9 +36,9 @@ function send() {
       />
       <UButton type="submit" color="primary" variant="soft" :loading="loading" :disabled="!text.trim()">Propose</UButton>
     </form>
-    <p class="text-xs text-muted">
+    <p class="text-[length:var(--text-label)] text-muted">
       Your sentence is sent to Anthropic to be turned into a proposal. Nothing changes until you confirm it.
     </p>
-    <p v-if="message" class="text-xs text-warning" role="status">{{ message }}</p>
+    <p v-if="message" class="text-[length:var(--text-label)] text-warning" role="status">{{ message }}</p>
   </div>
 </template>

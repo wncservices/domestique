@@ -500,7 +500,7 @@ onMounted(async () => {
           <li v-for="section in generalSections" :key="section.id" class="shrink-0">
             <a
               :href="`#${section.id}`"
-              class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
+              class="block rounded-md px-3 py-1.5 text-[length:var(--text-body)] text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
               :aria-current="current === section.id ? 'location' : undefined"
               @click.prevent="goTo(section.id)"
             >
@@ -514,7 +514,7 @@ onMounted(async () => {
             <li v-for="section in adminSections" :key="section.id" class="shrink-0">
               <a
               :href="`#${section.id}`"
-              class="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
+              class="block rounded-md px-3 py-1.5 text-[length:var(--text-body)] text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
               :aria-current="current === section.id ? 'location' : undefined"
               @click.prevent="goTo(section.id)"
             >
@@ -528,11 +528,11 @@ onMounted(async () => {
       <div class="flex min-w-0 flex-col gap-10">
         <section id="profile" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="profile-title">
           <div>
-            <h2 id="profile-title" class="text-xl text-highlighted">Profile</h2>
-            <p class="text-sm text-muted">Your own name and sign-in, for this account only.</p>
+            <h2 id="profile-title" class="text-[length:var(--text-title)] text-highlighted">Profile</h2>
+            <p class="text-[length:var(--text-body)] text-muted">Your own name and sign-in, for this account only.</p>
           </div>
 
-          <p class="text-sm text-toned">
+          <p class="text-[length:var(--text-body)] text-toned">
             Signed in as
             <span class="text-highlighted">
               {{ me?.authenticated ? `${me.name || me.user} (${me.role})` : 'nobody — every visitor is an admin' }}
@@ -558,7 +558,7 @@ onMounted(async () => {
               </UFormField>
 
               <div>
-                <p class="mb-1 text-sm font-medium text-toned">Password</p>
+                <p class="mb-1 text-[length:var(--text-body)] font-medium text-toned">Password</p>
                 <UButton
                   v-if="me?.canChangePassword"
                   size="sm"
@@ -569,14 +569,14 @@ onMounted(async () => {
                 >
                   Email me a reset link
                 </UButton>
-                <p v-else class="text-xs text-dimmed">
+                <p v-else class="text-[length:var(--text-label)] text-dimmed">
                   You sign in with an external provider — there's no password here to change.
                 </p>
               </div>
 
               <div>
                 <div class="mb-1 flex items-center gap-2">
-                  <p class="text-sm font-medium text-toned">Two-factor authentication</p>
+                  <p class="text-[length:var(--text-body)] font-medium text-toned">Two-factor authentication</p>
                   <UButton
                     size="xs"
                     color="neutral"
@@ -592,7 +592,7 @@ onMounted(async () => {
                   <div
                     v-for="factor in mfaEnrollments"
                     :key="factor.id"
-                    class="flex items-center gap-2 text-sm"
+                    class="flex items-center gap-2 text-[length:var(--text-body)]"
                   >
                     <UIcon name="i-lucide-shield-check" class="size-4 text-dimmed" />
                     <span class="flex-1 text-toned">
@@ -616,7 +616,7 @@ onMounted(async () => {
                     />
                   </div>
                 </div>
-                <p v-else class="mb-2 text-xs text-dimmed">Nothing set up yet.</p>
+                <p v-else class="mb-2 text-[length:var(--text-label)] text-dimmed">Nothing set up yet.</p>
 
                 <div class="mt-2 flex flex-wrap items-center gap-2">
                   <UButton
@@ -664,8 +664,8 @@ onMounted(async () => {
 
         <section id="devices" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="devices-title">
           <div>
-            <h2 id="devices-title" class="text-xl text-highlighted">Devices and sync</h2>
-            <p class="text-sm text-muted">Head units and accounts your routes are pushed to or imported from.</p>
+            <h2 id="devices-title" class="text-[length:var(--text-title)] text-highlighted">Devices and sync</h2>
+            <p class="text-[length:var(--text-body)] text-muted">Head units and accounts your routes are pushed to or imported from.</p>
           </div>
 
           <AccountsPanel
@@ -701,7 +701,7 @@ onMounted(async () => {
                 <UIcon name="i-lucide-mountain-snow" />
                 Komoot
               </h3>
-              <p class="text-sm text-muted">Sign in to import your own planned routes.</p>
+              <p class="text-[length:var(--text-body)] text-muted">Sign in to import your own planned routes.</p>
             </template>
 
             <UAlert
@@ -719,12 +719,12 @@ onMounted(async () => {
 
         <section id="training" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="training-title">
           <div>
-            <h2 id="training-title" class="text-xl text-highlighted">Training</h2>
-            <p class="text-sm text-muted">Where your rides start and how your plan gets scheduled.</p>
+            <h2 id="training-title" class="text-[length:var(--text-title)] text-highlighted">Training</h2>
+            <p class="text-[length:var(--text-body)] text-muted">Where your rides start and how your plan gets scheduled.</p>
           </div>
 
           <div v-if="canManageTraining" class="flex flex-col gap-4">
-            <p class="text-sm text-muted">
+            <p class="text-[length:var(--text-body)] text-muted">
               Your FTP and the rest of your training profile live on
               <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Fitness</RouterLink>.
             </p>
@@ -732,13 +732,13 @@ onMounted(async () => {
             <RideStartCard :routing-configured="routingConfigured" />
 
           </div>
-          <p v-else class="text-sm text-dimmed">Nothing to set here for your role.</p>
+          <p v-else class="text-[length:var(--text-body)] text-dimmed">Nothing to set here for your role.</p>
         </section>
 
         <section id="notifications" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="notifications-title">
           <div>
-            <h2 id="notifications-title" class="text-xl text-highlighted">Notifications</h2>
-            <p class="text-sm text-muted">What Domestique warns you about for planned rides.</p>
+            <h2 id="notifications-title" class="text-[length:var(--text-title)] text-highlighted">Notifications</h2>
+            <p class="text-[length:var(--text-body)] text-muted">What Domestique warns you about for planned rides.</p>
           </div>
 
           <!-- A rider's own setting. The card hides itself when the deployment
@@ -747,13 +747,13 @@ onMounted(async () => {
           <!-- The morning email is a notification, so it is set here; the card
                hides itself when the deployment has no mail configured. -->
           <MorningSummaryCard v-if="canManageTraining" />
-          <p v-if="notificationsEmpty" class="text-sm text-dimmed">Nothing to set here for your role.</p>
+          <p v-if="notificationsEmpty" class="text-[length:var(--text-body)] text-dimmed">Nothing to set here for your role.</p>
         </section>
 
         <section v-if="adminSections.length" id="deployment" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="deployment-title">
           <div>
-            <h2 id="deployment-title" class="text-xl text-highlighted">Deployment</h2>
-            <p class="text-sm text-muted">Settings that apply to every rider on this deployment.</p>
+            <h2 id="deployment-title" class="text-[length:var(--text-title)] text-highlighted">Deployment</h2>
+            <p class="text-[length:var(--text-body)] text-muted">Settings that apply to every rider on this deployment.</p>
           </div>
 
           <div class="flex flex-col gap-4">
@@ -766,12 +766,12 @@ onMounted(async () => {
                   <UIcon name="i-lucide-refresh-cw" />
                   Auto-sync
                 </h3>
-                <p class="text-sm text-muted">
+                <p class="text-[length:var(--text-body)] text-muted">
                   Pull in new routes from riders' connected accounts and push what changed out to devices on its own.
                 </p>
               </template>
 
-              <label class="flex w-fit items-center gap-2 text-sm text-toned">
+              <label class="flex w-fit items-center gap-2 text-[length:var(--text-body)] text-toned">
                 <USwitch
                   :model-value="autoSync.enabled"
                   :loading="togglingAutoSync"
@@ -779,11 +779,11 @@ onMounted(async () => {
                 />
                 {{ autoSync.enabled ? 'On' : 'Off' }}
               </label>
-              <p v-if="autoSync.updatedBy" class="mt-2 text-xs text-dimmed">
+              <p v-if="autoSync.updatedBy" class="mt-2 text-[length:var(--text-label)] text-dimmed">
                 Last changed by {{ autoSync.updatedBy }}.
               </p>
               <DetailsToggle v-model:open="aboutAutoSync" label="Learn more" class="mt-3">
-                <p class="text-sm text-muted">
+                <p class="text-[length:var(--text-body)] text-muted">
                   Whether this deployment pulls in new routes from a rider's connected Wahoo, Komoot or
                   Garmin on its own, then pushes what changed out to devices — for every rider, without
                   anyone clicking "Push to devices". Which of a rider's own devices actually get pushed
@@ -800,12 +800,12 @@ onMounted(async () => {
                   <UIcon name="i-lucide-calendar-clock" />
                   Auto-schedule
                 </h3>
-                <p class="text-sm text-muted">
+                <p class="text-[length:var(--text-body)] text-muted">
                   Sync every rider's completed sessions and schedule their current plan week on its own.
                 </p>
               </template>
 
-              <label class="flex w-fit items-center gap-2 text-sm text-toned">
+              <label class="flex w-fit items-center gap-2 text-[length:var(--text-body)] text-toned">
                 <USwitch
                   :model-value="autoSchedule.enabled"
                   :loading="togglingAutoSchedule"
@@ -813,11 +813,11 @@ onMounted(async () => {
                 />
                 {{ autoSchedule.enabled ? 'On' : 'Off' }}
               </label>
-              <p v-if="autoSchedule.updatedBy" class="mt-2 text-xs text-dimmed">
+              <p v-if="autoSchedule.updatedBy" class="mt-2 text-[length:var(--text-label)] text-dimmed">
                 Last changed by {{ autoSchedule.updatedBy }}.
               </p>
               <DetailsToggle v-model:open="aboutAutoSchedule" label="Learn more" class="mt-3">
-                <p class="text-sm text-muted">
+                <p class="text-[length:var(--text-body)] text-muted">
                   Whether training runs on its own: every rider's completed Garmin/Wahoo sessions are
                   synced in the background, and their current plan week is scheduled into real workouts
                   — for every rider with a goal and a filled-in fitness profile, without anyone visiting
@@ -835,7 +835,7 @@ onMounted(async () => {
                   <UIcon name="i-lucide-watch" />
                   Garmin setup
                 </h3>
-                <p class="text-sm text-muted">
+                <p class="text-[length:var(--text-body)] text-muted">
                   One pair of app keys for the whole deployment, so riders can sign in.
                 </p>
               </template>
@@ -854,21 +854,21 @@ onMounted(async () => {
                 </h3>
               </template>
 
-              <dl class="grid gap-3 text-sm sm:grid-cols-2">
+              <dl class="grid gap-3 text-[length:var(--text-body)] sm:grid-cols-2">
                 <div>
                   <dt class="text-dimmed">Library</dt>
-                  <dd class="tabular-nums text-xs break-all text-highlighted">{{ config.source }}</dd>
+                  <dd class="tabular-nums text-[length:var(--text-label)] break-all text-highlighted">{{ config.source }}</dd>
                 </div>
               </dl>
             </UCard>
           </div>
-          <p v-if="deploymentEmpty" class="text-sm text-dimmed">Nothing to set here.</p>
+          <p v-if="deploymentEmpty" class="text-[length:var(--text-body)] text-dimmed">Nothing to set here.</p>
         </section>
 
         <section v-if="adminSections.length" id="basemap" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="basemap-title">
           <div>
-            <h2 id="basemap-title" class="text-xl text-highlighted">Basemap</h2>
-            <p class="text-sm text-muted">
+            <h2 id="basemap-title" class="text-[length:var(--text-title)] text-highlighted">Basemap</h2>
+            <p class="text-[length:var(--text-body)] text-muted">
               Tile data behind a route's map — self-hosted, so a rider's coordinates never reach a third party.
             </p>
           </div>
@@ -889,7 +889,7 @@ onMounted(async () => {
               <BasemapSetup :basemap="basemap" @changed="pollBasemapWhileRunning" />
             </UCard>
           </div>
-          <p v-if="basemapEmpty" class="text-sm text-dimmed">The basemap status is not available.</p>
+          <p v-if="basemapEmpty" class="text-[length:var(--text-body)] text-dimmed">The basemap status is not available.</p>
         </section>
       </div>
     </div>
@@ -900,7 +900,7 @@ onMounted(async () => {
       @update:open="removeTarget = null"
     >
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           “{{ removeTarget ? factorLabel(removeTarget.type) : '' }}” will no longer be asked for at
           sign-in. Remove it only if you've lost access to it or no longer want it.
         </p>
@@ -921,7 +921,7 @@ onMounted(async () => {
       @update:open="deleteAccountOpen = $event"
     >
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           This permanently removes your routes, linked devices and crew membership, then your
           sign-in itself. You will be signed out immediately and cannot undo this — coming back
           means a fresh invite and starting from nothing.

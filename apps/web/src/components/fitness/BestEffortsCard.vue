@@ -57,7 +57,7 @@ function cell(row: EffortRow, key: Column['key']): EffortCell | null {
 
     <SkeletonCard v-if="loading && !data" :lines="4" label="Loading your records…" />
 
-    <p v-else-if="!hasRecords" class="text-sm text-muted py-4 text-center">
+    <p v-else-if="!hasRecords" class="text-[length:var(--text-body)] text-muted py-4 text-center">
       <template v-if="sport === 'cycling'">
         No records yet. They build up from the rides you sync that have power or heart rate data.
       </template>
@@ -66,8 +66,8 @@ function cell(row: EffortRow, key: Column['key']): EffortCell | null {
       </template>
     </p>
 
-    <div v-else role="table" :aria-label="`${sport === 'cycling' ? 'Cycling' : 'Running'} best efforts`" class="flex flex-col text-sm">
-      <div role="row" class="hidden sm:grid grid-cols-[minmax(0,1.1fr)_repeat(3,minmax(0,1fr))] gap-x-3 pb-2 text-xs text-muted">
+    <div v-else role="table" :aria-label="`${sport === 'cycling' ? 'Cycling' : 'Running'} best efforts`" class="flex flex-col text-[length:var(--text-body)]">
+      <div role="row" class="hidden sm:grid grid-cols-[minmax(0,1.1fr)_repeat(3,minmax(0,1fr))] gap-x-3 pb-2 text-[length:var(--text-label)] text-muted">
         <span role="columnheader">Effort</span>
         <span v-for="c in COLUMNS" :key="c.key" role="columnheader">{{ c.label }}</span>
       </div>
@@ -80,11 +80,11 @@ function cell(row: EffortRow, key: Column['key']): EffortCell | null {
       >
         <span role="rowheader" class="col-span-3 sm:col-span-1 font-medium text-highlighted">{{ row.label }}</span>
         <div v-for="c in COLUMNS" :key="c.key" role="cell" class="min-w-0">
-          <span class="block sm:hidden text-xs text-muted">{{ c.label }}</span>
+          <span class="block sm:hidden text-[length:var(--text-label)] text-muted">{{ c.label }}</span>
           <a
             v-if="cell(row, c.key)"
             :href="`#ride-${cell(row, c.key)!.sessionId}`"
-            class="tabular-nums text-xs sm:text-sm text-highlighted hover:underline break-words"
+            class="tabular-nums text-[length:var(--text-label)] sm:text-[length:var(--text-body)] text-highlighted hover:underline break-words"
             :title="'Show this ride'"
             @click.prevent="emit('open-ride', cell(row, c.key)!.sessionId)"
           >

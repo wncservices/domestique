@@ -132,7 +132,7 @@ async function importToLibrary() {
         <UIcon name="i-lucide-bike" class="size-5" />
       </span>
       <div class="min-w-0">
-        <span class="font-display block truncate text-base font-semibold tracking-tight text-highlighted">
+        <span class="font-display block truncate text-[length:var(--text-lead)] font-semibold tracking-tight text-highlighted">
           Domestique
         </span>
         <p class="truncate text-[length:var(--text-label)] text-muted">A route shared with you.</p>

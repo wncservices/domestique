@@ -69,8 +69,8 @@ const priorities: { value: GoalPriority; label: string }[] = [
     <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">
         <div v-if="narrationEnabled && !editing" class="rounded-md border border-default p-3">
-          <p class="text-sm font-medium mb-1">Describe it</p>
-          <p class="text-xs text-muted mb-2">
+          <p class="text-[length:var(--text-body)] font-medium mb-1">Describe it</p>
+          <p class="text-[length:var(--text-label)] text-muted mb-2">
             e.g. "gran fondo, 180 km, 2400 m of climbing, mid June" — fills in the fields below for you to review.
           </p>
           <div class="flex gap-2">
@@ -86,7 +86,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
               Fill in
             </UButton>
           </div>
-          <p v-if="explanation" class="mt-2 text-sm text-muted italic">{{ explanation }}</p>
+          <p v-if="explanation" class="mt-2 text-[length:var(--text-body)] text-muted italic">{{ explanation }}</p>
         </div>
         <UFormField label="Name">
           <UInput :model-value="form.name" placeholder="Local Gran Fondo" class="w-full" @update:model-value="(v: string | number) => set('name', String(v))" />
@@ -158,7 +158,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
                 :model-value="form.pacingIf"
                 @update:model-value="(v: number | undefined) => set('pacingIf', v ?? form.pacingIf)"
               />
-              <span class="w-12 text-right tabular-nums text-sm">{{ form.pacingIf.toFixed(2) }}</span>
+              <span class="w-12 text-right tabular-nums text-[length:var(--text-body)]">{{ form.pacingIf.toFixed(2) }}</span>
             </div>
           </div>
         </UFormField>

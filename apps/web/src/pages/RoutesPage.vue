@@ -361,7 +361,7 @@ async function push(items: { accountId: string; slug: string }[]) {
           />
           <div
             v-if="loadingTracks"
-            class="absolute inset-x-0 top-0 flex justify-center bg-elevated/80 py-1 text-xs text-muted"
+            class="absolute inset-x-0 top-0 flex justify-center bg-elevated/80 py-1 text-[length:var(--text-label)] text-muted"
           >
             Loading route tracks…
           </div>

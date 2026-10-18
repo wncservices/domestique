@@ -167,7 +167,7 @@ async function unlink(account: Account) {
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 class="font-medium text-highlighted">Head units</h3>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             {{ myAccounts.length }} linked · routes are pushed to these
           </p>
         </div>
@@ -211,7 +211,7 @@ async function unlink(account: Account) {
       color="error"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      :description="error"
+      :text="error"
       class="mb-4"
     />
 
@@ -222,7 +222,7 @@ async function unlink(account: Account) {
       color="warning"
       variant="subtle"
       icon="i-lucide-info"
-      :description="devicesError"
+      :text="devicesError"
       class="mb-4"
     />
 
@@ -237,8 +237,8 @@ async function unlink(account: Account) {
           class="text-dimmed"
         />
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm text-highlighted">{{ account.label }}</p>
-          <p class="tabular-nums text-xs text-dimmed">{{ account.id }}</p>
+          <p class="truncate text-[length:var(--text-body)] text-highlighted">{{ account.label }}</p>
+          <p class="tabular-nums text-[length:var(--text-label)] text-dimmed">{{ account.id }}</p>
         </div>
 
         <UBadge v-if="!account.implemented" color="warning" variant="subtle" size="sm">
@@ -267,7 +267,7 @@ async function unlink(account: Account) {
           v-if="account.mine"
           text="Whether auto-sync's unattended push includes this device — only takes effect once auto-sync itself is on in Settings. A manual push always reaches it either way."
         >
-          <label class="flex items-center gap-1.5 text-xs text-dimmed">
+          <label class="flex items-center gap-1.5 text-[length:var(--text-label)] text-dimmed">
             <USwitch
               size="sm"
               :model-value="account.autoPush"
@@ -312,11 +312,13 @@ async function unlink(account: Account) {
       </div>
     </div>
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else
       icon="i-lucide-watch"
       title="No head units linked"
-      :description="
+      :text="
         canManage
           ? 'Link a Garmin or Wahoo account above. Until then there is nowhere to push routes.'
           : 'Nothing is linked yet, so there is nowhere to push routes.'
@@ -327,7 +329,7 @@ async function unlink(account: Account) {
 
     <UModal :open="!!unlinkTarget" title="Unlink this account?" @update:open="unlinkTarget = null">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           “{{ unlinkTarget?.label }}” will stop syncing routes once unlinked.
         </p>
       </template>

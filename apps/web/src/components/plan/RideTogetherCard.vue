@@ -37,20 +37,20 @@ const agreed = computed(() => props.proposal.status === 'agreed')
       <div class="flex items-start gap-3">
         <UIcon name="i-lucide-users" class="mt-0.5 size-5 shrink-0 text-primary" />
         <div class="flex min-w-0 flex-col gap-1">
-          <p v-if="!agreed" class="text-sm font-medium text-highlighted">
+          <p v-if="!agreed" class="text-[length:var(--text-body)] font-medium text-highlighted">
             You and {{ otherNames }} each have a long ride, or an endurance ride of an hour or more, planned this week. {{ dayLabel }} on {{ proposal.routeName }} works for everyone.
           </p>
-          <p v-else class="text-sm font-medium text-highlighted">
+          <p v-else class="text-[length:var(--text-body)] font-medium text-highlighted">
             Agreed: you and {{ otherNames }} are riding {{ proposal.routeName }} on {{ dayLabel }}.
           </p>
-          <p class="text-xs text-muted">
+          <p class="text-[length:var(--text-label)] text-muted">
             {{ proposal.crewName }} · {{ weekdayAndDay(proposal.day) }}
           </p>
-          <p v-if="accepted.length > 0 && !agreed" class="text-xs text-muted">
+          <p v-if="accepted.length > 0 && !agreed" class="text-[length:var(--text-label)] text-muted">
             <UIcon name="i-lucide-check" class="inline size-3.5 align-text-bottom text-success" />
             {{ accepted.join(', ') }} accepted.
           </p>
-          <p v-if="mineAnswered && !agreed && waiting.length > 0" class="text-xs text-muted">
+          <p v-if="mineAnswered && !agreed && waiting.length > 0" class="text-[length:var(--text-label)] text-muted">
             Waiting for {{ waiting.join(', ') }}. Your session is already on {{ dayLabel }}.
           </p>
         </div>

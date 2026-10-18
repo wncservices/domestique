@@ -54,14 +54,14 @@ const biasNote = computed(() => {
   <UCard :ui="{ body: 'p-4 sm:p-5' }">
     <template #header>
       <div class="flex items-center justify-between gap-2">
-        <h3 class="text-sm font-semibold text-highlighted">Route demands</h3>
-        <span v-if="available" class="text-xs text-muted truncate">{{ available.route.name }}</span>
+        <h3 class="text-[length:var(--text-body)] font-semibold text-highlighted">Route demands</h3>
+        <span v-if="available" class="text-[length:var(--text-label)] text-muted truncate">{{ available.route.name }}</span>
       </div>
     </template>
 
-    <p v-if="loading && !demands" class="text-sm text-muted">Reading your route…</p>
-    <p v-else-if="failed" class="text-sm text-error">{{ failed }}</p>
-    <p v-else-if="demands && !demands.available" class="text-sm text-muted" data-testid="demands-unavailable">
+    <p v-if="loading && !demands" class="text-[length:var(--text-body)] text-muted">Reading your route…</p>
+    <p v-else-if="failed" class="text-[length:var(--text-body)] text-error">{{ failed }}</p>
+    <p v-else-if="demands && !demands.available" class="text-[length:var(--text-body)] text-muted" data-testid="demands-unavailable">
       {{ demands.reason }}
     </p>
 
@@ -71,12 +71,12 @@ const biasNote = computed(() => {
         :climbs="available.climbs.map((c) => ({ startM: c.startM, endM: c.endM, index: c.deviceIndex ?? c.index }))"
       />
 
-      <p v-if="!available.climbs.length" class="text-sm text-muted">
+      <p v-if="!available.climbs.length" class="text-[length:var(--text-body)] text-muted">
         No sustained climbs on this route (1 km or more at 3% or steeper), so the plan is not shaped to it.
       </p>
 
       <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-[length:var(--text-body)]">
           <thead>
             <tr class="text-left text-[length:var(--text-label)] text-muted">
               <th class="pb-2 pr-3 font-medium">Climb</th>
@@ -93,13 +93,13 @@ const biasNote = computed(() => {
               <td class="py-2 pr-3 whitespace-nowrap">
                 <span class="font-medium text-highlighted">C{{ (c.deviceIndex ?? c.index) + 1 }}</span>
                 <UBadge v-if="c.category" color="neutral" variant="subtle" size="sm" class="ml-1.5">{{ c.category === 'HC' ? 'HC' : `Cat ${c.category}` }}</UBadge>
-                <span class="block text-xs text-muted">{{ kindLabel[c.kind] }}</span>
+                <span class="block text-[length:var(--text-label)] text-muted">{{ kindLabel[c.kind] }}</span>
               </td>
               <td class="py-2 pr-3 whitespace-nowrap">{{ (c.startM / 1000).toFixed(1) }} km</td>
               <td class="py-2 pr-3 whitespace-nowrap">{{ (c.lengthM / 1000).toFixed(1) }} km</td>
               <td class="py-2 pr-3 whitespace-nowrap">{{ c.avgGradient.toFixed(1) }}%</td>
               <td class="py-2 pr-3 whitespace-nowrap">{{ minutes(c.durationSec) }}</td>
-              <td class="py-2 pr-3 whitespace-nowrap">{{ c.watts }} W <span class="text-xs text-muted">({{ Math.round(c.pctFtp) }}%)</span></td>
+              <td class="py-2 pr-3 whitespace-nowrap">{{ c.watts }} W <span class="text-[length:var(--text-label)] text-muted">({{ Math.round(c.pctFtp) }}%)</span></td>
               <td class="py-2">
                 <UIcon
                   :name="c.covered ? 'i-lucide-circle-check' : 'i-lucide-circle-alert'"
@@ -112,10 +112,10 @@ const biasNote = computed(() => {
         </table>
       </div>
 
-      <p v-if="available.coverage.message" class="text-sm text-toned">{{ available.coverage.message }}</p>
-      <p v-if="biasNote" class="text-sm text-muted">{{ biasNote }}</p>
+      <p v-if="available.coverage.message" class="text-[length:var(--text-body)] text-toned">{{ available.coverage.message }}</p>
+      <p v-if="biasNote" class="text-[length:var(--text-body)] text-muted">{{ biasNote }}</p>
 
-      <details class="text-xs text-muted">
+      <details class="text-[length:var(--text-label)] text-muted">
         <summary class="cursor-pointer">What these numbers assume</summary>
         <ul class="mt-2 list-disc pl-5 flex flex-col gap-1">
           <li v-for="a in available.assumptions" :key="a">{{ a }}</li>
