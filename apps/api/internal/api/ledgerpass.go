@@ -102,15 +102,8 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 		return
 	}
 
-	claimed, _, err := s.Training.ClaimLedgerDay(ctx, rider, weekStart, today)
-	if err != nil {
-		s.logger().Warn("load ledger: could not claim the day", "rider", rider, "err", err)
-		return
-	}
-	if !claimed {
-		return
-	}
-
+	// Everything is read before the day is claimed, so a transient read error
+	// costs this tick and not the whole day.
 	events, err := s.lifeEventsFor(ctx, rider)
 	if err != nil {
 		s.logger().Warn("load ledger: could not read life events", "rider", rider, "err", err)
@@ -122,17 +115,36 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 		s.logger().Warn("load ledger: could not read sessions", "rider", rider, "err", err)
 		return
 	}
-	reduced := planWeek.Recovery || planWeek.Phase == periodization.PhaseTaper
-
+	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		s.logger().Warn("load ledger: could not read workouts", "rider", rider, "err", err)
+		return
+	}
 	row, _, err := s.Training.GetLedgerWeek(ctx, rider, weekStart)
 	if err != nil {
 		s.logger().Warn("load ledger: could not read the week", "rider", rider, "err", err)
 		return
 	}
+	var levels map[string]float64
+	if levels, err = s.levelsFor(ctx, rider, profile, sport); err != nil {
+		s.logger().Warn("load ledger: could not read levels", "rider", rider, "err", err)
+		return
+	}
+
+	claimed, _, err := s.Training.ClaimLedgerDay(ctx, rider, weekStart, today)
+	if err != nil {
+		s.logger().Warn("load ledger: could not claim the day", "rider", rider, "err", err)
+		return
+	}
+	if !claimed {
+		return
+	}
+
+	reduced := planWeek.Recovery || planWeek.Phase == periodization.PhaseTaper
 	// Opened on the target not yet being set, not on the row being new: a crash
 	// between the claim and the open must not skip opening forever.
 	if row.TargetTSS == 0 {
-		row, err = s.openLedgerWeek(ctx, rider, monday, planWeek, profile, blackout, sessions, reduced)
+		row, err = s.openLedgerWeek(ctx, rider, monday, planWeek, profile, blackout, sessions, workouts, reduced)
 		if err != nil {
 			s.logger().Warn("load ledger: could not open the week", "rider", rider, "err", err)
 			return
@@ -142,11 +154,6 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 		return
 	}
 
-	workouts, err := s.Training.ListWorkouts(ctx, rider)
-	if err != nil {
-		s.logger().Warn("load ledger: could not read workouts", "rider", rider, "err", err)
-		return
-	}
 	var completed, remaining float64
 	for _, c := range sessions {
 		if c.Date >= weekStart && c.Date <= today {
@@ -163,16 +170,14 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 			remaining += workout.PlannedTSSOrHours(w, profile.FTPWatts)
 		}
 	}
-	debt := ledger.Debt(row.TargetTSS, row.CarriedInTSS, completed, remaining)
+	// A life event added since the week opened takes days away from what it
+	// owes, so the session it removed is not debt.
+	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, blackout))
+	debt := ledger.Debt(target, row.CarriedInTSS, completed, remaining)
 	if debt <= ledger.MinDebt {
 		return
 	}
 
-	levels, err := s.levelsFor(ctx, rider, profile, sport)
-	if err != nil {
-		s.logger().Warn("load ledger: could not read levels", "rider", rider, "err", err)
-		return
-	}
 	actions := ledger.PlanRepayment(ledger.RepayInput{
 		Debt: debt, Week: week, From: now.AddDate(0, 0, 1).Format(dateLayout), To: sunday,
 		Profile: profile, Phase: planWeek.Phase, Recovery: planWeek.Recovery, Levels: levels, Blackout: blackout,
@@ -200,14 +205,32 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 }
 
 // openLedgerWeek fixes the week's target and settles last week's row into it,
-// returning the row as stored. Last week's own debt rolls in up to a tenth of
-// this week's target (nothing into a recovery or taper week) and the rest of
-// what it owed is forgiven.
-func (s *Server) openLedgerWeek(ctx context.Context, rider string, monday time.Time, planWeek periodization.Week, profile workout.RiderProfile, blackout map[string]bool, sessions []workout.CompletedSession, reduced bool) (workout.LedgerWeek, error) {
+// returning the row as stored.
+//
+// The target is the plan's, scaled to the days not blacked out, but never more
+// than what the scheduler actually built for the week: a plan target the
+// sessions fall short of, or days of a week that were never planned (a goal
+// saved on Thursday), are not load the rider has lost. Debt then starts at
+// what was carried in and grows only as planned sessions are missed, eased or
+// cut short.
+//
+// Last week's own debt rolls in up to a tenth of this week's target (nothing
+// into a recovery or taper week) and the rest of what it owed is forgiven.
+func (s *Server) openLedgerWeek(ctx context.Context, rider string, monday time.Time, planWeek periodization.Week, profile workout.RiderProfile, blackout map[string]bool, sessions []workout.CompletedSession, workouts []workout.Workout, reduced bool) (workout.LedgerWeek, error) {
 	weekStart := monday.Format(dateLayout)
+	weekEnd := monday.AddDate(0, 0, 6).Format(dateLayout)
 	target := ledger.Target(planWeek.TargetTSS, profile.AvailableDays, weekStart, blackout)
+	var built float64
+	for _, w := range workouts {
+		if w.GoalID != "" && w.Date >= weekStart && w.Date <= weekEnd {
+			built += workout.PlannedTSSOrHours(w, profile.FTPWatts)
+		}
+	}
+	target = math.Min(target, built)
+	openDays := ledger.OpenDays(profile.AvailableDays, weekStart, blackout)
+
 	lastStart := monday.AddDate(0, 0, -7).Format(dateLayout)
-	var rolled float64
+	var rolled, forgiven float64
 	last, found, err := s.Training.GetLedgerWeek(ctx, rider, lastStart)
 	if err != nil {
 		return workout.LedgerWeek{}, err
@@ -220,16 +243,18 @@ func (s *Server) openLedgerWeek(ctx context.Context, rider string, monday time.T
 				done += c.TrainingLoad
 			}
 		}
-		lastDebt := ledger.Debt(last.TargetTSS, last.CarriedInTSS, done, 0)
-		var forgiven float64
+		lastTarget := ledger.EffectiveTarget(last.TargetTSS, last.OpenDays, ledger.OpenDays(profile.AvailableDays, lastStart, blackout))
+		lastDebt := ledger.Debt(lastTarget, last.CarriedInTSS, done, 0)
 		rolled, forgiven = ledger.Settle(lastDebt, last.CarriedInTSS, target, reduced)
+	}
+	if err := s.Training.OpenLedgerWeek(ctx, rider, weekStart, target, rolled, openDays); err != nil {
+		return workout.LedgerWeek{}, err
+	}
+	if found {
 		if err := s.Training.SetLedgerForgiven(ctx, rider, lastStart, forgiven); err != nil {
 			return workout.LedgerWeek{}, err
 		}
 		s.logger().Info("load ledger settled last week", "rider", rider, "rolled", rolled > 0, "forgiven", forgiven > 0)
-	}
-	if err := s.Training.OpenLedgerWeek(ctx, rider, weekStart, target, rolled); err != nil {
-		return workout.LedgerWeek{}, err
 	}
 	row, _, err := s.Training.GetLedgerWeek(ctx, rider, weekStart)
 	return row, err
@@ -260,7 +285,13 @@ func (s *Server) applyRepayment(ctx context.Context, rider string, wk workout.Wo
 	// holds together. The marker goes in before keepIndoor so the trainer note
 	// lands in front of it, and the reason text after it, where the UI reads it.
 	flags := workout.CurrentFlags(wk).WithAdaptation(why.LoadRepaid)
-	description := wk.Description + " " + scheduler.AdjustedMarker
+	base := wk.Description
+	if a.Kind == "upgrade" {
+		// A different session now: the endurance ride's own text no longer
+		// describes it.
+		base = workout.GeneratedDescription
+	}
+	description := base + " " + scheduler.AdjustedMarker
 	req := workout.UpdateWorkoutRequest{Name: &name, Steps: &steps, Zone: &zone, Level: level, Description: &description, Flags: &flags}
 	s.keepIndoor(&req, wk, profile, zone)
 
