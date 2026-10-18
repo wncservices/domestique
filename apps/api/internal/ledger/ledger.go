@@ -120,7 +120,7 @@ func Repayable(w workout.Workout, blackout map[string]bool) bool {
 		return false
 	}
 	for _, r := range w.Flags.AdaptedRules {
-		if r == why.LoadRepaid {
+		if r == why.LoadRepaid || r == why.GreenPush {
 			return false
 		}
 	}

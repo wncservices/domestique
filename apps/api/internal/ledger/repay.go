@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"math"
 	"sort"
 
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
@@ -16,7 +17,7 @@ import (
 // outdoor steps: an indoor session is re-converted by the caller.
 type Action struct {
 	WorkoutID string
-	Kind      string // "lengthen" | "upgrade"
+	Kind      string // "lengthen" | "upgrade" | "push"
 	Name      string
 	Steps     []workout.WorkoutStep
 	Zone      workout.Zone
@@ -117,14 +118,7 @@ func PlanRepayment(in RepayInput) []Action {
 	candidates := sortedRepayable(in, endurance)
 
 	// The week's longest session of any kind is its long ride.
-	var longestID string
-	var longest float64
-	for _, w := range in.Week {
-		s := workout.PlannedSeconds(outdoorSteps(w))
-		if s > longest || (s == longest && w.ID < longestID) {
-			longest, longestID = s, w.ID
-		}
-	}
+	longestID := longestOf(in.Week)
 
 	debt := in.Debt
 	var actions []Action
@@ -134,39 +128,125 @@ func PlanRepayment(in RepayInput) []Action {
 		if debt <= MinDebt {
 			break
 		}
-		old := outdoorSteps(w)
-		cur := workout.PlannedSeconds(old)
-		if cur <= 0 {
+		a, ok := lengthen(in, w, longestID)
+		if !ok {
 			continue
 		}
-		next := cur * (1 + LengthenFraction)
-		if v := cur + LengthenMaxSeconds; v < next {
-			next = v
-		}
-		if cap := in.Profile.HoursPerAvailableDay * 3600; cap > 0 && cap < next {
-			next = cap
-		}
-		if next <= cur {
-			continue
-		}
-		long := w.ID == longestID || scheduler.IsLongRideName(w.Name)
-		req := scheduler.BuildEnduranceSession(next/3600, long, w.Sport, in.Profile)
-		gain := tssOf(w, req.Steps, in.Profile) - tssOf(w, old, in.Profile)
-		if gain <= minGain {
-			continue
-		}
-		actions = append(actions, Action{
-			WorkoutID: w.ID, Kind: "lengthen", Name: req.Name, Steps: req.Steps,
-			Zone: workout.ZoneEndurance, TSSAdded: gain,
-		})
+		actions = append(actions, a)
 		touched[w.ID] = true
-		debt -= gain
+		debt -= a.TSSAdded
 	}
 
 	if a, ok := planUpgrade(in, debt, longestID, touched); ok {
 		actions = append(actions, a)
 	}
 	return actions
+}
+
+// longestOf is the id of the week's longest session of any kind: its long ride.
+func longestOf(week []workout.Workout) string {
+	var longestID string
+	var longest float64
+	for _, w := range week {
+		s := workout.PlannedSeconds(outdoorSteps(w))
+		if s > longest || (s == longest && w.ID < longestID) {
+			longest, longestID = s, w.ID
+		}
+	}
+	return longestID
+}
+
+// lengthen is the one place the repayment caps live: an endurance session grows
+// by LengthenFraction, at most LengthenMaxSeconds, and never past the rider's
+// hours for a day. ok is false when it would not gain enough to be worth it.
+func lengthen(in RepayInput, w workout.Workout, longestID string) (Action, bool) {
+	old := outdoorSteps(w)
+	cur := workout.PlannedSeconds(old)
+	if cur <= 0 {
+		return Action{}, false
+	}
+	next := cur * (1 + LengthenFraction)
+	if v := cur + LengthenMaxSeconds; v < next {
+		next = v
+	}
+	if cap := in.Profile.HoursPerAvailableDay * 3600; cap > 0 && cap < next {
+		next = cap
+	}
+	if next <= cur {
+		return Action{}, false
+	}
+	long := w.ID == longestID || scheduler.IsLongRideName(w.Name)
+	req := scheduler.BuildEnduranceSession(next/3600, long, w.Sport, in.Profile)
+	gain := tssOf(w, req.Steps, in.Profile) - tssOf(w, old, in.Profile)
+	if gain <= minGain {
+		return Action{}, false
+	}
+	return Action{
+		WorkoutID: w.ID, Kind: "lengthen", Name: req.Name, Steps: req.Steps,
+		Zone: workout.ZoneEndurance, TSSAdded: gain,
+	}, true
+}
+
+// PlanGreenPush raises today's session on a morning readiness says to push,
+// when the week still owes load: a structured session goes one rung up its own
+// ladder (never above the rider's level + 1), an endurance session is lengthened
+// with the repayment caps. It changes nothing and returns nil for a recovery or
+// taper week, for debt at or under MinDebt, or when no session qualifies.
+func PlanGreenPush(in RepayInput, today string) *Action {
+	if in.Recovery || in.Phase == periodization.PhaseTaper || in.Debt <= MinDebt {
+		return nil
+	}
+	for _, w := range in.Week {
+		if w.Date != today || !Repayable(w, in.Blackout) {
+			continue
+		}
+		if w.Zone == workout.ZoneEndurance {
+			a, ok := lengthen(in, w, longestOf(in.Week))
+			if !ok {
+				return nil
+			}
+			a.Kind = "push"
+			return &a
+		}
+		if !workout.IsStructuredZone(w.Zone) || w.Level <= 0 {
+			return nil
+		}
+		ladder, ok := workoutlib.LadderFor(w.Sport, string(w.Zone))
+		if !ok {
+			return nil
+		}
+		target := math.Min(math.Floor(w.Level)+1, math.Floor(level(in, w.Sport, string(w.Zone)))+1)
+		if target <= w.Level {
+			return nil
+		}
+		old := outdoorSteps(w)
+		// A rung one step up is a little longer; the rider's hours for a day bound
+		// it, and with none stated the ladder's own sizes do.
+		maxSeconds := math.Inf(1)
+		if cap := in.Profile.HoursPerAvailableDay * 3600; cap > 0 {
+			maxSeconds = math.Max(cap, workout.PlannedSeconds(old))
+		}
+		var rung workoutlib.Rung
+		found := false
+		for _, r := range ladder.Rungs {
+			if float64(r.Level) == target && workoutlib.TotalSeconds(r) <= maxSeconds {
+				rung, found = r, true
+			}
+		}
+		if !found {
+			return nil
+		}
+		req := workoutlib.Instantiate(ladder, rung, in.Profile)
+		gain := tssOf(w, req.Steps, in.Profile) - tssOf(w, old, in.Profile)
+		if gain <= minGain {
+			return nil
+		}
+		return &Action{
+			WorkoutID: w.ID, Kind: "push", Name: req.Name, Steps: req.Steps,
+			Zone: req.Zone, Level: req.Level, TSSAdded: gain,
+		}
+	}
+	return nil
 }
 
 // planUpgrade turns one endurance session into the phase's first structured

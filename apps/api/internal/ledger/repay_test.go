@@ -9,6 +9,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
+	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
 
 var testProfile = workout.RiderProfile{
@@ -254,5 +255,82 @@ func TestRepayUpgradeKeepsAwayFromTestAndCrewDays(t *testing.T) {
 		if got := PlanRepayment(in); len(got) != 0 {
 			t.Errorf("%s the day before: upgraded anyway %+v", name, got)
 		}
+	}
+}
+
+func structuredWorkout(id, date string, zone workout.Zone, lvl int) workout.Workout {
+	ladder, _ := workoutlib.LadderFor(model.SportCycling, string(zone))
+	var rung workoutlib.Rung
+	for _, r := range ladder.Rungs {
+		if r.Level == lvl {
+			rung = r
+		}
+	}
+	req := workoutlib.Instantiate(ladder, rung, testProfile)
+	return workout.Workout{
+		ID: id, Sport: model.SportCycling, Name: req.Name, GoalID: "g", Date: date,
+		Description: workout.GeneratedDescription, Steps: req.Steps, Zone: zone, Level: float64(lvl),
+		Flags: workout.Flags{Origin: workout.OriginPlan},
+	}
+}
+
+func TestGreenPushRaisesTodaysStructuredSessionOneRung(t *testing.T) {
+	w := structuredWorkout("t", "2026-10-15", workout.ZoneTempo, 3)
+	in := input(w)
+	in.Levels = map[string]float64{"tempo": 4}
+	a := PlanGreenPush(in, "2026-10-15")
+	if a == nil || a.WorkoutID != "t" || a.Kind != "push" || a.Level != 4 || a.TSSAdded <= minGain {
+		t.Fatalf("action = %+v", a)
+	}
+	if PlanGreenPush(in, "2026-10-16") != nil {
+		t.Error("a session that is not today's was pushed")
+	}
+}
+
+func TestGreenPushCappedAtLevelPlusOne(t *testing.T) {
+	in := input(structuredWorkout("t", "2026-10-15", workout.ZoneTempo, 4))
+	in.Levels = map[string]float64{"tempo": 3.4} // cap floor(3.4)+1 = 4
+	if a := PlanGreenPush(in, "2026-10-15"); a != nil {
+		t.Fatalf("pushed past level + 1: %+v", a)
+	}
+	in = input(structuredWorkout("t", "2026-10-15", workout.ZoneTempo, 3))
+	in.Levels = map[string]float64{"tempo": 3.4}
+	if a := PlanGreenPush(in, "2026-10-15"); a == nil || a.Level != 4 {
+		t.Fatalf("action = %+v, want level 4", a)
+	}
+}
+
+func TestGreenPushLengthensTodaysEnduranceRide(t *testing.T) {
+	in := input(enduranceWorkout("e", "2026-10-15", 3600))
+	a := PlanGreenPush(in, "2026-10-15")
+	if a == nil || a.Kind != "push" || a.Zone != workout.ZoneEndurance {
+		t.Fatalf("action = %+v", a)
+	}
+	if s := workout.PlannedSeconds(a.Steps); s != 3600*1.3 {
+		t.Errorf("lengthened to %v s, want the repayment cap of 30%%", s)
+	}
+}
+
+func TestGreenPushNothingWithoutDebtOrInReducedWeeks(t *testing.T) {
+	w := enduranceWorkout("e", "2026-10-15", 3600)
+	d := input(w)
+	d.Debt = MinDebt
+	if PlanGreenPush(d, "2026-10-15") != nil {
+		t.Error("pushed with no debt")
+	}
+	r := input(w)
+	r.Recovery = true
+	if PlanGreenPush(r, "2026-10-15") != nil {
+		t.Error("pushed in a recovery week")
+	}
+	tp := input(w)
+	tp.Phase = periodization.PhaseTaper
+	if PlanGreenPush(tp, "2026-10-15") != nil {
+		t.Error("pushed in a taper week")
+	}
+	pushed := w
+	pushed.Flags = pushed.Flags.WithAdaptation(why.GreenPush)
+	if PlanGreenPush(input(pushed), "2026-10-15") != nil {
+		t.Error("a session already raised was raised again")
 	}
 }

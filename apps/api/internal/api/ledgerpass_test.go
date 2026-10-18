@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -21,6 +23,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
+	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
 
 // ledgerHarness is a CTL-basis rider (FTP, a month of riding) with a goal, on a
@@ -751,5 +754,210 @@ func TestIllnessReturnRampIsNotRepaidOnto(t *testing.T) {
 		if w.Date <= "2026-10-08" {
 			t.Errorf("%s (%s) is inside the return ramp and was repaid", w.Date, w.Name)
 		}
+	}
+}
+
+// ledgerPushHarness is the ledger rider again, on a server with the fake Garmin
+// connected and auto-push on, so a morning pass can be followed to the head unit.
+type ledgerPushHarness struct {
+	*ledgerHarness
+	push *pushHarness
+}
+
+func newLedgerPushHarness(t *testing.T) *ledgerPushHarness {
+	t.Helper()
+	ph := newPushHarness(t)
+	asched := &autoScheduleHarness{t: t, client: ph.client, base: ph.base, store: ph.training, settings: ph.settings, srv: ph.srv, conn: ph.db.Conn(), now: utcNoon(2026, time.October, 5)}
+	ph.srv.Clock = func() time.Time { return asched.now }
+	h := &ledgerHarness{seasonHarness: &seasonHarness{autoScheduleHarness: asched, now: asched.now}}
+	// seasonHarness keeps its own copy of the clock; follow it.
+	ph.srv.Clock = func() time.Time { return h.now }
+	h.profile(t, ledgerDays, 250)
+	if _, err := h.store.SaveProfile(context.Background(), workout.RiderProfile{
+		Rider: "wilant", HoursPerAvailableDay: 3, AvailableDays: ledgerDays, FTPWatts: 250, AutoPushWorkouts: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.now = utcNoon(2026, time.October, 5)
+	h.ride(t, h.now, 40, 1, 60)
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	h.at(5, 13, 0)
+	g, err := h.store.CreateGoal(context.Background(), workout.CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", EventDate: "2027-04-14"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.goal = g
+	h.srv.AutoScheduleTick(context.Background())
+	h.backdate(t)
+	return &ledgerPushHarness{ledgerHarness: h, push: ph}
+}
+
+// goodMorning gives the rider a Push verdict on the given October day: a month
+// of steady HRV and sleep, then a better night.
+//
+// The fake Garmin answers every wellness request, and an unanswered date comes
+// back empty and overwrites what is stored, so the nights go to it as well.
+func goodMorning(t *testing.T, h *ledgerHarness, day int, fake *fakeGarmin) {
+	t.Helper()
+	if fake != nil && fake.wellnessByDate == nil {
+		fake.wellnessByDate = map[string]garmin.Wellness{}
+	}
+	today := time.Date(2026, time.October, day, 0, 0, 0, 0, time.UTC)
+	for i := 1; i <= 30; i++ {
+		v := 64.0
+		if i%2 == 0 {
+			v = 56
+		}
+		date := today.AddDate(0, 0, -i).Format("2006-01-02")
+		if fake != nil {
+			fake.wellnessByDate[date] = garmin.Wellness{Date: date, HRVLastNight: v, SleepSeconds: 8 * 3600}
+		}
+		if err := h.store.SaveWellness(context.Background(), workout.DailyWellness{
+			Rider: "wilant", Date: date, HRVLastNight: v, SleepSeconds: 8 * 3600,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fake != nil {
+		d := today.Format("2006-01-02")
+		fake.wellnessByDate[d] = garmin.Wellness{Date: d, HRVLastNight: 70, SleepSeconds: 8 * 3600}
+	}
+	if err := h.store.SaveWellness(context.Background(), workout.DailyWellness{
+		Rider: "wilant", Date: today.Format("2006-01-02"), HRVLastNight: 70, SleepSeconds: 8 * 3600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// plantTodaysTempo replaces the sessions on a date with one generated tempo
+// session at the given rung, and sets the rider's tempo level.
+func plantTodaysTempo(t *testing.T, h *ledgerHarness, date string, rung int, riderLevel float64) workout.Workout {
+	t.Helper()
+	ctx := context.Background()
+	for _, w := range h.thisWeek(t) {
+		if w.Date == date {
+			if err := h.store.DeleteWorkout(ctx, w.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	profile, _, _ := h.store.GetProfile(ctx, "wilant")
+	ladder, _ := workoutlib.LadderFor(model.SportCycling, string(workout.ZoneTempo))
+	var r workoutlib.Rung
+	for _, x := range ladder.Rungs {
+		if x.Level == rung {
+			r = x
+		}
+	}
+	req := workoutlib.Instantiate(ladder, r, profile)
+	req.Rider, req.GoalID, req.Date = "wilant", h.goal.ID, date
+	req.Description = scheduler.GeneratedDescription
+	w, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(req))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, z := range []workout.Zone{workout.ZoneTempo} {
+		if err := h.store.SaveLevel(ctx, workout.ProgressionLevel{Rider: "wilant", Sport: "cycling", Zone: z, Level: riderLevel, Reason: "test"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.backdate(t)
+	return w
+}
+
+func greenPushed(w workout.Workout) bool {
+	for _, r := range w.Flags.AdaptedRules {
+		if r == why.GreenPush {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPushMorningRaisesTodayAndThePushSendsTheRaisedSession(t *testing.T) {
+	h := newLedgerPushHarness(t)
+	ctx := context.Background()
+	orig := plantTodaysTempo(t, h.ledgerHarness, "2026-10-07", 3, 4)
+	goodMorning(t, h.ledgerHarness, 7, h.push.garmin)
+
+	h.at(7, 7, 0) // Wednesday; Monday's and Tuesday's sessions were not ridden
+	h.tick()
+
+	got, err := h.store.GetWorkout(ctx, orig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !greenPushed(got) || got.Level != 4 || got.Name == orig.Name {
+		t.Fatalf("today's session was not raised: %q level %v rules %v", got.Name, got.Level, got.Flags.AdaptedRules)
+	}
+	if len(got.Flags.EasedBy()) != 0 || !scheduler.IsGenerated(got) {
+		t.Errorf("a green push locked the session: %+v", got.Flags)
+	}
+	if !strings.Contains(got.Description, scheduler.AdjustedMarker) || !strings.Contains(got.Description, "Pushed on a good day") {
+		t.Errorf("description %q carries no note", got.Description)
+	}
+	adj, err := h.store.LatestAdjustments(ctx, "wilant", workout.SubjectWorkout, []string{got.ID})
+	if err != nil || adj[got.ID].Rule != why.GreenPush {
+		t.Errorf("no green_push reason stored: %v %+v", err, adj[got.ID])
+	}
+	// The head unit holds the raised session, not the planned one.
+	var onDevice []string
+	for _, n := range h.push.garmin.remoteWorkouts {
+		onDevice = append(onDevice, n)
+	}
+	if len(onDevice) != 1 || onDevice[0] != got.Name {
+		t.Errorf("head unit holds %v, want the raised %q", onDevice, got.Name)
+	}
+}
+
+func TestPushMorningWithoutDebtChangesNothing(t *testing.T) {
+	h := newLedgerPushHarness(t)
+	ctx := context.Background()
+	orig := plantTodaysTempo(t, h.ledgerHarness, "2026-10-05", 3, 4)
+	goodMorning(t, h.ledgerHarness, 5, h.push.garmin)
+
+	h.at(5, 7, 0) // Monday morning: nothing missed yet
+	h.tick()
+
+	got, _ := h.store.GetWorkout(ctx, orig.ID)
+	if greenPushed(got) || got.Level != orig.Level || got.Name != orig.Name {
+		t.Errorf("a push morning with no debt changed the session: %q %v", got.Name, got.Flags.AdaptedRules)
+	}
+	if n := adjustmentRows(t, h.autoScheduleHarness); n != 0 {
+		t.Errorf("adjustment rows = %d, want 0", n)
+	}
+}
+
+func TestGreenPushedIndoorSessionStaysIndoor(t *testing.T) {
+	h := newLedgerPushHarness(t)
+	ctx := context.Background()
+	orig := plantTodaysTempo(t, h.ledgerHarness, "2026-10-07", 3, 4)
+	profile, _, _ := h.store.GetProfile(ctx, "wilant")
+	outdoor := append([]workout.WorkoutStep{}, orig.Steps...)
+	res, err := indoor.Convert(orig, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	if _, err := h.store.UpdateWorkout(ctx, orig.ID, workout.UpdateWorkoutRequest{Indoor: &yes, Steps: &res.Steps, OutdoorSteps: &outdoor}); err != nil {
+		t.Fatal(err)
+	}
+	h.backdate(t)
+	goodMorning(t, h.ledgerHarness, 7, h.push.garmin)
+
+	h.at(7, 7, 0)
+	h.tick()
+
+	got, _ := h.store.GetWorkout(ctx, orig.ID)
+	if !greenPushed(got) {
+		t.Fatalf("not raised: %v", got.Flags.AdaptedRules)
+	}
+	if !got.Indoor || got.OutdoorSteps == nil {
+		t.Fatalf("the raised session was turned into a road ride")
+	}
+	if !(workout.PlannedTSSOrHours(got, 250) > workout.PlannedTSSOrHours(orig, 250)) {
+		t.Errorf("the indoor form gained nothing")
 	}
 }

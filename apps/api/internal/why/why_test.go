@@ -294,6 +294,7 @@ func TestTitlesForLoadRules(t *testing.T) {
 		why.LoadRepaid:   "Load made up",
 		why.LoadRolled:   "Load carried to next week",
 		why.LoadForgiven: "Load forgiven",
+		why.GreenPush:    "Pushed on a good day",
 	} {
 		if got := why.Title(rule); got != want {
 			t.Errorf("Title(%s) = %q, want %q", rule, got, want)
