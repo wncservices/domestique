@@ -50,7 +50,7 @@ func TestLifeEventRequestsCarryFlags(t *testing.T) {
 		{"ease", []Event{ill("2026-10-08", "2026-10-11", OptionProper)},
 			rampWeek(), "ease:d1",
 			func(t *testing.T, f workout.Flags) {
-				if len(f.AdaptedRules) != 1 || f.AdaptedRules[0] != why.LifeEvent {
+				if len(f.AdaptedRules) != 1 || f.AdaptedRules[0] != why.IllnessRamp {
 					t.Errorf("flags = %+v", f)
 				}
 			}},
@@ -98,10 +98,23 @@ func TestGymIndoorRequestCarriesFlags(t *testing.T) {
 
 func TestFlagsNeverAliasTheBeforeSlice(t *testing.T) {
 	w := easy("x", "2026-10-09", 60)
-	a := lifeAdaptedFlags(w)
-	b := lifeAdaptedFlags(w)
+	a := lifeAdaptedFlags(w, why.LifeEvent)
+	b := lifeAdaptedFlags(w, why.LifeEvent)
 	a.AdaptedRules[0] = why.Legacy
 	if b.AdaptedRules[0] != why.LifeEvent {
 		t.Error("two derived flags share a backing array")
+	}
+}
+
+func TestLifeEventEaseExtendsStoredRules(t *testing.T) {
+	w := hard("x", "2026-10-09", 90)
+	w.Flags = workout.Flags{Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.ReadinessRest}}
+	got := lifeAdaptedFlags(w, why.LifeEvent).AdaptedRules
+	if len(got) != 2 || got[0] != why.ReadinessRest || got[1] != why.LifeEvent {
+		t.Errorf("rules = %v", got)
+	}
+	m := movedFlags(w, "2026-10-09").AdaptedRules
+	if len(m) != 2 || m[0] != why.ReadinessRest {
+		t.Errorf("move rules = %v", m)
 	}
 }

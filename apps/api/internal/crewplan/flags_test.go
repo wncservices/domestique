@@ -46,12 +46,25 @@ func TestCrewShortenRequestsCarryFlags(t *testing.T) {
 			continue
 		}
 		n++
-		final := workout.Workout{GoalID: "goal", Description: *c.Update.Description}
+		final := workout.Workout{GoalID: in.Workouts[0].GoalID, Description: *c.Update.Description}
 		if c.Update.Flags == nil || !c.Update.Flags.Equivalent(workout.LegacyFlags(final)) {
 			t.Errorf("%s: flags %+v do not match the text", c.ID, c.Update.Flags)
 		}
 	}
 	if n == 0 {
 		t.Fatal("scenario produced no shortening")
+	}
+}
+
+func TestCrewEaseExtendsStoredRules(t *testing.T) {
+	w := hard("fri-hard", fri)
+	w.Flags = workout.Flags{Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.ReadinessRest}}
+	c := ops(Preview(input(Ride{ID: "r", Date: sat, Seconds: 90 * 60}, w)))["ease:fri-hard"]
+	if c.Update == nil || c.Update.Flags == nil {
+		t.Fatalf("no ease: %+v", c)
+	}
+	got := c.Update.Flags.AdaptedRules
+	if len(got) != 2 || got[0] != why.ReadinessRest || got[1] != why.CrewRideEve {
+		t.Errorf("rules = %v", got)
 	}
 }

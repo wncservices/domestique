@@ -112,6 +112,17 @@ func (f Flags) Equivalent(g Flags) bool {
 	return true
 }
 
+// CurrentFlags is the flags a change builds on: the stored ones when the row has
+// them (Origin is always set once the columns are filled), else what the text
+// says. The stored columns carry exact rule ids the text cannot, so a later
+// adaptation must extend them rather than the lossy text reading.
+func CurrentFlags(w Workout) Flags {
+	if w.Flags.Origin != "" {
+		return w.Flags
+	}
+	return LegacyFlags(w)
+}
+
 var movedFromRE = regexp.MustCompile(`moved from (\d{4}-\d{2}-\d{2})`)
 
 // MovedFromDate returns the first original date named in a description, if a

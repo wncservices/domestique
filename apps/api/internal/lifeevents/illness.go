@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -185,7 +186,7 @@ func (p *planner) replace(w workout.Workout, ev Event, name string, zone workout
 		Reason: reason, Default: true, ReKeepIndoor: true,
 		Update: &workout.UpdateWorkoutRequest{
 			Name: &name, Steps: &newSteps, Zone: &zone, Level: &level, Description: &description,
-			Flags: lifeAdaptedFlags(w),
+			Flags: lifeAdaptedFlags(w, why.IllnessRamp),
 		},
 	})
 }

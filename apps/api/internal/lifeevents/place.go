@@ -620,7 +620,7 @@ func movedDescription(w workout.Workout, from, reason string) string {
 // original date stays when the session was already moved, and the adjusted
 // marker is there exactly when movedDescription appends it.
 func movedFlags(w workout.Workout, from string) *workout.Flags {
-	f := workout.LegacyFlags(w)
+	f := workout.CurrentFlags(w)
 	if scheduler.IsPlanSession(w) {
 		f = f.WithAdaptation(why.LifeEvent)
 	}
@@ -707,15 +707,15 @@ func (p *planner) indoorSession(s scoped) {
 		Reason: reason, Default: true,
 		Update: &workout.UpdateWorkoutRequest{
 			Name: &name, Steps: &steps, Zone: &zone, Level: &level, Indoor: &yes, OutdoorSteps: &outdoor,
-			Description: &description, Flags: lifeAdaptedFlags(w),
+			Description: &description, Flags: lifeAdaptedFlags(w, why.LifeEvent),
 		},
 	})
 }
 
 // lifeAdaptedFlags is w's flags with one more life-event adaptation, for the
 // update whose description gets replaceMarked's marker.
-func lifeAdaptedFlags(w workout.Workout) *workout.Flags {
-	f := workout.LegacyFlags(w).WithAdaptation(why.LifeEvent)
+func lifeAdaptedFlags(w workout.Workout, rule why.Rule) *workout.Flags {
+	f := workout.CurrentFlags(w).WithAdaptation(rule)
 	return &f
 }
 
