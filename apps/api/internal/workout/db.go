@@ -12,6 +12,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/dbx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 )
 
 // schema is every table this package owns, in whichever types the engine
@@ -544,6 +545,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addRouteLinkColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addFlagColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.addAnalysisFeelColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
@@ -584,6 +588,10 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.copyAcceptedFTPSuggestions(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	// After every workouts column exists: it reads the whole row.
+	if err := store.backfillFlags(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
@@ -742,6 +750,112 @@ func (d *DB) addRouteLinkColumns() error {
 		return err
 	}
 	return nil
+}
+
+// addFlagColumns adds the typed adaptation state to a workouts table that
+// predates it. The defaults leave origin ” on existing rows, which is what
+// backfillFlags looks for.
+func (d *DB) addFlagColumns() error {
+	for _, stmt := range []string{
+		`ALTER TABLE workouts ADD COLUMN origin TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN adapted_rules TEXT NOT NULL DEFAULT ''`,
+		fmt.Sprintf(`ALTER TABLE workouts ADD COLUMN swapped %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean),
+		`ALTER TABLE workouts ADD COLUMN kept TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN moved_from TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN moved_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workouts ADD COLUMN edited_at TEXT NOT NULL DEFAULT ''`,
+	} {
+		_, err := d.db.Exec(stmt)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+// flagBackfillChunk bounds how many rows one backfill transaction holds.
+const flagBackfillChunk = 500
+
+// backfillFlags fills the flag columns of rows written before they existed,
+// from the description text they used to live in. Every row it writes gets a
+// non-empty origin, so a second run finds nothing: that is what makes it
+// idempotent. updated_at is left alone, and edited_at takes it only where the
+// row has been edited since it was created.
+func (d *DB) backfillFlags(ctx context.Context) error {
+	for {
+		rows, err := d.db.QueryContext(ctx, d.query(`
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
+        FROM workouts WHERE origin = '' ORDER BY id LIMIT ?`), flagBackfillChunk)
+		if err != nil {
+			return err
+		}
+		var batch []Workout
+		for rows.Next() {
+			w, err := scanWorkout(rows)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			batch = append(batch, w)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
+		if len(batch) == 0 {
+			return nil
+		}
+
+		tx, err := d.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		for _, w := range batch {
+			f := LegacyFlags(w)
+			edited := ""
+			if w.UpdatedAt != w.CreatedAt {
+				edited = w.UpdatedAt
+			}
+			if _, err := tx.ExecContext(ctx, d.query(`
+        UPDATE workouts SET origin=?, adapted_rules=?, swapped=?, kept=?, moved_from=?, moved_by=?, edited_at=?
+        WHERE id=? AND origin = ''`),
+				string(f.Origin), joinRules(f.AdaptedRules), f.Swapped, string(f.Kept), f.MovedFrom, string(f.MovedBy), edited, w.ID); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+}
+
+// joinRules and parseRules store adaptation rules as comma-joined ids; ""
+// means never adapted.
+func joinRules(rules []why.Rule) string {
+	ids := make([]string, len(rules))
+	for i, r := range rules {
+		ids[i] = string(r)
+	}
+	return strings.Join(ids, ",")
+}
+
+func parseRules(s string) []why.Rule {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	rules := make([]why.Rule, len(parts))
+	for i, p := range parts {
+		rules[i] = why.Rule(p)
+	}
+	return rules
 }
 
 // UnlinkRoute clears the route link of every workout, of any rider, that
@@ -1236,7 +1350,7 @@ func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64)
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -1256,7 +1370,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1273,19 +1387,25 @@ type rowScanner interface {
 
 func scanWorkout(row rowScanner) (Workout, error) {
 	var (
-		w       Workout
-		sport   string
-		steps   []byte
-		zone    string
-		outdoor sql.NullString
-		planned sql.NullString
+		w                            Workout
+		sport                        string
+		steps                        []byte
+		zone                         string
+		outdoor                      sql.NullString
+		planned                      sql.NullString
+		origin, rules, kept, movedBy string
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds,
+		&origin, &rules, &w.Flags.Swapped, &kept, &w.Flags.MovedFrom, &movedBy, &w.EditedAt, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
 	w.Sport = model.Sport(sport)
 	w.Zone = Zone(zone)
+	w.Flags.Origin = Origin(origin)
+	w.Flags.AdaptedRules = parseRules(rules)
+	w.Flags.Kept = Kept(kept)
+	w.Flags.MovedBy = MovedBy(movedBy)
 	if len(steps) > 0 {
 		if err := json.Unmarshal(steps, &w.Steps); err != nil {
 			return Workout{}, fmt.Errorf("workout: decode steps for %s: %w", w.ID, err)
@@ -1355,11 +1475,21 @@ func (d *DB) insertWorkout(ctx context.Context, q sqlRunner, req CreateWorkoutRe
 		return "", err
 	}
 
+	// An unmarked new row is the rider's: it fails closed, so nothing automatic
+	// ever mistakes it for a plan-made session.
+	f := req.Flags
+	origin := f.Origin
+	if origin == "" {
+		origin = OriginRider
+	}
+
 	ts := d.timestamp()
 	_, err = q.ExecContext(ctx, d.query(`
-        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, req.CrewRideID, ts, ts)
+        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id,
+               origin, adapted_rules, swapped, kept, moved_from, moved_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, req.CrewRideID,
+		string(origin), joinRules(f.AdaptedRules), f.Swapped, string(f.Kept), f.MovedFrom, string(f.MovedBy), ts, ts)
 	if err != nil {
 		// The partial unique index is what makes "one row per rider and ride"
 		// true even for two requests that raced past the caller's own check.
@@ -1426,6 +1556,10 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 		current.RouteSeconds = *req.RouteSeconds
 	}
 
+	if req.Flags != nil {
+		current.Flags = *req.Flags
+	}
+
 	switch {
 	case req.ClearPlannedSnapshot:
 		current.PlannedSnapshot = nil
@@ -1457,13 +1591,19 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 		planned = string(encoded)
 	}
 
+	// edited_at and updated_at are one value: edited_at is the part of
+	// updated_at a person or an automatic pass caused, so it must never differ.
+	ts := d.timestamp()
+	f := current.Flags
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?,
-               indoor=?, outdoor_steps=?, planned_snapshot=?, route_slug=?, route_seconds=?, updated_at=?
+               indoor=?, outdoor_steps=?, planned_snapshot=?, route_slug=?, route_seconds=?,
+               origin=?, adapted_rules=?, swapped=?, kept=?, moved_from=?, moved_by=?, edited_at=?, updated_at=?
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
 		steps, string(current.Zone), current.Level, current.Indoor, outdoor, planned,
-		current.RouteSlug, current.RouteSeconds, d.timestamp(), id)
+		current.RouteSlug, current.RouteSeconds,
+		string(f.Origin), joinRules(f.AdaptedRules), f.Swapped, string(f.Kept), f.MovedFrom, string(f.MovedBy), ts, ts, id)
 	if err != nil {
 		return Workout{}, err
 	}

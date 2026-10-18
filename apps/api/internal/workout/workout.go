@@ -378,8 +378,14 @@ type Workout struct {
 	// GPX; 0 with no route.
 	RouteSlug    string
 	RouteSeconds float64
-	CreatedAt    string
-	UpdatedAt    string
+	// Flags is the session's adaptation state as typed values.
+	Flags Flags
+	// EditedAt is when a person or an automatic pass last changed the session,
+	// "" if never. Always equal to UpdatedAt when set; other writes (a test
+	// result, an unlinked route) move neither.
+	EditedAt  string
+	CreatedAt string
+	UpdatedAt string
 }
 
 // PlannedSnapshot is what a swap overwrites: name, zone, level, description
@@ -460,6 +466,9 @@ type CreateWorkoutRequest struct {
 	// CrewRideID marks the workout as the fixed session for a crew ride; see
 	// Workout.CrewRideID.
 	CrewRideID string
+	// Flags is the new session's adaptation state; an empty Origin is stored
+	// as rider.
+	Flags Flags
 }
 
 // UpdateWorkoutRequest edits a workout. Nil fields are left alone.
@@ -486,6 +495,8 @@ type UpdateWorkoutRequest struct {
 	// clears both. Nil leaves them alone, so an ordinary edit keeps the link.
 	RouteSlug    *string
 	RouteSeconds *float64
+	// Flags replaces every flag column when non-nil; nil leaves them alone.
+	Flags *Flags
 }
 
 // FITSteps converts to the leaf-level type fitworkout.Encode takes. The one
