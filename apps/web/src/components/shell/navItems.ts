@@ -10,6 +10,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { group: 'you', label: 'Today', to: '/today', icon: 'i-lucide-calendar-check' },
   { group: 'you', label: 'Plan', to: '/plan', icon: 'i-lucide-calendar-range' },
+  { group: 'you', label: 'Workouts', to: '/workouts', icon: 'i-lucide-dumbbell' },
   { group: 'you', label: 'Fitness', to: '/fitness', icon: 'i-lucide-heart-pulse' },
   { group: 'shared', label: 'Routes', to: '/routes', icon: 'i-lucide-route' },
   { group: 'shared', label: 'Crews', to: '/crews', icon: 'i-lucide-users-round' },

@@ -6,7 +6,7 @@ import { navGroupLabels, navItems, type NavItem } from './navItems'
 
 const { canManageCrews, canManageTraining } = useLibrary()
 
-// Same gates the old header applied: Today, Plan and Fitness are training
+// Same gates the old header applied: Today, Plan, Workouts and Fitness are training
 // pages, Crews needs crews:manage. Routes is open to every role.
 const visible = computed(() =>
   navItems.filter((item) => {
@@ -85,11 +85,11 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
       <li v-for="item in visible" :key="item.to" class="min-w-0 flex-1">
         <RouterLink
           :to="item.to"
-          class="flex flex-col items-center gap-0.5 px-1 py-2 text-[length:var(--text-label)] text-muted focus-visible:outline-2 focus-visible:outline-primary"
+          class="flex flex-col items-center gap-0.5 px-0.5 py-2 text-[length:var(--text-label)] text-muted focus-visible:outline-2 focus-visible:outline-primary"
           active-class="text-primary"
         >
           <UIcon :name="item.icon" class="size-5" aria-hidden="true" />
-          <span class="max-w-full truncate">{{ item.label }}</span>
+          <span>{{ item.label }}</span>
         </RouterLink>
       </li>
     </ul>

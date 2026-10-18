@@ -1,43 +1,24 @@
 <script setup lang="ts">
-// Goals and the undated workout library, together in one card — what used
-// to be two separate cards (Goals, with its own periodization table now
-// split out to SeasonTimeline, and Workouts). A dated workout lives in the
-// week strip; this only ever lists the ones with nowhere on the calendar
-// yet — tests, templates, anything built ahead of scheduling it.
-import { computed } from 'vue'
-import type { Goal, Workout } from '@/api/types'
-import { formatDuration } from '@/utils/workoutMath'
-import ExportMenu from './ExportMenu.vue'
+// The goals list. The undated workout library has its own page (Workouts).
+import type { Goal } from '@/api/types'
 
-const props = defineProps<{
+defineProps<{
   goals: Goal[]
-  workouts: Workout[]
   focusGoalId?: string
-  canSyncGarmin: boolean
   deletingGoal: string
-  deletingWorkout: string
-  pushingWorkout: string
 }>()
 
 const emit = defineEmits<{
   editGoal: [g: Goal]
   deleteGoal: [g: Goal]
   focusGoal: [id: string]
-  editWorkout: [w: Workout]
-  deleteWorkout: [w: Workout]
-  pushWorkout: [w: Workout]
-  newWorkout: []
 }>()
-
-// Only the library — a dated workout already has a home in the week strip
-// above, and showing it twice would just invite editing the wrong copy.
-const library = computed(() => props.workouts.filter((w) => !w.date))
 </script>
 
 <template>
   <UCard variant="outline">
     <template #header>
-      <h2 class="text-[length:var(--text-title)] font-semibold text-highlighted">Goals and workouts</h2>
+      <h2 class="text-[length:var(--text-title)] font-semibold text-highlighted">Goals</h2>
     </template>
 
     <div v-if="goals.length === 0" class="text-sm text-muted">No goals yet.</div>
@@ -81,52 +62,8 @@ const library = computed(() => props.workouts.filter((w) => !w.date))
       </div>
     </div>
 
-    <div class="mt-6 flex items-center justify-between">
-      <h3 class="text-[length:var(--text-label)] font-medium text-muted">Workout library</h3>
-      <UButton color="neutral" variant="ghost" icon="i-lucide-plus" size="sm" @click="emit('newWorkout')">Build a workout</UButton>
-    </div>
-
-    <p v-if="library.length === 0" class="mt-2 text-sm text-muted">
-      Tests and templates you build without a date live here.
+    <p class="mt-4 text-[length:var(--text-label)] text-muted">
+      Workouts you built without a date live in <RouterLink to="/workouts" class="text-primary underline">Workouts</RouterLink>.
     </p>
-
-    <div v-else class="mt-2 flex flex-col divide-y divide-default">
-      <div v-for="w in library" :key="w.id" class="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-        <div class="min-w-0">
-          <span class="font-medium">{{ w.name }}</span>
-          <p class="tabular-nums text-sm text-muted">{{ formatDuration(w.plannedSeconds) }}</p>
-        </div>
-        <div class="flex items-center gap-1 shrink-0">
-          <UButton
-            v-if="canSyncGarmin"
-            icon="i-lucide-watch"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            :loading="pushingWorkout === w.id"
-            title="Push to your connected Garmin account"
-            @click="emit('pushWorkout', w)"
-          />
-          <ExportMenu :workout="w" variant="ghost" size="sm" />
-          <UButton
-            icon="i-lucide-pencil"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            aria-label="Edit workout"
-            @click="emit('editWorkout', w)"
-          />
-          <UButton
-            icon="i-lucide-trash-2"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            aria-label="Delete workout"
-            :loading="deletingWorkout === w.id"
-            @click="emit('deleteWorkout', w)"
-          />
-        </div>
-      </div>
-    </div>
   </UCard>
 </template>
