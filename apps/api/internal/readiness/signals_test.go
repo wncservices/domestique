@@ -17,7 +17,7 @@ func TestHRVRestSignalCarriesBothNightsAndTheUsualValue(t *testing.T) {
 	}
 }
 
-func TestHRVCautionSignalShowsTonightsReading(t *testing.T) {
+func TestHRVAmberSignalShowsTonightsReading(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
 	assertAssessment(t, got, Ready, "HRV is unbalanced today")

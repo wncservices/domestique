@@ -182,14 +182,13 @@ func TestGarminBoundaries(t *testing.T) {
 }
 
 func TestSleepDebtBoundary(t *testing.T) {
-	// Median 8 h. Three nights of 7h10 are 2.5 h short in total (at the line);
-	// 7h11 is 2h57... compute: shortfall = 3*(8h - x).
+	// Median 8 h; the shortfall over three nights is 3 x (8 h - night).
 	base := sleepHistory(28, 8*3600)
 	short := func(per int) Assessment {
 		hist := merge(base, []Day{{Date: daysBefore(1), SleepSeconds: per}, {Date: daysBefore(2), SleepSeconds: per}})
 		return eval(Day{SleepSeconds: per}, hist, nil)
 	}
-	// per = 8h - 3000 s => debt 9000 s exactly.
+	// Each night 3000 s short => debt 9000 s exactly.
 	if a := short(8*3600 - 3000); !hasSignal(a, "sleep", "amber") {
 		t.Errorf("exactly 2.5 h short should be amber: %+v", a.Signals)
 	}
@@ -200,7 +199,7 @@ func TestSleepDebtBoundary(t *testing.T) {
 
 func TestSleepDebtNeedsSevenNightsOfMedian(t *testing.T) {
 	hist := sleepHistory(6, 8*3600)
-	a := eval(Day{SleepSeconds: 4 * 3600}, merge(hist, nil), nil)
+	a := eval(Day{SleepSeconds: 4 * 3600}, hist, nil)
 	if hasSignal(a, "sleep", "amber") {
 		t.Fatalf("6 nights is no median: %+v", a.Signals)
 	}
@@ -452,4 +451,76 @@ func TestPushNeedsEveryCondition(t *testing.T) {
 			t.Errorf("%+v", a)
 		}
 	})
+}
+
+func TestBandWithAnEmptySevenNightWindowGivesNoHRVSignalAndNoPush(t *testing.T) {
+	// 20 nights of history, all between 8 and 27 days back: the band exists
+	// but none of the last 7 nights has a reading.
+	var h []Day
+	for i := 8; i <= 27; i++ {
+		v := 64.0
+		if i%2 == 0 {
+			v = 56
+		}
+		h = append(h, Day{Date: daysBefore(i), Present: true, HRVLastNight: v})
+	}
+	h = merge(h, sleepHistory(28, 8*3600))
+	if _, _, _, ok := HRVBand(h, Day{Date: v2Today}); !ok {
+		t.Fatal("the band depends on the 60 nights only")
+	}
+	// A LOW status must not be read by the old rules while a band exists.
+	a := eval(Day{HRVStatus: "LOW", SleepSeconds: 9 * 3600}, h, nil)
+	if a.Verdict != Ready || len(a.Signals) != 0 {
+		t.Fatalf("no HRV signal and no push expected: %+v", a)
+	}
+}
+
+func TestHRVSevenNightMeanAtTheEdgeIsNotAmberAndJustBelowIs(t *testing.T) {
+	// Make every window night read the same value x; the 7-night mean of ln
+	// is then ln(x), so x = exp(edge) puts it on the line. The baseline moves
+	// slightly when the window is overwritten, so solve for the edge with the
+	// window already in place.
+	build := func(x float64) ([]Day, Day) {
+		h := hrvHistory(40, 60)
+		for i := range h {
+			d, _ := parseDate(h[i].Date)
+			if date(v2Today).Sub(d) <= 6*24*time.Hour {
+				h[i].HRVLastNight = x
+			}
+		}
+		return h, Day{Date: v2Today, HRVLastNight: x}
+	}
+	edge := func(x float64) float64 {
+		h, td := build(x)
+		_, bm, sd, _ := HRVBand(h, td)
+		return math.Exp(bm - hrvBandSDs*sd)
+	}
+	x := 58.0
+	for i := 0; i < 60; i++ { // fixed point: x == edge(x)
+		x = edge(x)
+	}
+	h, td := build(x)
+	m7, bm, sd, _ := HRVBand(h, td)
+	if d := math.Abs(m7 - (bm - hrvBandSDs*sd)); d > 1e-6 {
+		t.Fatalf("setup did not reach the edge: %g", d)
+	}
+	// Exactly on the line (to within float noise, nudged up) is not amber.
+	h, td = build(x * 1.000001)
+	if a := eval(td, h, nil); hasSignal(a, "hrv", "amber") {
+		t.Errorf("at the edge: %+v", a.Signals)
+	}
+	h, td = build(x * 0.999)
+	if a := eval(td, h, nil); !hasSignal(a, "hrv", "amber") && !hasSignal(a, "hrv", "severe") {
+		t.Errorf("just below the edge: %+v", a.Signals)
+	}
+}
+
+func TestCheckInMoodOrSleepQualityOneAloneIsOneAmber(t *testing.T) {
+	for _, c := range []*CheckIn{{Mood: 1}, {SleepQuality: 1}} {
+		a := Evaluate(Input{Today: Day{Date: v2Today}, Now: date(v2Today), CheckIn: c})
+		if a.Verdict != Ready || len(a.Reasons) != 1 || len(a.Signals) != 1 ||
+			a.Signals[0].Source != "subjective" || a.Signals[0].Severity != "amber" {
+			t.Errorf("%+v: %+v", c, a)
+		}
+	}
 }

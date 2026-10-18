@@ -77,7 +77,7 @@ func TestReadinessLevelPoorFiresRestEvenWithNoScore(t *testing.T) {
 	assertAssessment(t, got, Rest, "Garmin readiness is poor")
 }
 
-func TestReadinessLevelLowFiresCautionEvenWithNoScore(t *testing.T) {
+func TestReadinessLevelLowAloneIsReadyWithTheReasonListedEvenWithNoScore(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, ReadinessLevel: "LOW"}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
 	assertAssessment(t, got, Ready, "Garmin readiness is low")
@@ -92,20 +92,20 @@ func TestHRVLowTwoNightsFiresRest(t *testing.T) {
 	assertAssessment(t, got, Rest, "HRV has been low for two nights")
 }
 
-func TestHRVLowOneNightOnlyFiresCaution(t *testing.T) {
+func TestHRVLowOneNightOnlyIsReadyWithTheReasonListed(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "LOW"}
 	history := []Day{{Date: "2026-09-27", HRVStatus: "BALANCED"}}
 	got := Assess(today, history, nil, "", nil, date("2026-09-28"))
 	assertAssessment(t, got, Ready, "HRV is low today")
 }
 
-func TestHRVLowTodayWithNoYesterdayRowFiresCautionNotRest(t *testing.T) {
+func TestHRVLowTodayWithNoYesterdayRowIsAnAmberNotRest(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "POOR"}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
 	assertAssessment(t, got, Ready, "HRV is poor today")
 }
 
-func TestHRVUnbalancedTodayFiresCaution(t *testing.T) {
+func TestHRVUnbalancedTodayIsAnAmberReason(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "UNBALANCED"}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
 	assertAssessment(t, got, Ready, "HRV is unbalanced today")

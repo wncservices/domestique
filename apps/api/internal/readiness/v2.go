@@ -45,7 +45,6 @@ type Input struct {
 const (
 	hrvBandNights   = 60
 	hrvBandMin      = 14 // nights with a reading before a rider's own range means anything
-	hrvMeanMin      = 3  // readings in the 7-night window before its mean is trusted
 	hrvBandSDs      = 0.5
 	sleepMedianDays = 28
 	sleepMedianMin  = 7
@@ -79,7 +78,7 @@ func Evaluate(in Input) Assessment {
 			lo := baseMean - hrvBandSDs*baseSD
 			if r, sig, ok := hrvBandSevere(today, in.History, lo); ok {
 				severe.add(SourceHRV, r, sig)
-			} else if band7 < lo {
+			} else if !math.IsNaN(band7) && band7 < lo {
 				amber.add(SourceHRV, "HRV is below your usual range", bandSignal(band7, baseMean))
 			}
 		} else if r, sig, ok := hrvRestReason(today, in.History); ok {
@@ -169,7 +168,7 @@ func distinctSources(sigs []Signal) int {
 // a check-in answered today did not say the legs are poor. The caller has
 // already established there is no severe or amber signal.
 func isPush(in Input, bandOK bool, mean7, baseMean, sleepMed float64, medianOK bool) bool {
-	if !in.Today.Present || !bandOK || mean7 < baseMean {
+	if !in.Today.Present || !bandOK || math.IsNaN(mean7) || mean7 < baseMean {
 		return false
 	}
 	if !medianOK || in.Today.SleepSeconds <= 0 || float64(in.Today.SleepSeconds) < sleepMed {
@@ -185,22 +184,24 @@ func isPush(in Input, bandOK bool, mean7, baseMean, sleepMed float64, medianOK b
 
 // HRVBand is the rider's own HRV range in ln space. baseMean and baseSD are
 // the mean and population standard deviation of ln(HRVLastNight) over the 60
-// nights before today, and need at least 14 nights with a reading. mean7 is
-// the mean of ln over the 7 nights ending today (today included when it has a
-// reading) and needs at least 3 readings, so one lucky night is not a trend.
-// ok is false when either is missing.
+// nights before today, and need at least 14 nights with a reading: ok is the
+// band's availability and depends on nothing else. mean7 is the mean of ln
+// over the 7 nights ending today (today included when it has a reading) from
+// at least one reading; with none it is NaN while ok stays true, so a rider
+// with a band never drops back to Garmin's status words (one rule set per
+// rider) and simply has no HRV verdict that day.
 func HRVBand(history []Day, today Day) (mean7, baseMean, baseSD float64, ok bool) {
 	todayDate, good := parseDate(today.Date)
 	if !good {
 		return 0, 0, 0, false
 	}
 	byDate := hrvByDate(history)
-	cutoff := todayDate.AddDate(0, 0, -hrvBandNights)
 
+	// Walk the nights oldest first: summing in map order would change the
+	// last bits of the mean and SD from run to run.
 	var base []float64
-	for ds, v := range byDate {
-		d, _ := parseDate(ds)
-		if d.Before(todayDate) && !d.Before(cutoff) {
+	for i := hrvBandNights; i >= 1; i-- {
+		if v := byDate[todayDate.AddDate(0, 0, -i).Format(dateLayout)]; v > 0 {
 			base = append(base, math.Log(v))
 		}
 	}
@@ -225,8 +226,8 @@ func HRVBand(history []Day, today Day) (mean7, baseMean, baseSD float64, ok bool
 			week = append(week, math.Log(v))
 		}
 	}
-	if len(week) < hrvMeanMin {
-		return 0, 0, 0, false
+	if len(week) == 0 {
+		return math.NaN(), baseMean, baseSD, true
 	}
 	return meanOf(week), baseMean, baseSD, true
 }
