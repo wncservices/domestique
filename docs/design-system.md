@@ -237,7 +237,9 @@ Pick in this order:
 1. **`AppPage`** (`components/ui/AppPage.vue`) — the frame of every top-level
    page: `title`, optional `subtitle`, an `actions` slot for the page's buttons
    and the default slot for content, at full width of the shell's `max-w-6xl` column. The shell supplies the
-   side padding, so a page does not wrap itself in `UContainer`.
+   side padding, so a page does not wrap itself in `UContainer`. The title is the
+   page's h1: display face, `--text-hero` from `sm` up (`--text-title` on a phone),
+   so it always outranks the section h2s at `--text-title`.
 2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
    `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
    `behind`). Tone carries meaning, not decoration: `good` is the primary accent,
