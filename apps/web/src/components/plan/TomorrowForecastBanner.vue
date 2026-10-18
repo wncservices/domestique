@@ -44,14 +44,14 @@ const sessionWord = computed(() => (props.zone ? zoneLabel(props.zone).toLowerCa
 <template>
   <UAlert :color="meta.color" variant="subtle" :icon="meta.icon" :title="meta.title">
     <template #description>
-      <p class="text-sm">
+      <p class="text-[length:var(--text-body)]">
         Tomorrow's {{ sessionWord }} session {{ meta.phrase }}<template v-if="firstReason"> — {{ firstReason }}</template>.
         Ease it now, or wait for tomorrow's readiness check.
       </p>
       <UPopover v-if="otherReasons.length > 0">
         <UButton color="neutral" variant="link" size="xs" class="px-0" label="Other reasons" />
         <template #content>
-          <ul class="flex max-w-64 list-disc flex-col gap-1 p-3 pl-7 text-sm text-muted">
+          <ul class="flex max-w-64 list-disc flex-col gap-1 p-3 pl-7 text-[length:var(--text-body)] text-muted">
             <li v-for="reason in otherReasons" :key="reason">{{ reason }}</li>
           </ul>
         </template>

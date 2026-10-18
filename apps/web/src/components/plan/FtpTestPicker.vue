@@ -43,13 +43,13 @@ function difficultyLabel(difficulty: string): string {
           <span class="font-medium text-highlighted">{{ p.name }}</span>
           <UBadge v-if="p.id === recommended" color="primary" variant="subtle" size="sm">Recommended</UBadge>
         </span>
-        <span class="tabular-nums text-xs text-muted">~{{ p.durationMinutes }} min · {{ difficultyLabel(p.difficulty) }}</span>
-        <span class="text-xs text-toned">FTP = {{ p.formula }}</span>
-        <span class="flex items-center gap-1 text-xs text-muted">
+        <span class="tabular-nums text-[length:var(--text-label)] text-muted">~{{ p.durationMinutes }} min · {{ difficultyLabel(p.difficulty) }}</span>
+        <span class="text-[length:var(--text-label)] text-toned">FTP = {{ p.formula }}</span>
+        <span class="flex items-center gap-1 text-[length:var(--text-label)] text-muted">
           <UIcon name="i-lucide-bike" class="size-3.5 shrink-0" />
           {{ trainerLabel(p.trainerMode) }}
         </span>
-        <span class="text-xs text-muted">{{ p.forWhom }}</span>
+        <span class="text-[length:var(--text-label)] text-muted">{{ p.forWhom }}</span>
       </button>
     </div>
 
@@ -60,7 +60,7 @@ function difficultyLabel(difficulty: string): string {
       class="max-w-xs"
     >
       <UInput v-model.number="estimatedFtp" type="number" inputmode="numeric" min="50" max="1000" placeholder="e.g. 220" class="w-full">
-        <template #trailing><span class="text-xs text-muted">W</span></template>
+        <template #trailing><span class="text-[length:var(--text-label)] text-muted">W</span></template>
       </UInput>
     </UFormField>
   </div>

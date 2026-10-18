@@ -58,7 +58,7 @@ const rampWarnings = computed(() => props.projection?.ramp?.warnings ?? [])
     <template #header>
       <div class="flex items-center justify-between gap-2">
         <h2 class="text-[length:var(--text-title)] font-semibold">Race day</h2>
-        <span class="text-sm text-muted truncate">{{ projection.goal.name }} · {{ formatDay(projection.goal.eventDate) }}</span>
+        <span class="text-[length:var(--text-body)] text-muted truncate">{{ projection.goal.name }} · {{ formatDay(projection.goal.eventDate) }}</span>
       </div>
     </template>
 
@@ -66,11 +66,11 @@ const rampWarnings = computed(() => props.projection?.ramp?.warnings ?? [])
       <UIcon :name="TONE_ICON[tone]" class="size-5 mt-0.5 shrink-0" :class="TONE_TEXT[tone]" />
       <div>
         <p class="font-semibold" :class="TONE_TEXT[tone]" data-testid="race-day-headline">{{ headline }}</p>
-        <p class="mt-1 text-sm text-muted tabular-nums">{{ numbers }}</p>
+        <p class="mt-1 text-[length:var(--text-body)] text-muted tabular-nums">{{ numbers }}</p>
       </div>
     </div>
 
-    <ul v-if="rampWarnings.length" class="mt-4 flex flex-col gap-1.5 text-sm" data-testid="ramp-warnings">
+    <ul v-if="rampWarnings.length" class="mt-4 flex flex-col gap-1.5 text-[length:var(--text-body)]" data-testid="ramp-warnings">
       <li v-for="w in rampWarnings.slice(0, 3)" :key="w.weekStart" class="flex items-start gap-2 text-warning">
         <UIcon name="i-lucide-trending-up" class="size-4 mt-0.5 shrink-0" />
         <span>
@@ -80,7 +80,7 @@ const rampWarnings = computed(() => props.projection?.ramp?.warnings ?? [])
       </li>
     </ul>
 
-    <p v-if="taperSuggestion" class="mt-4 flex items-start gap-2 text-sm text-muted" data-testid="taper-suggestion">
+    <p v-if="taperSuggestion" class="mt-4 flex items-start gap-2 text-[length:var(--text-body)] text-muted" data-testid="taper-suggestion">
       <UIcon name="i-lucide-lightbulb" class="size-4 mt-0.5 shrink-0" />
       <span>{{ taperSuggestion.text }}</span>
     </p>
@@ -95,7 +95,7 @@ const rampWarnings = computed(() => props.projection?.ramp?.warnings ?? [])
         label="About this projection"
       />
       <template #content>
-        <ul class="mt-2 list-disc pl-5 text-sm text-muted flex flex-col gap-1" data-testid="assumptions">
+        <ul class="mt-2 list-disc pl-5 text-[length:var(--text-body)] text-muted flex flex-col gap-1" data-testid="assumptions">
           <li v-for="a in projection.assumptions" :key="a">{{ a }}</li>
         </ul>
       </template>

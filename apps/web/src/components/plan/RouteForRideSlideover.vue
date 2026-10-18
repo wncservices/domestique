@@ -137,13 +137,13 @@ function suited(c: RouteCandidate): string {
   <USlideover v-model:open="open" side="right" title="Route for this ride" :ui="{ content: 'max-w-xl' }">
     <template #body>
       <div class="flex flex-col gap-4">
-        <p v-if="workout" class="text-sm text-muted">
+        <p v-if="workout" class="text-[length:var(--text-body)] text-muted">
           A loop of about {{ formatDuration(workout.plannedSeconds) }} for {{ workout.name }}, from where your rides start.
         </p>
 
         <div v-if="state === 'loading'" class="flex flex-col gap-3" aria-busy="true">
           <USkeleton v-for="n in 3" :key="n" class="h-40 w-full" />
-          <p class="text-sm text-muted">Looking for loops. This takes a few seconds.</p>
+          <p class="text-[length:var(--text-body)] text-muted">Looking for loops. This takes a few seconds.</p>
         </div>
 
         <div v-else-if="state === 'needStart'" class="flex flex-col gap-3">
@@ -159,7 +159,7 @@ function suited(c: RouteCandidate): string {
         </div>
 
         <template v-else-if="state === 'ready' && result">
-          <p v-if="result.speedAssumed" class="text-xs text-muted">
+          <p v-if="result.speedAssumed" class="text-[length:var(--text-label)] text-muted">
             Times assume about {{ Math.round(result.speedKph) }} km/h on the flat. Add your FTP and weight in Settings for a closer estimate.
           </p>
           <ul class="flex flex-col gap-3">
@@ -169,13 +169,13 @@ function suited(c: RouteCandidate): string {
                   <RouteCandidatePreview :points="c.points" />
                   <div class="flex flex-wrap items-center gap-2">
                     <UBadge v-if="i === 0 && c.terrainFit >= 0.5" color="primary" variant="subtle" icon="i-lucide-star">Best fit</UBadge>
-                    <span class="tabular-nums text-sm text-highlighted">{{ (c.distanceM / 1000).toFixed(1) }} km</span>
-                    <span class="tabular-nums text-sm text-muted">{{ Math.round(c.ascentM) }} m up</span>
-                    <span class="tabular-nums text-sm text-muted">
+                    <span class="tabular-nums text-[length:var(--text-body)] text-highlighted">{{ (c.distanceM / 1000).toFixed(1) }} km</span>
+                    <span class="tabular-nums text-[length:var(--text-body)] text-muted">{{ Math.round(c.ascentM) }} m up</span>
+                    <span class="tabular-nums text-[length:var(--text-body)] text-muted">
                       about {{ formatDuration(c.estimatedSeconds) }}
                     </span>
                   </div>
-                  <p class="text-xs text-muted">
+                  <p class="text-[length:var(--text-label)] text-muted">
                     {{ minutesApart(c) }} ({{ formatDuration(planned) }}).
                     <template v-if="c.note"> {{ c.note }}</template>
                     <template v-else> Suited to {{ suited(c) }}.</template>

@@ -159,7 +159,7 @@ const ariaLabel = computed(() => {
         :style="{ left: `${(x(m.t) / WIDTH) * 100}%`, top: `${y(m.level)}px`, background: color }"
       />
     </div>
-    <p class="min-h-4 text-xs text-muted" aria-live="polite">
+    <p class="min-h-4 text-[length:var(--text-label)] text-muted" aria-live="polite">
       <template v-if="activePoint">
         <span class="tabular-nums text-default">{{ dateLabel(activePoint.t) }} · {{ formatLevel(activePoint.level) }}</span>
         <template v-if="activePoint.reason"> — {{ activePoint.reason }}</template>

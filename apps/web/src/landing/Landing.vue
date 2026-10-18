@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import ColorModeToggle from '@/components/ColorModeToggle.vue'
 import StatTile from '@/components/ui/StatTile.vue'
 import { zoneColorVar } from '@/utils/zones'
+import { signInURL } from './signIn'
 
 // Where the app lives. Built in, so a self-hoster changes it in one place —
 // this page cannot discover its own deployment's domain at runtime.
@@ -36,7 +37,7 @@ onMounted(async () => {
     const res = await fetch('/api/me')
     if (!res.ok) return
     const me = await res.json()
-    if (me.authMode === 'oidc') signInHref.value = `${appHost}/sso/login`
+    signInHref.value = signInURL(appHost, me.authMode, window.location.search)
   } catch {
     // Network hiccup, or a backend old enough to have no /api/me: keep the
     // proxy-shaped default rather than break the link over it.
@@ -133,7 +134,7 @@ const sections = [
           >
             <UIcon name="i-lucide-bike" class="size-5" />
           </span>
-          <strong class="font-display text-base font-semibold tracking-tight text-highlighted">
+          <strong class="font-display text-[length:var(--text-lead)] font-semibold tracking-tight text-highlighted">
             Domestique
           </strong>
         </div>

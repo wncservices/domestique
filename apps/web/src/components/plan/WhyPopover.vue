@@ -30,7 +30,7 @@ const day = computed(() => (props.why?.day ? weekdayDateShort(props.why.day) : '
   <UPopover v-if="why || note">
     <button
       type="button"
-      class="inline-flex cursor-pointer items-center gap-1 text-left text-xs text-info hover:underline"
+      class="inline-flex cursor-pointer items-center gap-1 text-left text-[length:var(--text-label)] text-info hover:underline"
       :aria-label="`${title} — why?`"
     >
       <UIcon name="i-lucide-wand-sparkles" class="shrink-0" />
@@ -40,15 +40,15 @@ const day = computed(() => (props.why?.day ? weekdayDateShort(props.why.day) : '
 
     <template #content>
       <div class="flex max-w-80 flex-col gap-2 p-3">
-        <p class="text-sm font-semibold text-highlighted">{{ title }}</p>
-        <p v-if="text" class="text-sm text-muted">{{ text }}</p>
-        <dl v-if="facts.length > 0" class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+        <p class="text-[length:var(--text-body)] font-semibold text-highlighted">{{ title }}</p>
+        <p v-if="text" class="text-[length:var(--text-body)] text-muted">{{ text }}</p>
+        <dl v-if="facts.length > 0" class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[length:var(--text-body)]">
           <template v-for="fact in facts" :key="`${fact.label}-${fact.value}`">
             <dt class="text-muted">{{ fact.label }}</dt>
             <dd class="tabular-nums text-highlighted">{{ fact.value }}</dd>
           </template>
         </dl>
-        <p v-if="day" class="text-xs text-dimmed">{{ day }}</p>
+        <p v-if="day" class="text-[length:var(--text-label)] text-dimmed">{{ day }}</p>
       </div>
     </template>
   </UPopover>

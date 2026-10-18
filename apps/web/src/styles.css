@@ -109,8 +109,8 @@
   --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
 
-  /* Type scale: five roles. 13px and 20px are reached through text-[13px] and
-   * text-xl, so they need no token. */
+  /* Type scale: five roles plus the landing display size. Raw Tailwind size
+   * classes are banned (designSystem.test.mjs); use text-[length:var(--text-*)]. */
   --text-label: 0.75rem;
   --text-body: 0.875rem;
   --text-lead: 1rem;
@@ -166,6 +166,11 @@
   --ui-bg-muted: var(--color-neutral-100);
   --ui-bg-elevated: #ffffff;
   --ui-border: var(--color-neutral-200);
+  /* Nuxt UI's default greys fail WCAG AA on this palette: dimmed (neutral-400)
+   * is 2.7:1 on white, and muted (neutral-500) 4.4:1 on the page ground. These
+   * clear 4.5:1 on both the ground and a card. */
+  --ui-text-muted: var(--color-neutral-600);
+  --ui-text-dimmed: #5f746c;
   --ui-border-accented: var(--color-neutral-300);
 
   --app-card-bg: #ffffff;
@@ -221,8 +226,11 @@
   --ui-bg: #0b1211;
   --ui-bg-muted: var(--color-neutral-900);
   --ui-bg-elevated: #15201d;
-  --ui-border: var(--color-neutral-800);
-  --ui-border-accented: var(--color-neutral-700);
+  /* neutral-800 was 1.1:1 against the card, so a card had no edge at all. */
+  --ui-border: var(--color-neutral-700);
+  --ui-border-accented: var(--color-neutral-600);
+  /* Dimmed text at neutral-500 was 3.6:1 on the card; this clears 4.5:1. */
+  --ui-text-dimmed: #7a8e86;
 
   --app-card-bg: rgb(30 43 39 / 0.5);
   --app-card-shadow: none;

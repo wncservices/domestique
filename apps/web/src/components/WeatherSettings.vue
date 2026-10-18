@@ -146,12 +146,12 @@ onMounted(load)
         <UIcon name="i-lucide-cloud-sun" />
         Weather
       </h3>
-      <p class="text-sm text-muted">Forecasts for your planned rides. Your own, for this account only.</p>
+      <p class="text-[length:var(--text-body)] text-muted">Forecasts for your planned rides. Your own, for this account only.</p>
     </template>
 
     <div class="flex flex-col gap-4">
       <DetailsToggle v-model:open="aboutWeather" label="Learn more">
-        <p class="text-sm text-muted">
+        <p class="text-[length:var(--text-body)] text-muted">
           When rain, wind, cold, heat or a storm is forecast for a planned ride in the next three days, the plan says so
           and offers an indoor version or another day. It only ever suggests.
         </p>
@@ -188,8 +188,8 @@ onMounted(load)
             </UButton>
           </li>
         </ul>
-        <p v-else-if="searched" class="text-sm text-muted">No matching town found.</p>
-        <p class="text-xs text-muted">
+        <p v-else-if="searched" class="text-[length:var(--text-body)] text-muted">No matching town found.</p>
+        <p class="text-[length:var(--text-label)] text-muted">
           Domestique sends only this town's approximate location (rounded to about 1 km) to Open-Meteo to fetch the
           forecast. Your routes and rides are never shared. Remove it any time. Only the town and country are kept,
           never a street address.
@@ -197,10 +197,10 @@ onMounted(load)
       </div>
 
       <div v-if="configured" class="flex flex-col gap-2">
-        <p class="text-sm font-medium">I usually ride between</p>
+        <p class="text-[length:var(--text-body)] font-medium">I usually ride between</p>
         <div class="flex flex-wrap items-center gap-2">
           <USelect v-model="start" :items="startItems" class="w-28" aria-label="Ride window starts at" />
-          <span class="text-sm text-muted">and</span>
+          <span class="text-[length:var(--text-body)] text-muted">and</span>
           <USelect v-model="end" :items="endItems" class="w-28" aria-label="Ride window ends at" />
           <UButton
             color="neutral"
@@ -212,8 +212,8 @@ onMounted(load)
             Save hours
           </UButton>
         </div>
-        <p v-if="!windowValid" class="text-xs text-error">The end has to be after the start.</p>
-        <p v-else class="text-xs text-muted">
+        <p v-if="!windowValid" class="text-[length:var(--text-label)] text-error">The end has to be after the start.</p>
+        <p v-else class="text-[length:var(--text-label)] text-muted">
           A longer session is judged over its own length, up to six hours.
         </p>
       </div>
@@ -226,7 +226,7 @@ onMounted(load)
           href="https://open-meteo.com/"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-xs text-primary underline underline-offset-2"
+          class="text-[length:var(--text-label)] text-primary underline underline-offset-2"
         >
           {{ prefs?.attribution }}
         </a>
@@ -236,7 +236,7 @@ onMounted(load)
         href="https://open-meteo.com/"
         target="_blank"
         rel="noopener noreferrer"
-        class="text-xs text-primary underline underline-offset-2"
+        class="text-[length:var(--text-label)] text-primary underline underline-offset-2"
       >
         {{ prefs?.attribution }}
       </a>

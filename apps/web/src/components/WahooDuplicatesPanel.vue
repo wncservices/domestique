@@ -107,7 +107,7 @@ onMounted(async () => {
             <UIcon name="i-lucide-copy-x" />
             Duplicate routes on Wahoo
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="loading">Checking…</template>
             <template v-else>
               {{ groups.length }} route{{ groups.length === 1 ? '' : 's' }} pushed more than once
@@ -142,7 +142,7 @@ onMounted(async () => {
 
     <div class="flex flex-col gap-4">
       <div v-for="group in groups" :key="group.name" class="rounded-lg border border-default p-3">
-        <p class="mb-2 text-sm font-medium text-highlighted">{{ group.name }}</p>
+        <p class="mb-2 text-[length:var(--text-body)] font-medium text-highlighted">{{ group.name }}</p>
         <div class="flex flex-col divide-y divide-default">
           <label
             v-for="route in group.routes"
@@ -153,7 +153,7 @@ onMounted(async () => {
               :model-value="toDelete.has(route.id)"
               @update:model-value="(v: boolean | 'indeterminate') => toggle(route.id, v === true)"
             />
-            <span class="flex-1 text-sm text-muted">
+            <span class="flex-1 text-[length:var(--text-body)] text-muted">
               {{ (route.distanceM / 1000).toFixed(1) }} km
               · {{ Math.round(route.ascentM) }} m
               <span v-if="route.updatedAt">· {{ new Date(route.updatedAt).toLocaleDateString() }}</span>
@@ -166,7 +166,7 @@ onMounted(async () => {
 
     <UModal v-model:open="confirmingDelete" title="Delete these routes from Wahoo?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           {{ selectedCount }} route{{ selectedCount === 1 ? '' : 's' }} will be removed from
           Wahoo. This cannot be undone.
         </p>

@@ -86,7 +86,7 @@ const explanation = computed(() => {
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile v-for="tile in tiles" :key="tile.label" :label="tile.label" :value="tile.value" :caption="tile.caption" :tone="tile.tone" />
       </div>
-      <p v-if="explanation" class="mt-3 text-sm text-muted">{{ explanation }}</p>
+      <p v-if="explanation" class="mt-3 text-[length:var(--text-body)] text-muted">{{ explanation }}</p>
     </div>
   </section>
 </template>

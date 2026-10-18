@@ -326,8 +326,8 @@ async function applyProposal() {
 
         <!-- The neck check, before an illness is ended early -->
         <template v-if="step === 'neck'">
-          <p class="text-sm text-highlighted">Feeling it below the neck?</p>
-          <p class="text-sm text-toned">
+          <p class="text-[length:var(--text-body)] text-highlighted">Feeling it below the neck?</p>
+          <p class="text-[length:var(--text-body)] text-toned">
             Fever, chest congestion, a cough or body aches usually mean a little more rest. A runny nose or a sore throat on
             its own is a lighter case. This is a rule of thumb, not medical advice.
           </p>
@@ -339,7 +339,7 @@ async function applyProposal() {
 
         <!-- The form -->
         <template v-else-if="step === 'form'">
-          <p class="text-sm text-toned">
+          <p class="text-[length:var(--text-body)] text-toned">
             Away, ill or swamped? Say so and you will see what changes in your plan before anything does.
           </p>
 
@@ -360,11 +360,11 @@ async function applyProposal() {
             <URadioGroup v-model="form.option" :items="options" />
           </UFormField>
 
-          <p v-if="form.kind === 'illness'" class="text-xs text-muted">
+          <p v-if="form.kind === 'illness'" class="text-[length:var(--text-label)] text-muted">
             When you are better, the plan eases you back in for a few days. That ramp is this app’s own rule of thumb, not a
             clinical protocol. Symptoms below the neck (fever, chest congestion, body aches) mean choose proper.
           </p>
-          <p v-else-if="form.kind === 'travel' && form.option === 'no_bike'" class="text-xs text-muted">
+          <p v-else-if="form.kind === 'travel' && form.option === 'no_bike'" class="text-[length:var(--text-label)] text-muted">
             A week or more without a bike also gets a short return ramp.
           </p>
 
@@ -388,10 +388,10 @@ async function applyProposal() {
 
         <!-- The preview of the form (or of ending / deleting) -->
         <template v-else-if="step === 'preview' && result">
-          <p v-if="mode === 'delete'" class="text-sm text-toned">
+          <p v-if="mode === 'delete'" class="text-[length:var(--text-body)] text-toned">
             Deleting the event gives its days back. These sessions from your plan would return.
           </p>
-          <p v-else-if="props.endEarly" class="text-sm text-toned">
+          <p v-else-if="props.endEarly" class="text-[length:var(--text-body)] text-toned">
             Today is the first day out of it. This is what changes.
           </p>
           <LifeEventPreview
@@ -427,14 +427,14 @@ async function applyProposal() {
             :title="`Skipped: ${d.reason}`"
           />
 
-          <p v-if="proposal.items.length === 0" class="text-sm text-muted">Nothing to apply. You can use the Life event form instead.</p>
+          <p v-if="proposal.items.length === 0" class="text-[length:var(--text-body)] text-muted">Nothing to apply. You can use the Life event form instead.</p>
 
           <section v-for="(item, i) in proposal.items" :key="i" class="flex flex-col gap-2 rounded-lg border border-default p-3">
             <template v-if="item.intent.type === 'create_life_event'">
               <div class="flex items-center gap-2">
                 <UCheckbox v-model="itemOn[i]" :aria-label="`Create ${itemHeading(item)}`" />
                 <UIcon v-if="item.intent.kind" :name="KIND_META[item.intent.kind].icon" class="size-4 text-muted" />
-                <h3 class="text-sm font-medium text-highlighted">New life event: {{ itemHeading(item) }}</h3>
+                <h3 class="text-[length:var(--text-body)] font-medium text-highlighted">New life event: {{ itemHeading(item) }}</h3>
               </div>
               <LifeEventPreview v-model:ticks="itemTicks[i]!" :diff="item.diff" :show-actions="false" />
             </template>

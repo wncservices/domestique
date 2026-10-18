@@ -15,7 +15,7 @@ const emit = defineEmits<{ save: []; discard: [] }>()
     v-if="visible"
     class="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-lg border border-default bg-elevated/95 backdrop-blur px-4 py-3"
   >
-    <span class="text-sm font-medium">Unsaved changes</span>
+    <span class="text-[length:var(--text-body)] font-medium">Unsaved changes</span>
     <div class="flex gap-2">
       <UButton color="neutral" variant="ghost" @click="emit('discard')">Discard</UButton>
       <UButton icon="i-lucide-save" color="primary" :loading="saving" @click="emit('save')">Save</UButton>

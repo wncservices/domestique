@@ -1,89 +1,68 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
+import { AUTH0_HOSTNAME, credentials, signIn, submitCredentials, watchForBreakage } from './helpers'
+import { deleteRoute, routeLifecycle, sweepLeftoverRoutes, walkAdminPages, walkRiderPages } from './journeys'
 
-// The real tenant host — auth.oidc.issuer in domestique-infra's own
-// values.yaml. An exact match, not url.hostname.includes('auth0.com'):
-// .includes() is a substring test, so it would also match a hostname an
-// attacker controls, like evil-auth0.com.example.net or
-// notdomestique.eu.auth0.com.attacker.org — CodeQL correctly flags that
-// pattern (js/incomplete-url-substring-sanitization). This only ever needs
-// to recognize one specific, known host, so there's no reason to reach for
-// anything looser than equality.
-const AUTH0_HOSTNAME = 'domestique.eu.auth0.com'
+// Each signed-in test logs in once and walks its whole journey in steps,
+// because the Auth0 login is the slow part and the Job has a hard deadline
+// (see playwright.config.ts).
 
-// Drives Auth0's real Universal Login — this is the whole point of running
-// as postPromotionAnalysis rather than pre-promotion: the OIDC redirect
-// always lands back on whichever Service is currently *active*
-// (auth.OIDCConfig.RedirectURL is fixed config, not request-derived), so a
-// full login can only be exercised meaningfully once promotion has already
-// happened and this pod is the one 'app.domestique.dev' now resolves to.
-//
-// Selectors target Auth0's documented New Universal Login field names
-// (input[name=username], input[name=password]) rather than visible label
-// text, which is copy that can change per Auth0 branding config.
-//
-// Verified against the real tenant on the first real run: the identifier
-// screen renders a Google social-login button alongside the actual submit
-// button, and both are button[type="submit"] — a bare type selector
-// resolves to two elements there (strict-mode violation). The real submit
-// button is the one Auth0 marks as the primary action
-// (name="action" value="default" data-action-button-primary="true"); the
-// Google button carries data-provider="google" instead and has no
-// name="action" — scoping on name="action" rather than the primary/
-// secondary data attributes to stay consistent with this file's own
-// field-name-not-styling-attribute convention above.
-const CONTINUE_BUTTON = 'button[type="submit"][name="action"]'
+test('test-rider: sign in, walk every page, add and delete a route', async ({ page }) => {
+  test.setTimeout(90_000)
+  const assertNoBreakage = watchForBreakage(page)
 
-async function submitCredentials(page: Page, email: string, password: string) {
-  await page.goto('/sso/login')
+  await test.step('sign in lands on Today', async () => {
+    await signIn(page, 'rider')
+    await expect(page).toHaveURL(/\/today$/)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  })
 
-  await page.locator('input[name="username"]').fill(email)
-  await page.locator(CONTINUE_BUTTON).click()
+  await test.step('the session is a rider, not more', async () => {
+    const me = await (await page.request.get('/api/me')).json()
+    expect(me).toMatchObject({ authenticated: true, authMode: 'oidc', role: 'rider' })
+    // The server enforces this, whatever the UI shows.
+    expect((await page.request.get('/api/people')).status()).toBe(403)
+  })
 
-  // Identifier-first is Auth0's default: the password field lives on a
-  // second screen that only renders after the above submit. If this
-  // tenant is instead configured to show both fields at once, the field is
-  // already visible and this wait is a no-op.
-  const passwordField = page.locator('input[name="password"]')
-  await passwordField.waitFor({ state: 'visible' })
-  await passwordField.fill(password)
-  await page.locator(CONTINUE_BUTTON).click()
-}
+  await test.step('every page loads', async () => {
+    await walkRiderPages(page)
+  })
 
-async function signIn(page: Page, email: string, password: string) {
-  await submitCredentials(page, email, password)
-  // Lands back on the app once the OIDC callback completes.
-  await page.waitForURL((url) => url.hostname !== AUTH0_HOSTNAME)
-}
+  await test.step('the account menu offers no admin pages', async () => {
+    // walkRiderPages left it on Settings, menu closed.
+    await page.getByRole('button', { name: /Account menu/ }).click()
+    await expect(page.getByRole('menuitem', { name: 'Settings' })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: 'People' })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+  })
 
-test('test-rider can sign in and see the routes library', async ({ page }) => {
-  const email = process.env.DOMESTIQUE_TEST_RIDER_EMAIL
-  const password = process.env.DOMESTIQUE_TEST_RIDER_PASSWORD
-  if (!email || !password) {
-    throw new Error('DOMESTIQUE_TEST_RIDER_EMAIL/PASSWORD must be set')
-  }
+  await test.step('upload, find, download and delete a route', async () => {
+    await sweepLeftoverRoutes(page)
+    let slug: string | undefined
+    try {
+      await routeLifecycle(page, (s) => (slug = s))
+    } finally {
+      // The test accounts may create and delete; they must not accumulate.
+      if (slug) await deleteRoute(page, slug)
+    }
+  })
 
-  await signIn(page, email, password)
-
-  // Signing in lands on Today, not the library, so go to the library
-  // explicitly before asserting on it.
-  await page.goto('/routes')
-  // The Routes page's own route count line — see RoutesPage.vue.
-  await expect(page.getByText(/route(s)?$/i).first()).toBeVisible()
+  assertNoBreakage()
 })
 
-test('test-admin can sign in and reach the People page', async ({ page }) => {
-  const email = process.env.DOMESTIQUE_TEST_ADMIN_EMAIL
-  const password = process.env.DOMESTIQUE_TEST_ADMIN_PASSWORD
-  if (!email || !password) {
-    throw new Error('DOMESTIQUE_TEST_ADMIN_EMAIL/PASSWORD must be set')
-  }
+test('test-admin: sign in, reach People and Settings', async ({ page }) => {
+  const assertNoBreakage = watchForBreakage(page)
 
-  await signIn(page, email, password)
+  await test.step('sign in', async () => {
+    await signIn(page, 'admin')
+    const me = await (await page.request.get('/api/me')).json()
+    expect(me).toMatchObject({ authenticated: true, authMode: 'oidc', role: 'admin' })
+  })
 
-  // People lives in the avatar menu (AvatarMenu.vue), not as a visible link.
-  await page.getByRole('button', { name: /Account menu/ }).click()
-  await page.getByRole('menuitem', { name: 'People' }).click()
-  await expect(page).toHaveURL(/\/people/)
+  await test.step('People and Settings', async () => {
+    await walkAdminPages(page)
+  })
+
+  assertNoBreakage()
 })
 
 // This gate's own job is "does a known-good login still work" — it isn't
@@ -94,16 +73,12 @@ test('test-admin can sign in and reach the People page', async ({ page }) => {
 // regardless of what Auth0 actually decided) would still get caught here,
 // not just "does a correct login work."
 //
-// Only ever submits an obviously-fake password (never the real one) — this
-// test needs no password env var at all. Asserted by absence, not by any
-// particular error message: Auth0's own error copy is tenant branding that
-// can change, but "the OIDC redirect back to the app never completes" is
-// true regardless of that copy.
+// Only ever submits an obviously-fake password (never the real one).
+// Asserted by absence, not by any particular error message: Auth0's own
+// error copy is tenant branding that can change, but "the OIDC redirect
+// back to the app never completes" is true regardless of that copy.
 test('a wrong password is rejected, not silently accepted', async ({ page }) => {
-  const email = process.env.DOMESTIQUE_TEST_RIDER_EMAIL
-  if (!email) {
-    throw new Error('DOMESTIQUE_TEST_RIDER_EMAIL must be set')
-  }
+  const { email } = credentials('rider')
 
   await submitCredentials(page, email, `not-the-real-password-${Date.now()}`)
 
@@ -113,4 +88,26 @@ test('a wrong password is rejected, not silently accepted', async ({ page }) => 
     .catch(() => false)
 
   expect(redirectedToApp, 'a wrong password must not complete the OIDC login redirect').toBe(false)
+})
+
+// Signed out, an app page is not reachable: the visitor is sent to the landing
+// page (domestique.dev) with the page they asked for as return_to, and its Sign
+// in carries that on to /sso/login so they come back to it. The link is relative
+// when the app shell itself renders it (the preview host) and absolute on the
+// landing page, so the test reads it as a URL rather than as a fixed string.
+test('a signed-out visitor is offered sign-in, and nothing else', async ({ page, baseURL }) => {
+  const assertNoBreakage = watchForBreakage(page)
+  await page.goto('/routes')
+  const signInLink = page.getByRole('link', { name: 'Sign in' }).first()
+  await expect(signInLink).toBeVisible()
+
+  const href = await signInLink.getAttribute('href')
+  const target = new URL(href ?? '', page.url())
+  const allowedHosts = new Set([new URL(baseURL ?? page.url()).host, 'app.domestique.dev'])
+  expect(allowedHosts.has(target.host), `Sign in goes to ${target.host}`).toBe(true)
+  expect(target.pathname).toBe('/sso/login')
+  expect(target.searchParams.get('return_to')).toBe('/routes')
+
+  await expect(page.getByRole('heading', { level: 2, name: /^\d+ routes?$/ })).toHaveCount(0)
+  assertNoBreakage()
 })

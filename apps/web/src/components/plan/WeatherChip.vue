@@ -37,19 +37,19 @@ const summary = computed(() => {
     </button>
 
     <template #content>
-      <div class="flex max-w-64 flex-col gap-2 p-3 text-sm">
+      <div class="flex max-w-64 flex-col gap-2 p-3 text-[length:var(--text-body)]">
         <p class="font-medium text-highlighted">{{ weekdayLong(day.date) }}</p>
         <ul class="flex list-disc flex-col gap-1 pl-4 text-muted">
           <li v-for="reason in day.reasons" :key="reason">{{ reason }}</li>
         </ul>
-        <ul class="flex flex-col gap-0.5 text-xs text-muted">
+        <ul class="flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
           <li v-for="line in summary" :key="line">{{ line }}</li>
         </ul>
         <a
           href="https://open-meteo.com/"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-xs text-primary underline underline-offset-2"
+          class="text-[length:var(--text-label)] text-primary underline underline-offset-2"
         >
           {{ attribution }}
         </a>

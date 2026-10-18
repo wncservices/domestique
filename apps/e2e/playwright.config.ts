@@ -14,21 +14,29 @@ export default defineConfig({
   // that either works or does not, not a flaky test suite to smooth over —
   // a real failure here should abort/roll back, not quietly pass on attempt
   // two. Parallel workers are a different thing than retries, though — every
-  // test here is fully independent (separate accounts or no account at all,
+  // test here is fully independent (separate accounts or no account at all;
+  // the one test that writes, the rider's route lifecycle, only touches
+  // routes it named itself and deletes them however it ends,
   // and Playwright gives each test its own isolated browser context by
   // default regardless of worker count), so running them at once only
   // shortens the wall-clock time the postPromotionAnalysis Job spends
   // waiting, it doesn't change what any test does or how many times it gets
   // to do it.
   fullyParallel: true,
-  // One worker per test (there are 3, see tests/login.spec.ts) — small
-  // enough to run all of them in a single batch instead of queueing, fixed
-  // rather than left to Playwright's own CPU-count auto-detection, which
-  // would just guess based on whatever this container happens to be
-  // scheduled onto. Bump this (and the Job's own resources/dev-shm sizing
-  // in domestique-infra's analysistemplate-post-promotion.yaml, sized and
-  // tested for exactly 3 concurrent Chromium instances) if a test gets
-  // added.
+  // Three workers, so at most three Chromium instances at once: the Job's
+  // resources and /dev/shm in domestique-infra's
+  // analysistemplate-post-promotion.yaml are sized for exactly that, and
+  // its activeDeadlineSeconds (150) bounds the whole run. Fixed rather than
+  // left to Playwright's CPU-count auto-detection, which would guess from
+  // whatever node this lands on.
+  //
+  // The three signed-in or Auth0-bound tests in login.spec.ts start
+  // together; the signed-out visitor test queues behind the quickest of
+  // them, and public.spec.ts uses only the `request` fixture, which never
+  // starts a browser. A new browser test should extend an existing journey
+  // (one login, more steps) rather than add a login: the Auth0 round trip
+  // is most of each test's time. Raise this only together with the Job's
+  // sizing.
   workers: 3,
   reporter: [['list']],
   // Every request this suite makes to a container the pod itself never

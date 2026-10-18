@@ -116,7 +116,7 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ ftpWatts: numberOrUndefined(v) })"
           />
-          <p v-if="!profile.ftpWatts" class="text-xs text-muted mt-1">
+          <p v-if="!profile.ftpWatts" class="text-[length:var(--text-label)] text-muted mt-1">
             No FTP yet — sync your Garmin/Wahoo data above, or
             <UButton
               label="build a 20-minute FTP test"
@@ -128,7 +128,7 @@ const experienceItems = computed(() => {
               @click="emit('buildFtpTest')"
             />.
           </p>
-          <p v-else-if="profile.ftpEstimated" class="text-xs text-muted mt-1">
+          <p v-else-if="profile.ftpEstimated" class="text-[length:var(--text-label)] text-muted mt-1">
             Estimated from your synced rides — edit and save to make it permanent, or
             <UButton
               label="test it properly"
@@ -140,7 +140,7 @@ const experienceItems = computed(() => {
               @click="emit('buildFtpTest')"
             />.
           </p>
-          <p v-if="profile.ftpEstimated && provenance('ftp')" class="text-xs text-dimmed mt-1">{{ provenance('ftp') }}</p>
+          <p v-if="profile.ftpEstimated && provenance('ftp')" class="text-[length:var(--text-label)] text-dimmed mt-1">{{ provenance('ftp') }}</p>
         </UFormField>
         <UFormField label="Weight (kg)">
           <!-- Clearing the box sends 0, which clears the stored weight; leaving
@@ -154,7 +154,7 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ weightKg: v === '' ? 0 : numberOrUndefined(v) })"
           />
-          <p v-if="!profile.weightKg" class="text-xs text-muted mt-1">
+          <p v-if="!profile.weightKg" class="text-[length:var(--text-label)] text-muted mt-1">
             Not set: pacing assumes 75 kg and says so. Add yours for a better climbing time.
           </p>
         </UFormField>
@@ -169,7 +169,7 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ thresholdPaceSecPerKm: numberOrUndefined(v) })"
           />
-          <p v-if="isEstimated('threshold_pace') && provenance('threshold_pace')" class="text-xs text-dimmed mt-1">
+          <p v-if="isEstimated('threshold_pace') && provenance('threshold_pace')" class="text-[length:var(--text-label)] text-dimmed mt-1">
             {{ provenance('threshold_pace') }}
           </p>
         </UFormField>
@@ -184,7 +184,7 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ maxHr: numberOrUndefined(v) })"
           />
-          <p v-if="!profile.maxHr" class="text-xs text-muted mt-1">
+          <p v-if="!profile.maxHr" class="text-[length:var(--text-label)] text-muted mt-1">
             No max heart rate on file — sync to read it from Garmin, or
             <UButton
               label="build a max HR test"
@@ -196,7 +196,7 @@ const experienceItems = computed(() => {
               @click="emit('buildMaxHrTest')"
             />. Garmin's figure is often an age-based default, so a real test is the accurate way to get it.
           </p>
-          <p v-if="isEstimated('max_hr') && provenance('max_hr')" class="text-xs text-dimmed mt-1">{{ provenance('max_hr') }}</p>
+          <p v-if="isEstimated('max_hr') && provenance('max_hr')" class="text-[length:var(--text-label)] text-dimmed mt-1">{{ provenance('max_hr') }}</p>
         </UFormField>
         <UFormField>
           <template #label>
@@ -209,11 +209,11 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ thresholdHr: numberOrUndefined(v) })"
           />
-          <p v-if="!profile.thresholdHr" class="text-xs text-muted mt-1">
+          <p v-if="!profile.thresholdHr" class="text-[length:var(--text-label)] text-muted mt-1">
             No threshold heart rate yet — it is detected from your best 20-minute effort in synced
             rides (or read from Garmin's lactate threshold). Heart-rate zones use it once it is known.
           </p>
-          <p v-if="isEstimated('threshold_hr') && provenance('threshold_hr')" class="text-xs text-dimmed mt-1">
+          <p v-if="isEstimated('threshold_hr') && provenance('threshold_hr')" class="text-[length:var(--text-label)] text-dimmed mt-1">
             {{ provenance('threshold_hr') }}
           </p>
         </UFormField>
@@ -228,7 +228,7 @@ const experienceItems = computed(() => {
             class="w-full"
             @update:model-value="(v: string | number) => update({ restingHr: numberOrUndefined(v) })"
           />
-          <p v-if="!profile.restingHr" class="text-xs text-muted mt-1">
+          <p v-if="!profile.restingHr" class="text-[length:var(--text-label)] text-muted mt-1">
             No resting heart rate on file — sync your Garmin data above and it fills in automatically
             from your watch's own wellness reading, or enter one yourself.
           </p>
@@ -287,8 +287,8 @@ const experienceItems = computed(() => {
         </div>
       </UFormField>
       <div v-if="narrationEnabled" class="mt-4 pt-4 border-t border-default">
-        <p class="text-sm font-medium mb-1">Tell us about an upcoming change</p>
-        <p class="text-xs text-muted mb-2">
+        <p class="text-[length:var(--text-body)] font-medium mb-1">Tell us about an upcoming change</p>
+        <p class="text-[length:var(--text-label)] text-muted mb-2">
           e.g. "I'm traveling for work next week, only free on the weekend" — suggests changes to the fields
           above for you to review. Nothing is saved until you press Save profile.
         </p>
@@ -305,18 +305,18 @@ const experienceItems = computed(() => {
             Suggest changes
           </UButton>
         </div>
-        <p v-if="explanation" class="mt-2 text-sm text-muted italic">{{ explanation }}</p>
+        <p v-if="explanation" class="mt-2 text-[length:var(--text-body)] text-muted italic">{{ explanation }}</p>
       </div>
     </div>
 
     <!-- Trainer -->
     <div>
       <p class="text-[length:var(--text-label)] text-muted mb-3">Trainer</p>
-      <label class="flex items-start gap-3 text-sm">
+      <label class="flex items-start gap-3 text-[length:var(--text-body)]">
         <USwitch :model-value="profile.smartTrainer" class="mt-0.5" @update:model-value="(v: boolean) => update({ smartTrainer: v })" />
         <span>
           <span class="font-medium">I have a smart trainer</span>
-          <span class="block text-xs text-muted">
+          <span class="block text-[length:var(--text-label)] text-muted">
             An indoor version of a session then asks for one wattage per step, which a smart trainer can hold (ERG
             mode), instead of a range. Anyone can make a session indoor from the plan; this only changes how its
             targets are set. Takes effect when you press Save profile.
@@ -328,11 +328,11 @@ const experienceItems = computed(() => {
     <!-- Automation -->
     <div v-if="canSyncGarmin">
       <p class="text-[length:var(--text-label)] text-muted mb-3">Automation</p>
-      <label class="flex items-start gap-3 text-sm">
+      <label class="flex items-start gap-3 text-[length:var(--text-body)]">
         <USwitch :model-value="profile.autoPushWorkouts" class="mt-0.5" @update:model-value="(v: boolean) => update({ autoPushWorkouts: v })" />
         <span>
           <span class="font-medium">Send my workouts to Garmin automatically</span>
-          <span class="block text-xs text-muted">
+          <span class="block text-[length:var(--text-label)] text-muted">
             Today's session is sent to your Garmin each morning, and updated if the plan changes it during the day —
             nothing to press. Later days stay in the app until their morning; "Send to Garmin" still sends any day
             you choose. Needs your Garmin account connected in Settings, and takes effect when you press Save profile.

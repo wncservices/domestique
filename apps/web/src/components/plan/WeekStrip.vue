@@ -287,7 +287,7 @@ watch(
         <UButton v-if="!isCurrentWeek" color="neutral" variant="ghost" size="sm" @click="emit('thisWeek')">Today</UButton>
         <span
           v-if="phaseChip"
-          class="rounded-full px-2 py-0.5 text-xs font-medium"
+          class="rounded-full px-2 py-0.5 text-[length:var(--text-label)] font-medium"
           :class="phaseChip.class"
           :style="phaseChip.style"
         >
@@ -303,7 +303,7 @@ watch(
           <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-ellipsis" aria-label="More actions" />
         </UDropdownMenu>
         <div class="flex min-w-[10rem] flex-col items-end gap-1">
-          <span class="tabular-nums text-sm text-muted">
+          <span class="tabular-nums text-[length:var(--text-body)] text-muted">
             {{ loadLabel }}
           </span>
           <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-32" />
@@ -323,7 +323,7 @@ watch(
         @drop="onDrop($event, day.date)"
       >
         <div class="flex items-center justify-between gap-1">
-          <span class="text-xs font-medium tabular-nums">{{ weekdayShort(day.date) }} {{ dayNumber(day.date) }}</span>
+          <span class="text-[length:var(--text-label)] font-medium tabular-nums">{{ weekdayShort(day.date) }} {{ dayNumber(day.date) }}</span>
           <UIcon v-if="statusIcon[day.status]" :name="statusIcon[day.status]" :class="statusColor[day.status]" class="size-3.5" />
         </div>
 
@@ -348,7 +348,7 @@ watch(
             @keydown.space.prevent="emit('select', w, day.date)"
           >
             <!-- Three lines, never one; the tooltip carries the rest of a very long name. -->
-            <span class="line-clamp-3 break-words text-xs font-medium text-highlighted">{{ w.name }}</span>
+            <span class="line-clamp-3 break-words text-[length:var(--text-label)] font-medium text-highlighted">{{ w.name }}</span>
             <div class="flex items-center justify-between gap-1">
               <span class="tabular-nums text-[length:var(--text-label)] text-muted">
                 {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template>
@@ -377,7 +377,7 @@ watch(
           </div>
           <!-- Hover shows the whole session; a tap selects it into the day card above, which is the full detail. -->
           <template #content>
-            <div class="flex max-w-64 flex-col gap-1 p-1 text-xs">
+            <div class="flex max-w-64 flex-col gap-1 p-1 text-[length:var(--text-label)]">
               <span class="font-medium text-highlighted">{{ w.name }}</span>
               <span class="tabular-nums text-muted">
                 {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template><template v-if="w.zone"> · {{ zoneLabel(w.zone) }}</template>
@@ -421,7 +421,7 @@ watch(
       <UButton color="primary" variant="soft" icon="i-lucide-calendar-plus" :loading="filling" @click="emit('fill')">
         Fill this week
       </UButton>
-      <p class="text-xs text-muted">Builds this week's sessions from your plan.</p>
+      <p class="text-[length:var(--text-label)] text-muted">Builds this week's sessions from your plan.</p>
     </div>
 
     <StepResultsTable

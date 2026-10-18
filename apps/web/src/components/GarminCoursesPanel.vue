@@ -184,7 +184,7 @@ onMounted(async () => {
             <UIcon name="i-lucide-watch" />
             Sync back from Garmin
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="!connection.connected">Connect Garmin to sync courses back</template>
             <template v-else-if="loading">Loading courses…</template>
             <template v-else-if="!courses.length">No courses on that account.</template>
@@ -222,20 +222,22 @@ onMounted(async () => {
       color="error"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      :description="error"
+      :text="error"
       class="mb-4"
     />
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-if="!connection.connected"
       icon="i-lucide-log-in"
       title="Not connected to Garmin"
-      description="Connect your account to sync back the courses already on it."
+      text="Connect your account to sync back the courses already on it."
     >
       <template #actions>
         <UButton to="/settings" icon="i-lucide-settings" color="neutral">Go to Settings</UButton>
       </template>
-    </UEmpty>
+    </EmptyState>
 
     <div v-if="connection.connected && importedCount" class="mb-3 flex justify-end">
       <USwitch v-model="showImported" :label="`Show ${importedCount} already imported`" />
@@ -255,7 +257,7 @@ onMounted(async () => {
         :data="pagedCourses"
         :columns="columns"
         :loading="loading"
-        :ui="{ td: 'text-sm' }"
+        :ui="{ td: 'text-[length:var(--text-body)]' }"
       />
       <UPagination
         v-if="visibleCourses.length > coursesPageSize"
@@ -265,18 +267,22 @@ onMounted(async () => {
         class="mt-4 justify-center"
       />
     </template>
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else-if="connection.connected && courses.length"
       icon="i-lucide-check"
       title="Everything is imported"
-      :description="`All ${courses.length} courses on that account are already in the library.`"
+      :text="`All ${courses.length} courses on that account are already in the library.`"
     />
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else-if="connection.connected"
       icon="i-lucide-watch"
       title="Nothing to sync"
-      description="Create a course in Garmin Connect and refresh."
+      text="Create a course in Garmin Connect and refresh."
     />
   </UCard>
 </template>

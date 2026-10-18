@@ -110,7 +110,7 @@ onMounted(async () => {
             <UIcon name="i-lucide-copy-x" />
             Duplicate tours on Komoot
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="loading">Checking…</template>
             <template v-else>
               {{ groups.length }} tour{{ groups.length === 1 ? '' : 's' }} planned more than once
@@ -154,7 +154,7 @@ onMounted(async () => {
 
     <div class="flex flex-col gap-4">
       <div v-for="group in groups" :key="group.name" class="rounded-lg border border-default p-3">
-        <p class="mb-2 text-sm font-medium text-highlighted">{{ group.name }}</p>
+        <p class="mb-2 text-[length:var(--text-body)] font-medium text-highlighted">{{ group.name }}</p>
         <div class="flex flex-col divide-y divide-default">
           <label
             v-for="tour in group.tours"
@@ -165,7 +165,7 @@ onMounted(async () => {
               :model-value="toDelete.has(tour.id)"
               @update:model-value="(v: boolean | 'indeterminate') => toggle(tour.id, v === true)"
             />
-            <span class="flex-1 text-sm text-muted">
+            <span class="flex-1 text-[length:var(--text-body)] text-muted">
               {{ (tour.distanceM / 1000).toFixed(1) }} km
               · {{ Math.round(tour.ascentM) }} m
               <span v-if="tour.changedAt">· {{ new Date(tour.changedAt).toLocaleDateString() }}</span>
@@ -178,7 +178,7 @@ onMounted(async () => {
 
     <UModal v-model:open="confirmingDelete" title="Delete these tours from Komoot?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           {{ selectedCount }} tour{{ selectedCount === 1 ? '' : 's' }} will be removed from your
           Komoot account, not just this library. This cannot be undone.
         </p>

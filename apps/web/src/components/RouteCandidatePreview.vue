@@ -45,6 +45,6 @@ const start = computed(() => routeStart(path.value))
       />
       <circle v-if="start" :cx="start.x" :cy="start.y" r="4" class="fill-primary" />
     </svg>
-    <p v-else class="text-sm text-muted">no track</p>
+    <p v-else class="text-[length:var(--text-body)] text-muted">no track</p>
   </div>
 </template>

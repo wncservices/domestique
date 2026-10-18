@@ -459,7 +459,7 @@ function onSuggestSaved() {
               :title="`Editing “${editingName}”`"
               description="Drag, add, or remove waypoints, then save — the route's name, description and tags are untouched."
             />
-            <p class="text-sm text-muted">
+            <p class="text-[length:var(--text-body)] text-muted">
               Click the map to place waypoints — each one snaps to the nearest road. Click on the
               route itself to insert one in between, drag a waypoint to move it, click (or
               right-click) one to remove it.
@@ -474,7 +474,7 @@ function onSuggestSaved() {
                  the status text, five buttons are still wider than a phone
                  screen, so they wrap onto as many lines as needed instead
                  of continuing to squeeze single-button text. -->
-            <div class="flex flex-col gap-2 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex flex-col gap-2 text-[length:var(--text-body)] text-muted sm:flex-row sm:items-center sm:justify-between">
               <span v-if="preview === null">Snapping to roads…</span>
               <span v-else-if="drawDistanceKm !== null && preview.points.length >= 2">
                 {{ drawDistanceKm }} km, {{ Math.round(preview.ascentM) }} m ascent,
@@ -589,7 +589,7 @@ function onSuggestSaved() {
 
         <template #suggest>
           <div class="flex flex-col gap-4 pt-4">
-            <p class="text-sm text-muted">
+            <p class="text-[length:var(--text-body)] text-muted">
               Click the map to place a starting point, pick a rough distance, and generate a few
               loop options to choose from.
             </p>
@@ -633,7 +633,7 @@ function onSuggestSaved() {
                 </UButton>
               </div>
             </div>
-            <p v-if="!start" class="text-sm text-muted">Place a starting point on the map first.</p>
+            <p v-if="!start" class="text-[length:var(--text-body)] text-muted">Place a starting point on the map first.</p>
 
             <!-- The server already returns candidates ordered best-fitting
                  first (selectSuggestCandidates ranks the whole pool before
@@ -645,13 +645,13 @@ function onSuggestSaved() {
                 :key="index"
                 class="flex flex-col gap-2"
               >
-                <span class="text-xs font-medium text-highlighted">
+                <span class="text-[length:var(--text-label)] font-medium text-highlighted">
                   {{ index === 0 ? 'Best match' : `#${index + 1} match` }}
                 </span>
                 <RouteCandidatePreview :points="candidate.points" />
                 <ElevationProfile v-if="candidate.elevationProfile.length" :points="candidate.elevationProfile" />
                 <SurfaceBreakdown v-if="candidate.surface.length" :surface="candidate.surface" compact />
-                <div class="flex flex-col gap-2 text-sm text-muted">
+                <div class="flex flex-col gap-2 text-[length:var(--text-body)] text-muted">
                   <span>
                     {{ (candidate.distanceM / 1000).toFixed(1) }} km,
                     {{ Math.round(candidate.ascentM) }} m ascent

@@ -32,10 +32,10 @@ const title = computed(() => `${kind.value.title} ${when.value}`)
 <template>
   <UAlert :color="kind.color" variant="subtle" :icon="kind.icon" :title="title">
     <template #description>
-      <ul class="flex flex-col gap-0.5 text-sm">
+      <ul class="flex flex-col gap-0.5 text-[length:var(--text-body)]">
         <li v-for="reason in suggestion.reasons" :key="reason">{{ reason }}</li>
       </ul>
-      <p v-if="suggestion.canSwitch" class="mt-1 text-sm">Ride indoors instead?</p>
+      <p v-if="suggestion.canSwitch" class="mt-1 text-[length:var(--text-body)]">Ride indoors instead?</p>
     </template>
     <template #actions>
       <UButton

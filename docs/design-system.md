@@ -190,9 +190,12 @@ packages cover every weight used in one file each.
 
 **Type scale**: `--text-label` (12px), `--text-body` (14px), `--text-lead`
 (16px), `--text-title` (24px) and `--text-hero` (32px) give the utilities
-`text-label`, `text-body`, `text-lead`, `text-title` and `text-hero`. 13px
-and 20px are reached through `text-[13px]` and `text-xl`, so they have no
-token. `--text-display` (48px) is the landing headline only, used from `sm`
+`text-label`, `text-body`, `text-lead`, `text-title` and `text-hero`. There is
+no 13px or 20px role; pick the nearest token. **Raw Tailwind size classes
+(`text-xs`, `text-sm`, `text-base` through `text-6xl`, with or without a
+variant such as `sm:`) are banned in `.vue` files**: write
+`text-[length:var(--text-body)]`, and the guard test fails on the raw form.
+`--text-display` (48px) is the landing headline only, used from `sm`
 up as `sm:text-[length:var(--text-display)]`.
 
 Card headings use `--text-title` for a card's own header and `--text-lead`
@@ -204,7 +207,12 @@ for a heading nested in a card body; a figure in a definition list is
 Light: a teal-tinted near-white ground with white cards. Dark: the ground is
 `#0b1211` (`--ui-bg`), cards sit one step lighter (`--ui-bg-elevated` for
 `UCard`, `--app-card-bg` for `.app-card`) and carry no shadow, only the
-border. `--ui-bg-muted` stays between the two.
+border (`--ui-border`, neutral-700 in dark, so a card has a visible edge).
+`--ui-bg-muted` stays between the two.
+
+Grey text is set for contrast, not left at Nuxt UI's defaults, which fail WCAG AA
+on this palette. `text-muted` is neutral-600 in light; `text-dimmed` is `#5f746c` in
+light and `#7a8e86` in dark. All clear 4.5:1 on both the ground and a card.
 
 ### Shape
 
@@ -234,7 +242,9 @@ Pick in this order:
 1. **`AppPage`** (`components/ui/AppPage.vue`) — the frame of every top-level
    page: `title`, optional `subtitle`, an `actions` slot for the page's buttons
    and the default slot for content, at full width of the shell's `max-w-6xl` column. The shell supplies the
-   side padding, so a page does not wrap itself in `UContainer`.
+   side padding, so a page does not wrap itself in `UContainer`. The title is the
+   page's h1: display face, `--text-hero` from `sm` up (`--text-title` on a phone),
+   so it always outranks the section h2s at `--text-title`.
 2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
    `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
    `behind`). Tone carries meaning, not decoration: `good` is the primary accent,
@@ -304,7 +314,7 @@ still follows its own permission or data gate.
   a horizontally scrolling row on a phone. The section reached by click or hash gets
   `aria-current="location"`. Links are `#id` anchors; `/settings#basemap` scrolls once the
   panels above it have loaded, the way `/fitness#profile` does.
-- **Sections** are `<section id>` with a `text-xl` display heading and one line of
+- **Sections** are `<section id>` with a `text-[length:var(--text-title)]` display heading and one line of
   description; the cards inside use `h3`. A section whose cards are all gated out shows
   a one-line "nothing to set here" instead of a blank gap.
 - **Notifications** holds what Domestique sends a rider: the weather card and the
@@ -431,8 +441,10 @@ layouts cannot disagree and the lists are testable without a DOM.
   without raising it as a deliberate decision first.
 - Compose from `AppPage`, `StatTile`, `DetailsToggle`, `SuggestionRow`, `SegmentedControl`, `EmptyState` and `SkeletonCard` before inventing markup.
 - Empty list: `EmptyState`. Loading: `SkeletonCard`. Failed load: an error `UAlert` with Retry.
-- The guard test is the enforcement for hex colours, raw palette classes, `font-mono`,
-  `uppercase`, undocumented tokens and page-level spinners. Run `npm test` in `apps/web`.
+- Sizes come from the type tokens (`text-[length:var(--text-body)]`), never `text-sm` and
+  its kin; the guard test fails on a raw size class, variants included.
+- The guard test is the enforcement for hex colours, raw palette classes, raw font-size
+  classes, `font-mono`, `uppercase`, undocumented tokens and page-level spinners. Run `npm test` in `apps/web`.
 - Check both light and dark mode by hand. There's no automated visual test
   (see below), so this is the only check that happens.
 

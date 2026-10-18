@@ -93,12 +93,12 @@ const presentCategories = computed(() => {
         :title="`${s.type}: ${s.percent}%`"
       />
     </div>
-    <p v-if="!compact" class="text-xs text-muted">
+    <p v-if="!compact" class="text-[length:var(--text-label)] text-muted">
       <template v-for="(s, i) in segments" :key="i">
         {{ s.type }} {{ s.percent }}%<template v-if="i < segments.length - 1">, </template>
       </template>
     </p>
-    <div v-else class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+    <div v-else class="flex flex-wrap gap-x-3 gap-y-1 text-[length:var(--text-label)] text-muted">
       <span v-for="c in presentCategories" :key="c.label" class="flex items-center gap-1">
         <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: c.color }" />
         {{ c.label }}

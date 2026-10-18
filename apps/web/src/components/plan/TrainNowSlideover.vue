@@ -176,7 +176,7 @@ function tssLabel(s: TrainNowSuggestion): string {
           <UButton type="submit" color="neutral" variant="soft" :disabled="otherMinutes === null">Show</UButton>
         </form>
 
-        <p class="text-xs text-muted">Nothing is applied until you choose.</p>
+        <p class="text-[length:var(--text-label)] text-muted">Nothing is applied until you choose.</p>
 
         <div v-if="loading" class="flex flex-col gap-3" aria-busy="true">
           <USkeleton v-for="i in 3" :key="i" class="h-28 w-full" />
@@ -187,17 +187,17 @@ function tssLabel(s: TrainNowSuggestion): string {
         <UAlert v-else-if="result?.notice" color="info" variant="subtle" icon="i-lucide-calendar-off" :title="result.notice" />
 
         <template v-else-if="result">
-          <p class="text-xs text-muted">{{ applyNote }}</p>
+          <p class="text-[length:var(--text-label)] text-muted">{{ applyNote }}</p>
           <UCard v-for="s in result.suggestions" :key="s.kind" variant="outline">
             <div class="flex flex-col gap-2">
               <p class="text-[length:var(--text-label)] text-muted">{{ KIND_LABEL[s.kind] }}</p>
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <h3 class="text-base font-semibold text-highlighted">{{ s.name }}</h3>
+                <h3 class="text-[length:var(--text-lead)] font-semibold text-highlighted">{{ s.name }}</h3>
                 <DifficultyChip :difficulty="s.difficulty" />
               </div>
-              <p class="tabular-nums text-sm text-muted">{{ formatDuration(s.minutes * 60) }} · {{ tssLabel(s) }}</p>
-              <p class="text-sm text-toned">{{ s.why }}</p>
-              <p v-if="s.warning" class="flex items-start gap-1 text-xs text-warning">
+              <p class="tabular-nums text-[length:var(--text-body)] text-muted">{{ formatDuration(s.minutes * 60) }} · {{ tssLabel(s) }}</p>
+              <p class="text-[length:var(--text-body)] text-toned">{{ s.why }}</p>
+              <p v-if="s.warning" class="flex items-start gap-1 text-[length:var(--text-label)] text-warning">
                 <UIcon name="i-lucide-triangle-alert" class="mt-0.5 shrink-0" />
                 <span>{{ s.warning }}</span>
               </p>
@@ -217,7 +217,7 @@ function tssLabel(s: TrainNowSuggestion): string {
           </UCard>
         </template>
 
-        <p v-else class="text-sm text-muted">Pick a time to see what fits.</p>
+        <p v-else class="text-[length:var(--text-body)] text-muted">Pick a time to see what fits.</p>
       </div>
     </template>
   </USlideover>

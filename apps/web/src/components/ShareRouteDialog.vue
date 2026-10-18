@@ -126,17 +126,17 @@ const sortedShares = computed(() =>
   <UModal v-model:open="open" :title="`Share “${route.name}”`" :ui="{ content: 'sm:max-w-lg' }">
     <template #body>
       <div class="flex flex-col gap-4">
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           Anyone with the link can view and download this one route once they sign in — nothing
           else in your library. Revoke it any time.
         </p>
 
         <div v-if="justCreated" class="flex flex-col gap-2 rounded-lg bg-elevated/60 p-3">
-          <p class="text-xs font-medium text-dimmed">
+          <p class="text-[length:var(--text-label)] font-medium text-dimmed">
             Copy this now — you won't be able to see it again, but you can revoke it below.
           </p>
           <div class="flex gap-2">
-            <UInput :model-value="justCreated.url" readonly class="w-full tabular-nums text-xs" />
+            <UInput :model-value="justCreated.url" readonly class="w-full tabular-nums text-[length:var(--text-label)]" />
             <UButton
               :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
               :color="copied ? 'success' : 'neutral'"
@@ -156,7 +156,7 @@ const sortedShares = computed(() =>
         </form>
 
         <div v-if="sortedShares.length" class="flex flex-col gap-2">
-          <p class="text-xs font-medium text-dimmed">Existing links</p>
+          <p class="text-[length:var(--text-label)] font-medium text-dimmed">Existing links</p>
           <div class="flex flex-col divide-y divide-default">
             <div
               v-for="share in sortedShares"
@@ -166,7 +166,7 @@ const sortedShares = computed(() =>
               <UBadge :color="statusFor(share).color" variant="subtle" size="sm">
                 {{ statusFor(share).label }}
               </UBadge>
-              <div class="min-w-0 flex-1 text-xs text-dimmed">
+              <div class="min-w-0 flex-1 text-[length:var(--text-label)] text-dimmed">
                 <p>
                   Created {{ new Date(share.createdAt).toLocaleDateString() }} · expires
                   {{ new Date(share.expiresAt).toLocaleDateString() }}
@@ -188,7 +188,7 @@ const sortedShares = computed(() =>
             </div>
           </div>
         </div>
-        <p v-else-if="!loadingShares" class="text-xs text-dimmed">No links created yet.</p>
+        <p v-else-if="!loadingShares" class="text-[length:var(--text-label)] text-dimmed">No links created yet.</p>
       </div>
     </template>
     <template #footer>

@@ -494,7 +494,7 @@ const tooltipY = computed(() => (scrub.value ? Math.max(scrub.value.y - 12, 11) 
       </g>
     </svg>
 
-    <div class="flex justify-between text-xs text-muted">
+    <div class="flex justify-between text-[length:var(--text-label)] text-muted">
       <span>0 km</span>
       <span>{{ chart.totalDistanceKm }} km</span>
     </div>

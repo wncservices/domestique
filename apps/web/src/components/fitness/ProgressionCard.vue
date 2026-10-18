@@ -132,11 +132,11 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
             <div class="flex items-start justify-between gap-2">
               <div class="flex items-center gap-2">
                 <span class="size-2 rounded-full" :style="{ background: accent(s.zone) }" aria-hidden="true" />
-                <span class="text-sm font-medium text-highlighted">{{ zoneLabel(s.zone) }}</span>
+                <span class="text-[length:var(--text-body)] font-medium text-highlighted">{{ zoneLabel(s.zone) }}</span>
               </div>
-              <span class="tabular-nums text-2xl leading-none text-highlighted">{{ formatLevel(s.current) }}</span>
+              <span class="tabular-nums text-[length:var(--text-title)] leading-none text-highlighted">{{ formatLevel(s.current) }}</span>
             </div>
-            <p class="flex items-center gap-1 text-xs" :class="deltaMeta(s.current - (s.start ?? s.current)).class">
+            <p class="flex items-center gap-1 text-[length:var(--text-label)]" :class="deltaMeta(s.current - (s.start ?? s.current)).class">
               <UIcon :name="deltaMeta(s.current - (s.start ?? s.current)).icon" class="size-3.5 shrink-0" />
               <span class="tabular-nums">{{ formatDelta(s.current - (s.start ?? s.current)) }}</span>
               <span class="text-muted">since {{ windowStart }}</span>
@@ -146,33 +146,33 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
           </div>
         </div>
       </div>
-      <p class="text-xs text-dimmed">Levels run from 1 to 10. A ride on target moves its zone up, a struggle moves it down.</p>
+      <p class="text-[length:var(--text-label)] text-dimmed">Levels run from 1 to 10. A ride on target moves its zone up, a struggle moves it down.</p>
     </div>
 
     <!-- Changes: the table view of the same moves -->
     <div v-else>
-      <p v-if="changes.length === 0" class="py-6 text-center text-sm text-muted">No level changes since {{ windowStart }}.</p>
+      <p v-if="changes.length === 0" class="py-6 text-center text-[length:var(--text-body)] text-muted">No level changes since {{ windowStart }}.</p>
       <ul v-else class="divide-y divide-default">
         <li v-for="c in shownChanges" :key="`${c.key}-${c.at}`" class="flex flex-col gap-0.5 py-2">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span class="w-14 shrink-0 tabular-nums text-xs text-muted">{{ dateLabel(c.at) }}</span>
+            <span class="w-14 shrink-0 tabular-nums text-[length:var(--text-label)] text-muted">{{ dateLabel(c.at) }}</span>
             <span class="size-2 rounded-full" :style="{ background: accent(c.zone) }" aria-hidden="true" />
-            <span class="text-sm font-medium text-highlighted">
+            <span class="text-[length:var(--text-body)] font-medium text-highlighted">
               {{ zoneLabel(c.zone) }}<template v-if="sportCount > 1"> · {{ SPORT_LABEL[c.sport as Sport] }}</template>
             </span>
-            <span class="tabular-nums text-sm text-default">
+            <span class="tabular-nums text-[length:var(--text-body)] text-default">
               <template v-if="c.from !== undefined">{{ formatLevel(c.from) }} → </template>{{ formatLevel(c.to) }}
             </span>
             <span
               v-if="c.from !== undefined"
-              class="flex items-center gap-0.5 tabular-nums text-xs"
+              class="flex items-center gap-0.5 tabular-nums text-[length:var(--text-label)]"
               :class="deltaMeta(c.to - c.from).class"
             >
               <UIcon :name="deltaMeta(c.to - c.from).icon" class="size-3.5" />{{ formatDelta(c.to - c.from) }}
             </span>
-            <span v-else class="text-xs text-muted">starting level</span>
+            <span v-else class="text-[length:var(--text-label)] text-muted">starting level</span>
           </div>
-          <p v-if="c.reason" class="pl-16 text-xs text-muted">{{ c.reason }}</p>
+          <p v-if="c.reason" class="pl-16 text-[length:var(--text-label)] text-muted">{{ c.reason }}</p>
         </li>
       </ul>
       <UButton

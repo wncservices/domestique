@@ -99,11 +99,11 @@ onMounted(load)
         <UIcon name="i-lucide-calendar-days" />
         Calendar link
       </h3>
-      <p class="text-sm text-muted">Your planned sessions in the calendar you already use. Yours alone.</p>
+      <p class="text-[length:var(--text-body)] text-muted">Your planned sessions in the calendar you already use. Yours alone.</p>
     </template>
 
     <div class="flex flex-col gap-4">
-      <p class="text-sm text-muted">
+      <p class="text-[length:var(--text-body)] text-muted">
         Subscribe to this link in Google Calendar, Apple Calendar or Outlook and each planned session shows up on its
         day. It carries session names, durations and targets only: no health data, no routes. Google can take up to a
         day to show changes.
@@ -142,7 +142,7 @@ onMounted(load)
       </div>
 
       <div v-else class="flex flex-wrap items-center justify-between gap-2 border-t border-default pt-3">
-        <p class="text-sm text-muted">{{ lastFetched }}</p>
+        <p class="text-[length:var(--text-body)] text-muted">{{ lastFetched }}</p>
         <div class="flex flex-wrap gap-2">
           <UButton color="neutral" variant="soft" icon="i-lucide-refresh-cw" :disabled="busy" @click="confirmingRegenerate = true">
             Regenerate
@@ -156,7 +156,7 @@ onMounted(load)
 
     <UModal v-model:open="confirmingRegenerate" title="Make a new calendar link?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           The current link stops working at once. Your calendar app will need the new one.
         </p>
       </template>
@@ -170,7 +170,7 @@ onMounted(load)
 
     <UModal v-model:open="confirmingRevoke" title="Revoke the calendar link?">
       <template #body>
-        <p class="text-sm text-toned">
+        <p class="text-[length:var(--text-body)] text-toned">
           The link stops working at once and your calendar app will stop updating. You can make a new one any time.
         </p>
       </template>

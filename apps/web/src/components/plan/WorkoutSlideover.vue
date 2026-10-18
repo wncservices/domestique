@@ -58,10 +58,10 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
                placeholder; a duration/step-count line under that would read
                as "— · 0 steps", so it only appears once there's something to
                summarize. -->
-          <p v-if="totalSeconds > 0" class="text-xs tabular-nums text-muted">
+          <p v-if="totalSeconds > 0" class="text-[length:var(--text-label)] tabular-nums text-muted">
             {{ formatDuration(totalSeconds) }} · {{ form.steps.length }} step{{ form.steps.length === 1 ? '' : 's' }}
           </p>
-          <p v-else-if="form.steps.length > 0" class="text-xs tabular-nums text-muted">
+          <p v-else-if="form.steps.length > 0" class="text-[length:var(--text-label)] tabular-nums text-muted">
             {{ form.steps.length }} step{{ form.steps.length === 1 ? '' : 's' }}
           </p>
         </div>
@@ -85,7 +85,7 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
 
         <div v-if="editing && (route || canRoute)" class="flex flex-wrap items-center gap-2 rounded-lg border border-default p-3">
           <UIcon name="i-lucide-route" class="size-4 text-primary" />
-          <span class="text-sm text-highlighted">{{ route ? route.name : 'No route yet' }}</span>
+          <span class="text-[length:var(--text-body)] text-highlighted">{{ route ? route.name : 'No route yet' }}</span>
           <UButton v-if="canRoute" type="button" color="neutral" variant="outline" size="xs" @click="emit('route')">
             {{ route ? 'Change route' : 'Route for this ride' }}
           </UButton>

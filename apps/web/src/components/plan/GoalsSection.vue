@@ -21,7 +21,7 @@ const emit = defineEmits<{
       <h2 class="text-[length:var(--text-title)] font-semibold text-highlighted">Goals</h2>
     </template>
 
-    <div v-if="goals.length === 0" class="text-sm text-muted">No goals yet.</div>
+    <div v-if="goals.length === 0" class="text-[length:var(--text-body)] text-muted">No goals yet.</div>
 
     <div v-else class="flex flex-col divide-y divide-default">
       <div v-for="g in goals" :key="g.id" class="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
@@ -32,7 +32,7 @@ const emit = defineEmits<{
             <UBadge v-if="g.id === focusGoalId" color="primary" variant="subtle" size="sm">Focus</UBadge>
             <UButton v-else color="neutral" variant="ghost" size="xs" @click="emit('focusGoal', g.id)">Set as focus</UButton>
           </div>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             {{ g.sport }}
             <template v-if="g.eventDate">· {{ g.eventDate }}</template>
             <template v-else>· rolling</template>

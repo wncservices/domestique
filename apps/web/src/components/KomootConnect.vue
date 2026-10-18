@@ -61,10 +61,10 @@ async function disconnect() {
       <div class="flex items-center gap-3">
         <UIcon name="i-lucide-circle-check" class="size-5 text-primary" />
         <div>
-          <p class="text-sm text-highlighted">
+          <p class="text-[length:var(--text-body)] text-highlighted">
             {{ props.connection.displayName || props.connection.email }}
           </p>
-          <p class="text-xs text-muted">{{ props.connection.email }}</p>
+          <p class="text-[length:var(--text-label)] text-muted">{{ props.connection.email }}</p>
         </div>
       </div>
       <UButton
@@ -81,7 +81,7 @@ async function disconnect() {
     <!-- Connected, but by the deployment rather than by this rider. -->
     <div
       v-else-if="props.connection.connected"
-      class="flex items-center gap-3 text-sm text-muted"
+      class="flex items-center gap-3 text-[length:var(--text-body)] text-muted"
     >
       <UIcon name="i-lucide-server" class="size-5" />
       <p>
@@ -128,7 +128,7 @@ async function disconnect() {
 
       <!-- One line, because it answers a question the rider actually has.
            How the session is kept afterwards is not their problem. -->
-      <p class="text-xs text-dimmed sm:col-span-3">Your password is not stored.</p>
+      <p class="text-[length:var(--text-label)] text-dimmed sm:col-span-3">Your password is not stored.</p>
     </form>
   </div>
 </template>

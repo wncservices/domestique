@@ -86,11 +86,11 @@ async function save() {
 
 <template>
   <section class="app-card flex flex-col gap-3 p-4">
-    <h3 class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+    <h3 class="flex items-center gap-2 text-[length:var(--text-body)] font-semibold text-highlighted">
       <UIcon name="i-lucide-users-round" class="size-4 text-primary" />
       Open to riding together
     </h3>
-    <p class="text-xs text-muted">
+    <p class="text-[length:var(--text-label)] text-muted">
       Pick the days you could ride with this crew. When you and a crew mate both have a long ride in the same week, you
       are offered one shared day and route. Weekends are tried first. Pick none to opt out.
     </p>
@@ -110,7 +110,7 @@ async function save() {
       <UButton size="sm" icon="i-lucide-save" :loading="saving" :disabled="!dirty" class="ml-auto" @click="save">Save</UButton>
     </div>
 
-    <ul v-if="others.length > 0" class="flex flex-col gap-0.5 text-xs text-muted">
+    <ul v-if="others.length > 0" class="flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
       <li v-for="t in others" :key="t.rider">
         <span class="text-default">{{ t.rider }}</span> is open on {{ label(t.days) }}
       </li>

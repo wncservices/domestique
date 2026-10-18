@@ -126,7 +126,7 @@ async function trigger() {
     />
 
     <!-- Not this viewer's job. Say what is missing and who can fix it. -->
-    <div v-if="!props.basemap.canManage" class="flex items-start gap-3 text-sm">
+    <div v-if="!props.basemap.canManage" class="flex items-start gap-3 text-[length:var(--text-body)]">
       <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0 text-dimmed" />
       <p class="text-muted">
         {{ props.basemap.unavailable || 'An administrator manages the map basemap.' }}
@@ -154,8 +154,8 @@ async function trigger() {
             ]"
           />
           <div>
-            <p class="text-sm font-medium text-highlighted">Map basemap</p>
-            <p class="text-sm text-muted">
+            <p class="text-[length:var(--text-body)] font-medium text-highlighted">Map basemap</p>
+            <p class="text-[length:var(--text-body)] text-muted">
               <template v-if="running">
                 Update in progress, requested by {{ props.basemap.requestedBy }}
                 <template v-if="props.basemap.progress != null">
@@ -201,7 +201,7 @@ async function trigger() {
       <UProgress v-if="running" :model-value="props.basemap.progress ?? null" class="mt-3" size="sm" />
 
       <form v-if="open" class="mt-4 grid gap-3" @submit.prevent="trigger">
-        <p class="text-xs text-dimmed">
+        <p class="text-[length:var(--text-label)] text-dimmed">
           Pick a region covering wherever this crew's routes actually are. A route outside it
           still renders, just without basemap tiles behind it.
         </p>
@@ -213,7 +213,7 @@ async function trigger() {
             @update:model-value="applyRegion"
           />
         </UFormField>
-        <p class="text-xs text-dimmed">
+        <p class="text-[length:var(--text-label)] text-dimmed">
           West, south, east, north in decimal degrees, filled in by the region above — adjust
           them by hand if it needs to be narrower or wider.
         </p>
@@ -238,7 +238,7 @@ async function trigger() {
           <UButton type="submit" icon="i-lucide-download" :loading="busy">
             Start update
           </UButton>
-          <p class="text-xs text-dimmed">Runs in the background — this page reports progress.</p>
+          <p class="text-[length:var(--text-label)] text-dimmed">Runs in the background — this page reports progress.</p>
         </div>
       </form>
     </template>

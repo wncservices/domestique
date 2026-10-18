@@ -197,7 +197,7 @@ onMounted(async () => {
             <UIcon name="i-lucide-mountain-snow" />
             Import from Komoot
           </h2>
-          <p class="text-sm text-muted">
+          <p class="text-[length:var(--text-body)] text-muted">
             <template v-if="!connection.connected">Sign in to import your routes</template>
             <template v-else-if="loading">Loading tours…</template>
             <template v-else-if="!tours.length">No planned routes in that account.</template>
@@ -242,20 +242,22 @@ onMounted(async () => {
       color="error"
       variant="subtle"
       icon="i-lucide-triangle-alert"
-      :description="error"
+      :text="error"
       class="mb-4"
     />
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-if="!connection.connected"
       icon="i-lucide-log-in"
       title="Not signed in to Komoot"
-      description="Connect your account to import the routes you have planned."
+      text="Connect your account to import the routes you have planned."
     >
       <template #actions>
         <UButton to="/settings" icon="i-lucide-settings" color="neutral">Go to Settings</UButton>
       </template>
-    </UEmpty>
+    </EmptyState>
 
     <div v-if="ready && importedCount" class="mb-3 flex justify-end">
       <USwitch v-model="showImported" :label="`Show ${importedCount} already imported`" />
@@ -275,7 +277,7 @@ onMounted(async () => {
         :data="pagedTours"
         :columns="columns"
         :loading="loading"
-        :ui="{ td: 'text-sm' }"
+        :ui="{ td: 'text-[length:var(--text-body)]' }"
       />
       <UPagination
         v-if="visibleTours.length > toursPageSize"
@@ -285,18 +287,22 @@ onMounted(async () => {
         class="mt-4 justify-center"
       />
     </template>
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else-if="ready && tours.length"
       icon="i-lucide-check"
       title="Everything is imported"
-      :description="`All ${tours.length} tours in that account are already in the library.`"
+      :text="`All ${tours.length} tours in that account are already in the library.`"
     />
 
-    <UEmpty
+    <EmptyState
+      bare
+      :heading-level="3"
       v-else-if="ready"
       icon="i-lucide-mountain-snow"
       title="Nothing to import"
-      description="Plan a route in Komoot and refresh."
+      text="Plan a route in Komoot and refresh."
     />
   </UCard>
 </template>
