@@ -581,3 +581,28 @@ func TestPreviewReadsTodayInTheClocksOwnZone(t *testing.T) {
 		t.Fatalf("Tuesday's session is still today in UTC but was not handled: %v", ids(inUTC))
 	}
 }
+
+// A crew ride inside an event is the crew's day, not a session the rider
+// built, and the preview says so. Its removal is still offered, unticked
+// (TestACrewRideOnABlackoutDayIsNeverDeletedWithoutTheRiderTickingIt).
+func TestACrewRideIsLeftAloneAsTheCrews(t *testing.T) {
+	crew := built("crew", "2026-10-08", 120)
+	crew.CrewRideID = "ride-1"
+	d := Preview(Input{
+		Events:   []Event{travel("2026-10-08", "2026-10-08")},
+		Workouts: []workout.Workout{crew},
+		Profile:  profile(), Now: wed,
+	})
+	if c := mustFind(t, d, "remove:crew"); c.Default {
+		t.Error("the crew ride's removal is ticked by default")
+	}
+	var reason string
+	for _, n := range d.LeftAlone {
+		if n.WorkoutID == "crew" {
+			reason = n.Reason
+		}
+	}
+	if reason != "It is your crew's ride, so it was left alone." {
+		t.Errorf("reason = %q", reason)
+	}
+}

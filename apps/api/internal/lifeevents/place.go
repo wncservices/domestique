@@ -297,6 +297,10 @@ func (p *planner) scopeByClass() map[class][]scoped {
 				out[c] = append(out[c], scoped{w, ev})
 			case ineligibleRidden:
 				p.leave(w, "you have already ridden it")
+			case ineligibleCrew:
+				// The crew's day, not one the rider built: say so. The removal
+				// stays on offer, unticked, as for any session the rider owns.
+				p.leaveWithRemove(w, ev, "it is your crew's ride")
 			case ineligibleBuilt:
 				p.leaveWithRemove(w, ev, "you built this session yourself")
 			case ineligibleAdjusted:
@@ -314,6 +318,7 @@ type eligibility int
 const (
 	eligible eligibility = iota
 	ineligibleRidden
+	ineligibleCrew
 	ineligibleBuilt
 	ineligibleAdjusted
 	ineligibleSwapped
@@ -326,6 +331,8 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 	switch {
 	case p.in.Ridden[w.ID]:
 		return ineligibleRidden
+	case w.CrewRideID != "":
+		return ineligibleCrew
 	case w.TestProtocol != "":
 		return eligible
 	case scheduler.IsPlanSession(w):
