@@ -191,3 +191,30 @@ func TestAPeersJoinPreviewShowsNothingOfAnotherRider(t *testing.T) {
 	}
 	assertOnlyKeys(t, "dry-run going", body, "going", "diff", "applied", "workout")
 }
+
+// Ticking the removal of a crew ride in a life event's preview is the rider
+// leaving that ride, so they come off the crew's going list too; otherwise the
+// crew keeps counting someone whose session is gone.
+func TestATickedLifeEventRemovalOfACrewRideLeavesTheRide(t *testing.T) {
+	h := newCrewPlanHarness(t)
+	jw := h.joinWeek()
+	h.mustGo("wilant", jw.ride)
+	row, _ := h.fixedRow("wilant", jw.ride)
+
+	body := `{"kind":"travel","option":"no_bike","startDate":"` + cpSaturday + `","endDate":"` + cpSaturday +
+		`","include":["remove:` + row.ID + `"]}`
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/life-events", body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		t.Fatalf("life event: status = %d", resp.StatusCode)
+	}
+	if _, ok := h.fixedRow("wilant", jw.ride); ok {
+		t.Fatal("the included removal did not delete the crew ride")
+	}
+	going, err := h.sched.IsGoing(context.Background(), jw.ride, "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if going {
+		t.Error("the rider's session is gone but the crew still counts them as going")
+	}
+}
