@@ -56,8 +56,9 @@ func TestCrewShortenRequestsCarryFlags(t *testing.T) {
 	}
 }
 
-// An adapted session is never eased again, so there are no stored rules to
-// extend; what an ease must carry over is the rest of the stored flags.
+// The old version of this test stored rules its text did not carry, which
+// parity makes unreachable; that is why an ease no longer extends rules. An
+// adapted session is never eased again, so there are none to extend; what an ease must carry over is the rest of the stored flags.
 func TestCrewEaseKeepsTheStoredMove(t *testing.T) {
 	w := hard("fri-hard", fri)
 	w.Flags = workout.Flags{Origin: workout.OriginPlan, MovedFrom: "2026-10-01", MovedBy: workout.MovedByRider}

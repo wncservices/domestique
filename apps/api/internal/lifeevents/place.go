@@ -342,7 +342,7 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 		// Only a life event's own ramp touched it, and the rider has since
 		// made another event over its day: it is still the plan's session.
 		return eligible
-	case w.Flags.Origin != workout.OriginPlan:
+	case w.GoalID == "" || w.Flags.Origin != workout.OriginPlan:
 		return ineligibleBuilt
 	case w.Flags.Swapped:
 		return ineligibleSwapped
@@ -354,7 +354,7 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 // lifeRamped is a plan-made session whose only automatic change is a life
 // event's return ramp (not a readiness easing, not a swap, not a move).
 func lifeRamped(w workout.Workout) bool {
-	return w.Flags.Origin == workout.OriginPlan && !w.Flags.Swapped &&
+	return w.GoalID != "" && w.Flags.Origin == workout.OriginPlan && !w.Flags.Swapped &&
 		len(w.Flags.AdaptedRules) == 1 && workout.IsLifeRule(w.Flags.AdaptedRules[0])
 }
 
