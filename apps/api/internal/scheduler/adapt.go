@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"math"
-	"regexp"
 	"strings"
 	"time"
 
@@ -15,12 +14,12 @@ import (
 // scheduler made from one a rider built by hand. Automatic adjustments
 // (internal/adapter) only ever touch the former: a rider's own session is
 // theirs, however much the plan around it moves.
-const GeneratedDescription = "Generated from the periodization plan."
+const GeneratedDescription = workout.GeneratedDescription
 
 // AdjustedMarker prefixes the note appended to a generated workout's
 // description when it has been changed automatically. Its presence is also
 // what stops the same workout being adjusted twice.
-const AdjustedMarker = "Adjusted automatically:"
+const AdjustedMarker = workout.AdjustedMarker
 
 // SwappedMarker prefixes the note appended when the rider swapped a plan-made
 // session for an alternate ("I have N minutes" fits count too). Like
@@ -28,16 +27,16 @@ const AdjustedMarker = "Adjusted automatically:"
 // whole-season refresh and replan all leave it alone, because the rider
 // chose it on purpose. Unlike AdjustedMarker it does not stop a further
 // swap: each one is the rider acting.
-const SwappedMarker = "Swapped by you:"
+const SwappedMarker = workout.SwappedMarker
 
 // CrewKeptMarker is written into a session whose ease the rider unticked in a
 // crew-ride preview (internal/crewplan.KeptMarker is this same text).
-const CrewKeptMarker = "Kept as planned by you around your crew ride."
+const CrewKeptMarker = workout.CrewKeptMarker
 
 // LifeKeptMarker is written into a session whose ease or shortening the rider
 // unticked in a life-event preview (internal/lifeevents.KeptMarker is this same
 // text).
-const LifeKeptMarker = "Kept as planned by you through the return to training."
+const LifeKeptMarker = workout.LifeKeptMarker
 
 // RiderKept reports whether the rider explicitly chose to keep a session as
 // planned, in either feature that offers the choice. It is the one place the two
@@ -212,15 +211,9 @@ func NeedsEasingBeforeTest(w workout.Workout, workouts []workout.Workout) bool {
 	return false
 }
 
-var movedFromRE = regexp.MustCompile(`moved from (\d{4}-\d{2}-\d{2})`)
-
 // MovedFrom returns the date a generated workout was originally planned for,
 // when an automatic adjustment has since moved it. Scheduling reads this so
 // it does not see the vacated day as empty and make the missed session again.
 func MovedFrom(description string) (string, bool) {
-	m := movedFromRE.FindStringSubmatch(description)
-	if m == nil {
-		return "", false
-	}
-	return m[1], true
+	return workout.MovedFromDate(description)
 }
