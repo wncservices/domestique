@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -555,6 +556,7 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed in
 		return 0, 0
 	}
 
+	s.resetMetricsFailures()
 	seen := map[string]bool{}
 	var connected []string
 	for _, provider := range []string{garminProvider, wahooProvider} {
@@ -581,12 +583,39 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed in
 		result, err := s.syncRiderMetrics(ctx, rider, false)
 		if err != nil {
 			s.logger().Error("auto-sync metrics failed", "rider", rider, "err", err)
+			s.noteMetricsFailure(rider)
 			failed++
 			continue
 		}
 		for _, warning := range result.Warnings {
 			s.logger().Warn("auto-sync metrics warning", "rider", rider, "warning", warning)
+			// A provider's own failure leaves its rides unread; the other notes
+			// (analysis, estimates) do not.
+			if strings.HasPrefix(warning, "garmin:") || strings.HasPrefix(warning, "wahoo:") {
+				s.noteMetricsFailure(rider)
+			}
 		}
 	}
 	return len(connected), failed
+}
+
+func (s *Server) resetMetricsFailures() {
+	s.metricsFailedMu.Lock()
+	defer s.metricsFailedMu.Unlock()
+	s.metricsFailed = map[string]bool{}
+}
+
+func (s *Server) noteMetricsFailure(rider string) {
+	s.metricsFailedMu.Lock()
+	defer s.metricsFailedMu.Unlock()
+	if s.metricsFailed == nil {
+		s.metricsFailed = map[string]bool{}
+	}
+	s.metricsFailed[rider] = true
+}
+
+func (s *Server) metricsFailedRider(rider string) bool {
+	s.metricsFailedMu.Lock()
+	defer s.metricsFailedMu.Unlock()
+	return s.metricsFailed[rider]
 }

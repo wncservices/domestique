@@ -37,6 +37,10 @@ type RepayInput struct {
 	// (levelFor), with "<sport>:<zone>" tried first.
 	Levels   map[string]float64
 	Blackout map[string]bool
+	// UpgradedAlready is set when this week has had its one upgrade; the
+	// upgrade is once a week, not once a day, so it must outlive the session
+	// it landed on (readiness may ease or delete that).
+	UpgradedAlready bool
 }
 
 const minGain = 0.5
@@ -169,7 +173,7 @@ func PlanRepayment(in RepayInput) []Action {
 // zone, when the week is short of structured sessions, no hard session sits
 // the day before or after, and debt is still above UpgradeDebt.
 func planUpgrade(in RepayInput, debt float64, longestID string, touched map[string]bool) (Action, bool) {
-	if debt <= UpgradeDebt || in.Profile.FTPWatts <= 0 {
+	if in.UpgradedAlready || debt <= UpgradeDebt || in.Profile.FTPWatts <= 0 {
 		return Action{}, false
 	}
 	structured := 0
@@ -178,13 +182,17 @@ func planUpgrade(in RepayInput, debt float64, longestID string, touched map[stri
 		if workout.IsStructuredZone(w.Zone) {
 			structured++
 		}
-		if scheduler.IsHardSession(w) {
+		// A test day and a crew ride are as hard to sit next to as a hard session.
+		if scheduler.IsHardSession(w) || w.TestProtocol != "" || w.CrewRideID != "" {
 			hardDays[w.Date] = true
 		}
 	}
 	candidates := sortedRepayable(in, func(w workout.Workout) bool {
 		return w.Zone == workout.ZoneEndurance && w.ID != longestID && !touched[w.ID] &&
-			!scheduler.IsLongRideName(w.Name) && w.Sport == model.SportCycling
+			!scheduler.IsLongRideName(w.Name) && w.Sport == model.SportCycling &&
+			// An upgrade rewrites the description, which would erase the rider's
+			// own move note and break the flags/description parity.
+			w.Flags.MovedFrom == ""
 	})
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].Date != candidates[j].Date {

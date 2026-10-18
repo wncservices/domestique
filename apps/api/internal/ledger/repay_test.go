@@ -204,3 +204,55 @@ func TestRepayIndoorRideCappedByTrainerDoesNotLoop(t *testing.T) {
 		t.Fatalf("a trainer-capped ride gains nothing and must be skipped: %+v", got)
 	}
 }
+
+func TestRepayUpgradeIsSkippedWhenTheWeekAlreadyHadOne(t *testing.T) {
+	long := enduranceWorkout("long", "2026-10-18", 3*3600)
+	a := enduranceWorkout("a", "2026-10-15", 3600)
+	in := input(long, a)
+	in.Debt = 100
+	in.Profile.HoursPerAvailableDay = 0.5
+	if got := PlanRepayment(in); len(got) != 1 || got[0].Kind != "upgrade" {
+		t.Fatalf("setup: want an upgrade, got %+v", got)
+	}
+	in.UpgradedAlready = true
+	if got := PlanRepayment(in); len(got) != 0 {
+		t.Fatalf("the week's upgrade was already made: %+v", got)
+	}
+}
+
+// An upgrade rewrites the description, which would erase a rider's move note.
+func TestRepayNeverUpgradesARiderMovedSession(t *testing.T) {
+	long := enduranceWorkout("long", "2026-10-18", 3*3600)
+	a := enduranceWorkout("a", "2026-10-15", 3600)
+	a.Flags.MovedFrom, a.Flags.MovedBy = "2026-10-13", workout.MovedByRider
+	in := input(long, a)
+	in.Debt = 100
+	in.Profile.HoursPerAvailableDay = 0.5
+	if got := PlanRepayment(in); len(got) != 0 {
+		t.Fatalf("a moved session was upgraded: %+v", got)
+	}
+	// Lengthening keeps the description, so it stays allowed.
+	in.Profile.HoursPerAvailableDay = 0
+	in.Debt = 10
+	if got := PlanRepayment(in); len(got) == 0 || got[0].Kind != "lengthen" {
+		t.Fatalf("a moved session may still be lengthened: %+v", got)
+	}
+}
+
+func TestRepayUpgradeKeepsAwayFromTestAndCrewDays(t *testing.T) {
+	long := enduranceWorkout("long", "2026-10-18", 3*3600)
+	a := enduranceWorkout("a", "2026-10-15", 3600)
+	for name, mark := range map[string]func(*workout.Workout){
+		"test": func(w *workout.Workout) { w.TestProtocol = "ramp" },
+		"crew": func(w *workout.Workout) { w.CrewRideID = "c" },
+	} {
+		n := enduranceWorkout("n", "2026-10-14", 3600)
+		mark(&n)
+		in := input(long, a, n)
+		in.Debt = 100
+		in.Profile.HoursPerAvailableDay = 0.5
+		if got := PlanRepayment(in); len(got) != 0 {
+			t.Errorf("%s the day before: upgraded anyway %+v", name, got)
+		}
+	}
+}

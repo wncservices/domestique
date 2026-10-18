@@ -83,10 +83,15 @@ func EffectiveTarget(target float64, openDays, daysNow int) float64 {
 
 // Settle closes last week. Only the debt that week incurred itself (not what it
 // was carrying in) may roll, up to RollFraction of this week's target, and not
-// at all into a reduced week. Everything else is forgiven.
-func Settle(lastDebt, lastCarriedIn, thisTarget float64, thisReduced bool) (rolled, lastForgiven float64) {
+// at all into a reduced week. Everything else is forgiven. A reduced last week
+// (recovery or taper) forgives everything: its shortfall was the plan's easing,
+// not a debt to carry into a full week.
+func Settle(lastDebt, lastCarriedIn, thisTarget float64, thisReduced, lastReduced bool) (rolled, lastForgiven float64) {
 	if lastDebt <= 0 {
 		return 0, 0
+	}
+	if lastReduced {
+		return 0, lastDebt
 	}
 	own := lastDebt - lastCarriedIn
 	if own < 0 {

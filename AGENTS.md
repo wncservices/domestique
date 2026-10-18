@@ -554,13 +554,23 @@ Thursday) are not load lost. Each pass uses `ledger.EffectiveTarget` = target x 
 `target + carried in - ridden - still planned from today`, never negative; at 5 TSS or under
 nothing happens. Opening settles last week (`ledger.Settle`): its own debt, not what it carried,
 rolls into this week up to 10% of this week's target (nothing into a recovery or taper week) and
-the rest is forgiven, so debt never compounds. The current week's `forgivenTss` is therefore *last*
+the rest is forgiven, so debt never compounds; a recovery or taper *last* week forgives all of it
+(`Settle`'s `lastReduced`, from `load_ledger.reduced`). The current week's `forgivenTss` is therefore *last*
 week's. Repayment lengthens a later session (at most 30% and 45 minutes, keeping its name, so
 "Long ride, with climbing" survives) or, above 20 TSS of debt, upgrades an endurance one at most
-once (new name, and its description restarts from the generated one). Both are written as
-`load_repaid`, which is deliberately **not** an easing: `Flags.EasedBy` ignores it, so
-`scheduler.IsPlanSession` stays true and the session can still be refreshed or trimmed; only
-`ledger.Repayable` stops it being repaid a second time. There is no green-day push;
+once **a week**: `load_ledger.upgraded_at` records the day, so readiness easing or deleting the
+upgraded session never frees a second one. An upgrade gives a new name and restarts the description
+from the generated one, so it never touches a session with `Flags.MovedFrom` (it would erase the move
+note and break flags/description parity), nor one next to a hard, test or crew day. Both are written
+as `load_repaid`, which is deliberately **not** an easing: `Flags.EasedBy` ignores it, so
+`scheduler.IsPlanSession` stays true (a repaid session no longer has the exact generated
+description, so refresh and trim leave it alone, but readiness can still ease it); only
+`ledger.Repayable` stops it being repaid a second time. The description says "Load made up." with
+no figure (it reaches the calendar feed and the head unit); the Why popover keeps the number. A
+rider's pass is skipped, with a Warn counting riders, when this tick's metrics pass failed for
+them or their Garmin session has expired: rides the app has not seen must not read as missed. The
+illness return ramp (`lifeevents.NoTestDays`) is off-limits for repayment and does not count as an
+open day, so its easing is never debt. There is no green-day push;
 that moved to the readiness sub-project. Logs carry counts only, never a TSS beside a rider.
 
 ## Only today's session goes to the head unit

@@ -64,3 +64,10 @@ var LegacyFlagsAfter = legacyFlagsAfter
 func (s *Server) WeekDebtForTest(ctx context.Context, rider, weekStart string, row workout.LedgerWeek) (float64, error) {
 	return s.weekDebt(ctx, rider, weekStart, row)
 }
+
+// NoteMetricsFailureForTest marks a rider as one whose provider sync failed in
+// this tick's metrics pass.
+func (s *Server) NoteMetricsFailureForTest(rider string) { s.noteMetricsFailure(rider) }
+
+// MetricsFailedForTest reports whether the last metrics pass marked the rider.
+func (s *Server) MetricsFailedForTest(rider string) bool { return s.metricsFailedRider(rider) }
