@@ -120,6 +120,18 @@ func change(c Change, rule why.Rule, inputs any) Change {
 	return c
 }
 
+// readinessChange is change for a readiness verdict. The reasons name sleep,
+// HRV, heart rate, form and how the rider said they felt; they belong to the
+// Why record (shown to the rider alone), never to Change.Reason, which is
+// written into the workout description and so reaches the calendar feed a
+// third-party calendar server keeps and the head unit. what is the plain
+// wording that goes in the description, and carries no health text.
+func readinessChange(c Change, what, detailed string, rule why.Rule, inputs any) Change {
+	c.Reason = what
+	c.Why = why.NewRecord(rule, detailed, inputs)
+	return c
+}
+
 // AdaptSessions decides what to change this week. analyses is ride-analysis's
 // verdict on completed sessions, keyed by the planned workout id they
 // matched — set only for a ride that actually matched a planned workout,
@@ -240,16 +252,16 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 		// the structured-zone restriction caution's step-down does.
 		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, false, blackout); ok {
 			claimed[w.ID] = true
-			changes = append(changes, change(Change{
+			changes = append(changes, readinessChange(Change{
 				WorkoutID: w.ID, Downgrade: true,
-				Reason: "Swapped for an easy ride — " + reasons,
-			}, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
-		} else if w, ok := enduranceTarget(ordered, sessions, analyses, todayStr, claimed, blackout); ok {
+			}, "Swapped for an easy ride (readiness).", "Swapped for an easy ride — "+reasons, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
+		} else if w, ok := enduranceTarget(ordered, sessions, analyses, todayStr, claimed, blackout); ok && PlannedRideSeconds(w) > RecoveryRideSeconds {
+			// A ride already as short as a recovery ride is easier than the
+			// swap would be: Rest never lengthens a session.
 			claimed[w.ID] = true
-			changes = append(changes, change(Change{
+			changes = append(changes, readinessChange(Change{
 				WorkoutID: w.ID, RecoveryRide: true,
-				Reason: "Swapped for a recovery ride — " + reasons,
-			}, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
+			}, "Swapped for a recovery ride (readiness).", "Swapped for a recovery ride — "+reasons, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
 		}
 	case readiness.Caution:
 		// A step-down needs a rung on its own zone's ladder (workoutlib) —
@@ -258,18 +270,16 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 		// workout.IsStructuredZone.
 		if w, ok := readinessTarget(ordered, sessions, analyses, todayStr, claimed, true, blackout); ok {
 			claimed[w.ID] = true
-			changes = append(changes, change(Change{
+			changes = append(changes, readinessChange(Change{
 				WorkoutID: w.ID, StepDown: true, StepDownSourceID: readinessSourceID(today),
-				Reason: "Eased one level — " + reasons,
-			}, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
+			}, "Eased one level for readiness.", "Eased one level — "+reasons, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
 		} else if w, ok := enduranceTarget(ordered, sessions, analyses, todayStr, claimed, blackout); ok {
 			// A ride already at the floor has nothing left to give.
 			if secs := ShortenedSeconds(w); secs > 0 {
 				claimed[w.ID] = true
-				changes = append(changes, change(Change{
+				changes = append(changes, readinessChange(Change{
 					WorkoutID: w.ID, ShortenSeconds: secs,
-					Reason: "Shortened — " + reasons,
-				}, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
+				}, "Shortened for readiness.", "Shortened — "+reasons, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
 			}
 		}
 	}
@@ -311,6 +321,11 @@ func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSess
 	}
 	return workout.Workout{}, false
 }
+
+// RecoveryRideSeconds is the length of the recovery ride Rest swaps an
+// endurance ride for (api's recoveryRideHours). A ride this short or shorter is
+// left as it is.
+const RecoveryRideSeconds = 2700
 
 // MinShortenedSeconds is the floor a caution never shortens an endurance ride
 // below: 30 minutes is still a ride worth the kit.
@@ -359,6 +374,11 @@ func isEnduranceRide(w workout.Workout) bool {
 func enduranceTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool, blackout map[string]bool) (workout.Workout, bool) {
 	for _, w := range ordered {
 		if w.Date != todayStr || blackout[w.Date] || claimed[w.ID] || !scheduler.IsGenerated(w) || !isEnduranceRide(w) || done(w, sessions, analyses) {
+			continue
+		}
+		// A routed ride keeps the course it was made for: shortening or
+		// swapping it would leave a route that no longer fits the session.
+		if w.RouteSlug != "" {
 			continue
 		}
 		return w, true

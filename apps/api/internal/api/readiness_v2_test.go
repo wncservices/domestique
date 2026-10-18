@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -220,5 +221,131 @@ func TestShortenedSessionStaysIndoor(t *testing.T) {
 	}
 	if !strings.Contains(got.Description, scheduler.AdjustedMarker) {
 		t.Errorf("description = %q", got.Description)
+	}
+}
+
+// A rider who is told to rest is never given a longer ride: a 30-minute ride
+// is already easier than the 45-minute recovery ride that would replace it.
+func TestRestLeavesAShortEnduranceRideAlone(t *testing.T) {
+	h := newTomorrowHarness(t)
+	ctx := context.Background()
+	orig := h.enduranceOn(tmToday, "Endurance ride", longRideSteps(600)) // 30 minutes in all
+	if s := workout.PlannedSeconds(orig.Steps); s != 1800 {
+		t.Fatalf("setup: ride is %v s", s)
+	}
+	h.checkIn(1)
+	h.srv.AdaptWorkouts(ctx)
+	got, _ := h.store.GetWorkout(ctx, orig.ID)
+	if got.Name != orig.Name || workout.PlannedSeconds(got.Steps) != 1800 || markerCount(got) != 0 {
+		t.Errorf("a short ride was changed on a rest day: %q %v s %q", got.Name, workout.PlannedSeconds(got.Steps), got.Description)
+	}
+	if n := adjustmentRows(t, h.autoScheduleHarness); n != 0 {
+		t.Errorf("adjustment rows = %d, want 0", n)
+	}
+}
+
+// A routed ride keeps the course it was made for; endurance easing is
+// cycling-only and leaves it be, for caution and for rest alike.
+func TestReadinessLeavesARoutedEnduranceRideAlone(t *testing.T) {
+	for _, verdict := range []string{"rest", "caution"} {
+		t.Run(verdict, func(t *testing.T) {
+			h := newTomorrowHarness(t)
+			ctx := context.Background()
+			orig := h.enduranceOn(tmToday, "Long ride", longRideSteps(9600))
+			slug := "morning-loop"
+			if _, err := h.store.UpdateWorkout(ctx, orig.ID, workout.UpdateWorkoutRequest{RouteSlug: &slug}); err != nil {
+				t.Fatal(err)
+			}
+			if verdict == "rest" {
+				h.checkIn(1)
+			} else if err := h.store.SaveWellness(ctx, workout.DailyWellness{
+				Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52, ReadinessLevel: "LOW", ReadinessScore: 40,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if v := h.todayVerdict(); v != verdict {
+				t.Fatalf("setup: verdict = %q", v)
+			}
+			h.srv.AdaptWorkouts(ctx)
+			got, _ := h.store.GetWorkout(ctx, orig.ID)
+			if got.Name != "Long ride" || workout.PlannedSeconds(got.Steps) != workout.PlannedSeconds(orig.Steps) || markerCount(got) != 0 || got.RouteSlug != slug {
+				t.Errorf("a routed ride was changed: %q %v s %q", got.Name, workout.PlannedSeconds(got.Steps), got.Description)
+			}
+		})
+	}
+}
+
+// The description of an eased session is copied verbatim into the calendar
+// feed a third-party server keeps, so it must say nothing about health.
+func TestReadinessEasingDescriptionsCarryNoHealthText(t *testing.T) {
+	banned := []string{"slept", "sleep", "HRV", "heart rate", "mood", "legs", "form", "load", "readiness is", "score", "unbalanced", "56", "41", "52", "40"}
+	cases := map[string]func(*tomorrowHarness){
+		"rest endurance": func(h *tomorrowHarness) {
+			h.enduranceOn(tmToday, "Long ride", longRideSteps(9600))
+			if err := h.store.SaveCheckIn(context.Background(), workout.CheckIn{Rider: "wilant", Date: tmToday, Legs: 1, Mood: 2, SleepQuality: 2, Note: "slept badly"}); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"caution endurance": func(h *tomorrowHarness) {
+			h.enduranceOn(tmToday, "Long ride", longRideSteps(9600))
+			wellnessCaution(t, h)
+		},
+		"rest hard": func(h *tomorrowHarness) {
+			h.hard(tmToday)
+			h.checkIn(1)
+		},
+		"caution hard": func(h *tomorrowHarness) {
+			h.hard(tmToday)
+			wellnessCaution(t, h)
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newTomorrowHarness(t)
+			setup(h)
+			h.srv.AdaptWorkouts(context.Background())
+			ws, err := h.store.ListWorkouts(context.Background(), "wilant")
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := 0
+			for _, w := range ws {
+				if markerCount(w) == 0 {
+					continue
+				}
+				changed++
+				for _, b := range banned {
+					if strings.Contains(w.Description, b) {
+						t.Errorf("description %q contains %q", w.Description, b)
+					}
+				}
+				if !strings.Contains(w.Description, "readiness") {
+					t.Errorf("description %q says nothing of why", w.Description)
+				}
+				// The popover still has the reasons.
+				if a, ok := adjustmentFor(t, h.store, w.ID); !ok || len(a.Inputs) == 0 || a.Text == "" {
+					t.Errorf("why record = %+v (found %v), want the signals kept", a, ok)
+				}
+			}
+			if changed != 1 {
+				t.Fatalf("changed sessions = %d, want 1", changed)
+			}
+			for _, ev := range calendarfeed.Events(ws, time.Date(2026, 3, 19, 8, 0, 0, 0, time.UTC), time.UTC, nil, "") {
+				for _, b := range []string{"slept", "HRV", "mood", "resting heart rate"} {
+					if strings.Contains(ev.Description, b) {
+						t.Errorf("calendar event %q contains %q", ev.Description, b)
+					}
+				}
+			}
+		})
+	}
+}
+
+func wellnessCaution(t *testing.T, h *tomorrowHarness) {
+	t.Helper()
+	if err := h.store.SaveWellness(context.Background(), workout.DailyWellness{
+		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52, ReadinessLevel: "LOW", ReadinessScore: 40,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -162,7 +162,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 // recoveryRideHours and recoveryRideName are what rest turns today's endurance
 // or long ride into.
 const (
-	recoveryRideHours = 0.75
+	recoveryRideHours = adapter.RecoveryRideSeconds / 3600.0
 	recoveryRideName  = "Recovery ride"
 )
 

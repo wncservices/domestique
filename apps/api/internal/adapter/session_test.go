@@ -175,8 +175,10 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenVeryFatigued(t *testing.T) {
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want only today's intervals downgraded: a long ride is volume not intensity, and next week is not yet", got)
 	}
-	if !strings.Contains(got[0].Reason, "−34") {
-		t.Errorf("reason %q should say what the form is", got[0].Reason)
+	// The description carries no figure (it reaches the calendar feed); the
+	// Why record keeps what the form is.
+	if strings.Contains(got[0].Reason, "−34") || !strings.Contains(got[0].Why.Text, "−34") {
+		t.Errorf("reason %q / why text %q: the figure belongs in the Why record only", got[0].Reason, got[0].Why.Text)
 	}
 }
 
@@ -217,8 +219,11 @@ func TestCautionStepsDownTodaysStructuredHardWorkout(t *testing.T) {
 	if c.StepDownSourceID != "readiness:2026-03-19" {
 		t.Errorf("StepDownSourceID = %q, want readiness:2026-03-19", c.StepDownSourceID)
 	}
-	if !strings.HasPrefix(c.Reason, "Eased one level — ") || !strings.Contains(c.Reason, "HRV is unbalanced today") {
-		t.Errorf("reason = %q, want it to start with 'Eased one level — ' and carry the assessment's reasons", c.Reason)
+	if c.Reason != "Eased one level for readiness." || strings.Contains(c.Reason, "HRV") {
+		t.Errorf("reason = %q, want plain wording with no health text (it is written into the description)", c.Reason)
+	}
+	if !strings.HasPrefix(c.Why.Text, "Eased one level — ") || !strings.Contains(c.Why.Text, "HRV is unbalanced today") {
+		t.Errorf("why text = %q, want the assessment's reasons kept for the popover", c.Why.Text)
 	}
 }
 

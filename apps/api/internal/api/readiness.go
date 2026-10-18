@@ -299,8 +299,10 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 	for _, r := range forecast.Reasons {
 		signals = append(signals, forecastSignal(r))
 	}
+	// The description reaches the calendar feed, and the forecast's reasons
+	// carry projected form and load: they stay in the Why record and the reply.
 	change := adapter.Change{
-		WorkoutID: target.ID, Reason: reason,
+		WorkoutID: target.ID, Reason: "Eased ahead of time for readiness.",
 		Why: why.NewRecord(why.ReadinessTomorrow, reason, why.ReadinessInputs{Verdict: string(forecast.Verdict), Signals: signals}),
 	}
 	if forecast.Verdict == readiness.Rest {

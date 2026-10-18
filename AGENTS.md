@@ -427,7 +427,12 @@ under the band and both today's and yesterday's nights are under mean - 1.0 SD (
 0.5 SD), so a soft week is not Rest. Sleep debt is measured against the rider's own
 28-night median. The adapter acts on today's generated endurance or long cycling ride:
 Caution shortens it to max(80%, 30 min) keeping its name, Rest swaps it for a 45-minute
-"Recovery ride"; hard-session rules are unchanged. Check-in
+"Recovery ride" (a ride of 45 minutes or less is left alone: Rest never lengthens a session);
+hard-session rules are unchanged. A routed endurance ride is left alone; endurance easing is
+cycling-only. **The description a readiness change writes carries no health text** ("Eased one
+level for readiness.", "Swapped for a recovery ride (readiness)."), because workout descriptions
+are copied into the calendar feed: the reasons and signals live in the Why record
+(`adapter.readinessChange`). Check-in
 severity (`checkInSignal`): legs 1 is severe; a 2 on legs, or a mood or sleep quality of 2 or 1,
 is amber; the other thresholds are in `v2.go`. The **morning check-in** (`daily_checkins`,
 in `riderTables`; `GET/PUT /api/training/checkin`) holds scores 1-5 (0 unanswered) and a note of
