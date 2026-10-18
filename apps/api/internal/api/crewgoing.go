@@ -287,7 +287,7 @@ func (s *Server) rideWeek(ctx context.Context, rider string, ride crewplan.Ride,
 			}
 		}
 		reqs, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, rider, g.ID, g.Sport,
-			append(sc.options(), fixedOption(others, week))...)
+			append(sc.weekOptions(week), fixedOption(others, week))...)
 		if err != nil {
 			return nil, nil, err
 		}

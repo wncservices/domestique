@@ -26,6 +26,7 @@ type weekFocusDTO struct {
 	Phase       string  `json:"phase,omitempty"`
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
+	TargetTSS   float64 `json:"targetTss,omitempty"`
 }
 
 type weekDayDTO struct {
@@ -216,7 +217,7 @@ func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Ti
 			f := &weekFocusDTO{
 				GoalID: g.ID, Name: g.Name, Priority: string(g.Priority), Sport: string(g.Sport),
 				EventDate: g.EventDate, WeekNumber: wk.Number, TotalWeeks: plan.TotalWeeks,
-				Phase: string(wk.Phase), Recovery: wk.Recovery, TargetHours: wk.TargetHours,
+				Phase: string(wk.Phase), Recovery: wk.Recovery, TargetHours: wk.TargetHours, TargetTSS: wk.TargetTSS,
 			}
 			if g.EventDate != "" {
 				if ev, err := time.ParseInLocation(dateLayout, g.EventDate, now.Location()); err == nil {

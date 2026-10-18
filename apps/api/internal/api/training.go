@@ -458,6 +458,12 @@ type periodizationWeekDTO struct {
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
 	Adjusted    bool    `json:"adjusted,omitempty"`
+	// TargetTSS, PlannedCTL and LoadCapped are set only on the ctl basis: the
+	// week's load target, the CTL the plan expects at its start, and whether
+	// the rider's available hours cut that target short.
+	TargetTSS  float64 `json:"targetTss,omitempty"`
+	PlannedCTL float64 `json:"plannedCtl,omitempty"`
+	LoadCapped bool    `json:"loadCapped,omitempty"`
 }
 
 type periodizationPlanDTO struct {
@@ -465,6 +471,12 @@ type periodizationPlanDTO struct {
 	TotalWeeks int                    `json:"totalWeeks,omitempty"`
 	Weeks      []periodizationWeekDTO `json:"weeks"`
 	Adjustment float64                `json:"adjustment,omitempty"`
+	// LoadBasis is "ctl" when the weeks are sized from the rider's fitness and
+	// "hours" when from their profile alone. TargetCTL and Shortfall exist only
+	// on the ctl basis, for a dated goal.
+	LoadBasis string  `json:"loadBasis"`
+	TargetCTL float64 `json:"targetCtl,omitempty"`
+	Shortfall float64 `json:"shortfall,omitempty"`
 }
 
 // handleGoalPeriodization computes — on the fly, nothing persisted — the
@@ -501,11 +513,13 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	dto := periodizationPlanDTO{GoalID: plan.GoalID, TotalWeeks: plan.TotalWeeks, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment}
+	dto := periodizationPlanDTO{GoalID: plan.GoalID, TotalWeeks: plan.TotalWeeks, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment,
+		LoadBasis: plan.LoadBasis, TargetCTL: plan.TargetCTL, Shortfall: plan.Shortfall}
 	for _, wk := range plan.Weeks {
 		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
 			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
 			Recovery: wk.Recovery, TargetHours: wk.TargetHours, Adjusted: wk.Adjusted,
+			TargetTSS: wk.TargetTSS, PlannedCTL: wk.PlannedCTL, LoadCapped: wk.LoadCapped,
 		})
 	}
 	writeJSON(w, http.StatusOK, dto)
@@ -527,7 +541,12 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 		return periodization.Plan{}, workout.RiderProfile{}, err
 	}
 
-	plan, err := periodization.Build(g, profile, s.localNow())
+	// Nil (no FTP, no hours, no fitness yet) is the hours plan, exactly as before.
+	load, err := s.loadInput(ctx, g, rider, profile)
+	if err != nil {
+		return periodization.Plan{}, profile, err
+	}
+	plan, err := periodization.BuildWithLoad(g, profile, s.localNow(), load)
 	if err != nil {
 		// ErrNoEventDate/ErrEventInThePast are the only errors BuildPlan
 		// returns — both are the rider's own data being unsuitable to plan
@@ -536,6 +555,10 @@ func (s *Server) reconciledPeriodizationPlan(ctx context.Context, g workout.Goal
 		return periodization.Plan{}, profile, err
 	}
 
+	// CTL already reflects what was ridden, so compliance would count it twice.
+	if plan.LoadBasis != "hours" {
+		return plan, profile, nil
+	}
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
 		return periodization.Plan{}, profile, err
@@ -753,6 +776,19 @@ func (sc seasonContext) options() []scheduler.Option {
 	return []scheduler.Option{scheduler.WithRouteDemand(d)}
 }
 
+// weekOptions is options plus the week's own TSS target, which only a week the
+// rider's hours cut short carries: the scheduler then steps rungs up so the
+// shortened week still reaches it. Every caller that builds a season week
+// goes through here, so fill, refresh, join/leave previews and life events
+// agree on what a week holds.
+func (sc seasonContext) weekOptions(week periodization.Week) []scheduler.Option {
+	opts := sc.options()
+	if week.LoadCapped {
+		opts = append(opts, scheduler.WithTargetTSS(week.TargetTSS))
+	}
+	return opts
+}
+
 // demandUnreadable reports whether the route demand could not be computed
 // because the route could not be read (a storage error, not "unusable"). The
 // season pass then leaves a week that would be recorded as fresh for the next
@@ -797,7 +833,7 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
-	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.options(), fixedOption(existing, week))...)
+	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.weekOptions(week), fixedOption(existing, week))...)
 	if err != nil {
 		return nil, 0, err
 	}
