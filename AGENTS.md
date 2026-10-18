@@ -1303,6 +1303,12 @@ Two things make the suite worth trusting, and both are easy to lose:
    A test of a migration itself (a table that predates a column) builds its
    own database instead. CI shards `internal/api` three ways by test-name hash
    (`scripts/test-shard.sh`).
+4. **A frontend-only change skips the Go jobs.** `ci.yml`'s `changes` job skips
+   the API tests, the API build and golangci-lint when every changed file is
+   under `apps/web/`, `apps/e2e/`, `docs/` or is Markdown; skipped jobs report as
+   passed, so the required checks stay green. A frontend file a Go test reads
+   (`../../../web/...` in a `_test.go`, today `fitnessMath.ts`) still counts as
+   API. Docker, govulncheck and the web job always run.
 
 When you add behaviour, check the test fails without it. Several tests here were written after
 confirming that deleting the code they cover turns them red.
