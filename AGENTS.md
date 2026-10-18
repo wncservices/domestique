@@ -1266,6 +1266,14 @@ state file ──────Open────> state.Store ───┘
   `routing`, `loops`, `trainnow`, `pacing`. Eligibility to be changed automatically is decided by
   the predicates in `scheduler/adapt.go` (`IsGenerated`, `IsPlanMade`, `AutoReplaceable`,
   `RiderKept`): add a new automatic path by calling them, not by matching description text.
+  The state they read lives in columns on `workouts` (`origin` plan/rider/crew/test, `adapted_rules`
+  as the comma-joined `why.Rule` ids in order, `swapped`, `kept` ''/crew/life, `moved_from`,
+  `moved_by` ''/life/rider/auto, `edited_at`). A writer sets a `workout.Flags` (start from
+  `workout.CurrentFlags(w)`) next to the marker text it still writes; the markers stay for one more
+  release as display text. A parity check that `internal/testdb` switches on fails any test write
+  whose columns disagree with `LegacyFlags(description)`, and a one-off backfill fills old rows.
+  `edited_at` is set by every `UpdateWorkout`, so it means "any edit" for now, as `UpdatedAt ==
+  CreatedAt` did. `DeleteGoal` turns the goal's unlinked plan sessions into origin `rider`.
 
 `model.Route` carries **no file paths**. A route is a row; fetch its track through the library.
 
