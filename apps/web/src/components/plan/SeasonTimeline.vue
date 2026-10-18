@@ -95,6 +95,13 @@ function bandWidth(b: Band): number {
   return (b.end - b.start + 1) * colWidth.value - 2
 }
 
+// A label is drawn only when it fits inside its band (about 5 units per
+// character at font-size 8, plus padding), so it never spills over a neighbour.
+// The legend under the chart names every phase, so a narrow band loses nothing.
+function bandFits(b: Band): boolean {
+  return bandWidth(b) >= phaseLabel(b.phase).length * 5 + 8
+}
+
 // Weeks are sorted ascending by startDate and span 7 days each, so the last
 // week starting on or before a date is the week that contains it — no need
 // to know each week's own end date.
@@ -274,7 +281,7 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
       <g v-for="b in bands" :key="`${b.start}-${b.end}`">
         <rect :x="bandX(b)" :y="BAND_Y" :width="bandWidth(b)" :height="BAND_HEIGHT" rx="3" :fill="phaseBandFill(b.phase)" />
         <text
-          v-if="bandWidth(b) >= 48"
+          v-if="bandFits(b)"
           :x="bandX(b) + bandWidth(b) / 2"
           :y="BAND_Y + BAND_HEIGHT / 2"
           text-anchor="middle"

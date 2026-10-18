@@ -527,7 +527,7 @@ onMounted(async () => {
       <div class="flex min-w-0 flex-col gap-10">
         <section id="profile" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="profile-title">
           <div>
-            <h2 id="profile-title" class="font-display text-xl text-highlighted">Profile</h2>
+            <h2 id="profile-title" class="text-xl text-highlighted">Profile</h2>
             <p class="text-sm text-muted">Your own name and sign-in, for this account only.</p>
           </div>
 
@@ -663,7 +663,7 @@ onMounted(async () => {
 
         <section id="devices" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="devices-title">
           <div>
-            <h2 id="devices-title" class="font-display text-xl text-highlighted">Devices and sync</h2>
+            <h2 id="devices-title" class="text-xl text-highlighted">Devices and sync</h2>
             <p class="text-sm text-muted">Head units and accounts your routes are pushed to or imported from.</p>
           </div>
 
@@ -718,7 +718,7 @@ onMounted(async () => {
 
         <section id="training" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="training-title">
           <div>
-            <h2 id="training-title" class="font-display text-xl text-highlighted">Training</h2>
+            <h2 id="training-title" class="text-xl text-highlighted">Training</h2>
             <p class="text-sm text-muted">Where your rides start and how your plan gets scheduled.</p>
           </div>
 
@@ -736,7 +736,7 @@ onMounted(async () => {
 
         <section id="notifications" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="notifications-title">
           <div>
-            <h2 id="notifications-title" class="font-display text-xl text-highlighted">Notifications</h2>
+            <h2 id="notifications-title" class="text-xl text-highlighted">Notifications</h2>
             <p class="text-sm text-muted">What Domestique warns you about for planned rides.</p>
           </div>
 
@@ -752,7 +752,7 @@ onMounted(async () => {
 
         <section v-if="adminSections.length" id="deployment" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="deployment-title">
           <div>
-            <h2 id="deployment-title" class="font-display text-xl text-highlighted">Deployment</h2>
+            <h2 id="deployment-title" class="text-xl text-highlighted">Deployment</h2>
             <p class="text-sm text-muted">Settings that apply to every rider on this deployment.</p>
           </div>
 
@@ -867,7 +867,7 @@ onMounted(async () => {
 
         <section v-if="adminSections.length" id="basemap" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="basemap-title">
           <div>
-            <h2 id="basemap-title" class="font-display text-xl text-highlighted">Basemap</h2>
+            <h2 id="basemap-title" class="text-xl text-highlighted">Basemap</h2>
             <p class="text-sm text-muted">
               Tile data behind a route's map — self-hosted, so a rider's coordinates never reach a third party.
             </p>

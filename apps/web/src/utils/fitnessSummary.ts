@@ -19,7 +19,7 @@ export interface SummaryTile {
   tone: Tone
 }
 
-function weekDelta(delta: number | undefined): string | undefined {
+export function weekDelta(delta: number | undefined): string | undefined {
   if (delta === undefined) return undefined
   const n = Math.round(delta)
   return `${n < 0 ? '−' : '+'}${Math.abs(n)} in 7 days`

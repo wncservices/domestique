@@ -120,21 +120,21 @@ async function send(provider: 'garmin' | 'wahoo') {
       <dl class="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
           <dt class="text-[length:var(--text-label)] text-muted">Expected time</dt>
-          <dd class="tabular-nums text-lg text-highlighted">{{ duration(available.totals.seconds) }}</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)] text-highlighted">{{ duration(available.totals.seconds) }}</dd>
           <dd class="text-xs text-muted">estimated</dd>
         </div>
         <div>
           <dt class="text-[length:var(--text-label)] text-muted">Normalised power</dt>
-          <dd class="tabular-nums text-lg text-highlighted">{{ available.totals.normalizedW }} W</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)] text-highlighted">{{ available.totals.normalizedW }} W</dd>
           <dd class="text-xs text-muted">IF {{ available.totals.if.toFixed(2) }}</dd>
         </div>
         <div>
           <dt class="text-[length:var(--text-label)] text-muted">Average speed</dt>
-          <dd class="tabular-nums text-lg text-highlighted">{{ available.totals.avgKph.toFixed(1) }} km/h</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)] text-highlighted">{{ available.totals.avgKph.toFixed(1) }} km/h</dd>
         </div>
         <div>
           <dt class="text-[length:var(--text-label)] text-muted">Average power</dt>
-          <dd class="tabular-nums text-lg text-highlighted">{{ available.totals.avgW }} W</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)] text-highlighted">{{ available.totals.avgW }} W</dd>
           <dd class="text-xs text-muted">VI {{ available.totals.variabilityIndex.toFixed(2) }}</dd>
         </div>
       </dl>

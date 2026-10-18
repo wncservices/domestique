@@ -116,6 +116,7 @@
   --text-lead: 1rem;
   --text-title: 1.5rem;
   --text-hero: 2rem;
+  --text-display: 3rem;
 
   --radius-card: 1rem;
 
@@ -215,15 +216,17 @@
   --color-phase-peak: var(--color-primary-300);
   --color-phase-taper: #3f9a8c;
 
-  --ui-bg: var(--color-neutral-950);
+  /* Spec: ground #0b1211, cards one step lighter, no shadow. UCard's outline
+   * variant reads bg-elevated, so that token is the card surface in dark. */
+  --ui-bg: #0b1211;
   --ui-bg-muted: var(--color-neutral-900);
-  --ui-bg-elevated: var(--color-neutral-900);
+  --ui-bg-elevated: #15201d;
   --ui-border: var(--color-neutral-800);
   --ui-border-accented: var(--color-neutral-700);
 
   --app-card-bg: rgb(30 43 39 / 0.5);
-  --app-card-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
-  --app-card-shadow-hover: 0 6px 20px rgb(0 0 0 / 0.35);
+  --app-card-shadow: none;
+  --app-card-shadow-hover: none;
   --app-header-bg: rgb(5 10 9 / 0.8);
   --app-glow:
     radial-gradient(46rem 22rem at 18% -10%, rgb(20 207 171 / 0.16), transparent 70%),

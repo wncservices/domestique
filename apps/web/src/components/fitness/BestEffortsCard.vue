@@ -6,6 +6,7 @@
 // dashes.
 import { computed } from 'vue'
 import type { BestEffortsResponse, EffortCell, EffortRow, EffortSport } from '@/api/types'
+import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import { formatEffortCell } from '@/utils/bestEfforts'
 
@@ -15,10 +16,16 @@ const emit = defineEmits<{
   'open-ride': [sessionId: string]
 }>()
 
-const SPORTS: { key: EffortSport; label: string }[] = [
-  { key: 'cycling', label: 'Cycling' },
-  { key: 'running', label: 'Running' },
+const SPORTS = [
+  { value: 'cycling', label: 'Cycling' },
+  { value: 'running', label: 'Running' },
 ]
+
+// SegmentedControl's model is a plain string; the parent owns the typed sport.
+const sportModel = computed<string>({
+  get: () => props.sport,
+  set: (v) => emit('update:sport', v as EffortSport),
+})
 
 const rows = computed<EffortRow[]>(() => props.data?.metrics ?? [])
 // "Has records" means at least one metric has an all-time best.
@@ -43,20 +50,8 @@ function cell(row: EffortRow, key: Column['key']): EffortCell | null {
   <UCard variant="outline">
     <template #header>
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-lg font-semibold">Best efforts</h2>
-        <UFieldGroup aria-label="Sport">
-          <UButton
-            v-for="s in SPORTS"
-            :key="s.key"
-            size="xs"
-            :color="sport === s.key ? 'primary' : 'neutral'"
-            :variant="sport === s.key ? 'subtle' : 'outline'"
-            :aria-pressed="sport === s.key"
-            @click="emit('update:sport', s.key)"
-          >
-            {{ s.label }}
-          </UButton>
-        </UFieldGroup>
+        <h2 class="text-[length:var(--text-title)] font-semibold">Best efforts</h2>
+        <SegmentedControl v-model="sportModel" :items="SPORTS" label="Sport" />
       </div>
     </template>
 

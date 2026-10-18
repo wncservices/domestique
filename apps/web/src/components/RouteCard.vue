@@ -378,8 +378,8 @@ async function remove() {
       >
         <UButton
           size="xs"
-          color="warning"
-          variant="outline"
+          color="primary"
+          variant="soft"
           icon="i-lucide-user-plus"
           :loading="claiming"
           @click.stop="claim"

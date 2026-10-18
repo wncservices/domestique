@@ -76,7 +76,7 @@ onMounted(load)
 <template>
   <UCard v-if="status?.available" id="morning-summary" class="scroll-mt-20" variant="outline">
     <template #header>
-      <h3 class="flex items-center gap-2 text-lg font-semibold">
+      <h3 class="flex items-center gap-2 text-[length:var(--text-lead)] font-semibold">
         <UIcon name="i-lucide-mail" />
         Morning summary
       </h3>

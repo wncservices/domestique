@@ -41,13 +41,13 @@ const isRealFocus = computed(() => props.focus?.weekNumber !== undefined)
 // Real focus: "{daysToEvent} days to go · {Phase} · week {n} of {m}",
 // dropping whatever piece it doesn't carry. Fallback focus: says plainly
 // that this goal isn't what the browsed week's own plan is about.
-const metaLine = computed(() => {
+const metaParts = computed<string[]>(() => {
   const focus = props.focus
-  if (!focus) return ''
+  if (!focus) return []
   if (!isRealFocus.value) {
     return focus.eventDate
-      ? `${shortDate(focus.eventDate)} · outside this goal's plan weeks`
-      : `Rolling plan · outside its plan weeks`
+      ? [shortDate(focus.eventDate), `outside this goal's plan weeks`]
+      : ['Rolling plan', 'outside its plan weeks']
   }
   const parts: string[] = []
   parts.push(focus.daysToEvent !== undefined ? `${focus.daysToEvent} days to go` : 'Rolling plan')
@@ -55,9 +55,8 @@ const metaLine = computed(() => {
   if (focus.weekNumber !== undefined) {
     parts.push(focus.totalWeeks !== undefined ? `week ${focus.weekNumber} of ${focus.totalWeeks}` : `week ${focus.weekNumber}`)
   }
-  let line = parts.join(' · ')
-  if (focus.recovery) line += ' · recovery week'
-  return line
+  if (focus.recovery) parts.push('recovery week')
+  return parts
 })
 
 const goalMenuItems = computed(() =>
@@ -87,16 +86,22 @@ const newMenuItems = computed(() => [
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <UDropdownMenu v-if="focus && goals.length > 1" :items="goalMenuItems">
-              <button type="button" class="flex items-center gap-1 text-lg font-semibold text-highlighted">
+              <button type="button" class="flex items-center gap-1 text-[length:var(--text-title)] font-semibold text-highlighted">
                 {{ focus.name }}
                 <UIcon name="i-lucide-chevron-down" class="size-4 text-muted" />
               </button>
             </UDropdownMenu>
-            <span v-else-if="focus" class="text-lg font-semibold text-highlighted">{{ focus.name }}</span>
+            <span v-else-if="focus" class="text-[length:var(--text-title)] font-semibold text-highlighted">{{ focus.name }}</span>
             <UBadge v-if="focus" color="neutral" variant="subtle" size="sm">{{ focus.priority }}</UBadge>
             <RaceDayChip v-if="focus" :projection="projection ?? null" :goal-id="focus.goalId" />
           </div>
-          <p v-if="focus" class="text-sm text-muted">{{ metaLine }}</p>
+          <!-- Each segment is unbreakable so a wrap falls at a separator, never inside "week 1 of 13". -->
+          <p v-if="focus" class="text-sm text-muted">
+            <template v-for="(part, i) in metaParts" :key="i">
+              <span v-if="i > 0" aria-hidden="true"> · </span>
+              <span class="whitespace-nowrap">{{ part }}</span>
+            </template>
+          </p>
         </div>
       </div>
 

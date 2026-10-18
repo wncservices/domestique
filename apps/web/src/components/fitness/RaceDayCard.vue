@@ -57,7 +57,7 @@ const rampWarnings = computed(() => props.projection?.ramp?.warnings ?? [])
   <UCard v-if="shown && projection?.goal" variant="outline" data-testid="race-day-card">
     <template #header>
       <div class="flex items-center justify-between gap-2">
-        <h2 class="text-lg font-semibold">Race day</h2>
+        <h2 class="text-[length:var(--text-title)] font-semibold">Race day</h2>
         <span class="text-sm text-muted truncate">{{ projection.goal.name }} · {{ formatDay(projection.goal.eventDate) }}</span>
       </div>
     </template>

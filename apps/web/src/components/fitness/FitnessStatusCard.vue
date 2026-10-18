@@ -34,7 +34,7 @@ const explanation = computed(() => {
   <section class="flex flex-col gap-4" aria-labelledby="where-you-are">
     <div>
       <div class="flex items-center justify-between">
-        <h2 id="where-you-are" class="text-lg font-semibold">Where you are</h2>
+        <h2 id="where-you-are" class="text-[length:var(--text-title)] font-semibold">Where you are</h2>
         <UButton
           v-if="loading || hasHistory"
           icon="i-lucide-refresh-cw"

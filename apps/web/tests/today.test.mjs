@@ -109,6 +109,15 @@ test('form tile: good when fresh or productive, behind when high risk, else defa
   assert.equal(formTile([]).value, '—')
 })
 
+test('form tile: the fitness caption uses the Fitness page wording', () => {
+  const snaps = (prev, now) => [
+    { date: '2026-10-10', ctl: prev, atl: 30, tsb: 4 },
+    { date: '2026-10-17', ctl: now, atl: 30, tsb: 4 },
+  ]
+  assert.match(formTile(snaps(33, 34)).caption, /fitness 34, \+1 in 7 days$/)
+  assert.match(formTile(snaps(35, 34)).caption, /fitness 34, \u22121 in 7 days$/)
+})
+
 test('suggestion: nothing present gives null', () => {
   assert.equal(pickSuggestion({}), null)
 })

@@ -38,11 +38,11 @@ const endLabel = computed(() => endLabelText(props.review))
     <UCard v-if="review.volume" variant="outline" class="print-flat">
       <template #header><h3 class="font-semibold">Volume</h3></template>
       <dl class="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm">
-        <div><dt class="text-xs text-muted">Rides</dt><dd class="tabular-nums text-lg">{{ review.volume.rides }}</dd></div>
-        <div><dt class="text-xs text-muted">Time</dt><dd class="tabular-nums text-lg">{{ hoursText(review.volume.seconds) }}</dd></div>
-        <div><dt class="text-xs text-muted">Distance</dt><dd class="tabular-nums text-lg">{{ km(review.volume.distanceM) }}</dd></div>
-        <div><dt class="text-xs text-muted">Elevation</dt><dd class="tabular-nums text-lg">{{ ascentText(review.volume) }}</dd></div>
-        <div><dt class="text-xs text-muted">Training load</dt><dd class="tabular-nums text-lg">{{ round(review.volume.tss) }} TSS</dd></div>
+        <div><dt class="text-xs text-muted">Rides</dt><dd class="tabular-nums text-[length:var(--text-lead)]">{{ review.volume.rides }}</dd></div>
+        <div><dt class="text-xs text-muted">Time</dt><dd class="tabular-nums text-[length:var(--text-lead)]">{{ hoursText(review.volume.seconds) }}</dd></div>
+        <div><dt class="text-xs text-muted">Distance</dt><dd class="tabular-nums text-[length:var(--text-lead)]">{{ km(review.volume.distanceM) }}</dd></div>
+        <div><dt class="text-xs text-muted">Elevation</dt><dd class="tabular-nums text-[length:var(--text-lead)]">{{ ascentText(review.volume) }}</dd></div>
+        <div><dt class="text-xs text-muted">Training load</dt><dd class="tabular-nums text-[length:var(--text-lead)]">{{ round(review.volume.tss) }} TSS</dd></div>
       </dl>
     </UCard>
 
@@ -51,16 +51,16 @@ const endLabel = computed(() => endLabelText(props.review))
       <dl class="grid grid-cols-3 gap-4 text-sm">
         <div>
           <dt class="text-xs text-muted">Start</dt>
-          <dd class="tabular-nums text-lg">{{ review.fitness.startCtl === undefined ? 'n/a' : round(review.fitness.startCtl) }}</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)]">{{ review.fitness.startCtl === undefined ? 'n/a' : round(review.fitness.startCtl) }}</dd>
         </div>
         <div>
           <dt class="text-xs text-muted">Peak</dt>
-          <dd class="tabular-nums text-lg">{{ round(review.fitness.peakCtl) }}</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)]">{{ round(review.fitness.peakCtl) }}</dd>
           <dd class="text-xs text-muted">{{ formatEffortDate(review.fitness.peakDate, today) }}</dd>
         </div>
         <div>
           <dt class="text-xs text-muted">{{ endLabel }}</dt>
-          <dd class="tabular-nums text-lg">{{ review.fitness.endCtl === undefined ? 'n/a' : round(review.fitness.endCtl) }}</dd>
+          <dd class="tabular-nums text-[length:var(--text-lead)]">{{ review.fitness.endCtl === undefined ? 'n/a' : round(review.fitness.endCtl) }}</dd>
         </div>
       </dl>
     </UCard>

@@ -61,7 +61,7 @@ threshold, vo2max) and the badge stays neutral.
 `--color-zone-endurance`, `--color-zone-tempo`, `--color-zone-sweet_spot`,
 `--color-zone-threshold`, `--color-zone-vo2max`, `--color-zone-anaerobic`.
 Each has a light value and a `.dark` override, and each holds at least 3:1
-against its card (white, and about `#121a18`, which is `rgb(30 43 39 / .5)` over neutral-950). In code use
+against its card (white, and about `#141c1a`, which is `rgb(30 43 39 / .5)` over the dark ground `#0b1211`). In code use
 `zoneColorVar(zone)` from `utils/zones.ts`, never a literal; `intervals`
 maps to anaerobic and an unknown zone to endurance.
 
@@ -192,7 +192,19 @@ packages cover every weight used in one file each.
 (16px), `--text-title` (24px) and `--text-hero` (32px) give the utilities
 `text-label`, `text-body`, `text-lead`, `text-title` and `text-hero`. 13px
 and 20px are reached through `text-[13px]` and `text-xl`, so they have no
-token.
+token. `--text-display` (48px) is the landing headline only, used from `sm`
+up as `sm:text-[length:var(--text-display)]`.
+
+Card headings use `--text-title` for a card's own header and `--text-lead`
+for a heading nested in a card body; a figure in a definition list is
+`--text-lead`.
+
+### Surfaces
+
+Light: a teal-tinted near-white ground with white cards. Dark: the ground is
+`#0b1211` (`--ui-bg`), cards sit one step lighter (`--ui-bg-elevated` for
+`UCard`, `--app-card-bg` for `.app-card`) and carry no shadow, only the
+border. `--ui-bg-muted` stays between the two.
 
 ### Shape
 
