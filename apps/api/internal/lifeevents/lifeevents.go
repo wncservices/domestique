@@ -294,7 +294,7 @@ type RampInfo struct {
 
 // rampNotePrefix starts every note a life event leaves in a session's
 // description, after the adjusted marker.
-const rampNotePrefix = "Life event:"
+const rampNotePrefix = workout.LifeNotePrefix
 
 // KeptMarker is written into a session whose ease or shortening the rider
 // unticked in a preview. The return ramp reads it and leaves the session alone,

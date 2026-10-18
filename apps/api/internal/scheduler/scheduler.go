@@ -253,6 +253,7 @@ func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels 
 		case slotStructured:
 			req = workoutlib.Instantiate(ladders[i], rungs[i], profile)
 			req.Description = GeneratedDescription
+			req.Flags = workout.Flags{Origin: workout.OriginPlan}
 		default:
 			hours := remainingHours * restShares[i]
 			if hours <= 0 {
@@ -565,6 +566,7 @@ func BuildEnduranceSession(hours float64, long bool, sport model.Sport, profile 
 		Sport:       sport,
 		Name:        name,
 		Description: GeneratedDescription,
+		Flags:       workout.Flags{Origin: workout.OriginPlan},
 		Zone:        workout.ZoneEndurance,
 		Steps:       steps,
 	}
