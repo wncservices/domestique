@@ -386,7 +386,10 @@ table; `internal/mailer` sends.
 - **No readiness reasons, no numbers.** `Compose`'s `Input` carries the verdict as one word and not
   the reasons, so sleep, HRV, resting heart rate and load cannot reach a mailbox on a relay we do
   not control. The email points at the Fitness page for the why. The weather line is the same rule
-  the Plan page uses; the FTP-test line only fires for a suggestion dated today.
+  the Plan page uses. The FTP-test line names the suggested day ("tomorrow" or a
+  weekday) when it falls in the coming six days; the suggester never picks today. A day
+  inside a life event is "a planned break" (never which kind: illness is health data),
+  with no FTP line; a session the rider kept on it is still listed.
 - **Logs**: a rider's name, and for a failure the stage and the numeric code. Never the address,
   the subject, the verdict or a reason. The password is `DOMESTIQUE_SMTP_PASSWORD`, read in `main`
   and held by the mailer alone. `domestique_morning_summary_total{result="sent|failed"}` is the

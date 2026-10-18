@@ -33,9 +33,13 @@ type Input struct {
 	// Weather holds the reasons today's ride window is bad ("Rain likely, 80%,
 	// 9 to 12h"); empty when it is fine, or weather is not set up.
 	Weather []string
-	// FTPTest is the date an FTP test is suggested for, "" for none. Only a
-	// suggestion dated Today is mentioned.
+	// FTPTest is the date an FTP test is suggested for, "" for none. The
+	// suggester picks tomorrow at the earliest; a date in the coming week is
+	// named, a later one is left for the app.
 	FTPTest string
+	// Break is true when Today falls inside one of the rider's life events.
+	// Only that it is a break is said, never which kind: illness is health data.
+	Break bool
 	// AppURL is the deployment's public address, "" to leave out links.
 	AppURL string
 }
@@ -46,6 +50,8 @@ func Compose(in Input) (subject, body string) {
 	main, ok := mainSession(in.Workouts)
 
 	switch {
+	case !ok && in.Break:
+		subject = "Domestique: a planned break today"
 	case !ok:
 		subject = "Domestique: today is a rest day"
 	case in.Ridden:
@@ -65,6 +71,8 @@ func Compose(in Input) (subject, body string) {
 	}
 
 	switch {
+	case !ok && in.Break:
+		b.WriteString("Today is part of a planned break. Nothing is planned.\n")
 	case !ok:
 		b.WriteString("Rest day. Nothing is planned for today.\n")
 	case in.Ridden:
@@ -93,8 +101,8 @@ func Compose(in Input) (subject, body string) {
 				fmt.Fprintf(&b, "  %s\n", oneLine(r))
 			}
 		}
-		if in.FTPTest != "" && in.FTPTest == in.Today {
-			b.WriteString("\nToday would be a good day for your FTP test.\n")
+		if day := comingDay(in.Today, in.FTPTest); day != "" && !in.Break {
+			fmt.Fprintf(&b, "\nAn FTP test would help: %s looks right.\n", day)
 		}
 	}
 
@@ -166,4 +174,21 @@ func link(base, path string) string { return strings.TrimRight(base, "/") + path
 // in a subject or an indented row without breaking either.
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(strings.NewReplacer("\r", " ", "\n", " ").Replace(s)), " ")
+}
+
+// comingDay names date as "tomorrow" or its weekday when it falls in the six
+// days after today, and is "" otherwise: further out, the app says it better.
+func comingDay(today, date string) string {
+	t, err1 := time.Parse("2006-01-02", today)
+	d, err2 := time.Parse("2006-01-02", date)
+	if err1 != nil || err2 != nil {
+		return ""
+	}
+	switch days := int(d.Sub(t).Hours() / 24); {
+	case days == 1:
+		return "tomorrow"
+	case days >= 2 && days <= 6:
+		return d.Format("Monday")
+	}
+	return ""
 }
