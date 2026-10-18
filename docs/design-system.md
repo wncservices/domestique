@@ -219,7 +219,8 @@ Pick in this order:
 2. **`StatTile`** (`components/ui/StatTile.vue`) — a number with a label:
    `label`, `value`, optional `caption`, and `tone` (`default`, `good`,
    `behind`). Tone carries meaning, not decoration: `good` is the primary accent,
-   `behind` is ember (coral); status colours stay for system state.
+   `behind` is ember (coral); status colours stay for system state. The value is
+   title size until `lg` and hero size from there, so four tiles fit a tablet row.
 3. **`DetailsToggle`** (`components/ui/DetailsToggle.vue`) — `v-model:open`,
    optional `label` (default "Details"), a default slot. A real button with
    `aria-expanded`; the content is not rendered while closed.
@@ -361,8 +362,9 @@ deep links work and a tab switch does not add a history entry.
   (`composables/useExportItems.ts`, shared with `ExportMenu`).
 - **Week tiles** give a session name three lines (`line-clamp-3`, never truncated to one),
   a left bar in its zone colour (`zoneColorVar`), and duration and TSS. Hovering shows
-  the whole session; a tap selects it into the day card above. Below `sm` the week is a
-  horizontal row of fixed-width tiles.
+  the whole session; a tap selects it into the day card above. Below `xl` the week is a
+  swipeable row of fixed-width tiles: seven columns need about 1000px before a name
+  stops breaking mid-word.
 - **Season timeline** colours each week's bar and band with the phase ramp
   (`--color-phase-*`). "You are here" is a marker on the current week and a sentence
   under the chart ("You are here: week 5 of 16, Build"), so it never rests on colour alone.

@@ -13,7 +13,7 @@ const toneClass = { default: 'text-highlighted', good: 'text-primary', behind: '
 <template>
   <div class="app-card px-4 py-3">
     <div class="text-[length:var(--text-label)] text-muted">{{ label }}</div>
-    <div class="mt-1 truncate font-display text-[length:var(--text-title)] leading-tight sm:text-[length:var(--text-hero)] tabular-nums" :class="toneClass[tone]">
+    <div class="mt-1 truncate font-display text-[length:var(--text-title)] leading-tight lg:text-[length:var(--text-hero)] tabular-nums" :class="toneClass[tone]">
       {{ value }}
     </div>
     <div v-if="caption" class="mt-0.5 text-[length:var(--text-label)] text-muted">{{ caption }}</div>

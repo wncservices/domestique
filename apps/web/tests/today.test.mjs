@@ -193,6 +193,35 @@ test('week tiles: every day, done rides included, with visible text', () => {
   assert.equal(tiles[3].text, '30m')
 })
 
+test('week tiles: a compact duration for narrow screens', () => {
+  const tiles = weekTiles(
+    [
+      day('2026-10-12', { status: 'done', completed: [done(3960)] }),
+      day('2026-10-13', { planned: [ride({ plannedSeconds: 2460 })] }),
+      day('2026-10-14'),
+    ],
+    '2026-10-14',
+  )
+  assert.equal(tiles[0].text, '1h 6m')
+  assert.equal(tiles[0].short, '1:06')
+  assert.equal(tiles[1].short, '41m')
+  assert.equal(tiles[2].short, 'Rest')
+})
+
+test('week tiles: a planned day gone by unridden is missed, said in words', () => {
+  const tiles = weekTiles(
+    [
+      day('2026-10-16', { status: 'missed', planned: [ride({ plannedSeconds: 2460 })] }),
+      day('2026-10-17', { planned: [ride()] }),
+    ],
+    '2026-10-17',
+  )
+  assert.equal(tiles[0].missed, true)
+  assert.equal(tiles[0].done, false)
+  assert.match(tiles[0].aria, /missed/)
+  assert.equal(tiles[1].missed, false)
+})
+
 test('card state: rest day, ridden without a plan, planned', () => {
   const rest = cardState(day('2026-10-17', { status: 'rest' }))
   assert.equal(rest.kind, 'rest')

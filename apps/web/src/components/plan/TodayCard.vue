@@ -341,14 +341,16 @@ function onRated(analysis: SessionAnalysis) {
   <div class="flex flex-col gap-3">
     <UAlert
       v-if="showingToday && yesterday?.status === 'missed' && yesterdayWorkout"
-      color="warning"
+      color="neutral"
       variant="subtle"
-      icon="i-lucide-triangle-alert"
+      icon="i-lucide-circle-x"
+      :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
       :title="`Yesterday's ${yesterdayWorkout.name} was missed. Move it to later this week?`"
     >
+      <!-- A missed session is behind plan, which is ember; warning is for system state. -->
       <template #actions>
         <UDropdownMenu :items="moveMenuItems(yesterdayWorkout, yesterday!.date)">
-          <UButton color="warning" variant="soft" size="xs">Move</UButton>
+          <UButton color="neutral" variant="outline" size="xs">Move</UButton>
         </UDropdownMenu>
       </template>
     </UAlert>
