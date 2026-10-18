@@ -137,6 +137,18 @@ export function weekLoadLabel(
   return `${Math.round(tss)} TSS \u00b7 ${(completedSeconds / 3600).toFixed(1)} / ${hours} h`
 }
 
+/** What the load ledger moved into the week: "+12 TSS carried", "8 forgiven",
+ *  both joined, or "" when it moved nothing. Whole numbers; the server already
+ *  rounds, and a figure that rounds to 0 is not worth a line. */
+export function weekLedgerNote(focus?: { carriedTss?: number; forgivenTss?: number }): string {
+  const carried = Math.round(focus?.carriedTss ?? 0)
+  const forgiven = Math.round(focus?.forgivenTss ?? 0)
+  const parts: string[] = []
+  if (carried > 0) parts.push(`+${carried} TSS carried`)
+  if (forgiven > 0) parts.push(`${forgiven} forgiven`)
+  return parts.join(' \u00b7 ')
+}
+
 export interface WeekTile {
   date: string
   label: string

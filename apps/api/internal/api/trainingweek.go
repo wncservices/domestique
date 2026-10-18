@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/compliance"
+	"github.com/wncservices/domestique/apps/api/internal/ledger"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -27,6 +29,13 @@ type weekFocusDTO struct {
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
 	TargetTSS   float64 `json:"targetTss,omitempty"`
+	// The load ledger's figures, whole TSS, for the current week only and only
+	// where the ledger runs. DebtTSS is what the morning pass is working off
+	// (omitted at or under ledger.MinDebt, so rounding is not nagged about),
+	// CarriedTSS what last week rolled in, ForgivenTSS what it let go of.
+	DebtTSS     float64 `json:"debtTss,omitempty"`
+	CarriedTSS  float64 `json:"carriedTss,omitempty"`
+	ForgivenTSS float64 `json:"forgivenTss,omitempty"`
 }
 
 type weekDayDTO struct {
@@ -226,8 +235,46 @@ func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Ti
 					f.DaysToEvent = &days
 				}
 			}
+			if plan.LoadBasis == "ctl" && startDate == periodization.MondayOf(s.localNow()).Format(dateLayout) {
+				s.fillLedgerFigures(ctx, rider, startDate, f)
+			}
 			return f, nil
 		}
 	}
 	return nil, nil
+}
+
+// fillLedgerFigures adds the ledger's numbers to the current week's focus. It
+// only reads: a week nobody has opened has no row and shows nothing, and the
+// strip never opens or claims one. A failed read leaves the figures out, since
+// the week page is worth more than its footnote.
+func (s *Server) fillLedgerFigures(ctx context.Context, rider, weekStart string, f *weekFocusDTO) {
+	row, ok, err := s.Training.GetLedgerWeek(ctx, rider, weekStart)
+	if err != nil || !ok {
+		if err != nil {
+			s.logger().Warn("load ledger: could not read the week for the strip", "rider", rider, "err", err)
+		}
+		return
+	}
+	f.CarriedTSS = math.Round(row.CarriedInTSS)
+	// Forgiveness is recorded on the week that was settled, when this one opened.
+	if start, err := time.ParseInLocation(dateLayout, weekStart, s.localNow().Location()); err == nil {
+		last, found, err := s.Training.GetLedgerWeek(ctx, rider, start.AddDate(0, 0, -7).Format(dateLayout))
+		if err != nil {
+			s.logger().Warn("load ledger: could not read last week for the strip", "rider", rider, "err", err)
+		} else if found {
+			f.ForgivenTSS = math.Round(last.ForgivenTSS)
+		}
+	}
+	if row.TargetTSS == 0 {
+		return
+	}
+	debt, err := s.weekDebt(ctx, rider, weekStart, row)
+	if err != nil {
+		s.logger().Warn("load ledger: could not work out the debt for the strip", "rider", rider, "err", err)
+		return
+	}
+	if debt > ledger.MinDebt {
+		f.DebtTSS = math.Round(debt)
+	}
 }

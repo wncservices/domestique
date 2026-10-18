@@ -154,26 +154,17 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 		return
 	}
 
-	var completed, remaining float64
-	for _, c := range sessions {
-		if c.Date >= weekStart && c.Date <= today {
-			completed += c.TrainingLoad
-		}
-	}
 	var week []workout.Workout
 	for _, w := range workouts {
-		if w.Date < weekStart || w.Date > sunday {
-			continue
-		}
-		week = append(week, w)
-		if w.GoalID != "" && w.Date >= today && !adapter.WorkoutDone(w, sessions) {
-			remaining += workout.PlannedTSSOrHours(w, profile.FTPWatts)
+		if w.Date >= weekStart && w.Date <= sunday {
+			week = append(week, w)
 		}
 	}
-	// A life event added since the week opened takes days away from what it
-	// owes, so the session it removed is not debt.
-	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, blackout))
-	debt := ledger.Debt(target, row.CarriedInTSS, completed, remaining)
+	debt, err := s.weekDebt(ctx, rider, weekStart, row)
+	if err != nil {
+		s.logger().Warn("load ledger: could not work out the debt", "rider", rider, "err", err)
+		return
+	}
 	if debt <= ledger.MinDebt {
 		return
 	}
@@ -313,4 +304,52 @@ func (s *Server) applyRepayment(ctx context.Context, rider string, wk workout.Wo
 	rec := why.NewRecord(why.LoadRepaid, reason, why.LoadRepaidInputs{DebtBefore: debtBefore, TSSAdded: gain})
 	s.recordAdjustment(ctx, rider, wk.ID, rec, req.Indoor != nil && *req.Indoor)
 	return gain, nil
+}
+
+// weekDebt is what the current week still owes: the one computation the
+// morning pass and the week strip share, so the number a rider reads is the
+// number the pass acts on. Load lost after the week opened, plus what was
+// carried in, less what is done and what is still planned for today onward.
+// A life event added since the week opened takes days away from what it owes,
+// so the session it removed is not debt.
+func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row workout.LedgerWeek) (float64, error) {
+	profile, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		return 0, err
+	}
+	events, err := s.lifeEventsFor(ctx, rider)
+	if err != nil {
+		return 0, err
+	}
+	sessions, err := s.Training.ListSessions(ctx, rider)
+	if err != nil {
+		return 0, err
+	}
+	workouts, err := s.Training.ListWorkouts(ctx, rider)
+	if err != nil {
+		return 0, err
+	}
+	start, err := time.ParseInLocation(dateLayout, weekStart, s.localNow().Location())
+	if err != nil {
+		return 0, err
+	}
+	sunday := start.AddDate(0, 0, 6).Format(dateLayout)
+	today := s.localNow().Format(dateLayout)
+
+	var completed, remaining float64
+	for _, c := range sessions {
+		if c.Date >= weekStart && c.Date <= today {
+			completed += c.TrainingLoad
+		}
+	}
+	for _, w := range workouts {
+		if w.Date < weekStart || w.Date > sunday {
+			continue
+		}
+		if w.GoalID != "" && w.Date >= today && !adapter.WorkoutDone(w, sessions) {
+			remaining += workout.PlannedTSSOrHours(w, profile.FTPWatts)
+		}
+	}
+	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, lifeevents.Blackout(events)))
+	return ledger.Debt(target, row.CarriedInTSS, completed, remaining), nil
 }

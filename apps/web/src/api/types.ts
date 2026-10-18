@@ -1435,6 +1435,10 @@ export interface WeekFocus {
   recovery?: boolean
   targetHours?: number
   targetTss?: number
+  /** Load ledger figures, whole TSS, current week only (mirror weekFocusDTO). */
+  debtTss?: number
+  carriedTss?: number
+  forgivenTss?: number
 }
 
 export interface WeekDay {

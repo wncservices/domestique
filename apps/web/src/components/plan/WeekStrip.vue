@@ -9,7 +9,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { useExportItems } from '@/composables/useExportItems'
 import { hasGaps, planActions, type PlanActionId } from '@/utils/planActions'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
-import { weekLoadLabel, workoutLoad } from '@/utils/today'
+import { weekLedgerNote, weekLoadLabel, workoutLoad } from '@/utils/today'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
 import { zoneColorVar, zoneLabel } from '@/utils/zones'
 import CrewRideBadge from './CrewRideBadge.vue'
@@ -86,6 +86,8 @@ const loadLabel = computed(() =>
     ? weekLoadLabel(props.week.totals.completedSeconds, props.week.totals.plannedSeconds, props.week.focus)
     : `${doneHours.value.toFixed(1)} / ${(targetSeconds.value / 3600).toFixed(1)} h`,
 )
+
+const ledgerNote = computed(() => weekLedgerNote(props.week.focus))
 
 // One primary action, the rest in an overflow. Every handler is the page's own
 // (the same events the five separate buttons used to emit).
@@ -304,7 +306,7 @@ watch(
         </UDropdownMenu>
         <div class="flex min-w-[10rem] flex-col items-end gap-1">
           <span class="tabular-nums text-[length:var(--text-body)] text-muted">
-            {{ loadLabel }}
+            {{ loadLabel }}<template v-if="ledgerNote"> &middot; {{ ledgerNote }}</template>
           </span>
           <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-32" />
         </div>

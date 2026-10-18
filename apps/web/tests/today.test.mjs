@@ -16,6 +16,7 @@ import {
   todayHeadline,
   weekHoursLabel,
   weekLoadLabel,
+  weekLedgerNote,
   workoutLoad,
 } from '../src/utils/today.ts'
 
@@ -282,4 +283,12 @@ test('suggestion inputs: copy and icons per kind', () => {
     rideTogether: undefined,
   })
   assert.equal(pickSuggestion(buildSuggestionInputs({ ftpTest: { message: 'm' } })).kind, 'ftp-test')
+})
+
+test('week ledger note: carried and forgiven load, whole numbers, empty when neither', () => {
+  assert.equal(weekLedgerNote(undefined), '')
+  assert.equal(weekLedgerNote({}), '')
+  assert.equal(weekLedgerNote({ carriedTss: 11.6 }), '+12 TSS carried')
+  assert.equal(weekLedgerNote({ forgivenTss: 8 }), '8 forgiven')
+  assert.equal(weekLedgerNote({ carriedTss: 12, forgivenTss: 8 }), '+12 TSS carried \u00b7 8 forgiven')
 })
