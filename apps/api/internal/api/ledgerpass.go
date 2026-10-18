@@ -39,7 +39,7 @@ func (s *Server) repayLoad(ctx context.Context) {
 		return
 	}
 	seen := map[string]bool{}
-	skipped := 0
+	skipped, pushes := 0, 0
 	for _, g := range goals {
 		if seen[g.Rider] || ctx.Err() != nil {
 			continue
@@ -52,7 +52,12 @@ func (s *Server) repayLoad(ctx context.Context) {
 			skipped++
 			continue
 		}
-		s.repayRider(ctx, g.Rider)
+		if s.repayRider(ctx, g.Rider) {
+			pushes++
+		}
+	}
+	if pushes > 0 {
+		s.logger().Info("load ledger: green-day pushes", "riders", pushes)
 	}
 	if skipped > 0 {
 		s.logger().Warn("load ledger: riders skipped, their rides could not be read", "riders", skipped)
@@ -102,7 +107,9 @@ func (s *Server) ledgerPlanWeek(ctx context.Context, rider, weekStart string) (p
 	return plan, week, "", false, nil
 }
 
-func (s *Server) repayRider(ctx context.Context, rider string) {
+// repayRider reports whether a green-day push was applied, so the pass can
+// count them without naming the riders.
+func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool) {
 	now := s.localNow()
 	today := now.Format(dateLayout)
 	monday := periodization.MondayOf(now)
@@ -211,7 +218,6 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 	// A good morning is the cheapest place to pay load back: today's session is
 	// raised first, and only what is still owed goes on to later days. A failure
 	// here never stops the repayment below.
-	pushed := false
 	if gain := s.greenPush(ctx, rider, today, in, byID, profile); gain > 0 {
 		debt -= gain
 		in.Debt = debt
@@ -238,8 +244,10 @@ func (s *Server) repayRider(ctx context.Context, rider string) {
 			}
 		}
 	}
-	// Counts only: a TSS next to a rider's name is a fitness value.
-	s.logger().Info("load repaid", "rider", rider, "sessions", applied, "greenPush", pushed)
+	// Counts only: a TSS next to a rider's name is a fitness value, and a green
+	// push beside a name would reveal the day's readiness verdict.
+	s.logger().Info("load repaid", "rider", rider, "sessions", applied)
+	return pushed
 }
 
 // greenPush raises today's session when readiness says push and the week owes
@@ -261,6 +269,11 @@ func (s *Server) greenPush(ctx context.Context, rider, today string, in ledger.R
 	}
 	a := ledger.PlanGreenPush(in, today)
 	if a == nil {
+		return 0
+	}
+	// A session already ridden has nothing left to raise: rewriting it would
+	// change a record of what was done. The same test readiness easing uses.
+	if adapter.WorkoutDone(byID[a.WorkoutID], sessions) {
 		return 0
 	}
 	gain, err := s.applyRepayment(ctx, rider, byID[a.WorkoutID], profile, *a, in.Debt)

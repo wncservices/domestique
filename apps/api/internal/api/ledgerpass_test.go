@@ -961,3 +961,144 @@ func TestGreenPushedIndoorSessionStaysIndoor(t *testing.T) {
 		t.Errorf("the indoor form gained nothing")
 	}
 }
+
+func captureLogs(h *ledgerHarness) *bytes.Buffer {
+	var logs bytes.Buffer
+	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	}))
+	return &logs
+}
+
+// A session already ridden has nothing left to raise.
+func TestPushMorningDoesNotRaiseASessionAlreadyRidden(t *testing.T) {
+	h := newLedgerPushHarness(t)
+	ctx := context.Background()
+	orig := plantTodaysTempo(t, h.ledgerHarness, "2026-10-07", 3, 4)
+	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "wed", Sport: "cycling", Date: "2026-10-07",
+		DurationSeconds: workout.PlannedSeconds(orig.Steps), TrainingLoad: 60,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	goodMorning(t, h.ledgerHarness, 7, h.push.garmin)
+
+	h.at(7, 7, 0)
+	h.tick()
+
+	got, _ := h.store.GetWorkout(ctx, orig.ID)
+	if greenPushed(got) || got.Level != orig.Level || got.Name != orig.Name || got.Description != orig.Description {
+		t.Errorf("a ridden session was raised: %q level %v %v", got.Name, got.Level, got.Flags.AdaptedRules)
+	}
+	var n int
+	if err := h.conn.QueryRow(`SELECT COUNT(1) FROM adjustments WHERE rule = ?`, string(why.GreenPush)).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("green_push rows = %d, want 0", n)
+	}
+}
+
+// What the push added is no longer owed: the repayment that follows works from
+// the remainder, so the two together never exceed the debt.
+func TestGreenPushGainIsSubtractedFromTheDebtBeforeLaterRepayment(t *testing.T) {
+	h := newLedgerPushHarness(t)
+	ctx := context.Background()
+	orig := plantTodaysTempo(t, h.ledgerHarness, "2026-10-07", 3, 4)
+	goodMorning(t, h.ledgerHarness, 7, h.push.garmin)
+	logs := captureLogs(h.ledgerHarness)
+
+	h.at(7, 7, 0)
+	h.tick()
+
+	week := h.thisWeek(t)
+	ids := make([]string, 0, len(week))
+	for _, w := range week {
+		ids = append(ids, w.ID)
+	}
+	adj, err := h.store.LatestAdjustments(ctx, "wilant", workout.SubjectWorkout, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, ok := adj[orig.ID]
+	if !ok || push.Rule != why.GreenPush {
+		t.Fatalf("no green push on today's session: %+v", push)
+	}
+	pin := decodeInputs[why.GreenPushInputs](t, push)
+	remainder := pin.DebtBefore - pin.TSSAdded
+	repays := 0
+	for id, a := range adj {
+		if id == orig.ID || a.Rule != why.LoadRepaid {
+			continue
+		}
+		repays++
+		in := decodeInputs[why.LoadRepaidInputs](t, a)
+		if in.DebtBefore > remainder+1e-6 {
+			t.Errorf("a later repayment started from a debt of %.2f, above the %.2f left after the push", in.DebtBefore, remainder)
+		}
+	}
+	if repays == 0 {
+		t.Fatalf("setup: nothing was repaid after the push (debt %.1f, pushed %.1f)", pin.DebtBefore, pin.TSSAdded)
+	}
+	if strings.Contains(logs.String(), "greenPush") {
+		t.Errorf("a log line carries the green-push flag next to a rider:\n%s", logs.String())
+	}
+}
+
+// Rest wins over a green push: the push raised today's ride on the morning
+// pass, then a check-in of legs = 1 turns it into a recovery ride.
+func TestRestOverridesAGreenPush(t *testing.T) {
+	h := newLedgerPushHarness(t)
+	ctx := context.Background()
+	profile, _, _ := h.store.GetProfile(ctx, "wilant")
+	for _, w := range h.thisWeek(t) {
+		switch w.Date {
+		case "2026-10-07":
+			if err := h.store.DeleteWorkout(ctx, w.ID); err != nil {
+				t.Fatal(err)
+			}
+		case "2026-10-05", "2026-10-06":
+			// Edited by the rider and not ridden: the week still owes it, but the
+			// missed-session rule leaves it be instead of moving it onto the
+			// easy day this test is about.
+			w.Description = "Mine."
+			f := workout.LegacyFlags(w)
+			if _, err := h.store.UpdateWorkout(ctx, w.ID, workout.UpdateWorkoutRequest{Description: &w.Description, Flags: &f}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	req := scheduler.BuildEnduranceSession(1, false, model.SportCycling, profile)
+	req.Rider, req.GoalID, req.Date = "wilant", h.goal.ID, "2026-10-07"
+	req.Description = scheduler.GeneratedDescription
+	orig, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(req))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.backdate(t)
+	goodMorning(t, h.ledgerHarness, 7, h.push.garmin)
+
+	h.at(7, 7, 0)
+	h.tick()
+	pushed, _ := h.store.GetWorkout(ctx, orig.ID)
+	if !greenPushed(pushed) || workout.PlannedSeconds(pushed.Steps) <= workout.PlannedSeconds(orig.Steps) {
+		t.Fatalf("setup: the endurance ride was not raised: %v %v s", pushed.Flags.AdaptedRules, workout.PlannedSeconds(pushed.Steps))
+	}
+
+	if err := h.store.SaveCheckIn(ctx, workout.CheckIn{Rider: "wilant", Date: "2026-10-07", Legs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	h.at(7, 13, 0)
+	h.tick()
+
+	got, _ := h.store.GetWorkout(ctx, orig.ID)
+	if got.Name != "Recovery ride" || workout.PlannedSeconds(got.Steps) != 2700 {
+		t.Fatalf("session = %q %v s, want a 45-minute Recovery ride after the check-in", got.Name, workout.PlannedSeconds(got.Steps))
+	}
+}

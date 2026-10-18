@@ -557,7 +557,7 @@ func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession
 		}
 		// A routed ride is given up for nothing: taking its slot deletes it, and
 		// the rider chose that route for that day. Readiness easing may shorten
-		// it, but never remove it.
+		// it (unless it is routed, then it is left alone), but never remove it.
 		if w.RouteSlug != "" {
 			continue
 		}
