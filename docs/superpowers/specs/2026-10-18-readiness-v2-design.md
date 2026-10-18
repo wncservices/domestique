@@ -1,6 +1,6 @@
 # Readiness v2 — design (sub-project 3)
 
-Status: approved 2026-10-18. This is the detailed design for section 3 of
+Status: shipped 2026-10-18. This is the detailed design for section 3 of
 `2026-10-18-adaptive-training-builder-design.md`, plus the green-day push deferred
 from the load ledger.
 
