@@ -399,8 +399,9 @@ table; `internal/mailer` sends.
   weekday) when it falls in the coming six days; the suggester never picks today. A day
   inside a life event is "a planned break" (never which kind: illness is health data),
   with no FTP line; a session the rider kept on it is still listed.
-- **The check-in link**: the email ends with "Answer today's check-in: <AppURL>/today". The
-  verdict word for Push is "Good to push"; still one word, still no reasons.
+- **The check-in link**: "Answer today's check-in: <AppURL>/today" is the first of three footer
+  links (then "Open the plan", then "Change or turn off this email"), written only when
+  `public_url` is set. The verdict word for Push is "Good to push"; still one word, no reasons.
 - **Logs**: a rider's name, and for a failure the stage and the numeric code. Never the address,
   the subject, the verdict or a reason. The password is `DOMESTIQUE_SMTP_PASSWORD`, read in `main`
   and held by the mailer alone. `domestique_morning_summary_total{result="sent|failed"}` is the
@@ -416,13 +417,17 @@ table; `internal/mailer` sends.
 `internal/readiness/v2.go` `Evaluate` turns signals into a verdict. Each signal has a source
 (`hrv`, `sleep`, `resting_hr`, `garmin`, `load`, `subjective`) and a severity (amber, severe).
 **Rest on any severe; Caution only when ambers come from at least two sources; a single amber is
-listed but acts on nothing**, so one noisy reading can no longer ease a session. **Push** is the
-green light (HRV at or above the rider's own usual, nothing amber). HRV is judged against the
+listed but acts on nothing**, so one noisy reading can no longer ease a session. **Push** (`isPush`) needs no
+severe or amber signal and all of: today's data present; an HRV band whose 7-night mean is at or
+above its centre; a 28-night sleep median with last night's sleep at or above it; and no poor-legs
+check-in (an answered check-in needs legs 3 or more). HRV is judged against the
 rider's own band (at least 14 nights in the 60 before today, ln mean +/- 0.5 SD); where a band
 exists Garmin's HRV status strings are not used. Sleep debt is measured against the rider's own
 28-night median. The adapter acts on today's generated endurance or long cycling ride:
 Caution shortens it to max(80%, 30 min) keeping its name, Rest swaps it for a 45-minute
-"Recovery ride"; hard-session rules are unchanged. The **morning check-in** (`daily_checkins`,
+"Recovery ride"; hard-session rules are unchanged. Check-in
+severity (`checkInSignal`): legs 1 is severe; a 2 on legs, or a mood or sleep quality of 2 or 1,
+is amber; the other thresholds are in `v2.go`. The **morning check-in** (`daily_checkins`,
 in `riderTables`; `GET/PUT /api/training/checkin`) holds scores 1-5 (0 unanswered) and a note of
 at most 500 characters. The rider comes from the session and the date is `localToday`, never
 the body. The note is never logged or emailed. A check-in feeds the live readiness path only, not
@@ -591,8 +596,9 @@ them or their Garmin session has expired: rides the app has not seen must not re
 illness return ramp (`lifeevents.NoTestDays`) is off-limits for repayment and does not count as an
 open day, so its easing is never debt. **Green push** (`ledger.PlanGreenPush`, called
 from `ledgerpass.go`): on a morning readiness says Push, with debt over `MinDebt`, today's
-repayable session goes one rung up (capped at floor(level)+1) or is lengthened under the
-repayment caps. Rule `green_push`, ignored by `EasedBy` like `load_repaid`; its gain is
+repayable session goes one rung up (the lower of floor(session level)+1 and floor(rider's zone
+level)+1) or, if endurance, is lengthened under the repayment caps. A recovery or taper week, or
+a session that is not repayable, gets no push. Rule `green_push`, ignored by `EasedBy` like `load_repaid`; its gain is
 subtracted from the debt before later days are repaid; it does not consume `upgraded_at`;
 the marker is "Pushed on a good day." with no figure. Logs carry counts only, never a TSS beside a rider.
 
