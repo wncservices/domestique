@@ -77,6 +77,11 @@ type Signal struct {
 	Label   string    `json:"label"`
 	Value   string    `json:"value"`
 	Numbers []float64 `json:"numbers,omitempty"`
+	// Source (hrv, sleep, resting_hr, garmin, load, subjective) and Severity
+	// (amber, severe) say which kind of evidence this is and how strong:
+	// the verdict counts distinct sources, not signals.
+	Source   string `json:"source,omitempty"`
+	Severity string `json:"severity,omitempty"`
 }
 
 // ReadinessInputs is shared by the three readiness rules: today's rest and

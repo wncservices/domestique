@@ -56,14 +56,14 @@ func TestReadinessScoreBoundaries(t *testing.T) {
 		reason  string
 	}{
 		{24, Rest, "Garmin readiness is poor (24)"},
-		{25, Caution, "Garmin readiness is low (25)"},
-		{49, Caution, "Garmin readiness is low (49)"},
+		{25, Ready, "Garmin readiness is low (25)"},
+		{49, Ready, "Garmin readiness is low (49)"},
 		{50, Ready, ""},
 	}
 	for _, c := range cases {
 		today := Day{Date: "2026-09-28", Present: true, ReadinessScore: c.score, ReadinessLevel: "GOOD"}
 		got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
-		if c.verdict == Ready {
+		if c.reason == "" {
 			assertAssessment(t, got, Ready)
 		} else {
 			assertAssessment(t, got, c.verdict, c.reason)
@@ -80,7 +80,7 @@ func TestReadinessLevelPoorFiresRestEvenWithNoScore(t *testing.T) {
 func TestReadinessLevelLowFiresCautionEvenWithNoScore(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, ReadinessLevel: "LOW"}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
-	assertAssessment(t, got, Caution, "Garmin readiness is low")
+	assertAssessment(t, got, Ready, "Garmin readiness is low")
 }
 
 // --- HRV ------------------------------------------------------------------
@@ -96,19 +96,19 @@ func TestHRVLowOneNightOnlyFiresCaution(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "LOW"}
 	history := []Day{{Date: "2026-09-27", HRVStatus: "BALANCED"}}
 	got := Assess(today, history, nil, "", nil, date("2026-09-28"))
-	assertAssessment(t, got, Caution, "HRV is low today")
+	assertAssessment(t, got, Ready, "HRV is low today")
 }
 
 func TestHRVLowTodayWithNoYesterdayRowFiresCautionNotRest(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "POOR"}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
-	assertAssessment(t, got, Caution, "HRV is poor today")
+	assertAssessment(t, got, Ready, "HRV is poor today")
 }
 
 func TestHRVUnbalancedTodayFiresCaution(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "UNBALANCED"}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
-	assertAssessment(t, got, Caution, "HRV is unbalanced today")
+	assertAssessment(t, got, Ready, "HRV is unbalanced today")
 }
 
 func TestHRVBalancedNeverFires(t *testing.T) {
@@ -127,14 +127,14 @@ func TestSleepScoreBoundaries(t *testing.T) {
 		reason  string
 	}{
 		{39, Rest, "you slept 5h10 (sleep score 39)"},
-		{40, Caution, "you slept 5h10 (sleep score 40)"},
-		{59, Caution, "you slept 5h10 (sleep score 59)"},
+		{40, Ready, "you slept 5h10 (sleep score 40)"},
+		{59, Ready, "you slept 5h10 (sleep score 59)"},
 		{60, Ready, ""},
 	}
 	for _, c := range cases {
 		today := Day{Date: "2026-09-28", Present: true, SleepSeconds: 5*3600 + 10*60, SleepScore: c.score}
 		got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
-		if c.verdict == Ready {
+		if c.reason == "" {
 			assertAssessment(t, got, Ready)
 		} else {
 			assertAssessment(t, got, c.verdict, c.reason)
@@ -176,14 +176,14 @@ func TestRestingHRDeltaBoundaries(t *testing.T) {
 		reason  string
 	}{
 		{55, Ready, ""}, // +3
-		{56, Caution, "resting heart rate is 4 above your usual 52"}, // +4
-		{58, Caution, "resting heart rate is 6 above your usual 52"}, // +6
-		{59, Rest, "resting heart rate is 7 above your usual 52"},    // +7
+		{56, Ready, "resting heart rate is 4 above your usual 52"}, // +4
+		{58, Ready, "resting heart rate is 6 above your usual 52"}, // +6
+		{59, Rest, "resting heart rate is 7 above your usual 52"},  // +7
 	}
 	for _, c := range cases {
 		today := Day{Date: "2026-09-28", Present: true, RestingHR: c.rhr}
 		got := Assess(today, history, nil, "", nil, date("2026-09-28"))
-		if c.verdict == Ready {
+		if c.reason == "" {
 			assertAssessment(t, got, Ready)
 		} else {
 			assertAssessment(t, got, c.verdict, c.reason)
@@ -301,7 +301,7 @@ func TestACWRSparseScheduleFiresWhenHistoryReachesTwentyOneDays(t *testing.T) {
 		loads = append(loads, Load{Date: yesterday.AddDate(0, 0, -off).Format(dateLayout), Load: 150})
 	}
 	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, today)
-	if got.Verdict != Caution {
+	if got.Verdict != Ready || len(got.Reasons) != 1 {
 		t.Fatalf("verdict = %q, reasons = %v", got.Verdict, got.Reasons)
 	}
 }
@@ -338,7 +338,7 @@ func TestACWRBoundary(t *testing.T) {
 	l7Over := 3150.0 / 17.5 // solves l7/((7l7+2100)/28) = 1.5 exactly
 	loadsOver := buildLoads(l7Over, l28)
 	got = Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loadsOver, date("2026-09-28"))
-	if got.Verdict != Caution {
+	if got.Verdict != Ready {
 		t.Fatalf("at ratio 1.5: verdict = %q, reasons = %v", got.Verdict, got.Reasons)
 	}
 	if len(got.Reasons) != 1 || got.Reasons[0] != "your load this week is 1.5× your usual" {
@@ -360,7 +360,7 @@ func TestACWRMissingDaysCountAsZeroLoad(t *testing.T) {
 		loads = append(loads, Load{Date: base.AddDate(0, 0, -i).Format(dateLayout), Load: 10})
 	}
 	got := Assess(Day{Date: "2026-09-28", Present: true}, nil, nil, "", loads, date("2026-09-28"))
-	if got.Verdict != Caution {
+	if got.Verdict != Ready || len(got.Reasons) != 1 {
 		t.Fatalf("verdict = %q, reasons = %v", got.Verdict, got.Reasons)
 	}
 }

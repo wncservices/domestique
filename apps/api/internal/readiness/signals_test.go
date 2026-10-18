@@ -11,7 +11,7 @@ func TestHRVRestSignalCarriesBothNightsAndTheUsualValue(t *testing.T) {
 	history := []Day{{Date: "2026-09-27", Present: true, HRVStatus: "POOR", HRVLastNight: 38}}
 	got := Assess(today, history, nil, "", nil, date("2026-09-28"))
 	assertAssessment(t, got, Rest, "HRV has been low for two nights")
-	want := []Signal{{Kind: "hrv", Label: "HRV low two nights", Value: "38, 41 ms vs usual 52", Numbers: []float64{38, 41, 52}}}
+	want := []Signal{{Kind: "hrv", Label: "HRV low two nights", Value: "38, 41 ms vs usual 52", Numbers: []float64{38, 41, 52}, Source: "hrv", Severity: "severe"}}
 	if !reflect.DeepEqual(got.Signals, want) {
 		t.Errorf("signals = %#v, want %#v", got.Signals, want)
 	}
@@ -20,8 +20,8 @@ func TestHRVRestSignalCarriesBothNightsAndTheUsualValue(t *testing.T) {
 func TestHRVCautionSignalShowsTonightsReading(t *testing.T) {
 	today := Day{Date: "2026-09-28", Present: true, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52}
 	got := Assess(today, nil, nil, "", nil, date("2026-09-28"))
-	assertAssessment(t, got, Caution, "HRV is unbalanced today")
-	want := []Signal{{Kind: "hrv", Label: "HRV unbalanced", Value: "41 ms vs usual 52", Numbers: []float64{41, 52}}}
+	assertAssessment(t, got, Ready, "HRV is unbalanced today")
+	want := []Signal{{Kind: "hrv", Label: "HRV unbalanced", Value: "41 ms vs usual 52", Numbers: []float64{41, 52}, Source: "hrv", Severity: "amber"}}
 	if !reflect.DeepEqual(got.Signals, want) {
 		t.Errorf("signals = %#v, want %#v", got.Signals, want)
 	}
