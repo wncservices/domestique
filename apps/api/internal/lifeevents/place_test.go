@@ -8,6 +8,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -611,5 +612,55 @@ func TestACrewRideIsLeftAloneAsTheCrews(t *testing.T) {
 	}
 	if reason != "It is your crew's ride, so it was left alone." {
 		t.Errorf("reason = %q", reason)
+	}
+}
+
+func TestGoalOrphanedSessionsAreTheRidersToPlace(t *testing.T) {
+	p := &planner{in: Input{}}
+	orphan := easy("o", "2026-10-09", 60)
+	orphan.GoalID = ""
+	if got := p.eligibility(orphan); got != ineligibleBuilt {
+		t.Errorf("orphaned plan session eligibility = %v, want ineligibleBuilt", got)
+	}
+	ramped := easy("r", "2026-10-09", 60)
+	ramped.Flags = workout.Flags{Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.LifeEvent}}
+	if !lifeRamped(ramped) {
+		t.Fatal("setup: a life-ramped plan session")
+	}
+	ramped.GoalID = ""
+	if lifeRamped(ramped) {
+		t.Error("lifeRamped must need a goal")
+	}
+}
+
+func TestLifeRampedAndTouchedTable(t *testing.T) {
+	plan := func(f workout.Flags) workout.Workout {
+		f.Origin = workout.OriginPlan
+		return workout.Workout{GoalID: "g", Flags: f}
+	}
+	cases := []struct {
+		name    string
+		w       workout.Workout
+		ramped  bool
+		touched bool
+	}{
+		{"untouched", plan(workout.Flags{}), false, false},
+		{"life ramp", plan(workout.Flags{AdaptedRules: []why.Rule{why.LifeEvent}}), true, true},
+		{"illness ramp", plan(workout.Flags{AdaptedRules: []why.Rule{why.IllnessRamp}}), true, true},
+		{"readiness easing", plan(workout.Flags{AdaptedRules: []why.Rule{why.ReadinessRest}}), false, false},
+		{"ramp then easing", plan(workout.Flags{AdaptedRules: []why.Rule{why.LifeEvent, why.ReadinessRest}}), false, true},
+		{"ramp but swapped", plan(workout.Flags{Swapped: true, AdaptedRules: []why.Rule{why.LifeEvent}}), false, true},
+		{"moved by life", plan(workout.Flags{MovedBy: workout.MovedByLife}), false, true},
+		{"moved by rider", plan(workout.Flags{MovedBy: workout.MovedByRider}), false, false},
+		{"kept through life", plan(workout.Flags{Kept: workout.KeptLife}), false, true},
+		{"kept around crew", plan(workout.Flags{Kept: workout.KeptCrew}), false, false},
+	}
+	for _, c := range cases {
+		if got := lifeRamped(c.w); got != c.ramped {
+			t.Errorf("%s: lifeRamped = %v, want %v", c.name, got, c.ramped)
+		}
+		if got := Touched(c.w); got != c.touched {
+			t.Errorf("%s: Touched = %v, want %v", c.name, got, c.touched)
+		}
 	}
 }

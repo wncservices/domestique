@@ -102,7 +102,7 @@ func Plannable(w workout.Workout) bool {
 	if w.CrewRideID != "" {
 		return false
 	}
-	if w.Flags.Origin != workout.OriginPlan {
+	if w.GoalID == "" || w.Flags.Origin != workout.OriginPlan {
 		return false
 	}
 	if w.TestProtocol != "" {

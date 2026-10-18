@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -154,4 +155,37 @@ func TestPredicatesIgnoreDescriptionText(t *testing.T) {
 func legacy(w workout.Workout) workout.Workout {
 	w.Flags = workout.LegacyFlags(w)
 	return w
+}
+
+func TestIsPlanMadeAndAutoReplaceableTable(t *testing.T) {
+	plan := func(mut func(*workout.Workout)) workout.Workout {
+		w := workout.Workout{GoalID: "g", Flags: workout.Flags{Origin: workout.OriginPlan}}
+		if mut != nil {
+			mut(&w)
+		}
+		return w
+	}
+	cases := []struct {
+		name           string
+		w              workout.Workout
+		planMade, auto bool
+	}{
+		{"plain", plan(nil), true, true},
+		{"adapted", plan(func(w *workout.Workout) { w.Flags.AdaptedRules = []why.Rule{why.ReadinessRest} }), true, true},
+		{"routed", plan(func(w *workout.Workout) { w.RouteSlug = "loop" }), false, false},
+		{"swapped", plan(func(w *workout.Workout) { w.Flags.Swapped = true }), false, false},
+		{"kept", plan(func(w *workout.Workout) { w.Flags.Kept = workout.KeptLife }), true, false},
+		{"crew ride", plan(func(w *workout.Workout) { w.CrewRideID = "r" }), false, false},
+		{"goal gone", plan(func(w *workout.Workout) { w.GoalID = "" }), false, false},
+		{"rider origin", plan(func(w *workout.Workout) { w.Flags.Origin = workout.OriginRider }), false, false},
+		{"no flags", workout.Workout{GoalID: "g"}, false, false},
+	}
+	for _, c := range cases {
+		if got := IsPlanMade(c.w); got != c.planMade {
+			t.Errorf("%s: IsPlanMade = %v, want %v", c.name, got, c.planMade)
+		}
+		if got := AutoReplaceable(c.w); got != c.auto {
+			t.Errorf("%s: AutoReplaceable = %v, want %v", c.name, got, c.auto)
+		}
+	}
 }

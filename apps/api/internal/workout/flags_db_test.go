@@ -225,3 +225,32 @@ func TestParityCheckAcceptsMatch(t *testing.T) {
 		}
 	})
 }
+
+// An unlinked session is the rider's, as LegacyFlags reads it (no goal means not
+// the plan's), so deleting a goal must not leave origin plan behind.
+func TestDeleteGoalMakesUnlinkedPlanSessionsTheRiders(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *DB) {
+		ctx := t.Context()
+		g, err := db.CreateGoal(ctx, CreateGoalRequest{Rider: "wilant", Name: "Race Day"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := db.CreateWorkout(ctx, CreateWorkoutRequest{
+			Rider: "wilant", Name: "Tempo", Sport: model.SportCycling, Date: "2026-10-05", Steps: exampleSteps(),
+			GoalID: g.ID, Description: GeneratedDescription, Flags: Flags{Origin: OriginPlan},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.DeleteGoal(ctx, g.ID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := db.GetWorkout(ctx, w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.GoalID != "" || got.Flags.Origin != OriginRider {
+			t.Errorf("after DeleteGoal goal %q origin %q, want no goal and rider", got.GoalID, got.Flags.Origin)
+		}
+	})
+}

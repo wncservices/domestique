@@ -490,3 +490,11 @@ func TestShorterAndLongerPerRungOnANonMonotoneLadder(t *testing.T) {
 		}
 	}
 }
+
+func TestAGoalOrphanedPlanSessionIsNotPlannable(t *testing.T) {
+	w := planned(t, model.SportCycling, "threshold", 5)
+	w.GoalID = ""
+	if Plannable(w) {
+		t.Error("a plan-origin session whose goal is gone was plannable")
+	}
+}

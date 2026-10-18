@@ -1150,6 +1150,11 @@ func (d *DB) DeleteGoal(ctx context.Context, id string) error {
 	// planned session stays real even if the race it was built for falls
 	// through — just unlinked, the same "make it orphaned, not gone"
 	// choice routes make when the crew they were shared to disappears.
+	// An unlinked session is the rider's from here on (LegacyFlags reads no goal
+	// as not the plan's), so a plan-origin one becomes rider-origin with it.
+	if _, err = tx.ExecContext(ctx, d.query(`UPDATE workouts SET origin = 'rider' WHERE goal_id = ? AND origin = 'plan'`), id); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, d.query(`UPDATE workouts SET goal_id = '' WHERE goal_id = ?`), id); err != nil {
 		return err
 	}
