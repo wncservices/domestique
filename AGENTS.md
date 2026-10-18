@@ -822,6 +822,10 @@ plan behind their back. Design: `docs/superpowers/specs/2026-09-29-crew-planning
   **recomputes the diff on the server**, honours `skip`, and runs under the scheduling
   advisory lock (`withDBLock`, 409 with Replan's wording when the tick holds it). A
   failed apply compensates (`rollBackGoing`); the stores share no transaction.
+- **A crew ride's length in the rider's plan** is `routefit.EstimateSeconds` at the ride's
+  intensity factor (0.65) when the rider has an FTP and a weight (`crewRideSeconds`), else
+  `crewplan.EstimateRoute`'s length-and-ascent figure, which the crew-wide ride list always
+  shows. The join preview and the stored session use the same function.
 - **The preview and the fill must agree.** `crewplan.Preview` and
   `scheduler.WithFixed` drop the same slots; `TestThePreviewRemovesExactlyTheDaysTheFillDrops`
   holds them together. Change one, change the other.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/crewplan"
+	"github.com/wncservices/domestique/apps/api/internal/routefit"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -405,5 +407,41 @@ func TestAutoPushNeverSendsACrewRide(t *testing.T) {
 		if strings.Contains(name, "Crew ride") {
 			t.Errorf("a crew ride was auto-pushed: %q", name)
 		}
+	}
+}
+
+// A rider with an FTP and a weight gets their crew ride sized by the pacing
+// model (routefit.EstimateSeconds, the one function a route's time comes
+// from), not the crew-wide length-and-ascent guess; anyone else keeps that.
+func TestJoiningSizesTheCrewRideWithThePacingModelWhenTheRiderHasFTPAndWeight(t *testing.T) {
+	h := newCrewPlanHarness(t)
+	s := h.setup()
+	h.planFor("wilant")
+	ctx := context.Background()
+	if _, err := h.training.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", FTPWatts: 300, HoursPerAvailableDay: 2, AvailableDays: []string{"tue", "thu", "sat", "sun"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.training.SetWeight(ctx, "wilant", 68); err != nil {
+		t.Fatal(err)
+	}
+	points, err := h.db.Track(ctx, s.route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := routefit.EstimateSeconds(points, routefit.Rider{FTP: 300, WeightKg: 68}, 0.65)
+
+	h.mustGo("wilant", s.ride)
+	row, ok := h.fixedRow("wilant", s.ride)
+	if !ok {
+		t.Fatal("no fixed session")
+	}
+	got := workout.PlannedSeconds(row.Steps)
+	if got != math.Round(want) {
+		t.Errorf("planned %v s, want the pacing model's %v s", got, math.Round(want))
+	}
+	if got == s.est.Seconds() {
+		t.Errorf("planned %v s is the crew-wide guess; the rider's FTP and weight were ignored", got)
 	}
 }

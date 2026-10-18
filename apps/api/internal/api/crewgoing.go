@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crewplan"
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/routefit"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -209,7 +212,7 @@ func (s *Server) planCrewRide(ctx context.Context, in goingInput) (crewPlan, err
 	ride := crewplan.Ride{ID: in.ride.ID, Date: in.ride.Date}
 	if in.want {
 		ride.RouteName = in.route.Name
-		ride.Seconds = crewplan.EstimateRoute(in.route.Stats).Seconds()
+		ride.Seconds = s.crewRideSeconds(ctx, in.rider, in.route)
 	} else if in.existing != nil {
 		ride.RouteName = strings.TrimPrefix(in.existing.Name, crewRideNamePrefix)
 		ride.Seconds = workout.PlannedSeconds(in.existing.Steps)
@@ -624,4 +627,28 @@ func (s *Server) easeAroundCrewRides(ctx context.Context, rider string, workouts
 		alreadyChanged[c.WorkoutID] = true
 		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "eased around a crew ride")
 	}
+}
+
+// crewRideSeconds sizes the session joining a crew ride puts in the rider's own
+// plan. A rider with an FTP and a weight gets routefit.EstimateSeconds, the one
+// function a route's time comes from, at the same share of FTP the crew ride is
+// priced at. Anyone else, or a route whose track cannot be read, gets the
+// crew-wide length-and-ascent estimate the ride list shows. The list stays on
+// that estimate: it is one ride shown to every member, read on every load.
+func (s *Server) crewRideSeconds(ctx context.Context, rider string, route model.Route) float64 {
+	fallback := crewplan.EstimateRoute(route.Stats).Seconds()
+	who, err := s.riderFor(ctx, rider)
+	if err != nil || who.FTP <= 0 || who.WeightKg <= 0 {
+		return fallback
+	}
+	points, err := s.Source.Track(ctx, route.Slug)
+	if err != nil {
+		s.logger().Warn("crew ride sized by the group estimate: track unreadable", "rider", rider, "err", err)
+		return fallback
+	}
+	sec, _ := routefit.EstimateSeconds(points, who, crewplan.IntensityFactor)
+	if sec <= 0 {
+		return fallback
+	}
+	return math.Round(sec)
 }
