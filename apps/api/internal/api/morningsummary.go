@@ -382,6 +382,12 @@ func (s *Server) morningSummaryInput(ctx context.Context, rider string, now time
 		in.Verdict = s.assessReadinessAt(ctx, rider, sessions, latest, now).Verdict
 	}
 
+	if blackout, err := s.blackoutFor(ctx, rider); err != nil {
+		s.logger().Warn("morning summary: could not read life events", "err", err)
+	} else {
+		in.Break = blackout[today]
+	}
+
 	in.Eased = s.sessionEasedToday(ctx, rider, today, todays)
 	if !in.Ridden {
 		in.Weather = s.todaysWeatherReasons(ctx, rider, now, workouts, ridden)

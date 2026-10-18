@@ -23,7 +23,7 @@ export interface EffortLine {
 export interface EffortSummary {
   /** One of the five headline phrases below. */
   label: string
-  tone: 'success' | 'warning' | 'error'
+  tone: 'good' | 'behind' | 'neutral'
   icon: string
   efforts: EffortLine[]
 }
@@ -91,15 +91,15 @@ export function summariseEfforts(steps: AnalysisStep[] | undefined): EffortSumma
 
   // Five steps, best first. "Close" means every effort was on target or
   // within 10% of it; past that, the side most efforts missed on names it.
-  if (on === n) return { label: 'On target', tone: 'success', icon: 'i-lucide-target', efforts }
+  if (on === n) return { label: 'On target', tone: 'good', icon: 'i-lucide-target', efforts }
   if (near === n) {
     return on * 2 >= n
-      ? { label: 'Mostly on target', tone: 'success', icon: 'i-lucide-target', efforts }
-      : { label: low >= high ? 'Just under target' : 'Just over target', tone: 'warning', icon: low >= high ? 'i-lucide-arrow-down-right' : 'i-lucide-arrow-up-right', efforts }
+      ? { label: 'Mostly on target', tone: 'good', icon: 'i-lucide-target', efforts }
+      : { label: low >= high ? 'Just under target' : 'Just over target', tone: low >= high ? 'behind' : 'neutral', icon: low >= high ? 'i-lucide-arrow-down-right' : 'i-lucide-arrow-up-right', efforts }
   }
   return low >= high
-    ? { label: 'Below target', tone: 'error', icon: 'i-lucide-arrow-down', efforts }
-    : { label: 'Above target', tone: 'warning', icon: 'i-lucide-arrow-up', efforts }
+    ? { label: 'Below target', tone: 'behind', icon: 'i-lucide-arrow-down', efforts }
+    : { label: 'Above target', tone: 'neutral', icon: 'i-lucide-arrow-up', efforts }
 }
 
 export const GRADE_LABEL: Record<EffortGrade, string> = {

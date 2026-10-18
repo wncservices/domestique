@@ -127,3 +127,28 @@ func TestSummarySaysWhenAdaptationAlreadyEasedTheSession(t *testing.T) {
 		t.Fatalf("mails = %+v", mails)
 	}
 }
+
+// A day inside a life event is "a planned break" in the email, and the kind of
+// event, here an illness, never reaches the mailbox.
+func TestSummaryOnALifeEventDaySaysBreakWithoutTheKind(t *testing.T) {
+	h, notif, _ := summaryOnWeatherHarness(t)
+	if _, err := h.training.CreateLifeEvent(t.Context(), workout.LifeEvent{
+		Rider: "alice", Kind: "illness", Option: "proper", Start: "2026-03-24", End: "2026-03-26", Note: "flu-private-note",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.RunMetricsSyncIfMissed(t.Context())
+	mails := notif.mails()
+	if len(mails) != 1 {
+		t.Fatalf("mails = %+v", mails)
+	}
+	if mails[0].subject != "Domestique: a planned break today" || !strings.Contains(mails[0].body, "planned break") {
+		t.Errorf("subject %q body:\n%s", mails[0].subject, mails[0].body)
+	}
+	for _, banned := range []string{"illness", "flu", "Rest day"} {
+		if strings.Contains(strings.ToLower(mails[0].subject+mails[0].body), strings.ToLower(banned)) {
+			t.Errorf("%q reached the email", banned)
+		}
+	}
+}

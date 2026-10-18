@@ -310,13 +310,16 @@ async function buildMaxHRTest() {
 
 const fitness = ref<FitnessResponse | null>(null)
 const loadingFitness = ref(false)
+const fitnessFailed = ref(false)
 const syncingMetrics = ref(false)
 
 async function loadFitness() {
   loadingFitness.value = true
+  fitnessFailed.value = false
   try {
     fitness.value = await api.fitness()
   } catch (err) {
+    fitnessFailed.value = true
     toast.add({ title: 'Could not load fitness history', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
   } finally {
     loadingFitness.value = false
@@ -570,9 +573,11 @@ onMounted(() => {
       <FitnessStatusCard
         :fitness="fitness"
         :loading="loadingFitness"
+        :failed="fitnessFailed"
         :syncing="syncingMetrics"
         :needs-setup="needsSetup"
         @sync="syncMetrics"
+        @retry="loadFitness"
       />
 
       <ThresholdSuggestions

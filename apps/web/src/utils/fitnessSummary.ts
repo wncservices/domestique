@@ -41,3 +41,15 @@ export function summaryTiles(fitness: FitnessResponse | null, now = new Date()):
     { label: 'Hours this week', value: `${hours.thisWeek.toFixed(1)} h`, caption: `last week ${hours.lastWeek.toFixed(1)} h`, tone: 'default' },
   ]
 }
+
+export type StatusCardState = 'ready' | 'failed' | 'loading' | 'empty'
+
+/** What the status card shows. History in hand wins, so a failed re-read after
+ *  a sync does not hide numbers the rider can still use; with none, a failed
+ *  read is a failure, never "no data yet", which would send a rider with
+ *  history off to connect a device. */
+export function statusCardState(input: { hasHistory: boolean; loading: boolean; failed: boolean }): StatusCardState {
+  if (input.hasHistory) return 'ready'
+  if (input.failed) return 'failed'
+  return input.loading ? 'loading' : 'empty'
+}

@@ -440,6 +440,13 @@ func (s *Server) applyLifeDiff(ctx context.Context, rider string, plan lifePlan,
 			if err := s.Training.DeleteWorkout(ctx, wk.ID); err != nil && !errors.Is(err, workout.ErrWorkoutNotFound) {
 				return n, err
 			}
+			// Removing a crew ride is the rider leaving it: without this the
+			// crew would keep counting someone whose session is gone.
+			if wk.CrewRideID != "" && s.Schedule != nil {
+				if err := s.Schedule.Leave(ctx, wk.CrewRideID, rider); err != nil {
+					return n, err
+				}
+			}
 			n.Removed++
 		case lifeevents.OpMove:
 			// Its Garmin copy stays: a moved session is the same session, and the

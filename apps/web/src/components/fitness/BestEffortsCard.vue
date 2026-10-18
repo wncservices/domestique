@@ -7,6 +7,7 @@
 import { computed } from 'vue'
 import type { BestEffortsResponse, EffortCell, EffortRow, EffortSport } from '@/api/types'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import { formatEffortCell } from '@/utils/bestEfforts'
 
 const props = defineProps<{ data: BestEffortsResponse | null; loading: boolean; sport: EffortSport }>()
@@ -54,7 +55,7 @@ function cell(row: EffortRow, key: Column['key']): EffortCell | null {
       </div>
     </template>
 
-    <p v-if="loading && !data" class="text-sm text-muted py-4 text-center">Loading your records…</p>
+    <SkeletonCard v-if="loading && !data" :lines="4" label="Loading your records…" />
 
     <p v-else-if="!hasRecords" class="text-sm text-muted py-4 text-center">
       <template v-if="sport === 'cycling'">

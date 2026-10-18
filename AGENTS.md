@@ -386,7 +386,10 @@ table; `internal/mailer` sends.
 - **No readiness reasons, no numbers.** `Compose`'s `Input` carries the verdict as one word and not
   the reasons, so sleep, HRV, resting heart rate and load cannot reach a mailbox on a relay we do
   not control. The email points at the Fitness page for the why. The weather line is the same rule
-  the Plan page uses; the FTP-test line only fires for a suggestion dated today.
+  the Plan page uses. The FTP-test line names the suggested day ("tomorrow" or a
+  weekday) when it falls in the coming six days; the suggester never picks today. A day
+  inside a life event is "a planned break" (never which kind: illness is health data),
+  with no FTP line; a session the rider kept on it is still listed.
 - **Logs**: a rider's name, and for a failure the stage and the numeric code. Never the address,
   the subject, the verdict or a reason. The password is `DOMESTIQUE_SMTP_PASSWORD`, read in `main`
   and held by the mailer alone. `domestique_morning_summary_total{result="sent|failed"}` is the
@@ -828,7 +831,8 @@ plan behind their back. Design: `docs/superpowers/specs/2026-09-29-crew-planning
 - **A crew ride is the crew's day**: it cannot be moved (409), converted indoor, swapped
   for an alternate, or replaced by an FTP test. A crew action (deleting a ride, removing
   a member) never edits a rider's workouts: reads mark the session `orphaned`
-  (`cancelled` / `left`) and the rider updates their own plan by leaving.
+  (`cancelled` / `left`) and the rider updates their own plan by leaving. A life event's
+  removal of a crew ride, which the rider must tick, also takes them off its going list.
 - **Ride together** (`PUT /api/crews/{id}/together`, `GET /api/training/ride-together`,
   `POST .../{id}/accept|decline`): members opt in with weekdays; a proposal for one day
   and one visible route is computed when either rider reads and stored once per crew and

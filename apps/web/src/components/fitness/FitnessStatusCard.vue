@@ -5,20 +5,24 @@
 // available days yet.
 import { computed } from 'vue'
 import type { FitnessResponse } from '@/api/types'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import StatTile from '@/components/ui/StatTile.vue'
 import { formStatus, latestWithDelta } from '@/utils/fitnessMath'
-import { summaryTiles } from '@/utils/fitnessSummary'
+import { statusCardState, summaryTiles } from '@/utils/fitnessSummary'
 
 const props = defineProps<{
   fitness: FitnessResponse | null
   loading: boolean
+  failed: boolean
   syncing: boolean
   needsSetup: boolean
 }>()
 
-const emit = defineEmits<{ sync: [] }>()
+const emit = defineEmits<{ sync: []; retry: [] }>()
 
 const hasHistory = computed(() => (props.fitness?.snapshots.length ?? 0) > 0)
+const state = computed(() => statusCardState({ hasHistory: hasHistory.value, loading: props.loading, failed: props.failed }))
 const tiles = computed(() => summaryTiles(props.fitness))
 const explanation = computed(() => {
   const tsb = latestWithDelta(props.fitness?.snapshots ?? [], 'tsb', 7)
@@ -55,20 +59,30 @@ const explanation = computed(() => {
       :actions="[{ label: 'Set up from my devices', icon: 'i-lucide-refresh-cw', loading: syncing, onClick: () => emit('sync') }]"
     />
 
-    <div v-if="!loading && !hasHistory" class="flex flex-col items-center gap-3 py-8 text-center">
-      <div class="flex size-9 items-center justify-center rounded-lg bg-elevated">
-        <UIcon name="i-lucide-activity" class="size-4 text-muted" />
-      </div>
-      <p class="text-sm text-muted max-w-sm">
-        Connect Garmin or Wahoo in Settings, then sync to see your fitness.
-      </p>
-      <div class="flex gap-2">
+    <SkeletonCard v-if="state === 'loading'" :lines="2" label="Loading your fitness…" />
+
+    <UAlert
+      v-else-if="state === 'failed'"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-triangle-alert"
+      title="Could not load fitness history"
+      :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => emit('retry') }]"
+    />
+
+    <EmptyState
+      v-else-if="state === 'empty'"
+      bare
+      icon="i-lucide-activity"
+      text="Connect Garmin or Wahoo in Settings, then sync to see your fitness."
+    >
+      <template #actions>
         <UButton to="/settings" color="neutral" variant="outline">Open settings</UButton>
         <UButton icon="i-lucide-refresh-cw" :loading="syncing" @click="emit('sync')">Sync now</UButton>
-      </div>
-    </div>
+      </template>
+    </EmptyState>
 
-    <div v-else-if="hasHistory">
+    <div v-else-if="state === 'ready'">
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile v-for="tile in tiles" :key="tile.label" :label="tile.label" :value="tile.value" :caption="tile.caption" :tone="tile.tone" />
       </div>
