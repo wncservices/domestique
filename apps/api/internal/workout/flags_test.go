@@ -92,3 +92,17 @@ func TestCurrentFlagsPrefersStoredColumns(t *testing.T) {
 		t.Errorf("legacy fallback = %+v", got)
 	}
 }
+
+func TestEasedByIgnoresLoadRepaid(t *testing.T) {
+	f := Flags{AdaptedRules: []why.Rule{why.LoadRepaid, why.ReadinessRest, why.LoadRepaid}}
+	got := f.EasedBy()
+	if len(got) != 1 || got[0] != why.ReadinessRest {
+		t.Errorf("EasedBy = %v, want [readiness_rest]", got)
+	}
+	if !f.Adapted() {
+		t.Error("Adapted still means any adaptation")
+	}
+	if len((Flags{AdaptedRules: []why.Rule{why.LoadRepaid}}).EasedBy()) != 0 {
+		t.Error("load_repaid alone eases nothing")
+	}
+}

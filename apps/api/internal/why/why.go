@@ -42,6 +42,9 @@ const (
 	Legacy             Rule = "legacy"             // an adaptation the backfill could not name
 	LifeEvent          Rule = "life_event"         // a life event's move, ease or shortening
 	RideTogetherMove   Rule = "ride_together_move" // a ride-together answer moved the session
+	LoadRepaid         Rule = "load_repaid"        // a session lengthened or upgraded to make up owed load
+	LoadRolled         Rule = "load_rolled"        // owed load carried into next week
+	LoadForgiven       Rule = "load_forgiven"      // owed load dropped at the week's end
 )
 
 // Fact is one label/value row in the popover.
@@ -123,6 +126,12 @@ type StruggleStepDownInputs struct {
 	LevelFrom  float64 `json:"levelFrom"`
 	LevelTo    float64 `json:"levelTo"`
 	FeltAllOut bool    `json:"feltAllOut,omitempty"`
+}
+
+// LoadRepaidInputs: a session was made bigger to pay back load the week owed.
+type LoadRepaidInputs struct {
+	DebtBefore float64 `json:"debtBefore"`
+	TSSAdded   float64 `json:"tssAdded"`
 }
 
 // CrewRideInputs: the day before, or after, a crew ride the rider is going to.
@@ -213,6 +222,12 @@ func Title(rule Rule) string {
 		return "Week rebuilt"
 	case IllnessRamp:
 		return "Eased back in after time off"
+	case LoadRepaid:
+		return "Load made up"
+	case LoadRolled:
+		return "Load carried to next week"
+	case LoadForgiven:
+		return "Load forgiven"
 	}
 	return ""
 }
@@ -285,6 +300,15 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 			out = append(out, Fact{"You rated it", "all-out (5 of 5)"})
 		}
 		return append(out, Fact{"Level", arrow(in.LevelFrom, in.LevelTo)})
+	case LoadRepaid:
+		in, ok := decode[LoadRepaidInputs](inputs)
+		if !ok {
+			return nil
+		}
+		return []Fact{
+			{"Load owed", fmt.Sprintf("%.0f TSS", in.DebtBefore)},
+			{"Added", fmt.Sprintf("%.0f TSS", in.TSSAdded)},
+		}
 	case CrewRideEve, CrewRideAfter:
 		in, ok := decode[CrewRideInputs](inputs)
 		if !ok {
