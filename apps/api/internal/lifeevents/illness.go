@@ -148,19 +148,19 @@ func (p *planner) mildSessions(list []scoped) {
 			continue
 		}
 		reason := "Ill, symptoms above the neck: shortened to 45 minutes. If symptoms move below the neck, stop and switch to a proper illness."
-		p.cap(w, s.event, mildCapSeconds, false, OpShort, reason)
+		p.cap(w, s.event, mildCapSeconds, false, OpShort, reason, why.LifeEvent)
 	}
 }
 
 // cap shortens w's endurance session to at most maxSeconds, keeping a long
 // ride named as one when long is set. Nothing is changed when it is already
 // short enough.
-func (p *planner) cap(w workout.Workout, ev Event, maxSeconds float64, long bool, op, reason string) {
+func (p *planner) cap(w workout.Workout, ev Event, maxSeconds float64, long bool, op, reason string, rule why.Rule) {
 	if p.changed[w.ID] || outdoorSeconds(w) <= maxSeconds {
 		return
 	}
 	built := scheduler.BuildEnduranceSession(maxSeconds/3600, long, w.Sport, p.in.Profile)
-	p.replace(w, ev, built.Name, built.Zone, built.Level, built.Steps, op, reason)
+	p.replace(w, ev, built.Name, built.Zone, built.Level, built.Steps, op, reason, rule)
 }
 
 // outdoorSeconds is how long w is in its road form, which is what a cap is
@@ -173,9 +173,10 @@ func outdoorSeconds(w workout.Workout) float64 {
 	return workout.PlannedSeconds(w.Steps)
 }
 
-// replace writes a change that swaps w's content for a new session, marked so
+// replace writes a change (rule is the why-record: IllnessRamp for the return
+// ramp, LifeEvent for the mild-illness shortening) that swaps w's content for a new session, marked so
 // no other automatic rule touches it again.
-func (p *planner) replace(w workout.Workout, ev Event, name string, zone workout.Zone, level float64, newSteps []workout.WorkoutStep, op, reason string) {
+func (p *planner) replace(w workout.Workout, ev Event, name string, zone workout.Zone, level float64, newSteps []workout.WorkoutStep, op, reason string, rule why.Rule) {
 	p.changed[w.ID] = true
 	description := replaceMarked(w.Description, "", reason)
 	if name != w.Name {
@@ -186,7 +187,7 @@ func (p *planner) replace(w workout.Workout, ev Event, name string, zone workout
 		Reason: reason, Default: true, ReKeepIndoor: true,
 		Update: &workout.UpdateWorkoutRequest{
 			Name: &name, Steps: &newSteps, Zone: &zone, Level: &level, Description: &description,
-			Flags: lifeAdaptedFlags(w, why.IllnessRamp),
+			Flags: lifeAdaptedFlags(w, rule),
 		},
 	})
 }
@@ -238,11 +239,11 @@ func (p *planner) easyDay(w workout.Workout, e Event, reason string) {
 		if workout.PlannedSeconds(req.Steps) > rampEasyCapSeconds {
 			req = scheduler.BuildEnduranceSession(rampEasyCapSeconds/3600.0, false, w.Sport, p.in.Profile)
 		}
-		p.replace(w, e, req.Name, req.Zone, req.Level, req.Steps, OpEase, reason)
+		p.replace(w, e, req.Name, req.Zone, req.Level, req.Steps, OpEase, reason, why.IllnessRamp)
 	case scheduler.IsKeySession(w):
-		p.cap(w, e, rampLongCapSeconds, true, OpShort, reason)
+		p.cap(w, e, rampLongCapSeconds, true, OpShort, reason, why.IllnessRamp)
 	default:
-		p.cap(w, e, rampEasyCapSeconds, false, OpShort, reason)
+		p.cap(w, e, rampEasyCapSeconds, false, OpShort, reason, why.IllnessRamp)
 	}
 }
 
@@ -254,7 +255,7 @@ func (p *planner) oneRung(w workout.Workout, e Event, reason string) {
 	if !ok {
 		req = scheduler.EasyVariant(w, p.in.Profile)
 	}
-	p.replace(w, e, req.Name, req.Zone, req.Level, req.Steps, OpEase, reason)
+	p.replace(w, e, req.Name, req.Zone, req.Level, req.Steps, OpEase, reason, why.IllnessRamp)
 }
 
 // advise adds the clinician line for a long illness.

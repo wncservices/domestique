@@ -121,3 +121,16 @@ func TestLifeEventEaseExtendsStoredRules(t *testing.T) {
 		t.Errorf("move rules = %v", m)
 	}
 }
+
+func TestMildShorteningRecordsLifeEventAndRampEaseRecordsIllnessRamp(t *testing.T) {
+	mild := preview([]Event{ill("2026-10-08", "2026-10-10", OptionMild)}, nil, easy("fri", "2026-10-09", 120))
+	f := assertUpdateFlags(t, "shorten:fri", easy("fri", "2026-10-09", 120), mustFind(t, mild, "shorten:fri").Update)
+	if len(f.AdaptedRules) != 1 || f.AdaptedRules[0] != why.LifeEvent {
+		t.Errorf("mild shortening rules = %v, want [life_event]", f.AdaptedRules)
+	}
+	ramp := preview([]Event{ill("2026-10-08", "2026-10-11", OptionProper)}, nil, rampWeek()...)
+	f = assertUpdateFlags(t, "ease:d1", rampWeek()[0], mustFind(t, ramp, "ease:d1").Update)
+	if len(f.AdaptedRules) != 1 || f.AdaptedRules[0] != why.IllnessRamp {
+		t.Errorf("ramp ease rules = %v, want [illness_ramp]", f.AdaptedRules)
+	}
+}

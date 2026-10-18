@@ -508,12 +508,16 @@ func (s *Server) rollBackLifeEvent(ctx context.Context, rider string, op lifeOp,
 // keepThroughReturn writes the kept marker into a session whose ease or
 // shortening the rider unticked, once.
 func (s *Server) keepThroughReturn(ctx context.Context, wk workout.Workout) error {
-	if wk.ID == "" || workout.CurrentFlags(wk).Kept == workout.KeptLife {
+	flags := workout.CurrentFlags(wk)
+	if wk.ID == "" || flags.Kept == workout.KeptLife {
 		return nil
 	}
 	description := strings.TrimRight(wk.Description, " \n") + " " + lifeevents.KeptMarker
-	flags := workout.CurrentFlags(wk)
-	flags.Kept = workout.KeptLife
+	// A crew-kept session stays crew-kept: LegacyFlags gives the crew marker
+	// precedence when both are present, so overwriting it would break parity.
+	if flags.Kept == workout.KeptNone {
+		flags.Kept = workout.KeptLife
+	}
 	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &description, Flags: &flags})
 	return err
 }

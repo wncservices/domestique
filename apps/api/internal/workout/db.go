@@ -782,58 +782,139 @@ func (d *DB) addFlagColumns() error {
 const flagBackfillChunk = 500
 
 // backfillFlags fills the flag columns of rows written before they existed,
-// from the description text they used to live in. Every row it writes gets a
-// non-empty origin, so a second run finds nothing: that is what makes it
-// idempotent. updated_at is left alone, and edited_at takes it only where the
-// row has been edited since it was created.
+// from the description text they used to live in, and reconciles rows whose
+// stored flags disagree with that text.
+//
+// The second half exists for a rolling deploy or a rollback: an old image's
+// UpdateWorkout changes description and updated_at but knows nothing of the
+// flag columns, so it leaves them stale. New writes set text, flags and
+// edited_at in one statement, so any disagreement can only come from an old
+// image. Rolling back across this release therefore needs a restart of the new
+// image to reconcile; until then scanWorkout reads an origin-less row from its
+// text.
+//
+// It runs synchronously in UseDB, before the server listens, in keyset-paged
+// chunks of flagBackfillChunk rows (one transaction each); a full scan needs
+// no index at this table's size. It selects only the columns it needs and never
+// decodes the steps JSON, so one undecodable row cannot stop startup. Idempotent:
+// once a row agrees with its text, a second run leaves it alone. updated_at is
+// never touched.
 func (d *DB) backfillFlags(ctx context.Context) error {
+	last := ""
 	for {
 		rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
-        FROM workouts WHERE origin = '' ORDER BY id LIMIT ?`), flagBackfillChunk)
+        SELECT id, goal_id, description, test_protocol, crew_ride_id, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
+        FROM workouts WHERE id > ? ORDER BY id LIMIT ?`), last, flagBackfillChunk)
 		if err != nil {
 			return err
 		}
-		var batch []Workout
+		type fix struct {
+			id, updatedAt, edited string
+			f                     Flags
+		}
+		var fixes []fix
+		n := 0
 		for rows.Next() {
-			w, err := scanWorkout(rows)
-			if err != nil {
+			var (
+				w                            Workout
+				origin, rules, kept, movedBy string
+				stored                       Flags
+			)
+			if err := rows.Scan(&w.ID, &w.GoalID, &w.Description, &w.TestProtocol, &w.CrewRideID,
+				&origin, &rules, &stored.Swapped, &kept, &stored.MovedFrom, &movedBy, &w.EditedAt, &w.CreatedAt, &w.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return err
 			}
-			batch = append(batch, w)
+			n++
+			last = w.ID
+			stored.Origin, stored.AdaptedRules = Origin(origin), parseRules(rules)
+			stored.Kept, stored.MovedBy = Kept(kept), MovedBy(movedBy)
+
+			legacy := LegacyFlags(w)
+			target := stored
+			if origin == "" {
+				target = legacy
+			} else if !stored.Equivalent(legacy) {
+				target = reconcileFlags(stored, legacy)
+			}
+			edited := w.EditedAt
+			if w.UpdatedAt != w.CreatedAt && w.EditedAt != w.UpdatedAt {
+				edited = w.UpdatedAt
+			}
+			if origin == "" || !stored.Equivalent(target) || edited != w.EditedAt {
+				fixes = append(fixes, fix{id: w.ID, updatedAt: w.UpdatedAt, edited: edited, f: target})
+			}
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
 			return err
 		}
 		_ = rows.Close()
-		if len(batch) == 0 {
-			return nil
-		}
 
-		tx, err := d.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		for _, w := range batch {
-			f := LegacyFlags(w)
-			edited := ""
-			if w.UpdatedAt != w.CreatedAt {
-				edited = w.UpdatedAt
+		if len(fixes) > 0 {
+			tx, err := d.db.BeginTx(ctx, nil)
+			if err != nil {
+				return err
 			}
-			if _, err := tx.ExecContext(ctx, d.query(`
+			for _, x := range fixes {
+				// updated_at in the guard: a row a live writer changed since the
+				// read is left for the next start rather than overwritten.
+				if _, err := tx.ExecContext(ctx, d.query(`
         UPDATE workouts SET origin=?, adapted_rules=?, swapped=?, kept=?, moved_from=?, moved_by=?, edited_at=?
-        WHERE id=? AND origin = ''`),
-				string(f.Origin), joinRules(f.AdaptedRules), f.Swapped, string(f.Kept), f.MovedFrom, string(f.MovedBy), edited, w.ID); err != nil {
-				_ = tx.Rollback()
+        WHERE id=? AND updated_at=?`),
+					string(x.f.Origin), joinRules(x.f.AdaptedRules), x.f.Swapped, string(x.f.Kept), x.f.MovedFrom, string(x.f.MovedBy), x.edited, x.id, x.updatedAt); err != nil {
+					_ = tx.Rollback()
+					return err
+				}
+			}
+			if err := tx.Commit(); err != nil {
 				return err
 			}
 		}
-		if err := tx.Commit(); err != nil {
-			return err
+		if n < flagBackfillChunk {
+			return nil
 		}
 	}
+}
+
+// reconcileFlags re-derives stored flags from the text legacy was read from,
+// keeping the stored rule ids wherever they still fit what the text can tell
+// (same count, same life-rule class at that position).
+func reconcileFlags(stored, legacy Flags) Flags {
+	out := legacy
+	if len(stored.AdaptedRules) == len(legacy.AdaptedRules) {
+		out.AdaptedRules = append([]why.Rule(nil), legacy.AdaptedRules...)
+		for i, r := range stored.AdaptedRules {
+			if IsLifeRule(r) == IsLifeRule(legacy.AdaptedRules[i]) {
+				out.AdaptedRules[i] = r
+			}
+		}
+	}
+	return out
+}
+
+// FlagsFollowingText makes f agree with what desc, the description now being
+// stored on wk, says: markers the new text no longer carries are gone, and a
+// move note it carries is the move. It keeps the origin and the exact rule ids
+// of whatever adaptation is left.
+func FlagsFollowingText(f Flags, wk Workout, desc string) Flags {
+	after := wk
+	after.Description = desc
+	text := LegacyFlags(after)
+	rules := append([]why.Rule(nil), f.AdaptedRules...)
+	if len(rules) > len(text.AdaptedRules) {
+		rules = rules[:len(text.AdaptedRules)]
+	}
+	for len(rules) < len(text.AdaptedRules) {
+		rules = append(rules, why.Legacy)
+	}
+	f.AdaptedRules = rules
+	if len(f.AdaptedRules) == 0 {
+		f.AdaptedRules = nil
+	}
+	f.Swapped, f.Kept = text.Swapped, text.Kept
+	f.MovedFrom, f.MovedBy = text.MovedFrom, text.MovedBy
+	return f
 }
 
 // joinRules and parseRules store adaptation rules as comma-joined ids; ""
@@ -1432,6 +1513,11 @@ func scanWorkout(row rowScanner) (Workout, error) {
 			return Workout{}, fmt.Errorf("workout: decode planned snapshot for %s: %w", w.ID, err)
 		}
 		w.PlannedSnapshot = &snap
+	}
+	if w.Flags.Origin == "" {
+		// A row an old image inserted after this one started: read it from its
+		// text until the next start's backfill stores the columns.
+		w.Flags = LegacyFlags(w)
 	}
 	return w, nil
 }

@@ -20,7 +20,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
-	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -1452,23 +1451,7 @@ func riderEditFlags(wk workout.Workout, req workout.UpdateWorkoutRequest) workou
 // whole description (a rider's PATCH, "Back to planned version") rather than
 // append a note.
 func flagsFollowingText(f workout.Flags, wk workout.Workout, desc string) workout.Flags {
-	after := wk
-	after.Description = desc
-	text := workout.LegacyFlags(after)
-	rules := append([]why.Rule(nil), f.AdaptedRules...)
-	if len(rules) > len(text.AdaptedRules) {
-		rules = rules[:len(text.AdaptedRules)]
-	}
-	for len(rules) < len(text.AdaptedRules) {
-		rules = append(rules, why.Legacy)
-	}
-	f.AdaptedRules = rules
-	if len(f.AdaptedRules) == 0 {
-		f.AdaptedRules = nil
-	}
-	f.Swapped, f.Kept = text.Swapped, text.Kept
-	f.MovedFrom, f.MovedBy = text.MovedFrom, text.MovedBy
-	return f
+	return workout.FlagsFollowingText(f, wk, desc)
 }
 
 func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {
