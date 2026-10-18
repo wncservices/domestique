@@ -206,6 +206,8 @@ var riderTables = map[string]riderTable{
 		Rename: renameRule{Columns: []string{"rider"}}},
 	"fitness_snapshots": {Purged: true, Note: "Training.DeleteRider",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"date"}}},
+	"load_ledger": {Purged: true, Note: "Training.DeleteRider",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"week_start"}}},
 	"daily_wellness": {Purged: true, Note: "Training.DeleteRider: HRV, sleep and resting heart rate",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"date"}}},
 	"progression_levels": {Purged: true, Note: "Training.DeleteRider",
