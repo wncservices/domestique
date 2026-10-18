@@ -389,7 +389,7 @@ func TestReadinessCanStillEaseARepaidSession(t *testing.T) {
 
 	// A later morning's pass leaves the eased session as the easing made it.
 	eased := byID(h.thisWeek(t))
-	h.at(int(day.Day())+1, 7, 0)
+	h.at(day.Day()+1, 7, 0)
 	h.tick()
 	for _, w := range h.thisWeek(t) {
 		if w.ID == upgraded.ID && (secs(w) != secs(eased[w.ID]) || len(w.Flags.AdaptedRules) != len(eased[w.ID].Flags.AdaptedRules)) {
