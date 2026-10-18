@@ -63,6 +63,11 @@ type Option func(*options)
 type options struct {
 	demand *RouteDemand
 	fixed  []Fixed
+	// targetTSS is the week's wanted planned TSS (0: none). levelBoost is
+	// the internal retry's lift to structured target levels; it is never set
+	// by a caller.
+	targetTSS  float64
+	levelBoost float64
 }
 
 // Fixed is a session the rider has committed to that the week is built around:
@@ -89,6 +94,18 @@ func WithFixed(rides []Fixed) Option {
 // week that is not a recovery week reads it.
 func WithRouteDemand(d *RouteDemand) Option {
 	return func(o *options) { o.demand = d }
+}
+
+// WithTargetTSS asks for a week whose planned TSS (workout.PlannedTSS at the
+// profile's FTP) reaches tss. When the week built as usual falls short, its
+// structured sessions are rebuilt with target levels 0.5, then 1.0 higher and
+// the first week that reaches tss wins (else the 1.0 one). The hours cap is
+// untouched: a higher rung is still picked under the same seconds budget, so
+// no session gets longer, and endurance and long slots and the taper opener
+// are never boosted. Running, no FTP, or tss <= 0 leaves the week exactly as
+// it is without the option.
+func WithTargetTSS(tss float64) Option {
+	return func(o *options) { o.targetTSS = tss }
 }
 
 func applyOptions(opts []Option) options {
