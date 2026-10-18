@@ -3651,6 +3651,26 @@ func (s *Server) isLandingHost(r *http.Request) bool {
 	return strings.EqualFold(host, s.LandingHost)
 }
 
+// landingURLFor is where an anonymous visitor to the app host is sent: the
+// landing page, carrying the path they asked for as return_to so its Sign in
+// brings them back there (a share link above all) instead of to the app's
+// front page. The path is checked the same way /sso/login checks it, so the
+// landing page is never handed anything but a path on this site.
+func (s *Server) landingURLFor(r *http.Request) string {
+	target := "https://" + s.LandingHost + "/"
+	want := r.URL.Path
+	if r.URL.RawQuery != "" {
+		want += "?" + r.URL.RawQuery
+	}
+	if want == "/" || want == "/index.html" {
+		return target
+	}
+	if safe, err := safeReturnTo(want); err == nil && safe != "" {
+		return target + "?return_to=" + url.QueryEscape(safe)
+	}
+	return target
+}
+
 // isPreviewHost reports whether r arrived on the blue-green preview host —
 // auth.oidc.preview_redirect_url's own host, the one other host besides
 // LandingHost that an anonymous visitor needs to reach the SPA shell on
@@ -3748,9 +3768,22 @@ func (s *Server) spaHandler() http.Handler {
 		if !landing && s.LandingHost != "" && s.authenticator().Mode() == auth.ModeOIDC &&
 			(missing || clean == "index.html") && !s.isPreviewHost(r) {
 			if auth.FromContext(r.Context()).Anonymous() {
-				http.Redirect(w, r, "https://"+s.LandingHost+"/", http.StatusFound)
+				http.Redirect(w, r, s.landingURLFor(r), http.StatusFound)
 				return
 			}
+		}
+
+		// The landing and privacy pages belong to the apex. On the app host they
+		// are sent there, signed in or not, so the app host never renders the
+		// public front door.
+		if !s.isLandingHost(r) && s.LandingHost != "" && !missing &&
+			(clean == "landing.html" || clean == "privacy.html") {
+			target := "https://" + s.LandingHost + "/"
+			if clean == "privacy.html" {
+				target += "privacy.html"
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+			return
 		}
 
 		switch {

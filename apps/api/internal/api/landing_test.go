@@ -193,10 +193,15 @@ func TestAnonymousOIDCVisitorsAreSentToTheLandingPage(t *testing.T) {
 	}
 	srv := &Server{WebFS: web, LandingHost: "domestique.dev", Auth: oidcAuthenticator(t)}
 
-	for _, tc := range []struct{ name, path string }{
-		{"the app shell itself", "/"},
-		{"a deep link", "/settings"},
-		{"an unknown deep link", "/routes/some-ride"},
+	// A deep link carries where the visitor was going, so the landing page's
+	// Sign in brings them back there (a share link above all) rather than to
+	// the app's front page.
+	for _, tc := range []struct{ name, path, want string }{
+		{"the app shell itself", "/", "https://domestique.dev/"},
+		{"a deep link", "/settings", "https://domestique.dev/?return_to=%2Fsettings"},
+		{"a share link", "/shared/abc123", "https://domestique.dev/?return_to=%2Fshared%2Fabc123"},
+		{"a deep link with a query", "/fitness?tab=season", "https://domestique.dev/?return_to=%2Ffitness%3Ftab%3Dseason"},
+		{"an unknown deep link", "/routes/some-ride", "https://domestique.dev/?return_to=%2Froutes%2Fsome-ride"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -207,10 +212,41 @@ func TestAnonymousOIDCVisitorsAreSentToTheLandingPage(t *testing.T) {
 			if rec.Code != http.StatusFound {
 				t.Fatalf("status = %d, want 302", rec.Code)
 			}
-			if loc := rec.Header().Get("Location"); loc != "https://domestique.dev/" {
-				t.Errorf("Location = %q, want https://domestique.dev/", loc)
+			if loc := rec.Header().Get("Location"); loc != tc.want {
+				t.Errorf("Location = %q, want %q", loc, tc.want)
 			}
 		})
+	}
+}
+
+// The landing and privacy pages are the apex's; on the app host they are sent
+// there, signed in or not, so the app host never renders the front door.
+func TestTheAppHostSendsTheApexPagesToTheApex(t *testing.T) {
+	web := fstest.MapFS{
+		"index.html":   {Data: []byte("<html>APP</html>")},
+		"landing.html": {Data: []byte("<html>LANDING</html>")},
+		"privacy.html": {Data: []byte("<html>PRIVACY</html>")},
+	}
+	srv := &Server{WebFS: web, LandingHost: "domestique.dev", Auth: oidcAuthenticator(t)}
+	for path, want := range map[string]string{
+		"/landing.html": "https://domestique.dev/",
+		"/privacy.html": "https://domestique.dev/privacy.html",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "app.domestique.dev"
+		rec := httptest.NewRecorder()
+		srv.spaHandler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != want {
+			t.Errorf("%s: %d %q, want 302 %q", path, rec.Code, rec.Header().Get("Location"), want)
+		}
+		// On the apex itself the page is served as before.
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "domestique.dev"
+		rec = httptest.NewRecorder()
+		srv.spaHandler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s on the apex: %d, want 200", path, rec.Code)
+		}
 	}
 }
 
