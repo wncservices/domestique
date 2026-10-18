@@ -19,13 +19,20 @@ func (s *Server) loadInput(ctx context.Context, g workout.Goal, rider string, pr
 	if !(profile.FTPWatts > 0) || !(profile.HoursPerAvailableDay*float64(len(profile.AvailableDays)) > 0) {
 		return nil, nil
 	}
+	// A failed read costs the TSS sizing, not the plan: every plan reader goes
+	// through here, so an error would take the whole training area down.
 	snap, err := s.latestFitness(ctx, rider)
-	if err != nil || snap == nil {
-		return nil, err
+	if err != nil {
+		s.logger().Warn("load input unavailable, planning from hours", "rider", rider, "stage", "fitness")
+		return nil, nil
+	}
+	if snap == nil {
+		return nil, nil
 	}
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
-		return nil, err
+		s.logger().Warn("load input unavailable, planning from hours", "rider", rider, "stage", "sessions")
+		return nil, nil
 	}
 	return loadInputFrom(g, profile, snap, sessions, s.localNow()), nil
 }

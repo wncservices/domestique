@@ -166,8 +166,8 @@ test('week load: hours as before without a TSS target, TSS and hours with one', 
   assert.equal(weekLoadLabel(9360, 12240, { targetHours: 0 }), '2.6 / 3.4 h')
   assert.equal(weekLoadLabel(9360, 6840, { targetHours: 3.4 }), '2.6 / 3.4 h')
   assert.equal(weekLoadLabel(0, 0, undefined), 'Nothing planned')
-  assert.equal(weekLoadLabel(0, 0, { targetHours: 7.5, targetTss: 420 }), '420 TSS \u00b7 7.5 h')
-  assert.equal(weekLoadLabel(9360, 0, { targetHours: 7.5, targetTss: 420 }, 150), '150 / 420 TSS \u00b7 7.5 h')
+  assert.equal(weekLoadLabel(0, 0, { targetHours: 7.5, targetTss: 420 }), '420 TSS \u00b7 0.0 / 7.5 h')
+  assert.equal(weekLoadLabel(9360, 0, { targetHours: 7.5, targetTss: 420 }), '420 TSS \u00b7 2.6 / 7.5 h')
 })
 
 test('countdown: always says days, singular for one', () => {

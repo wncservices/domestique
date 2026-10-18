@@ -31,10 +31,13 @@ const (
 	recoveryTSSFraction = 0.65
 	spikeGrowth         = 1.15
 	spikeHistoryWeeks   = 6
-	taperMinFraction    = 0.3
-	taperMaxFraction    = 1.0
-	defaultMaxRamp      = 6.0
-	defaultTypicalIF    = 0.70
+	// spikeHoursFloor is the share of the hours model's week the spike guard
+	// may not cut below.
+	spikeHoursFloor  = 0.6
+	taperMinFraction = 0.3
+	taperMaxFraction = 1.0
+	defaultMaxRamp   = 6.0
+	defaultTypicalIF = 0.70
 	// holdTolerance is how close (CTL points) to its hours ceiling an undated
 	// plan counts as holding.
 	holdTolerance = 0.5
@@ -181,7 +184,12 @@ func (r loadRun) step(i int, s float64, st *loadState, out *Week) {
 
 	tss := desired
 	if r.load.HistoryWeeks < spikeHistoryWeeks && r.load.BestRecentWeekTSS > 0 {
-		tss = math.Min(tss, r.load.BestRecentWeekTSS*math.Pow(spikeGrowth, float64(i+1)))
+		guarded := math.Min(tss, r.load.BestRecentWeekTSS*math.Pow(spikeGrowth, float64(i+1)))
+		// A small best week must not leave a new rider with near-empty weeks
+		// for months: never below the hours model's recovery fraction of the
+		// same week, and never above what the load itself asked for.
+		floor := math.Min(tss, spikeHoursFloor*w.TargetHours*ifSq100)
+		tss = math.Max(guarded, floor)
 	}
 	tss = math.Max(0, finite(tss))
 	hours := tss / ifSq100
@@ -264,7 +272,11 @@ func layerLoad(plan *Plan, pos []int, eventDate string, capHours float64, load L
 // [0.3, 1.0] x the last pre-taper day's load.
 func (r loadRun) taper(weeks []Week, st loadState) []Week {
 	lastDaily := st.ctl
-	if st.lastTSS > 0 {
+	// The last non-recovery week: a Build-to-Taper plan with no Peak would
+	// otherwise taper from a recovery week's reduced load.
+	if st.prevFinal > 0 {
+		lastDaily = st.prevFinal / 7
+	} else if st.lastTSS > 0 {
 		lastDaily = st.lastTSS / 7
 	}
 	lo, hi := taperMinFraction*lastDaily, taperMaxFraction*lastDaily

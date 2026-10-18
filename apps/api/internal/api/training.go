@@ -461,9 +461,11 @@ type periodizationWeekDTO struct {
 	// TargetTSS, PlannedCTL and LoadCapped are set only on the ctl basis: the
 	// week's load target, the CTL the plan expects at its start, and whether
 	// the rider's available hours cut that target short.
-	TargetTSS  float64 `json:"targetTss,omitempty"`
-	PlannedCTL float64 `json:"plannedCtl,omitempty"`
-	LoadCapped bool    `json:"loadCapped,omitempty"`
+	TargetTSS float64 `json:"targetTss,omitempty"`
+	// PlannedCTL is a pointer so a forecast of 0 is still emitted on the ctl
+	// basis; omitempty would drop it.
+	PlannedCTL *float64 `json:"plannedCtl,omitempty"`
+	LoadCapped bool     `json:"loadCapped,omitempty"`
 }
 
 type periodizationPlanDTO struct {
@@ -516,11 +518,16 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 	dto := periodizationPlanDTO{GoalID: plan.GoalID, TotalWeeks: plan.TotalWeeks, Weeks: make([]periodizationWeekDTO, 0, len(plan.Weeks)), Adjustment: plan.Adjustment,
 		LoadBasis: plan.LoadBasis, TargetCTL: plan.TargetCTL, Shortfall: plan.Shortfall}
 	for _, wk := range plan.Weeks {
-		dto.Weeks = append(dto.Weeks, periodizationWeekDTO{
+		wdto := periodizationWeekDTO{
 			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
 			Recovery: wk.Recovery, TargetHours: wk.TargetHours, Adjusted: wk.Adjusted,
-			TargetTSS: wk.TargetTSS, PlannedCTL: wk.PlannedCTL, LoadCapped: wk.LoadCapped,
-		})
+			TargetTSS: wk.TargetTSS, LoadCapped: wk.LoadCapped,
+		}
+		if plan.LoadBasis == "ctl" {
+			ctl := wk.PlannedCTL
+			wdto.PlannedCTL = &ctl
+		}
+		dto.Weeks = append(dto.Weeks, wdto)
 	}
 	writeJSON(w, http.StatusOK, dto)
 }

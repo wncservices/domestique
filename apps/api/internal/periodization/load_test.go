@@ -230,8 +230,14 @@ func TestUndatedHoldsAtTheHoursCeiling(t *testing.T) {
 func TestSpikeGuard(t *testing.T) {
 	l := baseLoad()
 	l.HistoryWeeks, l.BestRecentWeekTSS = 3, 200
+	hours, err := Build(datedGoal(18), richProfile(), loadToday)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, w := range mustBuild(t, datedGoal(18), richProfile(), l).Weeks {
-		if limit := 200 * math.Pow(1.15, float64(i+1)); w.TargetTSS > limit+1e-9 {
+		// The guard, or the hours model's 0.6 floor when that is higher.
+		limit := math.Max(200*math.Pow(1.15, float64(i+1)), 0.6*hours.Weeks[i].TargetHours*49)
+		if w.TargetTSS > limit+1e-9 {
 			t.Errorf("week %d TSS %v over %v", i, w.TargetTSS, limit)
 		}
 	}
@@ -300,5 +306,50 @@ func TestLoadBasis(t *testing.T) {
 	}
 	if got := mustBuild(t, datedGoal(8), workout.RiderProfile{}, baseLoad()).LoadBasis; got != "hours" {
 		t.Errorf("no hours: %q", got)
+	}
+}
+
+func TestSpikeGuardFloorsAtTheHoursPlansRecoveryFraction(t *testing.T) {
+	p := workout.RiderProfile{HoursPerAvailableDay: 1.5, AvailableDays: []string{"mon", "tue", "thu", "sat"}}
+	l := baseLoad()
+	l.HistoryWeeks, l.BestRecentWeekTSS = 2, 40
+	g := datedGoal(18)
+	hours, err := Build(g, p, loadToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustBuild(t, g, p, l)
+	for i, w := range plan.Weeks {
+		floor := 0.6 * hours.Weeks[i].TargetHours
+		if w.TargetHours < math.Min(floor, 6)-1e-9 {
+			t.Errorf("week %d: %v h under the 0.6 x hours-plan floor %v", i, w.TargetHours, floor)
+		}
+		if want := w.TargetHours * 0.7 * 0.7 * 100; math.Abs(w.TargetTSS-want) > 1e-6 {
+			t.Errorf("week %d: TSS %v disagrees with hours %v", i, w.TargetTSS, w.TargetHours)
+		}
+	}
+}
+
+func TestSpikeGuardFloorLeavesALargeBestWeekAlone(t *testing.T) {
+	l := baseLoad()
+	l.HistoryWeeks, l.BestRecentWeekTSS = 2, 100000
+	free := baseLoad()
+	got, want := mustBuild(t, datedGoal(18), richProfile(), l), mustBuild(t, datedGoal(18), richProfile(), free)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("a large best week changed the plan")
+	}
+}
+
+func TestTaperStartsFromTheLastNonRecoveryWeekNotARecoveryOne(t *testing.T) {
+	r := loadRun{
+		load:     LoadInput{TypicalIF: 0.7, TaperTSB: 1000}, // any form is reached: the taper sits at its floor
+		capHours: 40, eventDate: "2026-03-01",
+	}
+	weeks := []Week{{StartDate: "2026-02-16", Phase: PhaseTaper}, {StartDate: "2026-02-23", Phase: PhaseTaper}}
+	// The week before the taper was a recovery week at 300 TSS after a 600 one.
+	st := loadState{ctl: 60, atl: 80, prevFinal: 600, lastTSS: 300}
+	out := r.taper(weeks, st)
+	if floor := taperMinFraction * 600; out[0].TargetTSS < floor-1e-6 {
+		t.Errorf("taper week %v tapers from the recovery week, under %v", out[0].TargetTSS, floor)
 	}
 }

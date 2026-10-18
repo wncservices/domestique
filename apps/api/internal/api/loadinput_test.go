@@ -211,3 +211,46 @@ func TestRefreshResizesNextWeekFromNewCTL(t *testing.T) {
 		t.Errorf("next week plans %v s after a big block of riding, was %v s: it was not re-sized from the new CTL", after, before)
 	}
 }
+
+// A fitness read that fails must cost the load sizing only, never the plan.
+func TestPeriodizationFallsBackToHoursWhenFitnessCannotBeRead(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 250)
+	g, err := h.store.CreateGoal(context.Background(), workout.CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", EventDate: "2027-04-14"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.conn.Exec(`DROP TABLE fitness_snapshots`); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.periodization(t, g.ID); got.LoadBasis != "hours" || len(got.Weeks) == 0 {
+		t.Errorf("basis %q with %d weeks, want the hours plan", got.LoadBasis, len(got.Weeks))
+	}
+}
+
+// plannedCtl of 0 is a real forecast (a rider returning from nothing), so it
+// is emitted on the ctl basis rather than dropped as empty.
+func TestPlannedCtlIsEmittedWhenZeroOnTheCtlBasis(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 250)
+	h.ride(t, h.now, 3, 1, 0)
+	g, err := h.store.CreateGoal(context.Background(), workout.CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", EventDate: "2027-04-14"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
+	var raw struct {
+		LoadBasis string           `json:"loadBasis"`
+		Weeks     []map[string]any `json:"weeks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw.LoadBasis != "ctl" {
+		t.Fatalf("basis %q", raw.LoadBasis)
+	}
+	v, ok := raw.Weeks[0]["plannedCtl"]
+	if !ok || v.(float64) != 0 {
+		t.Errorf("week 0 plannedCtl = %v (present %v), want an explicit 0", v, ok)
+	}
+}

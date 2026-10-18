@@ -86,7 +86,7 @@ type Week struct {
 	Adjusted bool
 
 	// TargetTSS is the week's training load in TSS, PlannedCTL the forecast
-	// CTL at the START of the week, Ramp the CTL points per week this week was
+	// CTL at the start of the week (week 0: today's CTL, not Monday's), Ramp the CTL points per week this week was
 	// sized to add (0 for recovery, taper and hold weeks), LoadCapped whether
 	// the rider's available hours limited TargetTSS. All zero unless the plan
 	// was built with BuildWithLoad and a LoadInput; see load.go.

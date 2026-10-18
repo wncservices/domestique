@@ -524,7 +524,7 @@ uses the rider's levels *now*.
 `periodization.BuildWithLoad` takes a `LoadInput` built by `api.loadInput`, which
 `reconciledPeriodizationPlan` alone calls, so every plan reader sees the same
 weeks. A week the hours cap held back is `LoadCapped`, and `scheduler.WithTargetTSS`
-then steps its structured rungs up (at most +1.0 level, the taper opener excluded)
+then steps its structured rungs up (at most one rung above the rider's level, route bias included; the taper opener excluded)
 toward the week's TSS. The old hours model is the fallback when there is no FTP,
 no available hours or no fitness snapshot, and `adapter.Reconcile` runs only on
 that fallback: CTL already reflects what was ridden, so compliance on top would

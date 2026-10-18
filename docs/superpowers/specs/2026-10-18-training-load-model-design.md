@@ -79,7 +79,9 @@ forecast; a week is re-sized from real CTL when `refreshWeek` rebuilds it as nex
   lands on it, not over. After that the ramp is 0 (hold), and recovery weeks continue.
 
 **Spike guard.** When `HistoryWeeks < 6` and `BestRecentWeekTSS > 0`, plan week *i* is at
-most `BestRecentWeekTSS × 1.15^(i+1)`.
+most `BestRecentWeekTSS × 1.15^(i+1)`, but never below 0.6 × the hours model's `TargetHours` for
+that same week (capped by what the load itself asked for), so a small best week does not leave a new
+rider with near-empty weeks for months; `TargetTSS` is recomputed from the floored hours.
 
 **Hours.**
 

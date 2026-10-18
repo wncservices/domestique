@@ -171,7 +171,8 @@ func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels 
 // week, the output is exactly what it is without the option.
 //
 // WithTargetTSS rebuilds a week that falls short of its TSS with the
-// structured target levels lifted (see that option).
+// structured target levels lifted (see that option), never more than one rung
+// above what the week would pick without the lift.
 func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
 	o := applyOptions(opts)
 	out, err := buildWeek(week, profile, levels, rider, goalID, sport, o)
@@ -223,8 +224,10 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days)
 	if o.levelBoost != 0 && week.Phase != periodization.PhaseTaper {
 		// The taper opener is deliberately easy, so only the other phases'
-		// structured slots are lifted. The boost goes in before PickNear, so
-		// a route demand still caps the pick at one rung above it.
+		// structured slots are lifted. Boost and route demand each move the
+		// pick, so the ladder is clamped below at the pick without the boost
+		// plus one: together they never reach more than one rung above the
+		// rider's level.
 		for i, k := range kinds {
 			if k == slotStructured {
 				targetLevels[i] += o.levelBoost
@@ -259,6 +262,9 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		}
 		capSeconds := shares[i] * targetHours * 3600
 		rung, ok := workoutlib.PickNear(ladder, targetLevels[i], capSeconds, demand.wantFor(zones[i]))
+		if ok && o.levelBoost != 0 {
+			rung = clampToBoostedCeiling(ladder, rung, targetLevels[i]-o.levelBoost, capSeconds, demand.wantFor(zones[i]))
+		}
 		if !ok {
 			kinds[i] = slotEndurance
 			continue
@@ -634,4 +640,36 @@ func enduranceZoneTarget(sport model.Sport, profile workout.RiderProfile) (worko
 		return workout.TargetHeartRate, low, high
 	}
 	return workout.TargetOpen, 0, 0
+}
+
+// clampToBoostedCeiling keeps a boosted pick within one rung of what the week
+// picks without the boost (unboostedTarget). A route demand can already take
+// the pick one rung up, so boost and demand together would otherwise reach two
+// rungs above the rider's level. Over the ceiling, the fitting rung at or under
+// it nearest the wanted work length wins (the lower on a tie).
+func clampToBoostedCeiling(l workoutlib.Ladder, picked workoutlib.Rung, unboostedTarget, maxSeconds float64, want int) workoutlib.Rung {
+	plain, ok := workoutlib.Pick(l, unboostedTarget, maxSeconds)
+	if !ok || picked.Level <= plain.Level+1 {
+		return picked
+	}
+	dist := func(r workoutlib.Rung) int {
+		if want <= 0 {
+			return -r.Level // nothing to follow: the highest rung under the ceiling
+		}
+		if d := r.WorkSeconds - want; d >= 0 {
+			return d
+		} else {
+			return -d
+		}
+	}
+	best, bestDist := plain, dist(plain)
+	for _, r := range l.Rungs {
+		if r.Level > plain.Level+1 || workoutlib.TotalSeconds(r) > maxSeconds {
+			continue
+		}
+		if d := dist(r); d < bestDist {
+			best, bestDist = r, d
+		}
+	}
+	return best
 }

@@ -108,3 +108,28 @@ func TestWithTargetTSSIsANoOpForRunningAndWithoutFTP(t *testing.T) {
 		t.Error("tss 0 changed")
 	}
 }
+
+// A route bias and a TSS boost together must still stay within one rung of the
+// rider's own level (AGENTS.md, route-aware training).
+func TestRouteDemandAndTargetTSSStayWithinOneRungOfTheRiderLevel(t *testing.T) {
+	week, profile, levels := tssWeek()
+	week.TargetHours = 12
+	profile.AvailableDays = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+	for _, sus := range []int{300, 600, 1200, 2400} {
+		for _, short := range []int{300, 600, 1200, 2400} {
+			d := &RouteDemand{Sustained: sus, Short: short}
+			got, err := WeekWorkouts(week, profile, levels, "r", "g", model.SportCycling, WithRouteDemand(d), WithTargetTSS(100000))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range got {
+				if r.Zone == workout.ZoneEndurance {
+					continue
+				}
+				if r.Level > levels[string(r.Zone)]+1 {
+					t.Errorf("demand %d/%d: %s level %v is more than one rung above the rider's %v", sus, short, r.Zone, r.Level, levels[string(r.Zone)])
+				}
+			}
+		}
+	}
+}
