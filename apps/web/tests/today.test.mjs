@@ -14,6 +14,7 @@ import {
   powerRange,
   REST_HEADLINE,
   todayHeadline,
+  checkInComplete,
   weekHoursLabel,
   weekLoadLabel,
   weekLedgerNote,
@@ -291,4 +292,22 @@ test('week ledger note: carried and forgiven load, whole numbers, empty when nei
   assert.equal(weekLedgerNote({ carriedTss: 11.6 }), '+12 TSS carried')
   assert.equal(weekLedgerNote({ forgivenTss: 8 }), '8 forgiven')
   assert.equal(weekLedgerNote({ carriedTss: 12, forgivenTss: 8 }), '+12 TSS carried \u00b7 8 forgiven')
+})
+
+test('headline: push keeps the zone line and adds a good-day note', () => {
+  const h = todayHeadline(ride(), { today: { verdict: 'push' } })
+  assert.ok(h.startsWith('Zone 2, steady and conversational.'))
+  assert.match(h, /fresh|push/i)
+  assert.doesNotMatch(h, /run down|ease off/i)
+})
+
+test('headline: push on a rest day is still the rest day', () => {
+  assert.equal(todayHeadline(null, { today: { verdict: 'push' } }), REST_HEADLINE)
+})
+
+test('checkInComplete: all three scores answered', () => {
+  assert.equal(checkInComplete({ legs: 3, mood: 4, sleepQuality: 5 }), true)
+  assert.equal(checkInComplete({ legs: 3, mood: 0, sleepQuality: 5 }), false)
+  assert.equal(checkInComplete({ legs: 0, mood: 0, sleepQuality: 0 }), false)
+  assert.equal(checkInComplete(null), false)
 })

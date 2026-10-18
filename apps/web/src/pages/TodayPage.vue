@@ -15,6 +15,7 @@ import type {
   Goal,
   LifeEvent,
   ProjectionResponse,
+  CheckIn,
   ReadinessResponse,
   RideTogether,
   RiderProfile,
@@ -24,6 +25,7 @@ import type {
 import AlternatesMenu from '@/components/plan/AlternatesMenu.vue'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
+import CheckInCard from '@/components/today/CheckInCard.vue'
 import ReadinessChip from '@/components/plan/ReadinessChip.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import AppPage from '@/components/ui/AppPage.vue'
@@ -63,6 +65,7 @@ const week = ref<TrainingWeek | null>(null)
 const weekFailed = ref(false)
 const profile = ref<RiderProfile>({})
 const readiness = ref<ReadinessResponse | null>(null)
+const checkIn = ref<CheckIn | null>(null)
 const goals = ref<Goal[]>([])
 const projection = ref<ProjectionResponse | null>(null)
 const snapshots = ref<FitnessSnapshot[]>([])
@@ -114,6 +117,9 @@ async function loadAll() {
   await Promise.all([
     loadWeek(),
     loadReadiness(),
+    quietly(api.checkIn(), null).then((v) => {
+      checkIn.value = v
+    }),
     api
       .riderProfile()
       .then((v) => {
@@ -193,6 +199,13 @@ async function pushToGarmin() {
   } finally {
     pushing.value = false
   }
+}
+
+// A saved check-in changes today's verdict at once (the easing itself waits
+// for the next adaptation tick), so the chip is read again.
+async function onCheckInSaved(c: CheckIn) {
+  checkIn.value = c
+  await loadReadiness()
 }
 
 async function reloadAfterSwap() {
@@ -286,6 +299,8 @@ async function dismissSuggestion() {
 
       <template v-else-if="week">
         <UAlert v-if="weekFailed" color="error" variant="subtle" icon="i-lucide-triangle-alert" title="Could not refresh today. Showing what was loaded earlier." />
+
+        <CheckInCard :check-in="checkIn" @saved="onCheckInSaved" />
 
         <UCard variant="outline" data-testid="today-card">
           <div class="flex flex-col gap-3">

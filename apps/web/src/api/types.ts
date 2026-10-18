@@ -1163,7 +1163,7 @@ export interface CheckIn {
   note: string
 }
 
-export type ReadinessVerdict = 'ready' | 'caution' | 'rest'
+export type ReadinessVerdict = 'ready' | 'push' | 'caution' | 'rest'
 
 /** One rider's Garmin recovery signals for one calendar day — mirrors
  *  apps/api/internal/api's dailyWellnessDTO (itself workout.DailyWellness).
@@ -1952,7 +1952,7 @@ export interface TrainNowSuggestion {
  *  verdict that shaped them. Nothing is stored or applied. */
 export interface TrainNowResponse {
   minutes: number
-  verdict: 'ready' | 'caution' | 'rest'
+  verdict: ReadinessVerdict
   suggestions: TrainNowSuggestion[]
   /** Why there is nothing to suggest: a life event rules riding out today. */
   notice?: string

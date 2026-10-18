@@ -15,10 +15,11 @@ const props = defineProps<{
 
 // Rider state, not system state: primary is good/ready, ember is behind or
 // take care, and Rest is neutral because resting is not an error.
-type ChipConfig = { label: string; color: 'primary' | 'neutral'; icon: string; class?: string }
+type ChipConfig = { label: string; color: 'primary' | 'neutral' | 'success'; icon: string; class?: string }
 
 const CONFIG: Record<ReadinessVerdict, ChipConfig> = {
   ready: { label: 'Ready', color: 'primary', icon: 'i-lucide-battery-full' },
+  push: { label: 'Good to push', color: 'success', icon: 'i-lucide-battery-charging' },
   caution: { label: 'Take care', color: 'neutral', icon: 'i-lucide-battery-medium', class: 'text-[var(--app-accent-ember)]' },
   rest: { label: 'Rest', color: 'neutral', icon: 'i-lucide-battery-low' },
 }
