@@ -16,7 +16,6 @@ package lifeevents
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -305,11 +304,16 @@ const KeptMarker = scheduler.LifeKeptMarker
 // rider has chosen to keep it through one: a move, an ease, a shortening or a
 // skip. Replan leaves such a session where it is, because the blackout keeps
 // the plan from rebuilding what a life event took away.
-func Touched(description string) bool {
-	return strings.Contains(description, "Rescheduled by a life event") ||
-		strings.Contains(description, "Rescheduled again by a life event") ||
-		strings.Contains(description, scheduler.AdjustedMarker+" "+rampNotePrefix) ||
-		strings.Contains(description, KeptMarker)
+func Touched(w workout.Workout) bool {
+	if w.Flags.MovedBy == workout.MovedByLife || w.Flags.Kept == workout.KeptLife {
+		return true
+	}
+	for _, r := range w.Flags.AdaptedRules {
+		if workout.IsLifeRule(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // NoRideReason is why the rider cannot ride on date because of a life event,

@@ -23,7 +23,7 @@ func planned(t *testing.T, sport model.Sport, zone string, level int) workout.Wo
 	req := workoutlib.Instantiate(l, l.Rungs[level-1], profile)
 	return workout.Workout{
 		ID: "w1", Rider: "r", Sport: sport, Name: req.Name, GoalID: "g", Date: "2026-10-05",
-		Description: scheduler.GeneratedDescription, Steps: req.Steps, Zone: req.Zone, Level: req.Level,
+		Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: req.Steps, Zone: req.Zone, Level: req.Level,
 	}
 }
 
@@ -32,7 +32,7 @@ func endurance(sport model.Sport, totalSeconds float64, long bool) workout.Worko
 	req := scheduler.BuildEnduranceSession(totalSeconds/3600, long, sport, profile)
 	return workout.Workout{
 		ID: "w1", Rider: "r", Sport: sport, Name: req.Name, GoalID: "g", Date: "2026-10-05",
-		Description: scheduler.GeneratedDescription, Steps: req.Steps, Zone: req.Zone,
+		Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: req.Steps, Zone: req.Zone,
 	}
 }
 
@@ -349,9 +349,16 @@ func TestOptionsCarryDifficultyAndPlannedTSS(t *testing.T) {
 func TestNothingIsOfferedForWhatIsNotAPlannedSession(t *testing.T) {
 	base := planned(t, model.SportCycling, "threshold", 5)
 	cases := map[string]func(*workout.Workout){
-		"an FTP test":        func(w *workout.Workout) { w.TestProtocol = "ramp" },
-		"a rider-built one":  func(w *workout.Workout) { w.GoalID = ""; w.Description = "my own" },
-		"no generated text":  func(w *workout.Workout) { w.Description = "my own" },
+		"an FTP test": func(w *workout.Workout) { w.TestProtocol = "ramp" },
+		"a rider-built one": func(w *workout.Workout) {
+			w.GoalID = ""
+			w.Description = "my own"
+			w.Flags = workout.Flags{Origin: workout.OriginRider}
+		},
+		"no generated text": func(w *workout.Workout) {
+			w.Description = "my own"
+			w.Flags = workout.Flags{Origin: workout.OriginRider}
+		},
 		"a zone-less legacy": func(w *workout.Workout) { w.Zone = "" },
 		"an unladdered zone": func(w *workout.Workout) { w.Zone = workout.ZoneIntervals }, // no cycling ladder
 		"a zero level":       func(w *workout.Workout) { w.Level = 0 },

@@ -38,7 +38,7 @@ func TestThePreviewRemovesExactlyTheDaysTheFillDrops(t *testing.T) {
 		for _, r := range plain {
 			existing = append(existing, workout.Workout{
 				ID: r.Date, Rider: "wilant", Sport: r.Sport, Name: r.Name, GoalID: "goal", Date: r.Date,
-				Description: r.Description, Zone: r.Zone, Steps: r.Steps,
+				Description: r.Description, Flags: workout.Flags{Origin: workout.OriginPlan}, Zone: r.Zone, Steps: r.Steps,
 			})
 		}
 		for kind, seconds := range rides {

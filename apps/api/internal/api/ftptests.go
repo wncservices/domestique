@@ -334,7 +334,7 @@ func (s *Server) handleBuildFTPTest(w http.ResponseWriter, r *http.Request) {
 		// A session the rider chose to keep as planned is not replaced, and a
 		// test beside it would put two sessions on one day.
 		for _, wk := range held {
-			if wk.Date == body.Date && scheduler.IsPlanMade(wk) && scheduler.RiderKept(wk.Description) {
+			if wk.Date == body.Date && scheduler.IsPlanMade(wk) && scheduler.RiderKept(wk) {
 				s.logger().Info("ftp test not scheduled: that day holds a session the rider kept", "rider", rider)
 				writeJSON(w, http.StatusConflict, map[string]string{"error": "You chose to keep that day's session as planned. Pick another day."})
 				return

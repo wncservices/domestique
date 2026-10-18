@@ -56,15 +56,17 @@ func TestCrewShortenRequestsCarryFlags(t *testing.T) {
 	}
 }
 
-func TestCrewEaseExtendsStoredRules(t *testing.T) {
+// An adapted session is never eased again, so there are no stored rules to
+// extend; what an ease must carry over is the rest of the stored flags.
+func TestCrewEaseKeepsTheStoredMove(t *testing.T) {
 	w := hard("fri-hard", fri)
-	w.Flags = workout.Flags{Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.ReadinessRest}}
+	w.Flags = workout.Flags{Origin: workout.OriginPlan, MovedFrom: "2026-10-01", MovedBy: workout.MovedByRider}
 	c := ops(Preview(input(Ride{ID: "r", Date: sat, Seconds: 90 * 60}, w)))["ease:fri-hard"]
 	if c.Update == nil || c.Update.Flags == nil {
 		t.Fatalf("no ease: %+v", c)
 	}
-	got := c.Update.Flags.AdaptedRules
-	if len(got) != 2 || got[0] != why.ReadinessRest || got[1] != why.CrewRideEve {
-		t.Errorf("rules = %v", got)
+	f := c.Update.Flags
+	if len(f.AdaptedRules) != 1 || f.AdaptedRules[0] != why.CrewRideEve || f.MovedFrom != "2026-10-01" || f.MovedBy != workout.MovedByRider {
+		t.Errorf("flags = %+v", f)
 	}
 }

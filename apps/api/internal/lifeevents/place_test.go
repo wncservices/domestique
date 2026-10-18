@@ -28,7 +28,7 @@ func steps(minutes int) []workout.WorkoutStep {
 func gen(id, date string, zone workout.Zone, name string, minutes int) workout.Workout {
 	return workout.Workout{
 		ID: id, Rider: "r", Sport: model.SportCycling, Name: name, GoalID: "g", Date: date,
-		Description: scheduler.GeneratedDescription, Zone: zone, Steps: steps(minutes),
+		Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Zone: zone, Steps: steps(minutes),
 	}
 }
 
@@ -44,7 +44,7 @@ func hard(id, date string, minutes int) workout.Workout {
 
 // built is a session the rider made themselves.
 func built(id, date string, minutes int) workout.Workout {
-	return workout.Workout{ID: id, Rider: "r", Sport: model.SportCycling, Name: "My ride", Date: date, Description: "mine", Steps: steps(minutes)}
+	return workout.Workout{ID: id, Rider: "r", Sport: model.SportCycling, Name: "My ride", Date: date, Description: "mine", Flags: workout.Flags{Origin: workout.OriginRider}, Steps: steps(minutes)}
 }
 
 func travel(start, end string) Event {
@@ -248,6 +248,7 @@ func TestVacatedAndEventDaysAreNotFree(t *testing.T) {
 	// has no free day at all this week.
 	moved := easy("old", "2026-10-12", 60)
 	moved.Description += " Rescheduled by you: moved from 2026-10-10."
+	moved.Flags = workout.LegacyFlags(moved)
 	busy := Event{ID: "b", Kind: KindBusy, Start: "2026-10-11", End: "2026-10-11"}
 	d := preview(
 		[]Event{travel("2026-10-08", "2026-10-09"), busy},
@@ -275,15 +276,16 @@ func TestAnFTPTestMovesLikeASession(t *testing.T) {
 	if strings.Contains(*c.Update.Description, scheduler.AdjustedMarker) {
 		t.Error("an FTP test is not a generated session and carries no adjusted marker")
 	}
-	if _, ok := scheduler.MovedFrom(*c.Update.Description); !ok {
+	if _, ok := scheduler.MovedFrom(workout.Workout{Flags: *c.Update.Flags}); !ok {
 		t.Error("the move is not recorded in the form the scheduler reads")
 	}
 }
 
 func TestTheMoveIsRecordedWhereTheSchedulerReadsIt(t *testing.T) {
 	d := preview([]Event{travel("2026-10-08", "2026-10-08")}, nil, easy("e1", "2026-10-08", 60))
-	desc := *mustFind(t, d, "move:e1").Update.Description
-	from, ok := scheduler.MovedFrom(desc)
+	upd := mustFind(t, d, "move:e1").Update
+	desc := *upd.Description
+	from, ok := scheduler.MovedFrom(workout.Workout{Flags: *upd.Flags})
 	if !ok || from != "2026-10-08" {
 		t.Fatalf("MovedFrom(%q) = %q, %v", desc, from, ok)
 	}
@@ -292,6 +294,7 @@ func TestTheMoveIsRecordedWhereTheSchedulerReadsIt(t *testing.T) {
 	}
 	moved := easy("e1", "2026-10-09", 60)
 	moved.Description = desc
+	moved.Flags = *upd.Flags
 	if scheduler.IsGenerated(moved) {
 		t.Error("a moved session must no longer be adaptable: it is the one automatic change")
 	}
@@ -300,8 +303,10 @@ func TestTheMoveIsRecordedWhereTheSchedulerReadsIt(t *testing.T) {
 func TestWhatItLeavesAloneIsListedWithAnUntickedRemoval(t *testing.T) {
 	adjusted := easy("adj", "2026-10-08", 60)
 	adjusted.Description += " " + scheduler.AdjustedMarker + " eased."
+	adjusted.Flags = workout.LegacyFlags(adjusted)
 	swapped := easy("swp", "2026-10-08", 60)
 	swapped.Description += " " + scheduler.SwappedMarker + " easier."
+	swapped.Flags = workout.LegacyFlags(swapped)
 	// ridden is dated Friday; the API says which sessions are ridden.
 	d := Preview(Input{
 		Events: []Event{travel("2026-10-08", "2026-10-09")},
@@ -426,6 +431,7 @@ func TestADeletedEventRefillsButNeverOnAVacatedDay(t *testing.T) {
 	prev := []Event{travel("2026-10-08", "2026-10-09")}
 	moved := easy("moved", "2026-10-11", 60)
 	moved.Description += " Rescheduled by a life event: moved from 2026-10-09."
+	moved.Flags = workout.LegacyFlags(moved)
 	refill := []workout.CreateWorkoutRequest{
 		{Date: "2026-10-08", Name: "thu", Description: scheduler.GeneratedDescription},
 		{Date: "2026-10-09", Name: "fri", Description: scheduler.GeneratedDescription},
@@ -522,6 +528,7 @@ func TestChangingTheOptionOrKindTreatsTheWholeRangeAsFresh(t *testing.T) {
 func TestCheckMoveAppliesTheMoveRules(t *testing.T) {
 	moved := easy("moved", "2026-10-12", 60)
 	moved.Description += " Rescheduled by you: moved from 2026-10-10."
+	moved.Flags = workout.LegacyFlags(moved)
 	busy := Event{ID: "b", Kind: KindBusy, Start: "2026-10-14", End: "2026-10-14"}
 	p := profile()
 	p.AvailableDays = []string{"mon", "tue", "wed", "thu", "fri", "sat"} // not Sunday

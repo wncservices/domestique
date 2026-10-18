@@ -225,7 +225,7 @@ func dayFree(c Candidate, own workout.Workout, date, tomorrow string) bool {
 			return false
 		}
 		if w.GoalID != "" {
-			if from, ok := scheduler.MovedFrom(w.Description); ok && from == date {
+			if from, ok := scheduler.MovedFrom(w); ok && from == date {
 				return false
 			}
 		}

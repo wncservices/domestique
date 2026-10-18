@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
@@ -196,7 +195,7 @@ func (s *Server) removePlanMadeWorkouts(ctx context.Context, rider, today, weekE
 		// A session a life event moved or eased, or one the rider chose to keep
 		// through it, stays: the blackout would keep the plan from rebuilding
 		// what the event took away, so deleting it here would lose it for good.
-		if lifeevents.Touched(wk.Description) {
+		if lifeevents.Touched(wk) {
 			continue
 		}
 		// A routed session is the rider's own too, but needs no check here:
@@ -285,7 +284,7 @@ func (s *Server) countAdjustedAmong(ctx context.Context, rider string, ids []str
 	}
 	n := 0
 	for _, wk := range workouts {
-		if want[wk.ID] && strings.Contains(wk.Description, scheduler.AdjustedMarker) {
+		if want[wk.ID] && wk.Flags.Adapted() {
 			n++
 		}
 	}

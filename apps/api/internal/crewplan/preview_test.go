@@ -32,7 +32,7 @@ func step(seconds float64) []workout.WorkoutStep {
 func gen(id, name, date string, zone workout.Zone, seconds float64) workout.Workout {
 	return workout.Workout{
 		ID: id, Rider: "wilant", Sport: model.SportCycling, Name: name, GoalID: "goal", Date: date,
-		Zone: zone, Description: scheduler.GeneratedDescription, Steps: step(seconds),
+		Zone: zone, Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: step(seconds),
 	}
 }
 
@@ -41,7 +41,7 @@ func hard(id, date string) workout.Workout {
 }
 
 func riderBuilt(id, date string) workout.Workout {
-	return workout.Workout{ID: id, Rider: "wilant", Sport: model.SportCycling, Name: "My ride", Date: date, Description: "mine", Steps: step(3600)}
+	return workout.Workout{ID: id, Rider: "wilant", Sport: model.SportCycling, Name: "My ride", Date: date, Description: "mine", Flags: workout.Flags{Origin: workout.OriginRider}, Steps: step(3600)}
 }
 
 func input(ride Ride, ws ...workout.Workout) Input {
@@ -200,6 +200,7 @@ func TestAnEasyDayAfterThatIsAlreadyShortIsLeftAsItIs(t *testing.T) {
 func TestNothingThePlanDidNotMakeIsEverChanged(t *testing.T) {
 	adjusted := hard("fri-adjusted", fri)
 	adjusted.Description += " " + scheduler.AdjustedMarker + " eased."
+	adjusted.Flags = workout.LegacyFlags(adjusted)
 	built := riderBuilt("built-on-day", sat)
 	ridden := gen("ridden", "Endurance ride", sat, workout.ZoneEndurance, 3600)
 	in := input(longRide, adjusted, built, ridden)
@@ -222,6 +223,7 @@ func TestNothingThePlanDidNotMakeIsEverChanged(t *testing.T) {
 func TestASwappedSessionIsLeftAlone(t *testing.T) {
 	swapped := hard("swapped", fri)
 	swapped.Description += " " + scheduler.SwappedMarker + " alternate."
+	swapped.Flags = workout.LegacyFlags(swapped)
 	d := Preview(input(longRide, swapped))
 	if len(d.Changes) != 0 || len(d.LeftAlone) != 1 {
 		t.Errorf("diff = %+v, want the swapped session left alone", d)
@@ -231,6 +233,7 @@ func TestASwappedSessionIsLeftAlone(t *testing.T) {
 func TestAKeptSessionIsNotEasedAgain(t *testing.T) {
 	kept := hard("fri-kept", fri)
 	kept.Description += " " + KeptMarker
+	kept.Flags = workout.LegacyFlags(kept)
 	if d := Preview(input(longRide, kept)); len(d.Changes) != 0 {
 		t.Errorf("changes = %+v, want none for a session the rider chose to keep", d.Changes)
 	}
@@ -344,8 +347,8 @@ func TestABlackoutDayWarnsButNeverBlocks(t *testing.T) {
 
 func TestLeavingAddsWhatThePlanWouldHaveMadeOnTheFreedDay(t *testing.T) {
 	refill := []workout.CreateWorkoutRequest{
-		{Rider: "wilant", Name: "Long ride", Date: sat, GoalID: "goal", Description: scheduler.GeneratedDescription, Steps: step(3 * 3600)},
-		{Rider: "wilant", Name: "Endurance ride", Date: fri, GoalID: "goal", Description: scheduler.GeneratedDescription, Steps: step(3600)},
+		{Rider: "wilant", Name: "Long ride", Date: sat, GoalID: "goal", Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: step(3 * 3600)},
+		{Rider: "wilant", Name: "Endurance ride", Date: fri, GoalID: "goal", Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: step(3600)},
 	}
 	row := workout.Workout{ID: "fixed", Rider: "wilant", Name: "Crew ride: Hill Loop", GoalID: "goal", Date: sat, CrewRideID: "ride-1", Steps: step(4 * 3600)}
 	in := input(longRide, row)

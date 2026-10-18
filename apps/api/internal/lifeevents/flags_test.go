@@ -25,6 +25,7 @@ func assertUpdateFlags(t *testing.T, id string, before workout.Workout, u *worko
 func TestLifeEventRequestsCarryFlags(t *testing.T) {
 	prior := hard("again", "2026-10-09", 90)
 	prior.Description = scheduler.GeneratedDescription + "\n\nRescheduled by you: moved from 2026-10-01."
+	prior.Flags = workout.LegacyFlags(prior)
 
 	cases := []struct {
 		name   string
@@ -113,8 +114,10 @@ func TestLifeEventEaseExtendsStoredRules(t *testing.T) {
 	if len(got) != 2 || got[0] != why.ReadinessRest || got[1] != why.LifeEvent {
 		t.Errorf("rules = %v", got)
 	}
+	// An already adapted session is not the plan's any more: moving it adds no
+	// rule of its own.
 	m := movedFlags(w, "2026-10-09").AdaptedRules
-	if len(m) != 2 || m[0] != why.ReadinessRest {
+	if len(m) != 1 || m[0] != why.ReadinessRest {
 		t.Errorf("move rules = %v", m)
 	}
 }

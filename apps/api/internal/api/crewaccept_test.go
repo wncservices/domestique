@@ -46,7 +46,7 @@ func TestAcceptingMovesOnlyTheCallersOwnSessionAndNeedsNobodyElse(t *testing.T) 
 	if moved.Date != cpSaturday {
 		t.Errorf("wilant's session is on %s, want the shared Saturday", moved.Date)
 	}
-	from, ok := scheduler.MovedFrom(moved.Description)
+	from, ok := scheduler.MovedFrom(moved)
 	if !ok || from != cpSunday {
 		t.Errorf("MovedFrom = %q, %v: scheduling must keep the vacated Sunday taken (%q)", from, ok, moved.Description)
 	}

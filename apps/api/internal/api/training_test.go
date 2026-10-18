@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/testdb"
 	"io"
 	"net/http"
@@ -987,7 +986,7 @@ func TestMovingAPlanWorkoutDoesNotGetItScheduledAgain(t *testing.T) {
 	if updated.Date != target {
 		t.Errorf("date = %q, want %q", updated.Date, target)
 	}
-	if from, ok := scheduler.MovedFrom(updated.Description); !ok || from != moved.Date {
+	if from, ok := workout.MovedFromDate(updated.Description); !ok || from != moved.Date {
 		t.Errorf("description %q does not record the original date %s", updated.Description, moved.Date)
 	}
 
@@ -996,7 +995,7 @@ func TestMovingAPlanWorkoutDoesNotGetItScheduledAgain(t *testing.T) {
 	if !taken[again] {
 		resp = h.as("wilant", "cyclists", http.MethodPatch, "/api/training/workouts/"+moved.ID, fmt.Sprintf(`{"date":%q}`, again))
 		_ = json.NewDecoder(resp.Body).Decode(&updated)
-		if from, _ := scheduler.MovedFrom(updated.Description); from != moved.Date {
+		if from, _ := workout.MovedFromDate(updated.Description); from != moved.Date {
 			t.Errorf("after a second move, recorded original = %q, want %q", from, moved.Date)
 		}
 	}

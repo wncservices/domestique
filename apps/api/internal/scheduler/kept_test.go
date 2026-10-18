@@ -16,7 +16,8 @@ func TestARiderKeptSessionIsNeverGeneratedOrReplaceable(t *testing.T) {
 		"life kept": scheduler.LifeKeptMarker,
 	} {
 		w := workout.Workout{GoalID: "g", Description: gen + " " + marker}
-		if !scheduler.RiderKept(w.Description) {
+		w.Flags = workout.LegacyFlags(w)
+		if !scheduler.RiderKept(w) {
 			t.Errorf("%s: RiderKept = false", name)
 		}
 		if scheduler.IsGenerated(w) {
@@ -30,6 +31,7 @@ func TestARiderKeptSessionIsNeverGeneratedOrReplaceable(t *testing.T) {
 		}
 	}
 	plain := workout.Workout{GoalID: "g", Description: gen}
+	plain.Flags = workout.LegacyFlags(plain)
 	if !scheduler.IsGenerated(plain) || !scheduler.AutoReplaceable(plain) {
 		t.Error("an untouched plan session must stay changeable")
 	}

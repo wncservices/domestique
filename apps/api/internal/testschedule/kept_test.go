@@ -24,10 +24,12 @@ func TestASuggestionSkipsADayHoldingAKeptSession(t *testing.T) {
 	for name, marker := range map[string]string{"crew": scheduler.CrewKeptMarker, "life event": scheduler.LifeKeptMarker} {
 		t.Run(name, func(t *testing.T) {
 			session := func(desc string) workout.Workout {
-				return workout.Workout{
+				w := workout.Workout{
 					ID: "s", Rider: "wilant", Sport: model.SportCycling, Name: "Endurance ride", Date: plain.Date, GoalID: "g",
 					Zone: workout.ZoneEndurance, Description: desc,
 				}
+				w.Flags = workout.LegacyFlags(w)
+				return w
 			}
 			// Control: the same session, not kept, is replaceable on that day.
 			in := base

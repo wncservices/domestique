@@ -137,7 +137,7 @@ func hasPlanSessionsBetween(existing []workout.Workout, g workout.Goal, start, e
 		// Neither is a ride the rider put on the day with a route and no plan
 		// description ("new" in routeschedule.go): it carries the goal id so the
 		// day reads as taken, but it is theirs, not the plan's.
-		riderRouted := wk.RouteSlug != "" && !strings.HasPrefix(wk.Description, scheduler.GeneratedDescription)
+		riderRouted := wk.RouteSlug != "" && wk.Flags.Origin != workout.OriginPlan
 		if wk.GoalID == g.ID && wk.TestProtocol == "" && wk.CrewRideID == "" && !riderRouted && wk.Date >= start && wk.Date <= end {
 			return true
 		}
@@ -261,10 +261,10 @@ func untouchedPlanSession(wk workout.Workout) bool {
 		!wk.Indoor &&
 		// A route link is the rider's own choice, and a rebuilt session would
 		// silently drop it or swap the content under a route chosen for the
-		// old one. It already moves UpdatedAt, but the guarantee is stated here.
+		// old one. It already moves EditedAt, but the guarantee is stated here.
 		wk.RouteSlug == "" &&
 		wk.PlannedSnapshot == nil &&
-		wk.UpdatedAt == wk.CreatedAt
+		wk.EditedAt == ""
 }
 
 func sameContent(wk workout.Workout, req workout.CreateWorkoutRequest) bool {

@@ -13,7 +13,7 @@ import (
 func TestACrewRideRowIsNeverPlannable(t *testing.T) {
 	w := workout.Workout{
 		GoalID: "g", CrewRideID: "ride-1", Description: scheduler.GeneratedDescription,
-		Zone: workout.ZoneEndurance,
+		Flags: workout.Flags{Origin: workout.OriginPlan}, Zone: workout.ZoneEndurance,
 	}
 	if Plannable(w) {
 		t.Error("a crew ride row is plannable")

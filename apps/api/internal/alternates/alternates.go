@@ -11,7 +11,6 @@ package alternates
 
 import (
 	"math"
-	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -103,7 +102,7 @@ func Plannable(w workout.Workout) bool {
 	if w.CrewRideID != "" {
 		return false
 	}
-	if w.GoalID == "" || !strings.HasPrefix(w.Description, scheduler.GeneratedDescription) {
+	if w.Flags.Origin != workout.OriginPlan {
 		return false
 	}
 	if w.TestProtocol != "" {

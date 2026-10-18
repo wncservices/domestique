@@ -24,7 +24,7 @@ func fcDay(offset int) string { return fcToday.AddDate(0, 0, offset).Format("200
 func fcHard(id, date string, powerWatts float64) workout.Workout {
 	return workout.Workout{
 		ID: id, Sport: model.SportCycling, Name: "Threshold 3x12", GoalID: "g", Date: date,
-		Description: scheduler.GeneratedDescription, Zone: workout.ZoneThreshold, Level: 5,
+		Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600,
 			Target: workout.TargetPower, TargetLow: powerWatts, TargetHigh: powerWatts}},
 	}
@@ -238,9 +238,11 @@ func fcSnap(date string, ctl, atl float64) *workout.FitnessSnapshot {
 func TestForecastTomorrowEligibility(t *testing.T) {
 	adjusted := fcHard("t", fcDay(1), 200)
 	adjusted.Description += " " + scheduler.AdjustedMarker + " already eased"
+	adjusted.Flags = workout.LegacyFlags(adjusted)
 	ownWorkout := fcHard("t", fcDay(1), 200)
 	ownWorkout.GoalID = ""
 	ownWorkout.Description = "mine"
+	ownWorkout.Flags = workout.Flags{Origin: workout.OriginRider}
 	// The 2-day run makes tomorrow a caution whenever it is eligible at all.
 	twoDays := []workout.Workout{fcHard("a", fcDay(0), 200), fcHard("b", fcDay(-1), 200)}
 

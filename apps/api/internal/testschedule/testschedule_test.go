@@ -244,7 +244,7 @@ func TestDayChoice(t *testing.T) {
 		return in
 	}
 	generated := func(id, date string, zone workout.Zone) workout.Workout {
-		return workout.Workout{ID: id, GoalID: "g", Date: date, Zone: zone, Name: "Session", Description: scheduler.GeneratedDescription}
+		return workout.Workout{ID: id, GoalID: "g", Date: date, Zone: zone, Name: "Session", Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}}
 	}
 
 	t.Run("first available day from tomorrow", func(t *testing.T) {

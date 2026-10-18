@@ -502,7 +502,7 @@ func (s *Server) applyCrewUpdate(ctx context.Context, wk workout.Workout, profil
 // keepAroundCrewRide writes the kept marker into a session whose ease the rider
 // unticked, once.
 func (s *Server) keepAroundCrewRide(ctx context.Context, wk workout.Workout, j *goingJournal) error {
-	if wk.ID == "" || strings.Contains(wk.Description, crewplan.KeptMarker) {
+	if wk.ID == "" || workout.CurrentFlags(wk).Kept == workout.KeptCrew {
 		return nil
 	}
 	description := strings.TrimRight(wk.Description, " \n") + " " + crewplan.KeptMarker

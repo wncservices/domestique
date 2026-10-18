@@ -162,7 +162,7 @@ func TestApplyingCreatesTheEventAndMovesTheSessionWithMarkers(t *testing.T) {
 	if got.Date != "2026-10-10" {
 		t.Fatalf("session is on %s, want 2026-10-10", got.Date)
 	}
-	from, ok := scheduler.MovedFrom(got.Description)
+	from, ok := scheduler.MovedFrom(got)
 	if !ok || from != "2026-10-08" {
 		t.Errorf("MovedFrom = %q, %v", from, ok)
 	}

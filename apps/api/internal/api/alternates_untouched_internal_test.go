@@ -16,6 +16,7 @@ func TestASwappedSessionIsNeverUntouched(t *testing.T) {
 	base := workout.Workout{
 		GoalID: "goal", Sport: model.SportCycling, Name: "Threshold 3×12",
 		Description: scheduler.GeneratedDescription, CreatedAt: "2026-03-01T00:00:00Z", UpdatedAt: "2026-03-01T00:00:00Z",
+		Flags: workout.Flags{Origin: workout.OriginPlan},
 	}
 	if !untouchedPlanSession(base) {
 		t.Fatal("the baseline session should be untouched, or this test proves nothing")
@@ -30,6 +31,7 @@ func TestASwappedSessionIsNeverUntouched(t *testing.T) {
 	// The description alone, as if the timestamps had been reset.
 	marked := base
 	marked.Description = scheduler.GeneratedDescription + " " + scheduler.SwappedMarker + " harder, was Threshold 3×12 (1h20)."
+	marked.Flags = workout.LegacyFlags(marked)
 	if untouchedPlanSession(marked) {
 		t.Error("a session carrying the swap marker was offered to the season refresh")
 	}

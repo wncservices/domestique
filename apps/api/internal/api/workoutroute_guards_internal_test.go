@@ -15,6 +15,7 @@ func generatedSession() workout.Workout {
 	return workout.Workout{
 		ID: "w", GoalID: "g", Sport: model.SportCycling, Name: "Endurance ride", Zone: workout.ZoneEndurance,
 		Description: scheduler.GeneratedDescription, CreatedAt: "t", UpdatedAt: "t",
+		Flags: workout.Flags{Origin: workout.OriginPlan},
 	}
 }
 

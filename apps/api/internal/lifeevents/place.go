@@ -110,7 +110,7 @@ func newPlanner(in Input) *planner {
 			p.hardOn[w.Date] = true
 		}
 		if w.GoalID != "" {
-			if from, ok := scheduler.MovedFrom(w.Description); ok {
+			if from, ok := scheduler.MovedFrom(w); ok {
 				p.vacated[from] = true
 			}
 		}
@@ -342,9 +342,9 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 		// Only a life event's own ramp touched it, and the rider has since
 		// made another event over its day: it is still the plan's session.
 		return eligible
-	case w.GoalID == "" || !strings.HasPrefix(w.Description, scheduler.GeneratedDescription):
+	case w.Flags.Origin != workout.OriginPlan:
 		return ineligibleBuilt
-	case strings.Contains(w.Description, scheduler.SwappedMarker):
+	case w.Flags.Swapped:
 		return ineligibleSwapped
 	default:
 		return ineligibleAdjusted
@@ -354,10 +354,8 @@ func (p *planner) eligibility(w workout.Workout) eligibility {
 // lifeRamped is a plan-made session whose only automatic change is a life
 // event's return ramp (not a readiness easing, not a swap, not a move).
 func lifeRamped(w workout.Workout) bool {
-	return w.GoalID != "" && strings.HasPrefix(w.Description, scheduler.GeneratedDescription) &&
-		strings.Contains(w.Description, scheduler.AdjustedMarker+" "+rampNotePrefix) &&
-		strings.Count(w.Description, scheduler.AdjustedMarker) == 1 &&
-		!strings.Contains(w.Description, scheduler.SwappedMarker)
+	return w.Flags.Origin == workout.OriginPlan && !w.Flags.Swapped &&
+		len(w.Flags.AdaptedRules) == 1 && workout.IsLifeRule(w.Flags.AdaptedRules[0])
 }
 
 func (p *planner) leave(w workout.Workout, why string) {
@@ -602,7 +600,7 @@ func (p *planner) move(s scoped, to string) {
 func movedDescription(w workout.Workout, from, reason string) string {
 	d := strings.TrimRight(w.Description, " \n")
 	note := "Rescheduled by a life event: moved from " + from + "."
-	if _, already := scheduler.MovedFrom(d); already {
+	if workout.CurrentFlags(w).MovedFrom != "" {
 		// The first date is the one the scheduler must keep reading.
 		note = "Rescheduled again by a life event (it was on " + from + ")."
 	}
