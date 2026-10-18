@@ -24,13 +24,15 @@ defineProps<{
 const emit = defineEmits<{ 'update:open': [boolean]; rated: [analysis: SessionAnalysis] }>()
 
 // The same five grades as the day card's effort summary (effortSummary.ts),
-// so "Just under" means the same thing in both places.
-const GRADE_META: Record<EffortGrade, { icon: string; color: 'success' | 'warning' | 'error' }> = {
-  on: { icon: 'i-lucide-check', color: 'success' },
-  justUnder: { icon: 'i-lucide-arrow-down-right', color: 'warning' },
-  justOver: { icon: 'i-lucide-arrow-up-right', color: 'warning' },
-  under: { icon: 'i-lucide-arrow-down', color: 'error' },
-  over: { icon: 'i-lucide-arrow-up', color: 'warning' },
+// so "Just under" means the same thing in both places. Primary is on target,
+// ember is behind; over is not behind, so it is neutral and the arrow says which way.
+const EMBER = 'text-[var(--app-accent-ember)]'
+const GRADE_META: Record<EffortGrade, { icon: string; color: 'primary' | 'neutral'; class?: string }> = {
+  on: { icon: 'i-lucide-check', color: 'primary' },
+  justUnder: { icon: 'i-lucide-arrow-down-right', color: 'neutral', class: EMBER },
+  justOver: { icon: 'i-lucide-arrow-up-right', color: 'neutral' },
+  under: { icon: 'i-lucide-arrow-down', color: 'neutral', class: EMBER },
+  over: { icon: 'i-lucide-arrow-up', color: 'neutral' },
 }
 
 function gradeOf(step: AnalysisStep): EffortGrade {
@@ -67,7 +69,7 @@ function formatActual(step: AnalysisStep): string {
   <UModal :open="open" :title="title" :ui="{ content: 'sm:max-w-2xl' }" @update:open="(v: boolean) => emit('update:open', v)">
     <template #body>
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[26rem] text-sm">
+        <table class="w-full min-w-[26rem] text-[length:var(--text-body)]">
           <thead>
             <tr class="text-left text-[length:var(--text-label)] text-muted">
               <th class="pb-2 pr-2 font-medium">Step</th>
@@ -82,10 +84,10 @@ function formatActual(step: AnalysisStep): string {
               <td class="py-2 pr-2 tabular-nums whitespace-nowrap">{{ formatRange(step) }}</td>
               <td class="py-2 pr-2 tabular-nums whitespace-nowrap">
                 <div>{{ formatActual(step) }}</div>
-                <div v-if="step.inTargetPct" class="text-xs text-dimmed">{{ Math.round(step.inTargetPct) }}% in range</div>
+                <div v-if="step.inTargetPct" class="text-[length:var(--text-label)] text-dimmed">{{ Math.round(step.inTargetPct) }}% in range</div>
               </td>
               <td class="py-2">
-                <UBadge :color="GRADE_META[gradeOf(step)].color" variant="subtle" :icon="GRADE_META[gradeOf(step)].icon" size="xs">
+                <UBadge :color="GRADE_META[gradeOf(step)].color" variant="subtle" :icon="GRADE_META[gradeOf(step)].icon" size="xs" :class="GRADE_META[gradeOf(step)].class">
                   {{ GRADE_LABEL[gradeOf(step)] }}
                 </UBadge>
               </td>

@@ -21,11 +21,14 @@ const props = withDefaults(
   { size: 'sm' },
 )
 
-const OUTCOME_META: Record<Outcome, { label: string; icon: string; color: 'success' | 'neutral' | 'warning' | 'error' | 'info' }> = {
-  nailed: { label: 'Nailed it', icon: 'i-lucide-circle-check', color: 'success' },
+// Primary is on target; ember is behind (the badge has no ember colour, so
+// those are neutral with an ember class).
+const EMBER = 'text-[var(--app-accent-ember)]'
+const OUTCOME_META: Record<Outcome, { label: string; icon: string; color: 'primary' | 'neutral' | 'info'; class?: string }> = {
+  nailed: { label: 'Nailed it', icon: 'i-lucide-circle-check', color: 'primary' },
   completed: { label: 'Completed', icon: 'i-lucide-check', color: 'neutral' },
-  struggled: { label: 'Struggled', icon: 'i-lucide-trending-down', color: 'warning' },
-  incomplete: { label: 'Incomplete', icon: 'i-lucide-circle-x', color: 'error' },
+  struggled: { label: 'Struggled', icon: 'i-lucide-trending-down', color: 'neutral', class: EMBER },
+  incomplete: { label: 'Incomplete', icon: 'i-lucide-circle-x', color: 'neutral', class: EMBER },
   unplanned: { label: 'Unplanned', icon: 'i-lucide-circle-plus', color: 'info' },
 }
 
@@ -37,9 +40,9 @@ const allOut = computed(() => props.feel === 5 && (props.outcome === 'nailed' ||
 
 <template>
   <span class="inline-flex max-w-full items-center gap-1.5">
-    <UBadge :color="meta.color" variant="subtle" :icon="meta.icon" :size="size" class="max-w-full truncate">
+    <UBadge :color="meta.color" variant="subtle" :icon="meta.icon" :size="size" class="max-w-full truncate" :class="meta.class">
       {{ meta.label }}
     </UBadge>
-    <span v-if="allOut" class="text-xs text-muted">felt all-out</span>
+    <span v-if="allOut" class="text-[length:var(--text-label)] text-muted">felt all-out</span>
   </span>
 </template>

@@ -50,6 +50,13 @@ phase scale for training phases only; neither is reused for decoration.
 | Phase | `--color-phase-*` | Training phase. Nothing else. |
 | Status | Nuxt UI `success`/`warning`/`error`/`info` | State, never decoration. |
 
+Going over a target is not behind, so *over* is neutral (muted) and the arrow icon
+carries the direction; ember is for under, missed, struggled and incomplete. Nuxt UI's
+`UBadge` has no ember colour: use `color="neutral"` with `text-[var(--app-accent-ember)]`.
+`DifficultyChip` is an intensity scale (calm to hard), so its icon takes the zone scale
+through `zoneColorVar` (Recovery to Breakthrough map to recovery, endurance, tempo,
+threshold, vo2max) and the badge stays neutral.
+
 **Zone scale**, cool to warm, in effort order: `--color-zone-recovery`,
 `--color-zone-endurance`, `--color-zone-tempo`, `--color-zone-sweet_spot`,
 `--color-zone-threshold`, `--color-zone-vo2max`, `--color-zone-anaerobic`.
@@ -253,7 +260,7 @@ something to retry. The guard test fails on a spinner icon in `pages/`.
 | Path | Page | Status |
 |---|---|---|
 | `/today` | `TodayPage.vue` | Redesigned: `AppPage`, calm-first card, `StatTile`, `DetailsToggle`, `SuggestionRow` |
-| `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle` |
+| `/plan` | `PlanPage.vue` | Redesigned: `AppPage`, week tiles, one-primary toolbar, `SuggestionRow` for the FTP test, goals behind `DetailsToggle`; the day card (`TodayCard`) and its outcome, difficulty and step-result chips are restyled to the colour roles and type tokens, keeping the workout profile and watts range visible |
 | `/fitness` | `FitnessPage.vue` | Redesigned: `AppPage`, `SegmentedControl` (Fitness / Season), `StatTile` summary row, "Data and devices" section |
 | `/routes`, `/routes/new`, `/routes/build` | `RoutesPage.vue`, `AddPage.vue`, `BuildRoutePage.vue` | Redesigned: `AppPage` with Add route / Build a route as page actions, library `StatTile` row, `SegmentedControl` (Grid / Map), slim sync banner, `RouteCard` with an actions menu. Add and Build are `AppPage`s with a "Back to routes" action |
 | `/crews` | `CrewsPage.vue` | Redesigned: `AppPage` with Search crews / Create crew as page actions, crew cards in a two-column grid, labelled menus for ride, member and crew actions, one-line `EmptyState` |
