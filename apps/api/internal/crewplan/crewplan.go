@@ -52,11 +52,10 @@ type Estimate struct {
 
 // EstimateRoute estimates a ride on a route from its length and ascent alone.
 //
-// A pacing-model estimate (internal/pacing) would be better for a rider with
-// an FTP and a weight, but it needs the route's whole profile, and this is
-// read for every upcoming ride of every crew on every page load. The cheap
-// stats-only formula is the one the spec fixes; swapping in the model is a
-// follow-up for when a route profile is cheap to get.
+// It is the crew-wide figure: the ride list shows one ride to every member and
+// is read on every page load, so it needs no profile. The session a rider gets
+// for going is sized by the pacing model instead when they have an FTP and a
+// weight (api.crewRideSeconds); this is its fallback.
 func EstimateRoute(stats model.RouteStats) Estimate {
 	km := stats.DistanceM / 1000
 	hours := km/groupSpeedKph + stats.AscentM*hoursPerMetreAscent

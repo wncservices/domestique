@@ -301,6 +301,11 @@ func (s *Server) fixedSessionFor(ctx context.Context, rider, rideID string) (*wo
 // automatic rule off it, and it names no rider.
 func (s *Server) fixedSessionRequest(ctx context.Context, in goingInput) (workout.CreateWorkoutRequest, error) {
 	est := crewplan.EstimateRoute(in.route.Stats)
+	// The rider's own length (crewRideSeconds), the same one the join preview
+	// was computed with, so what was previewed is what is stored.
+	if sec := s.crewRideSeconds(ctx, in.rider, in.route); sec != est.Seconds() {
+		est.Hours, est.TSS, est.Kind = sec/3600, crewplan.TSSForSeconds(sec), crewplan.KindForSeconds(sec)
+	}
 	_, focus, _, err := s.focusPlan(ctx, in.rider, s.localNow())
 	if err != nil {
 		return workout.CreateWorkoutRequest{}, err
