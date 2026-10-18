@@ -385,7 +385,8 @@ table; `internal/mailer` sends.
   and a late pass still sends until 12:00 local, then skips. "Today" is the schedule's zone.
 - **No readiness reasons, no numbers.** `Compose`'s `Input` carries the verdict as one word and not
   the reasons, so sleep, HRV, resting heart rate and load cannot reach a mailbox on a relay we do
-  not control. The email points at the Fitness page for the why. The weather line is the same rule
+  not control. The email points at the Fitness page for the why, and at Settings →
+  Notifications (`/settings#notifications`, where the opt-in card lives) to change or stop it. The weather line is the same rule
   the Plan page uses. The FTP-test line names the suggested day ("tomorrow" or a
   weekday) when it falls in the coming six days; the suggester never picks today. A day
   inside a life event is "a planned break" (never which kind: illness is health data),

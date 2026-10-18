@@ -294,6 +294,9 @@ still follows its own permission or data gate.
 - **Sections** are `<section id>` with a `text-xl` display heading and one line of
   description; the cards inside use `h3`. A section whose cards are all gated out shows
   a one-line "nothing to set here" instead of a blank gap.
+- **Notifications** holds what Domestique sends a rider: the weather card and the
+  morning summary email (`MorningSummaryCard`). The email's own "change or turn off"
+  link lands on `/settings#notifications`.
 - **One sentence per setting.** Anything longer goes unchanged behind
   `DetailsToggle label="Learn more"`. Do not delete help text to shorten a page.
 
@@ -353,7 +356,7 @@ deep links work and a tab switch does not add a history entry.
   two pages cannot disagree.
 - **Data and devices** is the pattern for set-up-once cards: a section under the
   charts with its own heading, holding unchanged cards (recovery, profile, zones,
-  calendar feed, morning summary, ride import). Moving a card there never changes
+  calendar feed, ride import). Moving a card there never changes
   what it does. The profile card has `id="profile"`; `/fitness#profile` (Today's
   "Finish your profile" link) scrolls to it once the page has loaded.
 

@@ -18,6 +18,7 @@ import BasemapSetup from '@/components/BasemapSetup.vue'
 import GarminSetup from '@/components/GarminSetup.vue'
 import KomootConnect from '@/components/KomootConnect.vue'
 import WeatherSettings from '@/components/WeatherSettings.vue'
+import MorningSummaryCard from '@/components/fitness/MorningSummaryCard.vue'
 import RideStartCard from '@/components/plan/RideStartCard.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 import DetailsToggle from '@/components/ui/DetailsToggle.vue'
@@ -743,10 +744,9 @@ onMounted(async () => {
           <!-- A rider's own setting. The card hides itself when the deployment
                has weather switched off. -->
           <WeatherSettings v-if="canManageTraining" />
-          <p v-if="canManageTraining" class="text-sm text-muted">
-            The morning summary email is set up on
-            <RouterLink to="/fitness#morning-summary" class="text-primary underline underline-offset-2">Fitness</RouterLink>.
-          </p>
+          <!-- The morning email is a notification, so it is set here; the card
+               hides itself when the deployment has no mail configured. -->
+          <MorningSummaryCard v-if="canManageTraining" />
           <p v-if="notificationsEmpty" class="text-sm text-dimmed">Nothing to set here for your role.</p>
         </section>
 
