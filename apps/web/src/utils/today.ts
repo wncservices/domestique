@@ -129,9 +129,20 @@ export interface WeekTile {
   /** A zone colour variable; absent for rest days and rides with no plan. */
   color?: string
   done: boolean
+  /** A planned day that went by unridden. */
+  missed: boolean
   /** Visible under the colour, so a tile never relies on colour alone. */
   text: string
+  /** The same, short enough for a seventh of a phone screen. */
+  short: string
   aria: string
+}
+
+// "1h 6m" is five characters, too wide for a day tile at 375px; "1:06" fits.
+function compactDuration(seconds: number): string {
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  const m = Math.round(seconds / 60)
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
@@ -145,14 +156,17 @@ export function weekTiles(days: WeekDay[], today: string): WeekTile[] {
     const done = d.status === 'done' || d.status === 'partial'
     const seconds = done || !d.planned.length ? completedSeconds : plannedSeconds
     const text = seconds > 0 ? formatDuration(seconds) : d.planned.length || d.completed.length ? 'Ride' : 'Rest'
+    const missed = d.status === 'missed'
     return {
       date: d.date,
       label: weekdayShort(d.date),
       isToday: d.date === today,
       color: d.planned.length ? zoneColorVar(d.planned[0]!.zone ?? 'endurance') : undefined,
       done,
+      missed,
       text,
-      aria: `${weekdayLong(d.date)}: ${text}${done ? ', done' : ''}`,
+      short: seconds > 0 ? compactDuration(seconds) : text,
+      aria: `${weekdayLong(d.date)}: ${text}${done ? ', done' : missed ? ', missed' : ''}`,
     }
   })
 }

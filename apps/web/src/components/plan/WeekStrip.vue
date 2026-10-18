@@ -304,12 +304,12 @@ watch(
       </div>
     </div>
 
-    <div ref="stripEl" class="mt-4 flex gap-2 overflow-x-auto pb-1 snap-x sm:grid sm:grid-cols-7 sm:overflow-visible">
+    <div ref="stripEl" class="mt-4 flex gap-2 overflow-x-auto pb-1 snap-x xl:grid xl:grid-cols-7 xl:overflow-visible">
       <div
         v-for="day in week.days"
         :key="day.date"
         :data-date="day.date"
-        class="flex min-h-28 min-w-[9.5rem] snap-start flex-col gap-1 rounded-[var(--radius-card)] border p-2 sm:min-w-0"
+        class="flex min-h-28 min-w-[9.5rem] snap-start flex-col gap-1 rounded-[var(--radius-card)] border p-2 xl:min-w-0"
         :class="[tileClass(day), { 'bg-elevated': dragOverDate === day.date }]"
         @dragover="onDragOver($event, day.date)"
         @dragleave="dragOverDate === day.date && (dragOverDate = null)"

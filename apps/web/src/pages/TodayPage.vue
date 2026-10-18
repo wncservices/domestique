@@ -355,7 +355,7 @@ async function dismissSuggestion() {
           </div>
         </UCard>
 
-        <div class="grid gap-3 sm:grid-cols-2">
+        <div class="grid grid-cols-2 gap-3">
           <StatTile :label="form.label" :value="form.value" :caption="form.caption" :tone="form.tone" />
           <StatTile v-if="goalUnknown" label="Goal" value="—" />
           <RouterLink
@@ -392,7 +392,11 @@ async function dismissSuggestion() {
                 <div class="h-1.5" :class="d.color ? '' : 'bg-transparent'" :style="d.color ? { background: d.color } : undefined" />
                 <div class="flex min-h-8 items-center justify-center gap-0.5 px-0.5 py-1 text-[length:var(--text-label)] tabular-nums text-highlighted">
                   <UIcon v-if="d.done" name="i-lucide-check" aria-hidden="true" class="size-3 shrink-0 text-primary" />
-                  <span class="truncate">{{ d.text }}</span>
+                  <!-- On a phone the icon would push the time out of the tile, so a
+                       missed day is struck through instead. -->
+                  <UIcon v-else-if="d.missed" name="i-lucide-circle-x" aria-hidden="true" class="hidden size-3 shrink-0 text-[var(--app-accent-ember)] sm:block" />
+                  <span class="truncate sm:hidden" :class="d.missed ? 'text-[var(--app-accent-ember)] line-through' : ''">{{ d.short }}</span>
+                  <span class="hidden truncate sm:inline">{{ d.text }}</span>
                 </div>
               </div>
             </li>
