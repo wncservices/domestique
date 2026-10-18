@@ -121,9 +121,9 @@ function canBeBack(e: LifeEvent): boolean {
 const ridden = computed(() => {
   switch (props.day?.status) {
     case 'done':
-      return { label: 'Done', icon: 'i-lucide-circle-check', color: 'text-success' }
+      return { label: 'Done', icon: 'i-lucide-circle-check', color: 'text-primary' }
     case 'partial':
-      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-warning' }
+      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-[var(--app-accent-ember)]' }
     default:
       return undefined
   }
@@ -309,14 +309,16 @@ const canOpenResults = computed(() => (analysedSession.value?.analysis?.steps?.l
 // effort saying by how much. See summariseEfforts for the grades.
 const efforts = computed(() => summariseEfforts(analysedSession.value?.analysis?.steps))
 
-const TONE_CLASS = { success: 'text-success', warning: 'text-warning', error: 'text-error' } as const
+// Primary is on target, ember is behind. Going over is not behind, so it stays
+// neutral and the arrow icon carries the direction.
+const TONE_CLASS = { good: 'text-primary', behind: 'text-[var(--app-accent-ember)]', neutral: 'text-muted' } as const
 // The dot repeats what the words already say, so colour is never the only cue.
 const GRADE_DOT: Record<EffortGrade, string> = {
-  on: 'bg-success',
-  justUnder: 'bg-warning',
-  justOver: 'bg-warning',
-  under: 'bg-error',
-  over: 'bg-warning',
+  on: 'bg-primary',
+  justUnder: 'bg-[var(--app-accent-ember)]',
+  justOver: 'bg-[var(--ui-text-muted)]',
+  under: 'bg-[var(--app-accent-ember)]',
+  over: 'bg-[var(--ui-text-muted)]',
 }
 
 const resultsOpen = ref(false)
@@ -387,7 +389,7 @@ function onRated(analysis: SessionAnalysis) {
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex min-w-0 flex-col gap-1">
             <LifeEventBand :event="e" />
-            <p class="text-sm text-muted">{{ rangeLabel(e) }}</p>
+            <p class="text-[length:var(--text-body)] text-muted">{{ rangeLabel(e) }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-pencil" @click="emit('editLifeEvent', e)">Edit</UButton>
@@ -404,7 +406,7 @@ function onRated(analysis: SessionAnalysis) {
           <div class="flex flex-wrap items-center gap-2">
             <UIcon :name="ridden.icon" class="size-5" :class="ridden.color" />
             <span class="font-medium text-highlighted">{{ ridden.label }}</span>
-            <span class="tabular-nums text-sm text-muted">
+            <span class="tabular-nums text-[length:var(--text-body)] text-muted">
               {{ formatDuration(completedSecondsOf(day)) }} of {{ formatDuration(plannedSecondsOf(day)) }} planned
             </span>
             <UBadge v-if="testResult" color="primary" variant="subtle" icon="i-lucide-gauge">
@@ -424,16 +426,16 @@ function onRated(analysis: SessionAnalysis) {
               <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
             </button>
           </div>
-          <p v-if="testUnreadable" class="text-xs text-muted">
+          <p v-if="testUnreadable" class="text-[length:var(--text-label)] text-muted">
             The ride had no usable power for this test, so your FTP is unchanged. You can schedule another.
           </p>
           <div v-if="efforts" class="mt-1 flex flex-col gap-1">
-            <p class="flex items-center gap-1 text-sm font-medium" :class="TONE_CLASS[efforts.tone]">
+            <p class="flex items-center gap-1 text-[length:var(--text-body)] font-medium" :class="TONE_CLASS[efforts.tone]">
               <UIcon :name="efforts.icon" class="size-4 shrink-0" />
               {{ efforts.label }}
             </p>
             <ul class="flex flex-col gap-0.5">
-              <li v-for="(e, i) in efforts.efforts" :key="i" class="flex items-baseline gap-2 text-xs text-muted">
+              <li v-for="(e, i) in efforts.efforts" :key="i" class="flex items-baseline gap-2 text-[length:var(--text-label)] text-muted">
                 <span class="size-2 shrink-0 translate-y-[-1px] rounded-full" :class="GRADE_DOT[e.grade]" aria-hidden="true" />
                 <span class="text-default">{{ e.name }}</span>
                 <span class="tabular-nums">{{ e.detail }}</span>
@@ -453,9 +455,17 @@ function onRated(analysis: SessionAnalysis) {
 
         <!-- Planned -->
         <div v-else-if="firstWorkout" class="mt-2 flex flex-col gap-3">
-          <div>
+          <div class="flex flex-col gap-1">
+            <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+              <h3 class="min-w-0 font-display text-[length:var(--text-title)] leading-tight text-highlighted">{{ firstWorkout.name }}</h3>
+              <div
+                v-if="firstWorkout.plannedSeconds > 0"
+                class="font-display text-[length:var(--text-hero)] leading-none text-highlighted tabular-nums"
+              >
+                {{ formatDuration(firstWorkout.plannedSeconds) }}
+              </div>
+            </div>
             <div class="flex flex-wrap items-center gap-2">
-              <h3 class="text-xl font-semibold text-highlighted">{{ firstWorkout.name }}</h3>
               <ZoneLevelBadge v-if="firstWorkout.zone && (firstWorkout.level ?? 0) > 0" :zone="firstWorkout.zone" :level="firstWorkout.level!" />
               <IndoorBadge v-if="firstWorkout.indoor" :description="firstWorkout.description" />
               <CrewRideBadge v-if="firstWorkout.crewRide" :crew-ride="firstWorkout.crewRide" />
@@ -464,28 +474,26 @@ function onRated(analysis: SessionAnalysis) {
                 {{ ftpTestLabel(firstWorkout.testProtocol) }}
               </UBadge>
             </div>
-            <p class="tabular-nums text-sm text-muted">
-              {{ formatDuration(firstWorkout.plannedSeconds) }}
-              <template v-if="firstWorkoutTarget"> · {{ firstWorkoutTarget }}</template>
-            </p>
+            <p v-if="firstWorkoutTarget" class="tabular-nums text-[length:var(--text-body)] text-muted">{{ firstWorkoutTarget }}</p>
           </div>
           <div v-if="crewRide" class="flex flex-col gap-2 rounded-lg border border-default p-3">
-            <p class="flex flex-wrap items-center gap-x-2 text-sm text-highlighted">
+            <p class="flex flex-wrap items-center gap-x-2 text-[length:var(--text-body)] text-highlighted">
               <UIcon name="i-lucide-users" class="size-4 text-primary" />
               <span class="font-medium">{{ crewKindLabel }}</span>
               <span v-if="crewRide.crewName" class="text-muted">with {{ crewRide.crewName }}</span>
             </p>
-            <p class="tabular-nums text-xs text-muted">
+            <p class="tabular-nums text-[length:var(--text-label)] text-muted">
               About {{ formatDuration(firstWorkout.plannedSeconds) }} · estimated TSS {{ Math.round(crewRide.estimatedTss) }}
             </p>
-            <p v-if="(crewRide.goingNames?.length ?? 0) > 0" class="text-xs text-muted">
+            <p v-if="(crewRide.goingNames?.length ?? 0) > 0" class="text-[length:var(--text-label)] text-muted">
               {{ crewRide.goingNames!.length }} going: {{ crewRide.goingNames!.join(', ') }}
             </p>
             <UAlert
               v-if="crewAdviceHere"
-              :color="crewAdviceHere.severity === 'rest' ? 'warning' : 'info'"
+              color="neutral"
               variant="subtle"
               icon="i-lucide-heart-pulse"
+              :ui="{ icon: crewAdviceHere.severity === 'rest' ? 'text-[var(--app-accent-ember)]' : '' }"
               :description="crewAdviceHere.advice"
             />
             <UAlert
@@ -509,33 +517,34 @@ function onRated(analysis: SessionAnalysis) {
           </div>
           <WorkoutProfile :steps="firstWorkout.steps" :profile="profile" interactive />
           <WhyPopover :why="firstWorkout.why" :note="adjustmentNote(firstWorkout.description)" />
-          <p v-if="swapNote(firstWorkout.description)" class="flex items-start gap-1 text-xs text-muted">
+          <p v-if="swapNote(firstWorkout.description)" class="flex items-start gap-1 text-[length:var(--text-label)] text-muted">
             <UIcon name="i-lucide-shuffle" class="mt-0.5 shrink-0" />
             <span>{{ swapNote(firstWorkout.description) }}</span>
           </p>
-          <p v-if="firstWorkout.testProtocol" class="flex items-start gap-1 text-xs text-muted">
+          <p v-if="firstWorkout.testProtocol" class="flex items-start gap-1 text-[length:var(--text-label)] text-muted">
             <UIcon name="i-lucide-bike" class="mt-0.5 shrink-0" />
             <span>{{ ftpTestTrainerNote(firstWorkout.testProtocol) }}</span>
           </p>
           <UAlert
             v-if="tiredForTest"
-            color="warning"
+            color="neutral"
             variant="subtle"
             icon="i-lucide-battery-medium"
+            :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
             title="Testing tired under-reads your FTP"
             description="Your readiness is low today. A test on fresher legs gives a number you can trust."
           />
           <div v-if="activeRoute" class="flex flex-col gap-1 rounded-lg border border-default bg-elevated/50 p-3">
             <div class="flex flex-wrap items-center gap-2">
               <UIcon name="i-lucide-route" class="size-4 text-primary" />
-              <span class="text-sm font-medium text-highlighted">{{ activeRoute.name }}</span>
+              <span class="text-[length:var(--text-body)] font-medium text-highlighted">{{ activeRoute.name }}</span>
               <UBadge v-if="activeRoute.generated" color="neutral" variant="subtle">Made for this ride</UBadge>
             </div>
-            <p class="tabular-nums text-xs text-muted">
+            <p class="tabular-nums text-[length:var(--text-label)] text-muted">
               {{ (activeRoute.distanceM / 1000).toFixed(1) }} km · {{ Math.round(activeRoute.ascentM) }} m up · about
               {{ formatDuration(activeRoute.estimatedSeconds) }}
             </p>
-            <p v-if="routeMismatch" class="text-xs text-warning">{{ routeMismatch }}</p>
+            <p v-if="routeMismatch" class="text-[length:var(--text-label)] text-warning">{{ routeMismatch }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-2">
               <UButton v-if="canRoute" color="neutral" variant="outline" size="xs" icon="i-lucide-refresh-cw" @click="emit('route', firstWorkout)">
                 Change
@@ -562,7 +571,7 @@ function onRated(analysis: SessionAnalysis) {
               </UButton>
             </div>
           </div>
-          <p v-if="extraCount > 0" class="text-xs text-dimmed">+{{ extraCount }} more this day</p>
+          <p v-if="extraCount > 0" class="text-[length:var(--text-label)] text-dimmed">+{{ extraCount }} more this day</p>
           <div class="flex flex-wrap items-center gap-2">
             <UButton
               v-if="canSyncGarmin"
@@ -601,7 +610,7 @@ function onRated(analysis: SessionAnalysis) {
         <div v-else-if="day.completed.length > 0" class="mt-2 flex flex-wrap items-center gap-2">
           <UIcon name="i-lucide-info" class="size-5 text-info" />
           <span class="font-medium text-highlighted">Unplanned ride</span>
-          <span class="tabular-nums text-sm text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
+          <span class="tabular-nums text-[length:var(--text-body)] text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
           <button
             v-if="analysedSession"
             type="button"
@@ -618,7 +627,7 @@ function onRated(analysis: SessionAnalysis) {
         <div v-else class="mt-2 flex items-center gap-2">
           <UIcon name="i-lucide-coffee" class="size-5 text-dimmed" />
           <span class="font-medium text-highlighted">Rest day</span>
-          <span class="text-sm text-muted">{{ showingToday ? 'Nothing planned today.' : 'Nothing planned.' }}</span>
+          <span class="text-[length:var(--text-body)] text-muted">{{ showingToday ? 'Nothing planned today.' : 'Nothing planned.' }}</span>
         </div>
       </template>
     </UCard>
