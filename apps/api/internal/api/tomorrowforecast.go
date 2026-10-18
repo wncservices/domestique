@@ -138,7 +138,7 @@ func projectedTSB(latest *workout.FitnessSnapshot, dayLoads map[string]float64, 
 
 // todayTrainingLoad is today's own load: the completed sessions dated today
 // if any have synced, else an estimate from today's planned hard workouts'
-// power targets (adapter.EstimatePlannedTSS, the same estimate
+// power targets (workout.PlannedTSSOrHours, the same estimate
 // overloadedWeek makes). A day with nothing hard planned and nothing ridden
 // truly contributes about zero, which is a real answer rather than a
 // missing one. ok is false only when a hard session is planned and there is
@@ -170,7 +170,7 @@ func todayTrainingLoad(workouts []workout.Workout, sessions []workout.CompletedS
 			continue
 		}
 		plannedHard = true
-		estimate += adapter.EstimatePlannedTSS(w, ftpWatts)
+		estimate += workout.PlannedTSSOrHours(w, ftpWatts)
 	}
 	if plannedHard && ftpWatts <= 0 {
 		return 0, false
