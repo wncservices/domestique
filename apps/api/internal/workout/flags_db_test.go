@@ -254,3 +254,65 @@ func TestDeleteGoalMakesUnlinkedPlanSessionsTheRiders(t *testing.T) {
 		}
 	})
 }
+
+// insertStale writes a row as an old image's UpdateWorkout leaves it: text and
+// updated_at changed, flag columns still the ones the row was created with.
+func insertStale(t *testing.T, db *DB, id, desc, rules, created, updated string) {
+	t.Helper()
+	_, err := db.db.Exec(db.query(`
+        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, origin, adapted_rules, created_at, updated_at)
+        VALUES (?, 'wilant', 'cycling', ?, 'g1', '2026-10-05', ?, '[]', '', 0, 'plan', ?, ?, ?)`),
+		id, id, desc, rules, created, updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBackfillReconcilesRowsAnOldImageEdited(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *DB) {
+		gen := GeneratedDescription
+		insertStale(t, db, "stale", gen+" "+AdjustedMarker+" Tired. "+SwappedMarker+" easier: X", "", "2026-10-01T08:00:00Z", "2026-10-03T09:00:00Z")
+		// A stored rule id that still fits the text is kept, not flattened to legacy.
+		insertStale(t, db, "keeps", gen+" "+AdjustedMarker+" Rest day.", string(why.ReadinessRest), "2026-10-01T08:00:00Z", "2026-10-01T08:00:00Z")
+		if err := db.backfillFlags(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		s, _ := db.GetWorkout(t.Context(), "stale")
+		if !s.Flags.Swapped || len(s.Flags.AdaptedRules) != 1 || s.EditedAt != "2026-10-03T09:00:00Z" || s.UpdatedAt != "2026-10-03T09:00:00Z" {
+			t.Errorf("stale row not reconciled: %+v edited %q", s.Flags, s.EditedAt)
+		}
+		k, _ := db.GetWorkout(t.Context(), "keeps")
+		if len(k.Flags.AdaptedRules) != 1 || k.Flags.AdaptedRules[0] != why.ReadinessRest {
+			t.Errorf("stored rule id lost: %+v", k.Flags.AdaptedRules)
+		}
+	})
+}
+
+func TestScanFillsFlagsFromTextForAnOriginlessRow(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *DB) {
+		insertLegacy(t, db, "fresh", "g1", "", "", GeneratedDescription+" "+SwappedMarker+" x", "2026-10-01T08:00:00Z", "2026-10-01T08:00:00Z")
+		w, err := db.GetWorkout(t.Context(), "fresh")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(w.Flags, LegacyFlags(w)) || !w.Flags.Swapped {
+			t.Errorf("flags = %+v", w.Flags)
+		}
+	})
+}
+
+func TestBackfillSurvivesAnUndecodableRow(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *DB) {
+		insertLegacy(t, db, "bad", "g1", "", "", GeneratedDescription, "2026-10-01T08:00:00Z", "2026-10-01T08:00:00Z")
+		if _, err := db.db.Exec(db.query(`UPDATE workouts SET steps = ? WHERE id = 'bad'`), "{not json"); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.backfillFlags(t.Context()); err != nil {
+			t.Fatalf("backfill failed on a bad row: %v", err)
+		}
+		var origin string
+		if err := db.db.QueryRow(db.query(`SELECT origin FROM workouts WHERE id = 'bad'`)).Scan(&origin); err != nil || origin != string(OriginPlan) {
+			t.Fatalf("origin = %q (%v)", origin, err)
+		}
+	})
+}

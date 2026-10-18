@@ -1280,6 +1280,9 @@ state file ──────Open────> state.Store ───┘
   `workout.CurrentFlags(w)`) next to the marker text it still writes; the markers stay for one more
   release as display text. A parity check that `internal/testdb` switches on fails any test write
   whose columns disagree with `LegacyFlags(description)`, and a one-off backfill fills old rows.
+  The startup backfill also reconciles rows whose columns disagree with their text (an old image's
+  `UpdateWorkout` leaves them stale), so rolling back across this release needs a restart of the new
+  image to reconcile.
   `edited_at` is set by every `UpdateWorkout`, so it means "any edit" for now, as `UpdatedAt ==
   CreatedAt` did. `DeleteGoal` turns the goal's unlinked plan sessions into origin `rider`.
 

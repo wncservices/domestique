@@ -595,8 +595,9 @@ func (p *planner) move(s scoped, to string) {
 
 // movedDescription is w's description with the move noted in the form
 // scheduler.MovedFrom reads, so the scheduler still treats the vacated day as
-// taken, and the adjusted marker, so no automatic rule touches it again. An FTP
-// test is not a generated session and carries no marker.
+// taken, and, for a session that is still plan-made (scheduler.IsPlanSession),
+// the adjusted marker, so no automatic rule touches it again. Any other session
+// (an FTP test, one already adjusted or swapped) is only moved and gets none.
 func movedDescription(w workout.Workout, from, reason string) string {
 	d := strings.TrimRight(w.Description, " \n")
 	note := "Rescheduled by a life event: moved from " + from + "."
@@ -717,8 +718,8 @@ func lifeAdaptedFlags(w workout.Workout, rule why.Rule) *workout.Flags {
 	return &f
 }
 
-// replaceMarked is description with note and the adjusted marker appended. A
-// test is not generated and takes no marker.
+// replaceMarked is description with note and the adjusted marker appended,
+// whatever the session is: callers decide whether a session may be changed.
 func replaceMarked(description, note, reason string) string {
 	d := strings.TrimRight(description, " \n")
 	if note != "" {
