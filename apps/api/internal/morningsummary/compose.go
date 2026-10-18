@@ -109,7 +109,7 @@ func Compose(in Input) (subject, body string) {
 	if in.AppURL != "" {
 		b.WriteString("\n")
 		fmt.Fprintf(&b, "Open the plan: %s\n", link(in.AppURL, "/plan"))
-		fmt.Fprintf(&b, "Change or turn off this email: %s\n", link(in.AppURL, "/fitness"))
+		fmt.Fprintf(&b, "Change or turn off this email: %s\n", link(in.AppURL, "/settings#notifications"))
 	}
 	return subject, b.String()
 }

@@ -17,7 +17,6 @@ import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 import SegmentedControl from '@/components/ui/SegmentedControl.vue'
 import FitnessStatusCard from '@/components/fitness/FitnessStatusCard.vue'
-import MorningSummaryCard from '@/components/fitness/MorningSummaryCard.vue'
 import PowerCurveChart from '@/components/fitness/PowerCurveChart.vue'
 import ProfileForm from '@/components/fitness/ProfileForm.vue'
 import ProgressionCard from '@/components/fitness/ProgressionCard.vue'
@@ -491,13 +490,12 @@ async function onImported() {
   if (!dirty.value) await loadProfile()
 }
 
-// Deep links into this page: Today sends a rider with no FTP to #profile,
-// Settings sends one to #morning-summary. The cards above load after mount and
-// move the target, and the morning summary card only renders once its own
-// status has loaded, so: scroll at once if the target is there, again once the
-// loads have settled, and wait briefly for a target that is not rendered yet.
-// A rider who scrolls in the meantime is left where they are.
-const hashTargets = ['#profile', '#morning-summary']
+// Deep links into this page: Today sends a rider with no FTP to #profile. The
+// cards above load after mount and move the target, so: scroll at once if the
+// target is there, again once the loads have settled, and wait briefly for a
+// target that is not rendered yet. A rider who scrolls in the meantime is left
+// where they are.
+const hashTargets = ['#profile']
 
 function whenRendered(id: string, timeoutMs: number): Promise<HTMLElement | null> {
   const found = document.getElementById(id)
@@ -657,8 +655,6 @@ onMounted(() => {
         />
 
         <CalendarFeedCard />
-
-        <MorningSummaryCard />
 
         <RideImportCard @done="onImported" />
       </section>
