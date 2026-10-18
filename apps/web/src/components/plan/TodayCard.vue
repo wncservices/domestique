@@ -527,9 +527,10 @@ function onRated(analysis: SessionAnalysis) {
           </p>
           <UAlert
             v-if="tiredForTest"
-            color="warning"
+            color="neutral"
             variant="subtle"
             icon="i-lucide-battery-medium"
+            :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
             title="Testing tired under-reads your FTP"
             description="Your readiness is low today. A test on fresher legs gives a number you can trust."
           />
