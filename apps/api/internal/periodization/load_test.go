@@ -195,25 +195,35 @@ func TestTaperOnlyPlanIsFinite(t *testing.T) {
 
 func TestUndatedHoldsAtTheHoursCeiling(t *testing.T) {
 	// 5 h x IF^2 0.49 x 100 / 7 = 35 CTL is all those hours can hold. The
-	// rider starts below it, as the brief's CTL 40 would already be above.
+	// hours cap limits the load that could land CTL exactly on it (and the
+	// recovery weeks pull it back), so a climb closes in on it from below
+	// rather than touching it; a rider within half a point of it holds.
 	p := workout.RiderProfile{HoursPerAvailableDay: 1, AvailableDays: []string{"mon", "tue", "wed", "thu", "fri"}}
+	ceiling := 5 * 0.49 * 100 / 7
+
 	l := &LoadInput{CTL: 20, ATL: 20, TypicalIF: 0.7, HistoryWeeks: 52, MaxRamp: 8}
 	plan := mustBuild(t, workout.Goal{ID: "u"}, p, l)
-	ceiling := 5 * 0.49 * 100 / 7
-	held := false
+	if plan.Weeks[0].Ramp <= 0 {
+		t.Errorf("first week does not climb: %+v", plan.Weeks[0])
+	}
+	last := plan.Weeks[len(plan.Weeks)-1]
+	if last.PlannedCTL < 27 {
+		t.Errorf("CTL only reached %v on the way to %v", last.PlannedCTL, ceiling)
+	}
 	for _, w := range plan.Weeks {
-		if w.PlannedCTL > ceiling+1e-9 {
+		if w.PlannedCTL > ceiling+0.5 {
 			t.Errorf("week %d planned CTL %v over the ceiling %v", w.Number, w.PlannedCTL, ceiling)
 		}
-		if held && !w.Recovery && w.Ramp != 0 {
-			t.Errorf("week %d ramps %v after holding", w.Number, w.Ramp)
-		}
-		if !w.Recovery && w.Ramp == 0 {
-			held = true
+		if gap := ceiling - w.PlannedCTL; !w.Recovery && gap > 0 && math.Abs(w.Ramp-math.Min(math.Min(w.Ramp, 8), gap)) > 1e-9 {
+			t.Errorf("week %d ramp %v is more than the %v left to the ceiling", w.Number, w.Ramp, gap)
 		}
 	}
-	if !held {
-		t.Error("the plan never stopped climbing")
+
+	l = &LoadInput{CTL: ceiling - 0.3, ATL: ceiling - 0.3, TypicalIF: 0.7, HistoryWeeks: 52, MaxRamp: 8}
+	for _, w := range mustBuild(t, workout.Goal{ID: "u"}, p, l).Weeks {
+		if !w.Recovery && w.PlannedCTL >= ceiling-0.5 && w.Ramp != 0 {
+			t.Errorf("week %d at %v still ramps %v", w.Number, w.PlannedCTL, w.Ramp)
+		}
 	}
 }
 
@@ -228,22 +238,45 @@ func TestSpikeGuard(t *testing.T) {
 }
 
 func TestHoursCapSetsLoadCapped(t *testing.T) {
-	// A rider far above what 4 h hold: every week asks for more than the cap,
-	// except that CTL decays towards the ceiling, so late recovery weeks
-	// (0.65 x a still-high week) can fit; they must still never exceed it.
 	p := workout.RiderProfile{HoursPerAvailableDay: 2, AvailableDays: []string{"sat", "sun"}}
 	l := &LoadInput{CTL: 80, ATL: 80, TypicalIF: 0.7, HistoryWeeks: 52, MaxRamp: 6}
+	prev := -1.0
 	for _, w := range mustBuild(t, workout.Goal{ID: "u"}, p, l).Weeks {
-		if !w.Recovery && (w.TargetHours != 4 || !w.LoadCapped) {
-			t.Errorf("week %d: hours %v capped %v", w.Number, w.TargetHours, w.LoadCapped)
-		}
 		if w.TargetHours > 4 {
 			t.Errorf("week %d over the cap: %v", w.Number, w.TargetHours)
 		}
+		if w.Recovery {
+			if prev >= 0 && math.Abs(w.TargetTSS-0.65*prev) > 1e-9 {
+				t.Errorf("week %d recovery %v, want 0.65 x %v", w.Number, w.TargetTSS, prev)
+			}
+			continue
+		}
+		prev = w.TargetTSS
+		if w.TargetHours != 4 || !w.LoadCapped {
+			t.Errorf("week %d: hours %v capped %v", w.Number, w.TargetHours, w.LoadCapped)
+		}
 	}
-	first := mustBuild(t, workout.Goal{ID: "u"}, p, l).Weeks[0]
-	if first.TargetHours != 4 || !first.LoadCapped {
-		t.Errorf("first week: %+v", first)
+}
+
+func TestDegenerateInputsStayFinite(t *testing.T) {
+	l := &LoadInput{CTL: 50, ATL: 50, TypicalIF: 1e-200, HistoryWeeks: 52, MaxRamp: 8}
+	p := workout.RiderProfile{HoursPerAvailableDay: math.Inf(1), AvailableDays: []string{"mon"}}
+	plan := mustBuild(t, workout.Goal{ID: "u"}, p, l)
+	if plan.LoadBasis != "hours" {
+		t.Errorf("basis %q", plan.LoadBasis)
+	}
+	for _, w := range plan.Weeks {
+		for _, v := range []float64{w.TargetTSS, w.PlannedCTL, w.Ramp} {
+			if math.IsNaN(v) || math.IsInf(v, 0) {
+				t.Fatalf("non-finite week %+v", w)
+			}
+		}
+	}
+	// A tiny IF is clamped, so a finite cap stays finite too.
+	for _, w := range mustBuild(t, workout.Goal{ID: "u"}, richProfile(), l).Weeks {
+		if math.IsNaN(w.TargetHours) || math.IsInf(w.TargetHours, 0) {
+			t.Fatalf("non-finite hours %+v", w)
+		}
 	}
 }
 

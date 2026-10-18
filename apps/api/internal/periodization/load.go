@@ -35,6 +35,9 @@ const (
 	taperMaxFraction    = 1.0
 	defaultMaxRamp      = 6.0
 	defaultTypicalIF    = 0.70
+	// holdTolerance is how close (CTL points) to its hours ceiling an undated
+	// plan counts as holding.
+	holdTolerance = 0.5
 	// minDefaultRamp is the smallest default ramp (peak), which bounds how far
 	// the scale factor can usefully go before every ramp sits at MaxRamp.
 	minDefaultRamp = 1.0
@@ -76,7 +79,7 @@ func BuildWithLoad(goal workout.Goal, profile workout.RiderProfile, today time.T
 	}
 	plan.LoadBasis = "hours"
 	capHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
-	if load == nil || !(capHours > 0) || len(plan.Weeks) == 0 {
+	if load == nil || !(capHours > 0) || math.IsInf(capHours, 0) || len(plan.Weeks) == 0 {
 		return plan, nil
 	}
 	layerLoad(&plan, pos, goal.EventDate, capHours, sanitizeLoad(*load))
@@ -99,9 +102,11 @@ func sanitizeLoad(l LoadInput) LoadInput {
 	if !(l.TypicalIF > 0) || math.IsInf(l.TypicalIF, 0) {
 		l.TypicalIF = defaultTypicalIF
 	}
-	if !(l.MaxRamp > 0) || math.IsInf(l.MaxRamp, 0) {
+	l.TypicalIF = math.Min(math.Max(l.TypicalIF, 0.55), 0.85)
+	if !(l.MaxRamp > 0) || math.IsNaN(l.MaxRamp) {
 		l.MaxRamp = defaultMaxRamp
 	}
+	l.MaxRamp = math.Min(l.MaxRamp, 8)
 	return l
 }
 
@@ -122,12 +127,11 @@ func defaultRamp(phase Phase, pos int) float64 {
 // loadState is the forecast carried from one week to the next.
 type loadState struct {
 	ctl, atl float64
-	// prevDesired is the last non-recovery week's TSS before the guards, -1
+	// prevFinal is the last non-recovery week's final TSS (after the spike
+	// guard and the hours cap), -1
 	// before there is one; a recovery week is a fraction of it.
-	prevDesired float64
-	lastTSS     float64
-	// held is set once an undated plan has reached its ceiling.
-	held bool
+	prevFinal float64
+	lastTSS   float64
 }
 
 type loadRun struct {
@@ -152,28 +156,27 @@ func (r loadRun) step(i int, s float64, st *loadState, out *Week) {
 
 	var desired, ramp float64
 	if w.Recovery {
-		if st.prevDesired < 0 {
+		if st.prevFinal < 0 {
 			desired = recoveryTSSFraction * WeeklyTSS(st.ctl, 0)
 		} else {
-			desired = recoveryTSSFraction * st.prevDesired
+			desired = recoveryTSSFraction * st.prevFinal
 		}
 	} else {
 		ramp = math.Min(defaultRamp(w.Phase, r.pos[i])*s, r.load.MaxRamp)
 		if r.undated {
-			desired = WeeklyTSS(st.ctl, ramp)
-			// The hours hold a CTL of `ceiling` and no more, so a ramp that
-			// asks for the whole cap or more is where the plan stops climbing.
-			// Hold from there at what keeps CTL where it is, which for a rider
-			// already above the ceiling is more than the hours allow: the cap
-			// trims it below.
-			if st.held || desired >= r.capTSS() {
-				st.held, ramp = true, 0
-				desired = 7 * math.Max(st.ctl, ceiling)
+			// Climb towards the CTL the hours can hold, landing on it rather
+			// than over; within half a point of it the week is a hold. The
+			// ordinary hours cap below decides TargetHours and LoadCapped.
+			gap := ceiling - st.ctl
+			if gap < holdTolerance {
+				ramp = 0
+			} else {
+				ramp = math.Min(ramp, gap)
 			}
+			desired = WeeklyTSS(st.ctl, ramp)
 		} else {
 			desired = WeeklyTSS(st.ctl, ramp)
 		}
-		st.prevDesired = desired
 	}
 
 	tss := desired
@@ -191,11 +194,14 @@ func (r loadRun) step(i int, s float64, st *loadState, out *Week) {
 	out.PlannedCTL, out.Ramp = st.ctl, ramp
 	st.ctl, st.atl = NextFitness(st.ctl, st.atl, tss)
 	st.lastTSS = tss
+	if !w.Recovery {
+		st.prevFinal = tss
+	}
 }
 
 // forecast sizes weeks [0, n) with scale factor s.
 func (r loadRun) forecast(n int, s float64) (loadState, []Week) {
-	st := loadState{ctl: r.load.CTL, atl: r.load.ATL, prevDesired: -1}
+	st := loadState{ctl: r.load.CTL, atl: r.load.ATL, prevFinal: -1}
 	out := make([]Week, n)
 	for i := range n {
 		r.step(i, s, &st, &out[i])
