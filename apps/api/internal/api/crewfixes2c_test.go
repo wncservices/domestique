@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -77,10 +78,10 @@ func TestALongCrewRideTheDayBeforeAnFTPTestWarns(t *testing.T) {
 	h := newCrewPlanHarness(t)
 	s := h.setup()
 	goal := h.planFor("wilant")
-	test, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	test, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "FTP Test (ramp)", GoalID: goal.ID, Date: cpSunday, TestProtocol: "ramp",
 		Description: "A test.", Steps: step(2400),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

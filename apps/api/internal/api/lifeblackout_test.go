@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -138,7 +139,7 @@ func TestALifeEventMoveIsNotRecreatedOnItsVacatedDay(t *testing.T) {
 	// noted in the form the scheduler reads, and adjusted.
 	friday := "2026-10-09"
 	desc := thu.Description + "\n\nRescheduled by a life event: moved from 2026-10-08. " + scheduler.AdjustedMarker + " moved."
-	if _, err := h.store.UpdateWorkout(ctx, thu.ID, workout.UpdateWorkoutRequest{Date: &friday, Description: &desc}); err != nil {
+	if _, err := h.store.UpdateWorkout(ctx, thu.ID, workout.UpdateWorkoutRequest{Date: &friday, Description: &desc, Flags: api.LegacyFlagsAfter(thu, desc)}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,11 +159,11 @@ func TestALifeEventMoveIsNotRecreatedOnItsVacatedDay(t *testing.T) {
 
 func (h *onceHarness) hardSession(t *testing.T, date string, minutes int) workout.Workout {
 	t.Helper()
-	w, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	w, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goal.ID, Sport: model.SportCycling, Name: "Threshold 3x12", Date: date,
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneThreshold, Level: 4,
 		Steps: []workout.WorkoutStep{{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: float64(minutes * 60), Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +237,7 @@ func TestASessionTheRiderKeptThroughTheReturnIsNotRampedByAdaptation(t *testing.
 	h.event(t, "illness", "2026-10-04", "2026-10-06", "proper")
 	kept := h.hardSession(t, "2026-10-08", 90)
 	desc := kept.Description + " " + lifeevents.KeptMarker
-	if _, err := h.store.UpdateWorkout(ctx, kept.ID, workout.UpdateWorkoutRequest{Description: &desc}); err != nil {
+	if _, err := h.store.UpdateWorkout(ctx, kept.ID, workout.UpdateWorkoutRequest{Description: &desc, Flags: api.LegacyFlagsAfter(kept, desc)}); err != nil {
 		t.Fatal(err)
 	}
 	control := h.hardSession(t, "2026-10-09", 60)
@@ -261,8 +262,8 @@ func TestReplanLeavesLifeEventMovesAndEasingsWhereTheyAre(t *testing.T) {
 	movedDesc := scheduler.GeneratedDescription + "\n\nRescheduled by a life event: moved from 2026-10-08. " + scheduler.AdjustedMarker + " Life event: Travelling, no bike: moved to Sat 10 Oct."
 	eased := h.hardSession(t, "2026-10-11", 60)
 	easedDesc := scheduler.GeneratedDescription + " " + scheduler.AdjustedMarker + " Life event: eased after illness (return to training)."
-	for id, d := range map[string]string{moved.ID: movedDesc, eased.ID: easedDesc} {
-		if _, err := h.store.UpdateWorkout(ctx, id, workout.UpdateWorkoutRequest{Description: &d}); err != nil {
+	for wk, d := range map[*workout.Workout]string{&moved: movedDesc, &eased: easedDesc} {
+		if _, err := h.store.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &d, Flags: api.LegacyFlagsAfter(*wk, d)}); err != nil {
 			t.Fatal(err)
 		}
 	}

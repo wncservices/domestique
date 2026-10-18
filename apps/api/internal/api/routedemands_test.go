@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/routefixture"
 	"github.com/wncservices/domestique/apps/api/internal/source"
@@ -311,9 +312,9 @@ func work(secs float64) workout.WorkoutStep {
 
 func plannedSession(h *routeHarness, goalID, date string, zone workout.Zone, steps ...workout.WorkoutStep) {
 	h.t.Helper()
-	if _, err := h.store.CreateWorkout(h.t.Context(), workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(h.t.Context(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "S " + date, GoalID: goalID, Date: date, Zone: zone, Steps: steps,
-	}); err != nil {
+	})); err != nil {
 		h.t.Fatal(err)
 	}
 }

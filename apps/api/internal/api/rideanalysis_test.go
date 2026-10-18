@@ -16,6 +16,7 @@ import (
 	"github.com/muktihari/fit/profile/mesgdef"
 	"github.com/muktihari/fit/profile/typedef"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -86,13 +87,13 @@ func TestSyncAnalysesARideAgainstItsPlannedWorkout(t *testing.T) {
 		t.Fatalf("save profile: status = %d", resp.StatusCode)
 	}
 
-	if _, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "20 min steady", Date: date,
 		Steps: []workout.WorkoutStep{
 			{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
 				Seconds: 1200, Target: workout.TargetPower, TargetLow: 150, TargetHigh: 200},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create planned workout: %v", err)
 	}
 
@@ -310,13 +311,13 @@ func TestSyncNeverMatchesAnotherRidersPlannedWorkout(t *testing.T) {
 	h := newMetricsSyncHarness(t, fake)
 	h.seedGarminSession("wilant")
 
-	if _, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "other", Sport: model.SportCycling, Name: "Someone else's plan", Date: date,
 		Steps: []workout.WorkoutStep{
 			{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
 				Seconds: 1200, Target: workout.TargetPower, TargetLow: 150, TargetHigh: 200},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create the other rider's workout: %v", err)
 	}
 
@@ -363,14 +364,14 @@ func syncNailedThresholdRide(t *testing.T) (*metricsSyncHarness, string) {
 		t.Fatalf("save profile: status = %d", resp.StatusCode)
 	}
 
-	if _, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Threshold 3x12", Date: date,
 		Zone: workout.ZoneThreshold, Level: 5.0,
 		Steps: []workout.WorkoutStep{
 			{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
 				Seconds: 1200, Target: workout.TargetPower, TargetLow: 150, TargetHigh: 200},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create planned workout: %v", err)
 	}
 
@@ -507,13 +508,13 @@ func TestSyncOfAnEndurancePlannedRideMovesNoLevel(t *testing.T) {
 	h := newMetricsSyncHarness(t, fake)
 	h.seedGarminSession("wilant")
 
-	if _, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Endurance ride", Date: date,
 		Zone: workout.ZoneEndurance,
 		Steps: []workout.WorkoutStep{
 			{Name: "Main", Duration: workout.DurationTime, Seconds: 1200, Target: workout.TargetOpen},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create planned workout: %v", err)
 	}
 
@@ -618,14 +619,14 @@ func TestSyncStoresTheAppliedDeltaNotTheRawOneAtTheFloor(t *testing.T) {
 	h := newMetricsSyncHarness(t, fake)
 	h.seedGarminSession("wilant")
 
-	if _, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Threshold 3x12", Date: date,
 		Zone: workout.ZoneThreshold, Level: 1.0,
 		Steps: []workout.WorkoutStep{
 			{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime,
 				Seconds: 1200, Target: workout.TargetPower, TargetLow: 150, TargetHigh: 200},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create planned workout: %v", err)
 	}
 	if err := h.srv.Training.SaveLevel(context.Background(), workout.ProgressionLevel{

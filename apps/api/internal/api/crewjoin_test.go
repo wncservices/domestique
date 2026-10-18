@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -34,7 +35,7 @@ func (h *crewPlanHarness) joinWeek() joinWeek {
 	jw.goal = h.planFor("wilant")
 	ctx := context.Background()
 	mk := func(req workout.CreateWorkoutRequest) workout.Workout {
-		w, err := h.training.CreateWorkout(ctx, req)
+		w, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(req))
 		if err != nil {
 			h.t.Fatal(err)
 		}
@@ -227,9 +228,9 @@ func TestApplyRecomputesSoAStalePreviewIsHarmless(t *testing.T) {
 func TestOnlyWhatThePlanMadeIsChangedAndTheRestIsListed(t *testing.T) {
 	h := newCrewPlanHarness(t)
 	jw := h.joinWeek()
-	built, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	built, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "My own ride", Date: cpSaturday, Description: "mine", Steps: step(3600),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

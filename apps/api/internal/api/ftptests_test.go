@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -177,9 +178,9 @@ func TestFTPTestsEndpointsNeedTheTrainingPermission(t *testing.T) {
 func TestScheduledTestSilencesTheSuggestionAndShowsInTheResponse(t *testing.T) {
 	h := newTrainingHarness(t)
 	seedRiderWithStaleFTP(t, h, "wilant")
-	if _, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "FTP Test (ramp)", Date: "2031-03-25", TestProtocol: "ramp",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	out := getFTPTests(t, h, "wilant")
@@ -203,9 +204,9 @@ func TestLastTestIsTheLatestCompletedOneAndSetsTheRecommendation(t *testing.T) {
 		{"two_by_eight", "2031-02-10", 262},
 		{"twenty_minute", "2031-03-01", 0}, // never ridden: no result, not a "last test"
 	} {
-		w, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		w, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 			Rider: "wilant", Name: "Test " + tc.protocol, Date: tc.date, TestProtocol: tc.protocol,
-		})
+		}))
 		if err != nil {
 			t.Fatal(err)
 		}

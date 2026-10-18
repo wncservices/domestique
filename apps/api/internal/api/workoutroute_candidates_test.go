@@ -327,28 +327,28 @@ func TestCandidatesAreRefusedForARideThatCannotTakeARoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	test, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	test, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "FTP test", Date: wrFuture, TestProtocol: "ramp",
 		Steps: []workout.WorkoutStep{timedStep("Ramp", workout.IntensityActive, 1800, 0)},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	running, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	running, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: "running", Name: "Easy run", Date: wrFuture,
 		Steps: []workout.WorkoutStep{timedStep("Run", workout.IntensityActive, 1800, 0)},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// A crew ride follows the crew's own route, so a generated loop would
 	// replace the ride the rider committed to with the crew.
-	crewRide, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	crewRide, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: "cycling", Name: "Sunday Club", Date: wrFuture, CrewRideID: "ride-1",
 		Steps: []workout.WorkoutStep{timedStep("Crew ride", workout.IntensityActive, 7200, 0)},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

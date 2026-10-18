@@ -316,14 +316,14 @@ func TestARolledOverWeekIsRefreshedForUntouchedSessionsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	easedDesc := eased.Description + " " + scheduler.AdjustedMarker + " eased."
-	if _, err := h.store.UpdateWorkout(ctx, eased.ID, workout.UpdateWorkoutRequest{Description: &easedDesc}); err != nil {
+	if _, err := h.store.UpdateWorkout(ctx, eased.ID, workout.UpdateWorkoutRequest{Description: &easedDesc, Flags: api.LegacyFlagsAfter(eased, easedDesc)}); err != nil {
 		t.Fatal(err)
 	}
 	// An FTP test scheduled onto a day takes that day's plan-made session's place.
-	test, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	test, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "FTP test", GoalID: g.ID, Date: replaced.Date, Description: "A test.",
 		TestProtocol: "twenty_minute", Steps: replaced.Steps,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

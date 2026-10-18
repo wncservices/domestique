@@ -247,7 +247,7 @@ func (h *calHarness) generate(user string) string {
 
 func (h *calHarness) seedWorkout(rider, name, date string) {
 	h.t.Helper()
-	_, err := h.training.CreateWorkout(h.t.Context(), workout.CreateWorkoutRequest{
+	_, err := h.training.CreateWorkout(h.t.Context(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: rider, Name: name, Date: date, Zone: workout.ZoneThreshold,
 		Steps: []workout.WorkoutStep{{
 			Repeat: 3, Steps: []workout.WorkoutStep{
@@ -255,7 +255,7 @@ func (h *calHarness) seedWorkout(rider, name, date string) {
 				{Intensity: workout.IntensityRecovery, Duration: workout.DurationTime, Seconds: 300, Target: workout.TargetOpen},
 			},
 		}},
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}

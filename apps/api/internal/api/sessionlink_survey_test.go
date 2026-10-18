@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -12,11 +13,11 @@ import (
 // threshold plans a rider-built 20-minute threshold session at level on date.
 func (h *ftpResultHarness) threshold(date string, level float64) string {
 	h.t.Helper()
-	wk, err := h.srv.Training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	wk, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Threshold " + date, Date: date,
 		Zone: workout.ZoneThreshold, Level: level,
 		Steps: []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 1200, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}

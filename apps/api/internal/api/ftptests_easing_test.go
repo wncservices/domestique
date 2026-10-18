@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -22,14 +23,14 @@ func TestSchedulingATestEasesTheGeneratedHardSessionTheDayBefore(t *testing.T) {
 	ctx := context.Background()
 	goal := h.scheduleSetup(250)
 
-	hard, err := h.training.CreateWorkout(ctx, hardGenerated("wilant", goal.ID, "Threshold intervals", replanThursday))
+	hard, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(hardGenerated("wilant", goal.ID, "Threshold intervals", replanThursday)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mine, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	mine, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "My intervals", Date: replanToday,
 		Zone: workout.ZoneVO2Max, Description: "my own",
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestEasingIsNotAppliedTwiceAndNotToARiddenSession(t *testing.T) {
 	goal := h.scheduleSetup(250)
 
 	// Wednesday (today) is the day before a Thursday test, and already ridden.
-	today, err := h.training.CreateWorkout(ctx, hardGenerated("wilant", goal.ID, "Threshold intervals", replanToday))
+	today, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(hardGenerated("wilant", goal.ID, "Threshold intervals", replanToday)))
 	if err != nil {
 		t.Fatal(err)
 	}

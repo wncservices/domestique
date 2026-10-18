@@ -189,7 +189,8 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 	}
 
 	description := wk.Description + " " + adapter.Note(c)
-	req := workout.UpdateWorkoutRequest{Description: &description}
+	flags := changeFlags(wk, c)
+	req := workout.UpdateWorkoutRequest{Description: &description, Flags: &flags}
 
 	what := "rescheduled"
 	if c.NewDate != "" {
@@ -229,6 +230,23 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 	// never leaves a reason for something that did not happen.
 	s.recordAdjustment(ctx, rider, wk.ID, c.Why, req.Indoor != nil && *req.Indoor)
 	return what, nil
+}
+
+// changeFlags is wk's flags after c: one more adaptation by c's rule, and, for
+// a reschedule, the day it was moved from. It starts from the stored flags so
+// the rule ids already on the row survive. The text of a reschedule says
+// "moved from <date>", and only the first such note counts, so a session that
+// was already moved keeps its original day and mover.
+func changeFlags(wk workout.Workout, c adapter.Change) workout.Flags {
+	rule := c.Why.Rule
+	if rule == "" {
+		rule = why.Legacy
+	}
+	f := workout.CurrentFlags(wk).WithAdaptation(rule)
+	if c.NewDate != "" && f.MovedFrom == "" {
+		f.MovedFrom, f.MovedBy = wk.Date, workout.MovedByAuto
+	}
+	return f
 }
 
 // recordAdjustment stores why a workout was changed. Keeping a session indoors
@@ -303,8 +321,9 @@ func (s *Server) applyStepDown(ctx context.Context, wk workout.Workout, profile 
 	// hasStepDownSource can still find it — it just searches the whole
 	// description, position included.
 	description := wk.Description + " " + adapter.StepDownSourceNote(c.StepDownSourceID) + " " + adapter.Note(c)
+	flags := changeFlags(wk, c)
 	update := workout.UpdateWorkoutRequest{
-		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description,
+		Name: &req.Name, Steps: &req.Steps, Level: &req.Level, Description: &description, Flags: &flags,
 	}
 	// The step-down stays in the workout's own zone, so that is the zone the
 	// replacement's steps are converted under.

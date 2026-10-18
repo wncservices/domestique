@@ -204,9 +204,9 @@ func TestAnOptInRemovalIsOnlyAppliedWhenIncluded(t *testing.T) {
 	h := newOnceHarness(t)
 	ctx := context.Background()
 	h.srv.AutoScheduleTick(ctx)
-	mine, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	mine, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: "cycling", Name: "My own ride", Date: "2026-10-09", Description: "mine",
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,9 +224,9 @@ func TestAnOptInRemovalIsOnlyAppliedWhenIncluded(t *testing.T) {
 	}
 
 	// Another day, this time ticked.
-	mine2, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	mine2, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: "cycling", Name: "My other ride", Date: "2026-10-14", Description: "mine",
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

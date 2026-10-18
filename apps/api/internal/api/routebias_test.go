@@ -280,10 +280,10 @@ func TestRefreshMatchesUntouchedSessionsAndLeavesTheRestAlone(t *testing.T) {
 	if _, err := h.store.UpdateWorkout(ctx, edited.ID, workout.UpdateWorkoutRequest{Name: &newName}); err != nil {
 		t.Fatal(err)
 	}
-	test, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	test, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "FTP test", GoalID: g.ID, Date: replaced.Date, Description: "A test.",
 		TestProtocol: "twenty_minute", Steps: replaced.Steps,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

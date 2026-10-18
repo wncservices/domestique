@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -35,7 +36,7 @@ func exportRide(name, date string) workout.CreateWorkoutRequest {
 
 func (h *trainingHarness) seedExport(req workout.CreateWorkoutRequest) string {
 	h.t.Helper()
-	wk, err := h.store.CreateWorkout(context.Background(), req)
+	wk, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(req))
 	if err != nil {
 		h.t.Fatal(err)
 	}

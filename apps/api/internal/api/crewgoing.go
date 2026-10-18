@@ -507,7 +507,9 @@ func (s *Server) keepAroundCrewRide(ctx context.Context, wk workout.Workout, j *
 	}
 	description := strings.TrimRight(wk.Description, " \n") + " " + crewplan.KeptMarker
 	j.updated[wk.ID] = wk
-	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &description})
+	flags := workout.CurrentFlags(wk)
+	flags.Kept = workout.KeptCrew
+	_, err := s.Training.UpdateWorkout(ctx, wk.ID, workout.UpdateWorkoutRequest{Description: &description, Flags: &flags})
 	return err
 }
 
@@ -531,7 +533,7 @@ func (s *Server) rollBackGoing(ctx context.Context, in goingInput, j *goingJourn
 		made, err := s.Training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
 			Rider: o.Rider, Sport: o.Sport, Name: o.Name, GoalID: o.GoalID, Date: o.Date,
 			Description: o.Description, Steps: o.Steps, Zone: o.Zone, Level: o.Level,
-			TestProtocol: o.TestProtocol, CrewRideID: o.CrewRideID,
+			TestProtocol: o.TestProtocol, CrewRideID: o.CrewRideID, Flags: workout.CurrentFlags(o),
 		})
 		log("restore a deleted session", err)
 		// An indoor session stays indoor, with the outdoor steps it reverts to.
@@ -556,9 +558,10 @@ func (s *Server) rollBackGoing(ctx context.Context, in goingInput, j *goingJourn
 		if o.OutdoorSteps != nil {
 			outdoor = append([]workout.WorkoutStep{}, *o.OutdoorSteps...)
 		}
+		prior := workout.CurrentFlags(o)
 		_, err := s.Training.UpdateWorkout(ctx, id, workout.UpdateWorkoutRequest{
 			Name: &o.Name, Steps: &o.Steps, Zone: &o.Zone, Level: &o.Level, Description: &o.Description,
-			Indoor: &o.Indoor, OutdoorSteps: &outdoor,
+			Indoor: &o.Indoor, OutdoorSteps: &outdoor, Flags: &prior,
 		})
 		log("restore an updated session", err)
 	}

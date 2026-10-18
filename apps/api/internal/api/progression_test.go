@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -115,10 +116,10 @@ func TestGetProgressionIsOwnerOnly(t *testing.T) {
 func seedThresholdWorkoutAndAnalysis(t *testing.T, h *trainingHarness, rider, sessionID, outcome string, workoutLevel float64) {
 	t.Helper()
 	ctx := context.Background()
-	wk, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	wk, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Zone: workout.ZoneThreshold, Level: workoutLevel,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,10 +223,10 @@ func TestSetSessionFeel404sForAnotherRidersSession(t *testing.T) {
 func seedThresholdWorkoutAnalysisAndLevel(t *testing.T, h *trainingHarness, rider, sessionID, outcome string, workoutLevel, riderLevel, storedDelta float64) {
 	t.Helper()
 	ctx := context.Background()
-	wk, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	wk, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.SportCycling, Name: "Threshold 3x12",
 		Zone: workout.ZoneThreshold, Level: workoutLevel,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

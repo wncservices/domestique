@@ -11,6 +11,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crewplan"
 	"github.com/wncservices/domestique/apps/api/internal/schedule"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -218,15 +219,22 @@ func (s *Server) acceptRideTogether(ctx context.Context, rider, id string) answe
 		description := sess.Description + " " + scheduler.AdjustedMarker + " moved from " + sess.Date +
 			" - Ride together: " + routeName + " with your crew."
 		day := p.Day
-		if _, err := s.Training.UpdateWorkout(ctx, sess.ID, workout.UpdateWorkoutRequest{Date: &day, Description: &description}); err != nil {
+		// The text names the day it left; only the first such note counts, so a
+		// session already moved keeps its original day and mover.
+		before := workout.CurrentFlags(sess)
+		flags := before.WithAdaptation(why.RideTogetherMove)
+		if flags.MovedFrom == "" {
+			flags.MovedFrom, flags.MovedBy = sess.Date, workout.MovedByAuto
+		}
+		if _, err := s.Training.UpdateWorkout(ctx, sess.ID, workout.UpdateWorkoutRequest{Date: &day, Description: &description, Flags: &flags}); err != nil {
 			return answerOutcome{err: err}
 		}
 	}
 	if err := s.Schedule.SetMemberStatus(ctx, id, rider, schedule.MemberAccepted, sess.ID); err != nil {
 		if moved {
 			// Put the session back as it was: the answer did not land.
-			date, desc := sess.Date, sess.Description
-			if _, rerr := s.Training.UpdateWorkout(ctx, sess.ID, workout.UpdateWorkoutRequest{Date: &date, Description: &desc}); rerr != nil {
+			date, desc, prior := sess.Date, sess.Description, workout.CurrentFlags(sess)
+			if _, rerr := s.Training.UpdateWorkout(ctx, sess.ID, workout.UpdateWorkoutRequest{Date: &date, Description: &desc, Flags: &prior}); rerr != nil {
 				s.logger().Error("could not put a session back after a failed ride together answer", "rider", rider, "proposal", id, "err", rerr)
 			}
 		}

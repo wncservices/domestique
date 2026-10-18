@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -12,7 +13,7 @@ func TestEasingTheDayBeforeAnFTPTestRecordsTheTest(t *testing.T) {
 	h := newReplanHarness(t)
 	ctx := context.Background()
 	goal := h.scheduleSetup(250)
-	hard, err := h.training.CreateWorkout(ctx, hardGenerated("wilant", goal.ID, "Threshold intervals", replanThursday))
+	hard, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(hardGenerated("wilant", goal.ID, "Threshold intervals", replanThursday)))
 	if err != nil {
 		t.Fatal(err)
 	}

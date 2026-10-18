@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -17,11 +18,11 @@ import (
 
 func (h *pushHarness) planMade(date string) string {
 	h.t.Helper()
-	w, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: "g", Sport: "cycling", Name: "Endurance ride", Date: date,
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneEndurance,
 		Steps: []workout.WorkoutStep{{Name: "Main", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3600, Target: workout.TargetOpen}},
-	})
+	}))
 	if err != nil {
 		h.t.Fatal(err)
 	}

@@ -30,11 +30,11 @@ func TestARoutedRideInAnUnfilledWeekDoesNotSuppressThatWeeksPlan(t *testing.T) {
 	// What scheduling a route onto a day with nothing on it makes.
 	ctx := context.Background()
 	date := far.AddDate(0, 0, 1).Format("2006-01-02")
-	ride, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	ride, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Endurance ride: Sunday loop", GoalID: g.ID, Date: date,
 		Description: "Sized to Sunday loop.", Zone: workout.ZoneEndurance,
 		Steps: []workout.WorkoutStep{{Name: "Ride", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 7200}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

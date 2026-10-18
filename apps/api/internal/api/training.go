@@ -20,6 +20,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -1304,6 +1305,7 @@ func (s *Server) handleCreateWorkout(w http.ResponseWriter, r *http.Request) {
 		Rider: rider, Sport: model.Sport(body.Sport), Name: body.Name, GoalID: body.GoalID,
 		Date: body.Date, Description: body.Description, Steps: stepsFromDTOs(body.Steps),
 		Zone: workout.Zone(body.Zone), Level: body.Level,
+		Flags: workout.Flags{Origin: workout.OriginRider},
 	})
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1370,6 +1372,10 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 		req.Zone = &zone
 	}
 	req.Description = recordManualMove(wk, req)
+	if req.Description != nil && *req.Description != wk.Description {
+		flags := riderEditFlags(wk, req)
+		req.Flags = &flags
+	}
 	s.retireOutdoorSteps(&req, wk)
 
 	updated, err := s.Training.UpdateWorkout(r.Context(), id, req)
@@ -1411,6 +1417,52 @@ func recordManualMove(wk workout.Workout, req workout.UpdateWorkoutRequest) *str
 	}
 	desc = strings.TrimRight(desc, " \n") + "\n\nRescheduled by you: moved from " + wk.Date + "."
 	return &desc
+}
+
+// riderEditFlags is wk's flags after the rider's PUT rewrote its description
+// (or the move note was appended to it). The description is the rider's now, so
+// the markers it no longer carries are gone, and a plan session whose text no
+// longer is the generated one, or that has left its goal, is the rider's own
+// from here on: that is what keeps replan off it. A date move gets the vacated
+// day recorded, by the note recordManualMove has appended.
+func riderEditFlags(wk workout.Workout, req workout.UpdateWorkoutRequest) workout.Flags {
+	f := workout.CurrentFlags(wk)
+	goalID := wk.GoalID
+	if req.GoalID != nil {
+		goalID = *req.GoalID
+	}
+	desc := *req.Description
+	f = flagsFollowingText(f, wk, desc)
+	if f.Origin == workout.OriginPlan && (goalID == "" || !strings.HasPrefix(desc, workout.GeneratedDescription)) {
+		f.Origin = workout.OriginRider
+	}
+	return f
+}
+
+// flagsFollowingText makes f agree with what desc, the description now being
+// stored on wk, says: markers the new text no longer carries are gone, and a
+// move note it carries is the move. It keeps the origin and the exact rule ids
+// of whatever adaptation is left. It exists for the writers that replace the
+// whole description (a rider's PUT, "Back to planned version") rather than
+// append a note.
+func flagsFollowingText(f workout.Flags, wk workout.Workout, desc string) workout.Flags {
+	after := wk
+	after.Description = desc
+	text := workout.LegacyFlags(after)
+	rules := append([]why.Rule(nil), f.AdaptedRules...)
+	if len(rules) > len(text.AdaptedRules) {
+		rules = rules[:len(text.AdaptedRules)]
+	}
+	for len(rules) < len(text.AdaptedRules) {
+		rules = append(rules, why.Legacy)
+	}
+	f.AdaptedRules = rules
+	if len(f.AdaptedRules) == 0 {
+		f.AdaptedRules = nil
+	}
+	f.Swapped, f.Kept = text.Swapped, text.Kept
+	f.MovedFrom, f.MovedBy = text.MovedFrom, text.MovedBy
+	return f
 }
 
 func (s *Server) handleDeleteWorkout(w http.ResponseWriter, r *http.Request) {

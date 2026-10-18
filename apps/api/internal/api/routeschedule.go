@@ -318,9 +318,10 @@ func (s *Server) applySchedule(ctx context.Context, sc scheduleContext, choice s
 		// and replan and refresh leave it. The goal id stays, so the day
 		// still counts as taken.
 		previous := target.RouteSlug
+		flags := riderEditFlags(target, workout.UpdateWorkoutRequest{Description: &sized})
 		saved, err = s.Training.UpdateWorkout(ctx, target.ID, workout.UpdateWorkoutRequest{
 			Name: &name, Description: &sized, Steps: &enduranceSteps, Zone: &zone, Level: &level,
-			RouteSlug: &slug, RouteSeconds: &secs,
+			RouteSlug: &slug, RouteSeconds: &secs, Flags: &flags,
 		})
 		if err == nil && previous != "" && previous != slug {
 			s.dropGeneratedRoute(ctx, target, previous)

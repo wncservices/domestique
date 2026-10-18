@@ -13,9 +13,9 @@ import (
 func seedTestRide(t *testing.T, s *Server, protocol string, curve map[string]float64) []workout.CompletedSession {
 	t.Helper()
 	ctx := t.Context()
-	planned, err := s.Training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	planned, err := s.Training.CreateWorkout(ctx, legacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Name: "Planned", Date: "2026-03-10", TestProtocol: protocol,
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

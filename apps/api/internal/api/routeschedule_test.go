@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/routefixture"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -119,10 +120,10 @@ func TestIndoorRunningAndRiddenSessionsDoNotBlockANewRide(t *testing.T) {
 	indoor := h.rideOf("wilant", wrFuture, route)
 	yes := true
 	_, _ = h.training.UpdateWorkout(ctx, indoor.ID, workout.UpdateWorkoutRequest{Indoor: &yes})
-	if _, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	if _, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: "running", Name: "Run", Date: wrFuture,
 		Steps: []workout.WorkoutStep{timedStep("Run", workout.IntensityActive, 1800, 0)},
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	h.rideOf("wilant", wrToday, route)
@@ -213,11 +214,11 @@ func TestAdjustRewritesTheRideInPlaceAndDropsTheGeneratedPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wk, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	wk, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Threshold 3x12", GoalID: goal.ID, Date: wrFuture,
 		Description: scheduler.GeneratedDescription, Zone: workout.ZoneThreshold, Level: 5,
 		Steps: []workout.WorkoutStep{timedStep("On", workout.IntensityActive, route*3, 250)},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,10 +394,10 @@ func TestSchedulingOntoALifeEventDayIsRefused(t *testing.T) {
 // beside it is offered.
 func TestSchedulingOntoACrewRideDayIsRefused(t *testing.T) {
 	h, rt, route := scheduleHarness(t)
-	crewRide, err := h.training.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	crewRide, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "Sunday Club", Date: wrFuture, CrewRideID: "ride-1",
 		Steps: []workout.WorkoutStep{timedStep("Crew ride", workout.IntensityActive, route, 0)},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

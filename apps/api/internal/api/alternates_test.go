@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -78,7 +79,7 @@ func (h *pushHarness) altRung(goal, date, zone string, level int) workout.Workou
 	}
 	req := workoutlib.Instantiate(l, l.Rungs[level-1], altProfile)
 	req.Rider, req.GoalID, req.Date, req.Description = "wilant", goal, date, scheduler.GeneratedDescription
-	w, err := h.training.CreateWorkout(context.Background(), req)
+	w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(req))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func (h *pushHarness) altEndurance(goal, date string, hours float64) workout.Wor
 	h.t.Helper()
 	req := scheduler.BuildEnduranceSession(hours, false, model.SportCycling, altProfile)
 	req.Rider, req.GoalID, req.Date = "wilant", goal, date
-	w, err := h.training.CreateWorkout(context.Background(), req)
+	w, err := h.training.CreateWorkout(context.Background(), api.LegacyFlagged(req))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -191,18 +192,18 @@ func TestAlternatesAreEmptyForWhatIsNotAPlannedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	test, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	test, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: goal, Sport: model.SportCycling, Name: "FTP Test (ramp)", Date: indoorFuture,
 		Description: scheduler.GeneratedDescription, TestProtocol: "ramp", Zone: workout.ZoneThreshold, Level: 4,
 		Steps: altSteps(t, "threshold", 4),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	riderBuilt, err := h.training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	riderBuilt, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: model.SportCycling, Name: "My ride", Date: indoorFuture, Description: "mine",
 		Zone: workout.ZoneThreshold, Level: 4, Steps: altSteps(t, "threshold", 4),
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -68,11 +68,11 @@ func TestReplanLeavesARoutedSessionAndRemovesTheRest(t *testing.T) {
 	env := openRiderDataEnv(t, filepath.Join(t.TempDir(), "r.db"))
 	ctx := context.Background()
 	mk := func(name, date string) workout.Workout {
-		wk, err := env.srv.Training.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+		wk, err := env.srv.Training.CreateWorkout(ctx, legacyFlagged(workout.CreateWorkoutRequest{
 			Rider: "wilant", Sport: model.SportCycling, Name: name, GoalID: "g", Date: date,
 			Description: scheduler.GeneratedDescription, Zone: workout.ZoneEndurance,
 			Steps: []workout.WorkoutStep{{Name: "Ride", Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 3600}},
-		})
+		}))
 		if err != nil {
 			t.Fatal(err)
 		}

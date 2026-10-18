@@ -52,3 +52,9 @@ func CrewsToRefreshForTest(snap crew.Snapshot, rider string) []crew.Crew {
 // ImportHeartbeat exposes the import job's heartbeat interval to the external
 // tests, which hold it against the stale window.
 const ImportHeartbeat = importHeartbeat
+
+// LegacyFlagged is legacyFlagged for the external tests.
+var LegacyFlagged = legacyFlagged
+
+// LegacyFlagsAfter is legacyFlagsAfter for the external tests.
+var LegacyFlagsAfter = legacyFlagsAfter

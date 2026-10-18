@@ -52,6 +52,9 @@ var (
 // filepath.Join(t.TempDir(), "x.db").
 func Path(t testing.TB) string {
 	t.Helper()
+	// The dual write of adaptation flags and description markers is proven by
+	// refusing any write where the two disagree, in every test that has a database.
+	workout.EnableLegacyParityCheck()
 	once.Do(func() { template, buildErr = build() })
 	if buildErr != nil {
 		t.Fatalf("build migrated template database: %v", buildErr)

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -162,15 +163,15 @@ func TestARequestCarriesTheMinimumAndNothingPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A session the rider named themselves, and one dated today.
-	if _, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: secretRider, Sport: "cycling", Name: "Ride with Pieter to Oudenaarde", Date: "2026-10-09", Description: "mine",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	// Another rider's session, in the same window.
-	if _, err := h.store.CreateWorkout(ctx, workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "sam", Sport: "cycling", Name: "Sam's secret intervals", Date: "2026-10-08", Description: "mine",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	h.srv.AutoScheduleTick(ctx)
@@ -257,9 +258,9 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 	h := newOnceHarness(t)
 	h.tickedWithFreeSaturday(t)
 	h.event(t, "busy", "2026-10-17", "2026-10-17", "")
-	if _, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	if _, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", Sport: "cycling", Name: "Done today", Date: "2026-10-07", Description: "mine",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.store.UpsertSession(context.Background(), workout.UpsertSessionRequest{
@@ -380,9 +381,9 @@ func TestASwapAndAnIndoorConversionAreValidatedByTheirOwnRules(t *testing.T) {
 	if kind == "shorter" {
 		other = "easier"
 	}
-	test, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+	test, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
 		Rider: "wilant", GoalID: h.goal.ID, Sport: "cycling", Name: "FTP test", Date: "2026-10-13", Description: "FTP", TestProtocol: "ramp",
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}

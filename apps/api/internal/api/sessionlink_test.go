@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -51,7 +52,7 @@ func (h *ftpResultHarness) plainWorkout(date string) string {
 	h.t.Helper()
 	req, _ := fitnesstest.BuildTestWorkout(fitnesstest.ProtocolTwentyMinute, 250)
 	req.Rider, req.Date, req.Name = "wilant", date, "Threshold"
-	wk, err := h.srv.Training.CreateWorkout(context.Background(), req)
+	wk, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(req))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestLinkingIsOwnerOnly(t *testing.T) {
 
 	req, _ := fitnesstest.BuildTestWorkout(fitnesstest.ProtocolTwentyMinute, 250)
 	req.Rider, req.Date = "someone", h.date
-	theirs, err := h.srv.Training.CreateWorkout(context.Background(), req)
+	theirs, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(req))
 	if err != nil {
 		t.Fatal(err)
 	}

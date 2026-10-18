@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -16,7 +17,7 @@ func TestAnFTPTestIsNotScheduledOverARoutedRide(t *testing.T) {
 	ctx := context.Background()
 	goal := h.scheduleSetup(250)
 
-	routed, err := h.training.CreateWorkout(ctx, generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600))
+	routed, err := h.training.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Endurance ride", replanFriday, 3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
