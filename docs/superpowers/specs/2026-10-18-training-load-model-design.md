@@ -1,6 +1,6 @@
 # Training load model — design (sub-project 1)
 
-Status: approved 2026-10-18. Detailed design for section 1 of
+Status: implemented 2026-10-18. Detailed design for section 1 of
 `2026-10-18-adaptive-training-builder-design.md`.
 
 ## Why
