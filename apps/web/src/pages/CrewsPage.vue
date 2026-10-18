@@ -9,6 +9,7 @@ import { usePagedList } from '@/composables/usePagedList'
 import { truncationNote } from '@/utils/pagination'
 import { formatRideWhen, rideDay, rideMonth, todayISO } from '@/utils/rideDates'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import AppPage from '@/components/ui/AppPage.vue'
 import CrewRideGoing from '@/components/CrewRideGoing.vue'
 import CrewTogetherDays from '@/components/CrewTogetherDays.vue'
@@ -871,15 +872,6 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
     </template>
 
     <UAlert
-      v-if="error"
-      color="error"
-      variant="subtle"
-      icon="i-lucide-triangle-alert"
-      :description="error"
-      :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => refresh() }]"
-    />
-
-    <UAlert
       v-if="crewsTruncated"
       color="warning"
       variant="subtle"
@@ -935,9 +927,12 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
       />
     </section>
 
-    <!-- One line and the two ways in; no illustration. -->
+    <SkeletonCard v-else-if="loading" :lines="2" label="Loading your crews…" />
+
+    <!-- One line and the two ways in; no illustration. A failed load is not
+         "no crews": App.vue already shows the error with its Retry. -->
     <EmptyState
-      v-else-if="!loading"
+      v-else-if="!error"
       icon="i-lucide-users"
       text="A crew is a group of riders who share routes and plan rides together. Create one, or find one to join."
     >

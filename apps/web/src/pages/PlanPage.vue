@@ -58,6 +58,8 @@ import WeekStrip from '@/components/plan/WeekStrip.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
 import { freshWorkoutForm, NO_GOAL } from '@/components/plan/forms'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
+import SkeletonCard from '@/components/ui/SkeletonCard.vue'
+import { planPageState } from '@/utils/planPageState'
 import WorkoutSlideover from '@/components/plan/WorkoutSlideover.vue'
 import { useIndoor } from '@/composables/useIndoor'
 import { useRideLink } from '@/composables/useRideLink'
@@ -107,6 +109,8 @@ const {
   goals,
   loadingGoals,
   loadGoals,
+  goalsError,
+  goalsSettled,
   goalModalOpen,
   editingGoalId,
   goalForm,
@@ -846,7 +850,8 @@ async function confirmReplan() {
 // finish loading, so opening or closing it by hand is never overridden.
 const goalsOpen = ref(true)
 const stopGoalsWatch = watch(loadingGoals, (loading) => {
-  if (loading) return
+  // A failed read decides nothing: wait for a retry that returns goals.
+  if (loading || goalsError.value) return
   goalsOpen.value = goals.value.length === 0
   stopGoalsWatch()
 })
@@ -905,12 +910,28 @@ onMounted(() => {
   loadLifeEvents()
   startGoalFromRoute()
 })
+
+const pageState = computed(() =>
+  planPageState({ goalCount: goals.value.length, loading: loadingGoals.value, settled: goalsSettled.value, failed: !!goalsError.value }),
+)
 </script>
 
 <template>
   <AppPage title="Plan">
+    <SkeletonCard v-if="pageState === 'loading'" :lines="4" label="Loading your plan…" />
+
+    <UAlert
+      v-else-if="pageState === 'failed'"
+      color="error"
+      variant="subtle"
+      icon="i-lucide-triangle-alert"
+      title="Could not load goals"
+      :description="goalsError"
+      :actions="[{ label: 'Retry', color: 'error', variant: 'subtle', onClick: () => loadGoals() }]"
+    />
+
     <PlanEmptyState
-      v-if="!loadingGoals && goals.length === 0"
+      v-else-if="pageState === 'empty'"
       :narration-enabled="!!me?.narrationEnabled"
       :starting="startingGeneralPlan"
       @goal="openCreateGoal"
@@ -1043,7 +1064,12 @@ onMounted(() => {
       />
     </template>
 
-    <DetailsToggle v-if="goals.length || workouts.length" v-model:open="goalsOpen" label="Goals and workouts">
+    <!-- Not while goals are loading or failed: GoalsSection would say "No goals yet". -->
+    <DetailsToggle
+      v-if="pageState !== 'loading' && pageState !== 'failed' && (goals.length || workouts.length)"
+      v-model:open="goalsOpen"
+      label="Goals and workouts"
+    >
       <GoalsSection
         :goals="goals"
         :workouts="workouts"
