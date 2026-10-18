@@ -84,6 +84,16 @@ type Week struct {
 	// coming straight out of BuildPlan — nothing in this package sets it —
 	// so a caller that never calls Reconcile never sees it true either.
 	Adjusted bool
+
+	// TargetTSS is the week's training load in TSS, PlannedCTL the forecast
+	// CTL at the START of the week, Ramp the CTL points per week this week was
+	// sized to add (0 for recovery, taper and hold weeks), LoadCapped whether
+	// the rider's available hours limited TargetTSS. All zero unless the plan
+	// was built with BuildWithLoad and a LoadInput; see load.go.
+	TargetTSS  float64
+	PlannedCTL float64
+	Ramp       float64
+	LoadCapped bool
 }
 
 // Plan is a full periodized structure for one goal.
@@ -96,6 +106,13 @@ type Plan struct {
 	// default) means unadjusted, whether because Reconcile was never called
 	// or because it found recent training right on target.
 	Adjustment float64
+	// LoadBasis is "ctl" when the weeks are sized in TSS from the rider's CTL,
+	// "hours" when from the profile's hours alone. TargetCTL is the CTL the
+	// dated goal asks for and Shortfall how far the plan falls short of it
+	// even at the rider's maximum ramp; both 0 under "hours".
+	LoadBasis string
+	TargetCTL float64
+	Shortfall float64
 }
 
 // ErrNoEventDate is returned when the goal has no event date to plan
@@ -154,13 +171,20 @@ const (
 // flag, volume and Number whichever day the plan is built on. This is the
 // same idea as BuildRollingPlan's fixed anchor.
 func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Plan, error) {
+	plan, _, err := buildPlanPos(goal, profile, today)
+	return plan, err
+}
+
+// buildPlanPos is BuildPlan plus each returned week's position inside its
+// 3:1 block, which the TSS sizing in load.go needs and Week does not carry.
+func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Plan, []int, error) {
 	anchor := planAnchor(goal, today)
 	if goal.EventDate == "" {
-		return Plan{}, ErrNoEventDate
+		return Plan{}, nil, ErrNoEventDate
 	}
 	event, err := time.Parse("2006-01-02", goal.EventDate)
 	if err != nil {
-		return Plan{}, fmt.Errorf("periodization: parse event date %q: %w", goal.EventDate, err)
+		return Plan{}, nil, fmt.Errorf("periodization: parse event date %q: %w", goal.EventDate, err)
 	}
 
 	start := MondayOf(today)
@@ -174,7 +198,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	// startUTC already applies below.
 	startUTC := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
 	if !event.After(startUTC) {
-		return Plan{}, ErrEventInThePast
+		return Plan{}, nil, ErrEventInThePast
 	}
 
 	anchorUTC := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.UTC)
@@ -197,6 +221,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 	// returned, but they still count towards Number and each phase's index.
 	firstShown := max(0, int(startUTC.Sub(anchorUTC).Hours()/24)/7)
 	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, max(0, totalWeeks-firstShown)), TotalWeeks: totalWeeks, Adjustment: 1}
+	pos := make([]int, 0, cap(plan.Weeks))
 	weekNumber := 0
 	for _, phase := range order {
 		n := lengths[phase]
@@ -207,6 +232,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 			}
 			recovery := (phase == PhaseBase || phase == PhaseBuild) &&
 				(i+1)%recoveryEveryNWeeks == 0
+			pos = append(pos, i%recoveryEveryNWeeks)
 			plan.Weeks = append(plan.Weeks, Week{
 				Number:      weekNumber,
 				StartDate:   anchorUTC.AddDate(0, 0, (weekNumber-1)*7).Format("2006-01-02"),
@@ -216,7 +242,7 @@ func BuildPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time)
 			})
 		}
 	}
-	return plan, nil
+	return plan, pos, nil
 }
 
 // planAnchor is the Monday week 1 falls on: the Monday of the goal's
@@ -249,10 +275,7 @@ var rollingAnchor = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 // date" is a supported kind of goal (general fitness) rather than an error
 // each call site has to remember to handle.
 func Build(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Plan, error) {
-	if goal.EventDate == "" {
-		return BuildRollingPlan(goal, profile, today), nil
-	}
-	return BuildPlan(goal, profile, today)
+	return BuildWithLoad(goal, profile, today, nil)
 }
 
 // BuildRollingPlan is the plan for a rider who is training but not toward
@@ -272,6 +295,12 @@ func Build(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Pl
 // every fourth calendar week, and yesterday's plan and today's agree about
 // next week.
 func BuildRollingPlan(goal workout.Goal, profile workout.RiderProfile, today time.Time) Plan {
+	plan, _ := buildRollingPos(goal, profile, today)
+	return plan
+}
+
+// buildRollingPos is BuildRollingPlan plus each week's position in its 3:1 block.
+func buildRollingPos(goal workout.Goal, profile workout.RiderProfile, today time.Time) (Plan, []int) {
 	start := MondayOf(today)
 	// Calendar arithmetic on the date, not on instants: a local Monday
 	// midnight is not a UTC midnight, and dividing hours by 24 would land a
@@ -282,6 +311,7 @@ func BuildRollingPlan(goal workout.Goal, profile workout.RiderProfile, today tim
 	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
 
 	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, rollingWeeks), TotalWeeks: rollingWeeks, Adjustment: 1}
+	pos := make([]int, 0, rollingWeeks)
 	for i := 0; i < rollingWeeks; i++ {
 		index := firstWeek + i
 		if index < 0 {
@@ -290,6 +320,7 @@ func BuildRollingPlan(goal workout.Goal, profile workout.RiderProfile, today tim
 			index = ((index % recoveryEveryNWeeks) + recoveryEveryNWeeks) % recoveryEveryNWeeks
 		}
 		recovery := (index+1)%recoveryEveryNWeeks == 0
+		pos = append(pos, index%recoveryEveryNWeeks)
 		plan.Weeks = append(plan.Weeks, Week{
 			Number:      i + 1,
 			StartDate:   start.AddDate(0, 0, i*7).Format("2006-01-02"),
@@ -298,7 +329,7 @@ func BuildRollingPlan(goal workout.Goal, profile workout.RiderProfile, today tim
 			TargetHours: peakHours * weekFraction(PhaseBase, index, rollingWeeks, recovery),
 		})
 	}
-	return plan
+	return plan, pos
 }
 
 // allocateWeeks splits totalWeeks across the four phases. Short plans
