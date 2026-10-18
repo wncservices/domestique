@@ -144,6 +144,10 @@ func TestHeavyLegsTwoDaysRunningEasesTodaysHardSessionLikeAnHRVCaution(t *testin
 			t.Fatal(err)
 		}
 	}
+	// A second source: heavy legs alone is one amber and eases nothing.
+	if err := h.store.SaveWellness(ctx, workout.DailyWellness{Rider: "wilant", Date: tmToday, ReadinessLevel: "LOW", ReadinessScore: 40}); err != nil {
+		t.Fatal(err)
+	}
 	orig := h.hard(tmToday)
 
 	h.srv.AdaptWorkouts(ctx)
@@ -157,7 +161,7 @@ func TestHeavyLegsTwoDaysRunningEasesTodaysHardSessionLikeAnHRVCaution(t *testin
 		t.Fatalf("adjustment = %+v (found %v), want readiness_caution, never rest", a, ok)
 	}
 	in := decodeInputs[why.ReadinessInputs](t, a)
-	if in.Verdict != "caution" || len(in.Signals) != 1 || in.Signals[0].Kind != "survey_legs" {
+	if in.Verdict != "caution" || len(in.Signals) != 2 || in.Signals[0].Kind != "readiness" || in.Signals[1].Kind != "survey_legs" {
 		t.Errorf("inputs = %+v", in)
 	}
 }

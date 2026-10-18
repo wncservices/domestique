@@ -8,6 +8,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
 )
@@ -639,5 +640,94 @@ func TestNoteCarriesTheMarkerThatPreventsASecondAdjustment(t *testing.T) {
 	}
 	if d, ok := scheduler.MovedFrom(w); !ok || d != "2026-03-17" {
 		t.Errorf("MovedFrom = %q, %v — scheduling relies on this to not recreate the vacated day", d, ok)
+	}
+}
+
+func enduranceToday(name string, seconds float64) workout.Workout {
+	w := planned("today", name, "2026-03-19")
+	w.Zone = workout.ZoneEndurance
+	w.Steps = []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: seconds}}
+	return w
+}
+
+func TestCautionShortensTodaysEnduranceRide(t *testing.T) {
+	caution := readiness.Assessment{Verdict: readiness.Caution, Reasons: []string{"two things are off"}}
+	for _, name := range []string{"Endurance ride", "Long ride", scheduler.ClimbingLongRideName} {
+		got := AdaptSessions([]workout.Workout{enduranceToday(name, 10000)}, nil, workout.RiderProfile{}, thursday, nil, caution)
+		if len(got) != 1 {
+			t.Fatalf("%s: changes = %+v, want exactly one", name, got)
+		}
+		c := got[0]
+		if c.ShortenSeconds != 8000 || c.StepDown || c.Downgrade || c.RecoveryRide {
+			t.Errorf("%s: change = %+v, want only ShortenSeconds 8000", name, c)
+		}
+		if c.Why.Rule != why.ReadinessCaution {
+			t.Errorf("%s: rule = %q, want readiness_caution", name, c.Why.Rule)
+		}
+	}
+	// The floor: 80 % of 2000 s is 1600 s, so the ride keeps 1800 s.
+	got := AdaptSessions([]workout.Workout{enduranceToday("Endurance ride", 2000)}, nil, workout.RiderProfile{}, thursday, nil, caution)
+	if len(got) != 1 || got[0].ShortenSeconds != 1800 {
+		t.Errorf("changes = %+v, want ShortenSeconds 1800 (the floor)", got)
+	}
+	// At or under the floor already: nothing to take away.
+	for _, secs := range []float64{1800, 1200} {
+		if got := AdaptSessions([]workout.Workout{enduranceToday("Endurance ride", secs)}, nil, workout.RiderProfile{}, thursday, nil, caution); len(got) != 0 {
+			t.Errorf("%v s: changes = %+v, want none", secs, got)
+		}
+	}
+	// An indoor session is sized from the outdoor steps it was made from.
+	in := enduranceToday("Endurance ride", 3000)
+	out := []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 10000}}
+	in.Indoor, in.OutdoorSteps = true, &out
+	if got := AdaptSessions([]workout.Workout{in}, nil, workout.RiderProfile{}, thursday, nil, caution); len(got) != 1 || got[0].ShortenSeconds != 8000 {
+		t.Errorf("indoor: changes = %+v, want ShortenSeconds 8000 from the outdoor steps", got)
+	}
+	// Tomorrow's, a done one, a blackout day and an already-eased one are left.
+	tomorrow := enduranceToday("Endurance ride", 10000)
+	tomorrow.Date = "2026-03-20"
+	if got := AdaptSessions([]workout.Workout{tomorrow}, nil, workout.RiderProfile{}, thursday, nil, caution); len(got) != 0 {
+		t.Errorf("tomorrow: changes = %+v, want none", got)
+	}
+	if got := AdaptSessions([]workout.Workout{enduranceToday("Endurance ride", 10000)}, []workout.CompletedSession{rode("2026-03-19", 9000)}, workout.RiderProfile{}, thursday, nil, caution); len(got) != 0 {
+		t.Errorf("done: changes = %+v, want none", got)
+	}
+	if got := AdaptSessionsAround([]workout.Workout{enduranceToday("Endurance ride", 10000)}, nil, workout.RiderProfile{}, thursday, nil, caution, map[string]bool{"2026-03-19": true}); len(got) != 0 {
+		t.Errorf("blackout: changes = %+v, want none", got)
+	}
+	eased := enduranceToday("Endurance ride", 10000)
+	eased.Description += " " + scheduler.AdjustedMarker + " Eased."
+	eased.Flags = eased.Flags.WithAdaptation(why.ReadinessCaution)
+	if got := AdaptSessions([]workout.Workout{eased}, nil, workout.RiderProfile{}, thursday, nil, caution); len(got) != 0 {
+		t.Errorf("already eased: changes = %+v, want none", got)
+	}
+}
+
+func TestRestSwapsTodaysLongRideForARecoveryRide(t *testing.T) {
+	rest := readiness.Assessment{Verdict: readiness.Rest, Reasons: []string{"form is very low"}}
+	for _, name := range []string{"Long ride", "Endurance ride"} {
+		got := AdaptSessions([]workout.Workout{enduranceToday(name, 10000)}, nil, workout.RiderProfile{}, thursday, nil, rest)
+		if len(got) != 1 || !got[0].RecoveryRide || got[0].Downgrade || got[0].StepDown || got[0].ShortenSeconds != 0 {
+			t.Fatalf("%s: changes = %+v, want one RecoveryRide", name, got)
+		}
+		if got[0].Why.Rule != why.ReadinessRest {
+			t.Errorf("%s: rule = %q, want readiness_rest", name, got[0].Why.Rule)
+		}
+	}
+}
+
+func TestHardSessionRulesUnchanged(t *testing.T) {
+	hard := structured("today", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4)
+	if got := AdaptSessions([]workout.Workout{hard}, nil, workout.RiderProfile{}, thursday, nil, readiness.Assessment{Verdict: readiness.Caution}); len(got) != 1 || !got[0].StepDown || got[0].ShortenSeconds != 0 || got[0].RecoveryRide {
+		t.Errorf("caution: changes = %+v, want the step-down", got)
+	}
+	if got := AdaptSessions([]workout.Workout{hard}, nil, workout.RiderProfile{}, thursday, nil, readiness.Assessment{Verdict: readiness.Rest}); len(got) != 1 || !got[0].Downgrade || got[0].RecoveryRide {
+		t.Errorf("rest: changes = %+v, want the downgrade", got)
+	}
+	// Push eases nothing, whatever is planned.
+	for _, w := range []workout.Workout{hard, enduranceToday("Long ride", 10000)} {
+		if got := AdaptSessions([]workout.Workout{w}, nil, workout.RiderProfile{}, thursday, nil, readiness.Assessment{Verdict: readiness.Push}); len(got) != 0 {
+			t.Errorf("push: changes = %+v, want none", got)
+		}
 	}
 }

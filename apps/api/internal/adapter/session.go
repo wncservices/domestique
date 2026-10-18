@@ -2,10 +2,12 @@ package adapter
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -95,6 +97,13 @@ type Change struct {
 	// stepDownTarget's own doc comment for why that matters with more than
 	// one untouched same-zone workout in the window.
 	StepDownSourceID string
+	// ShortenSeconds is set when today's endurance or long ride should be
+	// rebuilt at this length (caution): the same session, kept under its own
+	// name, shorter. The caller builds it with scheduler.BuildEnduranceSession.
+	ShortenSeconds float64
+	// RecoveryRide is set when today's endurance or long ride should become a
+	// short recovery ride (rest).
+	RecoveryRide bool
 	// Reason is shown to the rider.
 	Reason string
 	// Why is the structured record of the rule that produced this change:
@@ -235,6 +244,12 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				WorkoutID: w.ID, Downgrade: true,
 				Reason: "Swapped for an easy ride — " + reasons,
 			}, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
+		} else if w, ok := enduranceTarget(ordered, sessions, analyses, todayStr, claimed, blackout); ok {
+			claimed[w.ID] = true
+			changes = append(changes, change(Change{
+				WorkoutID: w.ID, RecoveryRide: true,
+				Reason: "Swapped for a recovery ride — " + reasons,
+			}, why.ReadinessRest, why.ReadinessInputs{Verdict: string(readiness.Rest), Signals: assessment.Signals}))
 		}
 	case readiness.Caution:
 		// A step-down needs a rung on its own zone's ladder (workoutlib) —
@@ -247,6 +262,15 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				WorkoutID: w.ID, StepDown: true, StepDownSourceID: readinessSourceID(today),
 				Reason: "Eased one level — " + reasons,
 			}, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
+		} else if w, ok := enduranceTarget(ordered, sessions, analyses, todayStr, claimed, blackout); ok {
+			// A ride already at the floor has nothing left to give.
+			if secs := ShortenedSeconds(w); secs > 0 {
+				claimed[w.ID] = true
+				changes = append(changes, change(Change{
+					WorkoutID: w.ID, ShortenSeconds: secs,
+					Reason: "Shortened — " + reasons,
+				}, why.ReadinessCaution, why.ReadinessInputs{Verdict: string(readiness.Caution), Signals: assessment.Signals}))
+			}
 		}
 	}
 
@@ -281,6 +305,60 @@ func readinessTarget(ordered []workout.Workout, sessions []workout.CompletedSess
 			continue
 		}
 		if requireStructuredZone && !workout.IsStructuredZone(w.Zone) {
+			continue
+		}
+		return w, true
+	}
+	return workout.Workout{}, false
+}
+
+// MinShortenedSeconds is the floor a caution never shortens an endurance ride
+// below: 30 minutes is still a ride worth the kit.
+const MinShortenedSeconds = 1800
+
+// PlannedRideSeconds is the length of w as the rider planned it. An indoor
+// session's own steps are already the trainer version, so it is sized from the
+// outdoor steps it was made from (as EasyVariant does), or shortening it would
+// shrink it twice.
+func PlannedRideSeconds(w workout.Workout) float64 {
+	steps := w.Steps
+	if w.OutdoorSteps != nil {
+		steps = *w.OutdoorSteps
+	}
+	return workout.PlannedSeconds(steps)
+}
+
+// ShortenedSeconds is what caution shortens w to: a fifth off, but not below
+// MinShortenedSeconds. 0 when the ride is at or under that floor already.
+func ShortenedSeconds(w workout.Workout) float64 {
+	planned := PlannedRideSeconds(w)
+	if planned <= MinShortenedSeconds {
+		return 0
+	}
+	return math.Max(0.8*planned, MinShortenedSeconds)
+}
+
+// isEnduranceRide is whether w is a cycling endurance or long ride: the
+// volume days, never a structured session. A zone decides it; a legacy row with
+// no zone falls back to the names the scheduler gives them.
+func isEnduranceRide(w workout.Workout) bool {
+	if w.Sport != model.SportCycling || scheduler.IsHardSession(w) {
+		return false
+	}
+	if w.Zone == workout.ZoneEndurance {
+		return true
+	}
+	return w.Zone == "" && (scheduler.IsLongRideName(w.Name) || w.Name == "Endurance ride")
+}
+
+// enduranceTarget is today's generated, untouched, not-yet-done endurance or
+// long ride: the one readiness's caution shortens and rest swaps for a
+// recovery ride. Eligibility is readinessTarget's, so a session already eased
+// today (IsGenerated is false once a readiness rule has changed it) is not
+// eased again.
+func enduranceTarget(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, todayStr string, claimed map[string]bool, blackout map[string]bool) (workout.Workout, bool) {
+	for _, w := range ordered {
+		if w.Date != todayStr || blackout[w.Date] || claimed[w.ID] || !scheduler.IsGenerated(w) || !isEnduranceRide(w) || done(w, sessions, analyses) {
 			continue
 		}
 		return w, true

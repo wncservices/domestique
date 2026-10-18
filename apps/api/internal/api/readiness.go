@@ -149,7 +149,7 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 	if blackout[today.AddDate(0, 0, 1).Format(dateLayout)] {
 		ok = false
 	}
-	if ok && forecast.Verdict != readiness.Ready {
+	if ok && readinessEases(forecast.Verdict) {
 		out.Tomorrow = &tomorrowForecastDTO{
 			Date: today.AddDate(0, 0, 1).Format(dateFormat), Risk: string(forecast.Verdict),
 			Reasons: forecast.Reasons, WorkoutID: target.ID, WorkoutName: target.Name,
@@ -279,7 +279,7 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if !ok || forecast.Verdict == readiness.Ready {
+	if !ok || !readinessEases(forecast.Verdict) {
 		s.logger().Warn("ease tomorrow refused: nothing to ease", "rider", rider, "eligible", ok)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": easeTomorrowRefusedMessage})
 		return

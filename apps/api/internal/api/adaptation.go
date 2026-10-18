@@ -159,6 +159,13 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 	s.logTomorrowAdvisory(ctx, rider, sessions, latest, profile)
 }
 
+// recoveryRideHours and recoveryRideName are what rest turns today's endurance
+// or long ride into.
+const (
+	recoveryRideHours = 0.75
+	recoveryRideName  = "Recovery ride"
+)
+
 // applyChange writes one adapter.Change to the store and returns what kind
 // of change it was, for the caller's log line. It is the one place a Change
 // (reschedule, downgrade or step-down) becomes a stored workout, shared by
@@ -202,6 +209,24 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 		req.Name, req.Steps = &easy.Name, &easy.Steps
 		s.keepIndoor(&req, wk, profile, easy.Zone)
 		what = "downgraded"
+	}
+	// Caution on an endurance or long ride: the same ride, kept under its
+	// own name ("Long ride, with climbing" survives), shorter.
+	if c.ShortenSeconds > 0 {
+		short := scheduler.BuildEnduranceSession(c.ShortenSeconds/3600, scheduler.IsLongRideName(wk.Name), wk.Sport, profile)
+		name := wk.Name
+		req.Name, req.Steps = &name, &short.Steps
+		s.keepIndoor(&req, wk, profile, short.Zone)
+		what = "shortened"
+	}
+	// Rest on one: a 45-minute recovery ride in its place.
+	if c.RecoveryRide {
+		rec := scheduler.BuildEnduranceSession(recoveryRideHours, false, wk.Sport, profile)
+		name := recoveryRideName
+		description += fmt.Sprintf(" Replaces: %s.", wk.Name)
+		req.Name, req.Steps = &name, &rec.Steps
+		s.keepIndoor(&req, wk, profile, rec.Zone)
+		what = "recovery ride"
 	}
 
 	// The easy day the missed session is taking over is given up first,
@@ -350,7 +375,7 @@ type stepDownResult struct {
 // resting-HR baseline's 28 days before the reference date (see
 // restingHRBaseline), so 29 days back from today covers that plus today
 // itself.
-const readinessHistoryDays = 29
+const readinessHistoryDays = 67
 
 // assessReadiness builds today's readiness.Day, its wellness history, the
 // latest form (TSB) snapshot and the rider's own daily training loads, and
@@ -416,7 +441,41 @@ func (s *Server) assessReadinessWith(ctx context.Context, rider string, sessions
 	if withSurvey {
 		survey = s.surveyDays(ctx, rider, sessions, now)
 	}
-	return readiness.AssessWithSurvey(today, history, tsb, tsbDate, dailyLoadsForReadiness(sessions), survey, now)
+	in := readiness.Input{
+		Today: today, History: history, TSB: tsb, TSBDate: tsbDate,
+		Loads: dailyLoadsForReadiness(sessions), Survey: survey, Now: now,
+	}
+	// Today's own answers, for the live verdict only. The forecast for
+	// tomorrow keeps them out as it keeps the survey out: an answer given this
+	// morning says nothing about tomorrow's legs.
+	if withSurvey {
+		in.CheckIn = s.checkInFor(ctx, rider, todayStr)
+	}
+	return readiness.Evaluate(in)
+}
+
+// checkInFor is the rider's check-in for date as readiness reads it, nil when
+// they have not answered (or the read failed: a missing check-in only costs
+// that one signal). The answers are health data, so a failure logs the rider
+// and the error, never a value.
+func (s *Server) checkInFor(ctx context.Context, rider, date string) *readiness.CheckIn {
+	c, ok, err := s.Training.GetCheckIn(ctx, rider, date)
+	if err != nil {
+		s.logger().Warn("adapt: reading the check-in failed", "rider", rider, "err", err)
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	return &readiness.CheckIn{Legs: c.Legs, Mood: c.Mood, SleepQuality: c.SleepQuality}
+}
+
+// readinessEases is whether a verdict asks anything of the day. Ready and Push
+// do not: Push is a green light for the day's own plan, never a reason to
+// advise or warn, so every consumer that used to compare against Ready asks
+// this instead.
+func readinessEases(v readiness.Verdict) bool {
+	return v == readiness.Caution || v == readiness.Rest
 }
 
 // surveyLookbackDays is how far back readiness reads the post-ride survey: its
