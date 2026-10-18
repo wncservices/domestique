@@ -238,6 +238,9 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 // "moved from <date>", and only the first such note counts, so a session that
 // was already moved keeps its original day and mover.
 func changeFlags(wk workout.Workout, c adapter.Change) workout.Flags {
+	// Every adapter Change is built by adapter.change(), which always sets the
+	// rule, so this is empty only for a Change a test built by hand. The
+	// fallback keeps such a row's adaptation count in step with its text.
 	rule := c.Why.Rule
 	if rule == "" {
 		rule = why.Legacy

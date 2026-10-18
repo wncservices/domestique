@@ -138,3 +138,23 @@ func TestSwapRevertSwapKeepsSwapped(t *testing.T) {
 		}
 	}
 }
+
+// Taking a plan session off its goal makes it the rider's own: the origin
+// follows, so replan leaves it alone and the stored flags agree with its text.
+func TestRiderGoalChangeMakesPlanSessionTheRiders(t *testing.T) {
+	h := newOnceHarness(t)
+	session := h.hardSession(t, "2026-10-10", 60)
+
+	h.putWorkout(t, session.ID, `{"goalId":""}`)
+	if got := h.stored(t, session.ID); got.GoalID != "" || got.Flags.Origin != workout.OriginRider {
+		t.Errorf("after taking it off its goal: goal %q origin %q, want no goal and rider", got.GoalID, got.Flags.Origin)
+	}
+
+	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/replan", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("replan status %d", resp.StatusCode)
+	}
+	after := h.stored(t, session.ID)
+	if !reflect.DeepEqual(after.Steps, session.Steps) || after.Flags.Origin != workout.OriginRider {
+		t.Errorf("replan touched the session: %+v", after)
+	}
+}
