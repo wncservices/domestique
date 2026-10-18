@@ -8,6 +8,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // SetRideAnalysisForTest swaps the ride scorer and the FIT decoder, so a test
@@ -58,3 +59,8 @@ var LegacyFlagged = legacyFlagged
 
 // LegacyFlagsAfter is legacyFlagsAfter for the external tests.
 var LegacyFlagsAfter = legacyFlagsAfter
+
+// WeekDebtForTest exposes the debt the pass and the week strip share.
+func (s *Server) WeekDebtForTest(ctx context.Context, rider, weekStart string, row workout.LedgerWeek) (float64, error) {
+	return s.weekDebt(ctx, rider, weekStart, row)
+}

@@ -3,8 +3,10 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"math"
+	"net/http"
 	"regexp"
 	"strings"
 	"testing"
@@ -486,5 +488,69 @@ func TestRepaidIndoorRideStaysIndoor(t *testing.T) {
 		if !(workout.PlannedSeconds(*w.OutdoorSteps) > workout.PlannedSeconds(*was[w.ID].OutdoorSteps)) {
 			t.Errorf("%s: the outdoor original was not lengthened", w.Name)
 		}
+	}
+}
+
+// The week strip reads the ledger: what was carried into the current week and
+// what was forgiven when it opened, and the debt the morning pass works from.
+// Another week shows none of it.
+func TestWeekFocusShowsCarriedAndForgiven(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	if err := h.store.OpenLedgerWeek(ctx, "wilant", "2026-10-05", 400, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "last-week", Sport: "cycling",
+		Date: "2026-10-07", DurationSeconds: 3600, TrainingLoad: 100,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.at(12, 7, 0)
+	h.tick()
+	row, _, _ := h.store.GetLedgerWeek(ctx, "wilant", "2026-10-12")
+	last, _, _ := h.store.GetLedgerWeek(ctx, "wilant", "2026-10-05")
+
+	type focusOut struct {
+		Focus *struct {
+			DebtTSS     float64 `json:"debtTss"`
+			CarriedTSS  float64 `json:"carriedTss"`
+			ForgivenTSS float64 `json:"forgivenTss"`
+		} `json:"focus"`
+	}
+	get := func(path string) focusOut {
+		resp := h.as("wilant", "cyclists", http.MethodGet, path, "")
+		var out focusOut
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	cur := get("/api/training/week")
+	if cur.Focus == nil {
+		t.Fatal("no focus")
+	}
+	if want := math.Round(row.CarriedInTSS); cur.Focus.CarriedTSS != want || want == 0 {
+		t.Errorf("carriedTss = %v, want %v", cur.Focus.CarriedTSS, want)
+	}
+	if want := math.Round(last.ForgivenTSS); cur.Focus.ForgivenTSS != want || want == 0 {
+		t.Errorf("forgivenTss = %v, want %v", cur.Focus.ForgivenTSS, want)
+	}
+	debt, err := h.srv.WeekDebtForTest(ctx, "wilant", "2026-10-12", row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if debt > 5 {
+		if cur.Focus.DebtTSS != math.Round(debt) {
+			t.Errorf("debtTss = %v, want %v", cur.Focus.DebtTSS, math.Round(debt))
+		}
+	} else if cur.Focus.DebtTSS != 0 {
+		t.Errorf("debtTss = %v, want it omitted at %.1f", cur.Focus.DebtTSS, debt)
+	}
+
+	if other := get("/api/training/week?start=2026-10-05"); other.Focus != nil &&
+		(other.Focus.CarriedTSS != 0 || other.Focus.ForgivenTSS != 0 || other.Focus.DebtTSS != 0) {
+		t.Errorf("a past week shows ledger figures: %+v", other.Focus)
 	}
 }
