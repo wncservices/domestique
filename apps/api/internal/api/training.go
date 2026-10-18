@@ -257,7 +257,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 	if w.CrewRideID != "" {
 		dto.CrewRide = crewRideStub(w)
 	}
-	dto.Swapped = strings.Contains(w.Description, scheduler.SwappedMarker)
+	dto.Swapped = w.Flags.Swapped
 	dto.HasPlannedSnapshot = w.PlannedSnapshot != nil
 	return dto
 }
@@ -833,7 +833,7 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 			// leaves its original day empty. That day is not free: it is
 			// where the session was planned, and scheduling must not read the
 			// gap and plan it again on top of the moved one.
-			if from, ok := scheduler.MovedFrom(wk.Description); ok {
+			if from, ok := scheduler.MovedFrom(wk); ok {
 				alreadyScheduled[from] = true
 			}
 		}
@@ -1413,7 +1413,7 @@ func recordManualMove(wk workout.Workout, req workout.UpdateWorkoutRequest) *str
 	if req.Description != nil {
 		desc = *req.Description
 	}
-	if _, ok := scheduler.MovedFrom(desc); ok {
+	if flagsFollowingText(workout.CurrentFlags(wk), wk, desc).MovedFrom != "" {
 		return req.Description
 	}
 	desc = strings.TrimRight(desc, " \n") + "\n\nRescheduled by you: moved from " + wk.Date + "."

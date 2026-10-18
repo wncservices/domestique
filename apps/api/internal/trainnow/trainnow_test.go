@@ -27,7 +27,7 @@ func planSession(t *testing.T, sport model.Sport, zone string, lvl int) *workout
 	req := workoutlib.Instantiate(l, l.Rungs[lvl-1], profile)
 	return &workout.Workout{
 		ID: "today", Rider: "r", Sport: sport, Name: req.Name, GoalID: "g", Date: "2026-03-25",
-		Description: scheduler.GeneratedDescription, Steps: req.Steps, Zone: req.Zone, Level: req.Level,
+		Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: req.Steps, Zone: req.Zone, Level: req.Level,
 	}
 }
 
@@ -36,7 +36,7 @@ func enduranceSession(minutes float64, long bool) *workout.Workout {
 	req := scheduler.BuildEnduranceSession(minutes/60, long, model.SportCycling, profile)
 	return &workout.Workout{
 		ID: "today", Rider: "r", Sport: model.SportCycling, Name: req.Name, GoalID: "g", Date: "2026-03-25",
-		Description: scheduler.GeneratedDescription, Steps: req.Steps, Zone: req.Zone,
+		Description: scheduler.GeneratedDescription, Flags: workout.Flags{Origin: workout.OriginPlan}, Steps: req.Steps, Zone: req.Zone,
 	}
 }
 
@@ -183,6 +183,7 @@ func TestATestOrNoSessionIsNeverAPlannedBase(t *testing.T) {
 	}
 	riderBuilt := planSession(t, model.SportCycling, "threshold", 4)
 	riderBuilt.GoalID, riderBuilt.Description = "", "mine"
+	riderBuilt.Flags = workout.Flags{Origin: workout.OriginRider}
 	in.Today = riderBuilt
 	if _, ok := byKind(Suggest(in), Planned); ok {
 		t.Error("a rider-built session was used as the base of a planned suggestion")

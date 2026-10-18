@@ -16,6 +16,7 @@ func TestAnIndoorSessionIsNeverUntouched(t *testing.T) {
 	w := workout.Workout{
 		GoalID: "goal", Sport: model.SportCycling, Name: "Long ride",
 		Description: scheduler.GeneratedDescription, CreatedAt: "2026-03-01T00:00:00Z", UpdatedAt: "2026-03-01T00:00:00Z",
+		Flags: workout.Flags{Origin: workout.OriginPlan},
 	}
 	if !untouchedPlanSession(w) {
 		t.Fatal("the baseline session should be untouched, or this test proves nothing")

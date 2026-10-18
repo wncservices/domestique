@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"math"
-	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -42,8 +41,8 @@ const LifeKeptMarker = workout.LifeKeptMarker
 // planned, in either feature that offers the choice. It is the one place the two
 // markers are listed: every automatic path asks it (through IsGenerated and
 // AutoReplaceable) instead of checking whichever marker it happens to know.
-func RiderKept(description string) bool {
-	return strings.Contains(description, CrewKeptMarker) || strings.Contains(description, LifeKeptMarker)
+func RiderKept(w workout.Workout) bool {
+	return w.Flags.Kept != workout.KeptNone
 }
 
 // IsPlanSession reports whether w is a session the scheduler made and nothing
@@ -54,9 +53,8 @@ func RiderKept(description string) bool {
 // it at the rider's own request, not change its content automatically.
 func IsPlanSession(w workout.Workout) bool {
 	return w.GoalID != "" && w.CrewRideID == "" &&
-		strings.HasPrefix(w.Description, GeneratedDescription) &&
-		!strings.Contains(w.Description, AdjustedMarker) &&
-		!strings.Contains(w.Description, SwappedMarker)
+		w.Flags.Origin == workout.OriginPlan &&
+		!w.Flags.Adapted() && !w.Flags.Swapped
 }
 
 // IsGenerated reports whether w was made by the scheduler and has not
@@ -67,7 +65,7 @@ func IsPlanSession(w workout.Workout) bool {
 // rider's own commitment to a ride the crew set, linked to a goal only so its
 // day reads as taken. Nothing automatic may move, ease, replace or delete it.
 func IsGenerated(w workout.Workout) bool {
-	return IsPlanSession(w) && !RiderKept(w.Description)
+	return IsPlanSession(w) && !RiderKept(w)
 }
 
 // IsPlanMade reports whether a workout was built by scheduleGoal rather than by
@@ -79,15 +77,14 @@ func IsGenerated(w workout.Workout) bool {
 // still counts for scheduling, because its GoalID is kept.
 func IsPlanMade(w workout.Workout) bool {
 	return w.GoalID != "" && w.CrewRideID == "" && w.RouteSlug == "" &&
-		strings.HasPrefix(w.Description, GeneratedDescription) &&
-		!strings.Contains(w.Description, SwappedMarker)
+		w.Flags.Origin == workout.OriginPlan && !w.Flags.Swapped
 }
 
 // AutoReplaceable is IsPlanMade for the paths that delete a session to build
 // another in its place (replan, scheduling an FTP test): a session the rider
 // kept as planned stays.
 func AutoReplaceable(w workout.Workout) bool {
-	return IsPlanMade(w) && !RiderKept(w.Description)
+	return IsPlanMade(w) && !RiderKept(w)
 }
 
 // CrewLongRideSeconds is how long a crew ride has to be to count as the week's
@@ -214,6 +211,6 @@ func NeedsEasingBeforeTest(w workout.Workout, workouts []workout.Workout) bool {
 // MovedFrom returns the date a generated workout was originally planned for,
 // when an automatic adjustment has since moved it. Scheduling reads this so
 // it does not see the vacated day as empty and make the missed session again.
-func MovedFrom(description string) (string, bool) {
-	return workout.MovedFromDate(description)
+func MovedFrom(w workout.Workout) (string, bool) {
+	return w.Flags.MovedFrom, w.Flags.MovedFrom != ""
 }

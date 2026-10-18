@@ -148,6 +148,7 @@ func TestEveryRidersDayMustBeFreeByThePlansOwnRules(t *testing.T) {
 	t.Run("a day an earlier move left empty", func(t *testing.T) {
 		moved := gen("moved", "Endurance ride", thu, workout.ZoneEndurance, 3600)
 		moved.Description += " " + scheduler.AdjustedMarker + " moved from " + sat + " - that session was missed."
+		moved.Flags = workout.LegacyFlags(moved)
 		out := align(group([]Candidate{wilant, sam(moved)}, r))
 		if len(out) != 1 || out[0].Day != sun {
 			t.Errorf("proposals = %+v, want Sunday: Saturday is a vacated day", out)
@@ -186,6 +187,7 @@ func TestOnlyASessionThePlanMayMoveQualifies(t *testing.T) {
 	partner := rider("sam", weekend, long("s", fri, 3))
 	adjusted := long("adj", thu, 3)
 	adjusted.Description += " " + scheduler.AdjustedMarker + " eased."
+	adjusted.Flags = workout.LegacyFlags(adjusted)
 	cases := map[string]workout.Workout{
 		"a hard session":              hard("h", thu),
 		"an endurance ride under 60":  gen("short", "Endurance ride", thu, workout.ZoneEndurance, 3000),
@@ -316,6 +318,7 @@ func TestAProposalHoldsWhileEveryRidersPremiseDoes(t *testing.T) {
 			"adjusted": func() []workout.Workout {
 				a := long("s", fri, 3)
 				a.Description += " " + scheduler.AdjustedMarker + " eased."
+				a.Flags = workout.LegacyFlags(a)
 				return []workout.Workout{a}
 			}(),
 		} {
@@ -359,6 +362,7 @@ func TestAProposalHoldsWhileEveryRidersPremiseDoes(t *testing.T) {
 	t.Run("an accepted rider is on the shared day", func(t *testing.T) {
 		moved := long("w", sat, 3)
 		moved.Description += " " + scheduler.AdjustedMarker + " moved from " + sun + "."
+		moved.Flags = workout.LegacyFlags(moved)
 		x := g
 		x.Candidates = []Candidate{rider("wilant", weekend, moved), g.Candidates[1]}
 		accepted := []MemberState{{Rider: "sam"}, {Rider: "wilant", Accepted: true, WorkoutID: "w"}}

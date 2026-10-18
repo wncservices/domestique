@@ -44,7 +44,7 @@ func assertNothingInThePast(t *testing.T, h *autoScheduleHarness, ws []workout.W
 		t.Fatal(err)
 	}
 	for _, wk := range after {
-		if _, moved := scheduler.MovedFrom(wk.Description); moved || strings.Contains(wk.Description, "missed") {
+		if _, moved := scheduler.MovedFrom(wk); moved || strings.Contains(wk.Description, "missed") {
 			t.Errorf("workout %q on %s was adjusted right after filling: %q", wk.Name, wk.Date, wk.Description)
 		}
 	}

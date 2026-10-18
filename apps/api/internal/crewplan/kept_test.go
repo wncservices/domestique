@@ -4,12 +4,14 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // A session kept through a life-event return is the rider's decision too.
 func TestASessionKeptThroughALifeEventReturnIsNotEasedForACrewRide(t *testing.T) {
 	kept := hard("fri-kept", fri)
 	kept.Description += " " + scheduler.LifeKeptMarker
+	kept.Flags = workout.LegacyFlags(kept)
 	if d := Preview(input(longRide, kept)); len(d.Changes) != 0 {
 		t.Errorf("changes = %+v, want none for a session the rider chose to keep", d.Changes)
 	}

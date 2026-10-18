@@ -39,6 +39,7 @@ func TestTheTwoDefinitionsOfPlanMadeAgree(t *testing.T) {
 		"routed": {workout.Workout{GoalID: "g", Description: gen, RouteSlug: "a-loop"}, false},
 	}
 	for name, c := range cases {
+		c.w = withLegacyFlags(c.w)
 		if got := scheduler.IsPlanMade(c.w); got != c.want {
 			t.Errorf("scheduler.IsPlanMade(%s) = %v, want %v", name, got, c.want)
 		}
@@ -54,7 +55,7 @@ func TestTheTwoDefinitionsOfPlanMadeAgree(t *testing.T) {
 // kept session is neither offered nor deleted.
 func TestAKeptSessionIsNeitherOfferedNorReplacedByAnFTPTest(t *testing.T) {
 	for _, marker := range []string{scheduler.CrewKeptMarker, scheduler.LifeKeptMarker} {
-		w := workout.Workout{GoalID: "g", Description: scheduler.GeneratedDescription + " " + marker}
+		w := withLegacyFlags(workout.Workout{GoalID: "g", Description: scheduler.GeneratedDescription + " " + marker})
 		if scheduler.AutoReplaceable(w) {
 			t.Errorf("a session carrying %q is replaceable", marker)
 		}
@@ -62,4 +63,11 @@ func TestAKeptSessionIsNeitherOfferedNorReplacedByAnFTPTest(t *testing.T) {
 			t.Errorf("a kept session is still plan-made structurally (%q)", marker)
 		}
 	}
+}
+
+// legacyFlagged gives a fixture the Flags its description text implies, so a
+// table written in markers drives the predicates, which read the columns.
+func withLegacyFlags(w workout.Workout) workout.Workout {
+	w.Flags = workout.LegacyFlags(w)
+	return w
 }

@@ -319,11 +319,11 @@ func (p *previewer) leave(w workout.Workout) {
 		reason = "it is in the past"
 	case w.RouteSlug != "":
 		reason = "you chose a route for it"
-	case strings.Contains(w.Description, KeptMarker):
+	case w.Flags.Kept == workout.KeptCrew:
 		reason = "you chose to keep it as planned"
-	case strings.Contains(w.Description, scheduler.SwappedMarker):
+	case w.Flags.Swapped:
 		reason = "you swapped it for another version"
-	case strings.Contains(w.Description, scheduler.AdjustedMarker):
+	case w.Flags.Adapted():
 		reason = "it has already been adjusted"
 	case w.CrewRideID != "":
 		reason = "it is another crew ride"

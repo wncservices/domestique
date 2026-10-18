@@ -508,7 +508,7 @@ func (s *Server) rollBackLifeEvent(ctx context.Context, rider string, op lifeOp,
 // keepThroughReturn writes the kept marker into a session whose ease or
 // shortening the rider unticked, once.
 func (s *Server) keepThroughReturn(ctx context.Context, wk workout.Workout) error {
-	if wk.ID == "" || strings.Contains(wk.Description, lifeevents.KeptMarker) {
+	if wk.ID == "" || workout.CurrentFlags(wk).Kept == workout.KeptLife {
 		return nil
 	}
 	description := strings.TrimRight(wk.Description, " \n") + " " + lifeevents.KeptMarker

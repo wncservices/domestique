@@ -20,6 +20,7 @@ func planned(id, name, date string) workout.Workout {
 	return workout.Workout{
 		ID: id, GoalID: "g", Sport: model.SportCycling, Name: name, Date: date,
 		Description: scheduler.GeneratedDescription,
+		Flags:       workout.Flags{Origin: workout.OriginPlan},
 		Steps:       []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 3600}},
 	}
 }
@@ -27,6 +28,7 @@ func planned(id, name, date string) workout.Workout {
 func hand(id, name, date string) workout.Workout {
 	w := planned(id, name, date)
 	w.Description = "mine"
+	w.Flags = workout.Flags{Origin: workout.OriginRider}
 	return w
 }
 
@@ -227,6 +229,7 @@ func TestCautionStepsDownTodaysStructuredHardWorkout(t *testing.T) {
 func TestCautionChangesNothingOnASecondSamedayPass(t *testing.T) {
 	already := structured("today", "Threshold 3×6", "2026-03-19", workout.ZoneThreshold, 3)
 	already.Description += " " + scheduler.AdjustedMarker + " Eased one level — HRV is unbalanced today."
+	already.Flags = workout.LegacyFlags(already)
 	caution := readiness.Assessment{Verdict: readiness.Caution, Reasons: []string{"HRV is unbalanced today"}}
 
 	got := AdaptSessions([]workout.Workout{already}, nil, workout.RiderProfile{}, thursday, nil, caution)
@@ -255,10 +258,12 @@ func TestCautionSkipsALegacyZonelessHardWorkout(t *testing.T) {
 func TestNothingElseIsEverTouched(t *testing.T) {
 	hand := planned("mine", "VO2max intervals", "2026-03-17")
 	hand.Description = "my own session"
+	hand.Flags = workout.Flags{Origin: workout.OriginRider}
 	noGoal := planned("free", "Long ride", "2026-03-17")
 	noGoal.GoalID = ""
 	adjusted := planned("done-once", "Long ride", "2026-03-18")
 	adjusted.Description += " " + scheduler.AdjustedMarker + " moved from 2026-03-16."
+	adjusted.Flags = workout.LegacyFlags(adjusted)
 
 	got := AdaptSessions([]workout.Workout{hand, noGoal, adjusted}, nil, profileAvailable("fri"), thursday, nil, readiness.Assessment{})
 	if len(got) != 0 {
@@ -542,6 +547,7 @@ func TestAStruggledSessionDoesNotStepDownADifferentZone(t *testing.T) {
 func TestAnAlreadyAdjustedWorkoutIsNeverStepDownTargeted(t *testing.T) {
 	touched := structured("thu-threshold", "Threshold 3×8", "2026-03-19", workout.ZoneThreshold, 4)
 	touched.Description += " " + scheduler.AdjustedMarker + " moved already."
+	touched.Flags = workout.LegacyFlags(touched)
 	ws := []workout.Workout{
 		structured("tue-threshold", "Threshold 3×12", "2026-03-17", workout.ZoneThreshold, 5),
 		touched,
@@ -669,10 +675,11 @@ func TestAMissedSessionRescheduledOntoASameZoneSlotIsNotAlsoSteppedDown(t *testi
 func TestNoteCarriesTheMarkerThatPreventsASecondAdjustment(t *testing.T) {
 	c := Change{Reason: "moved from 2026-03-17 — missed."}
 	w := workout.Workout{GoalID: "g", Description: scheduler.GeneratedDescription + " " + Note(c)}
+	w.Flags = workout.LegacyFlags(w)
 	if scheduler.IsGenerated(w) {
 		t.Error("a workout carrying its own adjustment note must not be adjustable again")
 	}
-	if d, ok := scheduler.MovedFrom(w.Description); !ok || d != "2026-03-17" {
+	if d, ok := scheduler.MovedFrom(w); !ok || d != "2026-03-17" {
 		t.Errorf("MovedFrom = %q, %v — scheduling relies on this to not recreate the vacated day", d, ok)
 	}
 }

@@ -17,6 +17,7 @@ func TestAKeptSessionIsNeverEasedSwappedOrSteppedDown(t *testing.T) {
 			kept := func(id, date string) workout.Workout {
 				w := structured(id, "Threshold 3×8", date, workout.ZoneThreshold, 4)
 				w.Description += " " + marker
+				w.Flags = workout.LegacyFlags(w)
 				return w
 			}
 			rest := readiness.Assessment{Verdict: readiness.Rest, Reasons: []string{"your form is −34"}}

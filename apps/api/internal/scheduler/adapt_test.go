@@ -58,7 +58,7 @@ func TestKeyAndHardSessionReadZoneWithNameFallback(t *testing.T) {
 }
 
 func TestOnlyUnadjustedGeneratedWorkoutsMayBeAdapted(t *testing.T) {
-	gen := workout.Workout{GoalID: "g", Description: GeneratedDescription}
+	gen := legacy(workout.Workout{GoalID: "g", Description: GeneratedDescription})
 	if !IsGenerated(gen) {
 		t.Error("a scheduler-made workout should be adaptable")
 	}
@@ -69,6 +69,7 @@ func TestOnlyUnadjustedGeneratedWorkoutsMayBeAdapted(t *testing.T) {
 		t.Error("a workout with no goal is not the scheduler's")
 	}
 	gen.Description += " " + AdjustedMarker + " moved from 2026-03-17."
+	gen = legacy(gen)
 	if IsGenerated(gen) {
 		t.Error("an already-adjusted workout must not be adjusted a second time")
 	}
@@ -95,22 +96,62 @@ func TestEasyVariantIsAFifthShorterAndEasy(t *testing.T) {
 }
 
 func TestMovedFromReadsTheOriginalDate(t *testing.T) {
-	d, ok := MovedFrom(GeneratedDescription + " " + AdjustedMarker + " moved from 2026-03-17, missed.")
+	d, ok := MovedFrom(legacy(workout.Workout{Description: GeneratedDescription + " " + AdjustedMarker + " moved from 2026-03-17, missed."}))
 	if !ok || d != "2026-03-17" {
 		t.Errorf("MovedFrom = %q, %v", d, ok)
 	}
-	if _, ok := MovedFrom(GeneratedDescription); ok {
+	if _, ok := MovedFrom(legacy(workout.Workout{Description: GeneratedDescription})); ok {
 		t.Error("an unmoved workout has no original date")
 	}
 }
 
 func TestASwappedSessionIsRiderTouchedAndNotGenerated(t *testing.T) {
-	gen := workout.Workout{GoalID: "g", Description: GeneratedDescription}
+	gen := legacy(workout.Workout{GoalID: "g", Description: GeneratedDescription})
 	if !IsGenerated(gen) {
 		t.Fatal("setup: a scheduler-made workout should be generated")
 	}
 	gen.Description += " " + SwappedMarker + " harder, was Threshold 4 (1h10)."
+	gen = legacy(gen)
 	if IsGenerated(gen) {
 		t.Error("a swapped session is the rider's choice; adaptation must not rewrite it")
 	}
+}
+
+// The predicates read the typed columns. The description is deliberately
+// misleading here, so a predicate that still looked at it would answer wrongly.
+func TestPredicatesIgnoreDescriptionText(t *testing.T) {
+	plan := workout.Flags{Origin: workout.OriginPlan}
+
+	w := workout.Workout{GoalID: "g", Description: "anything", Flags: plan}
+	if !IsGenerated(w) {
+		t.Error("plan origin with unrelated text must be generated")
+	}
+
+	w = workout.Workout{GoalID: "g", Description: GeneratedDescription + " " + AdjustedMarker, Flags: plan}
+	if !IsGenerated(w) {
+		t.Error("a marker in the text with no adaptation in the flags must still be generated")
+	}
+
+	kept := plan
+	kept.Kept = workout.KeptCrew
+	w = workout.Workout{GoalID: "g", Description: GeneratedDescription, Flags: kept}
+	if IsGenerated(w) || !IsPlanSession(w) {
+		t.Errorf("kept session: generated=%v planSession=%v, want false/true", IsGenerated(w), IsPlanSession(w))
+	}
+	if !RiderKept(w) {
+		t.Error("RiderKept must read Kept")
+	}
+
+	moved := plan
+	moved.MovedFrom = "2026-10-01"
+	if from, ok := MovedFrom(workout.Workout{Description: "x", Flags: moved}); !ok || from != "2026-10-01" {
+		t.Errorf("MovedFrom = %q, %v", from, ok)
+	}
+}
+
+// legacy gives a fixture the Flags its description text implies, so a test that
+// writes markers by hand exercises the columns the predicates now read.
+func legacy(w workout.Workout) workout.Workout {
+	w.Flags = workout.LegacyFlags(w)
+	return w
 }

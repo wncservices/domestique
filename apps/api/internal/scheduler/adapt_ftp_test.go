@@ -8,7 +8,7 @@ import (
 
 func TestNeedsEasingBeforeTest(t *testing.T) {
 	hard := func(id, date string) workout.Workout {
-		return workout.Workout{ID: id, GoalID: "g", Date: date, Name: "Threshold intervals", Zone: workout.ZoneThreshold, Description: GeneratedDescription}
+		return legacy(workout.Workout{ID: id, GoalID: "g", Date: date, Name: "Threshold intervals", Zone: workout.ZoneThreshold, Description: GeneratedDescription})
 	}
 	test := workout.Workout{ID: "t", GoalID: "g", Date: "2026-03-27", Name: "FTP Test (ramp)", TestProtocol: "ramp", Description: "The ramp test."}
 	all := func(w ...workout.Workout) []workout.Workout { return append([]workout.Workout{test}, w...) }
@@ -30,6 +30,7 @@ func TestNeedsEasingBeforeTest(t *testing.T) {
 		{"already adjusted is not adjusted twice", func() workout.Workout {
 			w := hard("f", "2026-03-26")
 			w.Description += " " + AdjustedMarker + " eased for readiness."
+			w = legacy(w)
 			return w
 		}(), false},
 		{"an easy generated session needs nothing", func() workout.Workout {

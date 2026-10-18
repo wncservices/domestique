@@ -214,8 +214,10 @@ func TestRampCapsOnEasyDays(t *testing.T) {
 func TestRampNeverRewritesWhatTheRiderOrAnEarlierRuleTouched(t *testing.T) {
 	adjusted := hard("adj", "2026-10-12", 60)
 	adjusted.Description += " Rescheduled by a life event: moved from 2026-10-09. " + scheduler.AdjustedMarker + " moved."
+	adjusted.Flags = workout.LegacyFlags(adjusted)
 	swapped := hard("swp", "2026-10-13", 60)
 	swapped.Description += " " + scheduler.SwappedMarker + " harder."
+	swapped.Flags = workout.LegacyFlags(swapped)
 	mine := built("mine", "2026-10-14", 60)
 	ridden := hard("ridden", "2026-10-15", 60)
 	d := Preview(Input{
@@ -232,6 +234,7 @@ func TestRampNeverRewritesWhatTheRiderOrAnEarlierRuleTouched(t *testing.T) {
 func TestASessionTheRiderKeptThroughTheReturnIsNotRampedAgain(t *testing.T) {
 	kept := hard("kept", "2026-10-12", 90)
 	kept.Description += " " + KeptMarker
+	kept.Flags = workout.LegacyFlags(kept)
 	d := preview([]Event{ill("2026-10-08", "2026-10-11", OptionProper)}, nil, kept, hard("other", "2026-10-13", 90))
 	if _, ok := find(d, "ease:kept"); ok {
 		t.Fatal("the ramp eased a session the rider unticked")
@@ -271,7 +274,11 @@ func TestEveryLifeEventNoteIsRecognisedAsOne(t *testing.T) {
 		for _, c := range d.Changes {
 			if c.Update != nil && c.Update.Description != nil && c.Op != OpRemove {
 				got = true
-				if !Touched(*c.Update.Description) {
+				var f workout.Flags
+				if c.Update.Flags != nil {
+					f = *c.Update.Flags
+				}
+				if !Touched(workout.Workout{Description: *c.Update.Description, Flags: f}) {
 					t.Errorf("%s: %q is not recognised as a life event's", name, *c.Update.Description)
 				}
 			}
@@ -280,10 +287,14 @@ func TestEveryLifeEventNoteIsRecognisedAsOne(t *testing.T) {
 			t.Errorf("%s: no change to check", name)
 		}
 	}
-	if Touched(scheduler.GeneratedDescription + " " + scheduler.AdjustedMarker + " Eased one level — HRV low") {
+	eased := workout.Workout{GoalID: "g", Description: scheduler.GeneratedDescription + " " + scheduler.AdjustedMarker + " Eased one level — HRV low"}
+	eased.Flags = workout.LegacyFlags(eased)
+	if Touched(eased) {
 		t.Error("a readiness easing was taken for a life event's")
 	}
-	if !Touched("x " + KeptMarker) {
+	kept := workout.Workout{Description: "x " + KeptMarker}
+	kept.Flags = workout.LegacyFlags(kept)
+	if !Touched(kept) {
 		t.Error("a kept session is not Touched")
 	}
 }
@@ -319,6 +330,7 @@ func TestASessionOnlyAnEarlierRampTouchedIsStillThePlansToRemove(t *testing.T) {
 	// treat it as one the rider touched.
 	ramped := easy("sat", "2026-10-10", 60)
 	ramped.Description += " " + scheduler.AdjustedMarker + " Life event: eased after illness (return to training)."
+	ramped.Flags = workout.LegacyFlags(ramped)
 	prev := []Event{ill("2026-10-08", "2026-10-08", OptionProper)}
 	now := []Event{ill("2026-10-08", "2026-10-10", OptionProper)}
 	d := preview(now, prev, ramped)
@@ -341,7 +353,7 @@ func TestSwitchingMildToProperRemovesTheSessionsMildLeftBehind(t *testing.T) {
 	first := preview([]Event{mild}, nil, easy("thu", "2026-10-08", 120), easy("fri", "2026-10-09", 30))
 	cut := mustFind(t, first, "shorten:thu")
 	left := easy("thu", "2026-10-08", 120)
-	left.Name, left.Steps, left.Description = *cut.Update.Name, *cut.Update.Steps, *cut.Update.Description
+	left.Name, left.Steps, left.Description, left.Flags = *cut.Update.Name, *cut.Update.Steps, *cut.Update.Description, *cut.Update.Flags
 
 	d := preview([]Event{proper}, []Event{mild}, left, easy("fri", "2026-10-09", 30))
 	for _, id := range []string{"remove:thu", "remove:fri"} {
