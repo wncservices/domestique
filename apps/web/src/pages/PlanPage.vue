@@ -29,7 +29,6 @@ import type {
   TrainingWeek,
   WeatherSuggestion,
   WeekFocus,
-  Why,
   Workout,
 } from '@/api/types'
 import AppPage from '@/components/ui/AppPage.vue'
