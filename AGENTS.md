@@ -831,7 +831,8 @@ plan behind their back. Design: `docs/superpowers/specs/2026-09-29-crew-planning
 - **A crew ride is the crew's day**: it cannot be moved (409), converted indoor, swapped
   for an alternate, or replaced by an FTP test. A crew action (deleting a ride, removing
   a member) never edits a rider's workouts: reads mark the session `orphaned`
-  (`cancelled` / `left`) and the rider updates their own plan by leaving.
+  (`cancelled` / `left`) and the rider updates their own plan by leaving. A life event's
+  removal of a crew ride, which the rider must tick, also takes them off its going list.
 - **Ride together** (`PUT /api/crews/{id}/together`, `GET /api/training/ride-together`,
   `POST .../{id}/accept|decline`): members opt in with weekdays; a proposal for one day
   and one visible route is computed when either rider reads and stored once per crew and
