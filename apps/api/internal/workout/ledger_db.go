@@ -39,8 +39,8 @@ func (d *DB) ClaimLedgerDay(ctx context.Context, rider, weekStart, day string) (
 	rider = normalizeRider(rider)
 	now := d.timestamp()
 	res, err := d.db.ExecContext(ctx, d.query(`
-INSERT INTO load_ledger (rider, week_start, updated_at) VALUES (?, ?, ?)
-ON CONFLICT (rider, week_start) DO NOTHING`), rider, weekStart, now)
+INSERT INTO load_ledger (rider, week_start, created_at, updated_at) VALUES (?, ?, ?, ?)
+ON CONFLICT (rider, week_start) DO NOTHING`), rider, weekStart, now, now)
 	if err != nil {
 		return false, false, fmt.Errorf("workout: claim ledger day: %w", err)
 	}
@@ -66,12 +66,13 @@ WHERE rider = ? AND week_start = ? AND last_pass_date <> ?`), day, now, rider, w
 // OpenLedgerWeek records the week's target and what was carried into it,
 // creating the row if needed and leaving last_pass_date and forgiven alone.
 func (d *DB) OpenLedgerWeek(ctx context.Context, rider, weekStart string, target, carriedIn float64) error {
+	now := d.timestamp()
 	_, err := d.db.ExecContext(ctx, d.query(`
-INSERT INTO load_ledger (rider, week_start, target_tss, carried_in_tss, updated_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO load_ledger (rider, week_start, target_tss, carried_in_tss, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (rider, week_start) DO UPDATE SET
     target_tss = excluded.target_tss, carried_in_tss = excluded.carried_in_tss, updated_at = excluded.updated_at`),
-		normalizeRider(rider), weekStart, target, carriedIn, d.timestamp())
+		normalizeRider(rider), weekStart, target, carriedIn, now, now)
 	if err != nil {
 		return fmt.Errorf("workout: open ledger week: %w", err)
 	}
