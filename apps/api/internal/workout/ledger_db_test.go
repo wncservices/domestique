@@ -16,9 +16,17 @@ func TestLedgerClaimIsOncePerDay(t *testing.T) {
 		if err != nil || claimed || created {
 			t.Fatalf("same day = %v, %v, %v; want neither", claimed, created, err)
 		}
+		var before string
+		if err := db.db.QueryRowContext(ctx, db.query(`SELECT created_at FROM load_ledger WHERE rider = ? AND week_start = ?`), "wilant", "2026-10-12").Scan(&before); err != nil || before == "" {
+			t.Fatalf("created_at = %q, err %v; want set", before, err)
+		}
 		claimed, created, err = db.ClaimLedgerDay(ctx, "wilant", "2026-10-12", "2026-10-13")
 		if err != nil || !claimed || created {
 			t.Fatalf("next day = %v, %v, %v; want claimed, not created", claimed, created, err)
+		}
+		var after string
+		if err := db.db.QueryRowContext(ctx, db.query(`SELECT created_at FROM load_ledger WHERE rider = ? AND week_start = ?`), "wilant", "2026-10-12").Scan(&after); err != nil || after != before {
+			t.Fatalf("created_at moved: %q -> %q (err %v)", before, after, err)
 		}
 	})
 }

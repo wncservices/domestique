@@ -334,7 +334,7 @@ func riderSeeds() []seed {
 			return exec(e, `INSERT INTO fitness_snapshots (rider, date) VALUES (?, '2026-01-02')`, rider)
 		}, "rider", byRider},
 		{"load_ledger", func(e *riderDataEnv, rider, id string) error {
-			return exec(e, `INSERT INTO load_ledger (rider, week_start, updated_at) VALUES (?, '2026-01-05', ?)`, rider, ts)
+			return exec(e, `INSERT INTO load_ledger (rider, week_start, created_at, updated_at) VALUES (?, '2026-01-05', ?, ?)`, rider, ts, ts)
 		}, "rider", byRider},
 		{"daily_wellness", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO daily_wellness (rider, date, hrv_last_night, sleep_seconds, resting_hr, updated_at) VALUES (?, '2026-01-02', 61, 27000, 48, ?)`, rider, ts)

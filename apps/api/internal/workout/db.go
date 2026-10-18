@@ -252,6 +252,7 @@ CREATE TABLE IF NOT EXISTS load_ledger (
     carried_in_tss DOUBLE PRECISION NOT NULL DEFAULT 0,
     forgiven_tss   DOUBLE PRECISION NOT NULL DEFAULT 0,
     last_pass_date TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
     PRIMARY KEY (rider, week_start)
 );
