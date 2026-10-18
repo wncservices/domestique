@@ -81,11 +81,12 @@ Add to `workouts`:
 
 | Column | Meaning |
 |---|---|
-| `origin` | `plan` \| `rider` \| `crew` \| `test` \| `route` |
-| `rider_kept` | bool — replaces `CrewKeptMarker` / `LifeKeptMarker` |
+| `origin` | `plan` \| `rider` \| `crew` \| `test` (a route is `route_slug`, which `IsPlanMade` still checks) |
+| `adapted_rules` | comma-joined `why.Rule` ids of every automatic change, in order |
 | `swapped` | bool — replaces `SwappedMarker` |
-| `rider_edited_at` | set by every rider write path; replaces `UpdatedAt == CreatedAt` |
-| `last_adapted_by`, `last_adapted_at` | rule id and time of the latest automatic change |
+| `kept` | `''` \| `crew` \| `life` — which feature the rider kept it through; replaces `CrewKeptMarker` / `LifeKeptMarker` |
+| `moved_from`, `moved_by` | the date it was moved from, and by whom (`''` \| `life` \| `rider` \| `auto`) |
+| `edited_at` | set by every `UpdateWorkout`, so "any edit" for now; replaces `UpdatedAt == CreatedAt`. Sub-project 2 marks system writes |
 
 - The predicates in `scheduler/adapt.go` (`IsPlanSession`, `IsGenerated`,
   `IsPlanMade`, `AutoReplaceable`, `RiderKept`) keep their names and meaning and
@@ -93,8 +94,7 @@ Add to `workouts`:
 - A one-off migration derives the columns from today's markers; the markers
   stay in descriptions as display text for one release, then are no longer
   written.
-- "Changed at most once" becomes "at most once **per rule per day**", keyed on
-  `adjustments` (rule, subject, date). Sub-projects 2 and 4 need this.
+- New why rules: `legacy`, `life_event`, `crew_ride_shorten`, `ride_together_move`.
 - Pure refactor: behaviour is identical, proven by the existing adapter,
   season-plan and acceptance tests passing unchanged, plus a migration test
   over fixtures for every marker.
@@ -168,6 +168,10 @@ workouts and `session_analyses`; only the carry-over is stored
 - **Green-day push**: verdict Push (sub-project 3) and debt > 0 → today's
   session goes one rung up its ladder, or an endurance session is lengthened.
   Capped at the rider's level + 1 (the same cap as the "harder" alternate).
+- **At most once per rule per day**, keyed on `adjustments` (rule, subject,
+  date): "changed at most once, ever" blocks any multi-step adaptation, so the
+  ledger and the daily re-optimiser (sub-project 4) need this. It changes
+  behaviour, so it lands here and not with the column refactor.
 - **`adapter.Reconcile` is retired**; the ledger replaces it.
 - New why-rules: `load_repaid`, `load_rolled`, `load_forgiven`, `green_push`.
 
