@@ -541,6 +541,28 @@ count it twice. There is one TSS estimator, `workout.PlannedTSS` (with
 `adapter.PlannedTSS` only forwards. The Plan page shows TSS and hours, and a
 planned-CTL line on its own scale, not the fitness chart's.
 
+**A load ledger makes up the load a week lost.** `repayLoad` (`internal/api/ledgerpass.go`,
+`internal/ledger`, table `load_ledger`, registered in `riderTables`) runs from `AutoScheduleTick`,
+under the scheduling lock, after adaptation and before the push, in the day's first sync slot, once
+per rider per day. It needs a CTL-sized plan (`LoadBasis == "ctl"`) *and* an FTP; the hours basis
+stays `adapter.Reconcile`'s, so nothing is counted twice. The day is claimed (`ClaimLedgerDay`)
+only after every read has succeeded, so a transient error costs a tick, not the day. A week is
+opened once, with a target of `min(plan target scaled to the open days, planned TSS of the week's
+goal-linked workouts at open)`, stored with `open_days`: days never planned (a goal saved on
+Thursday) are not load lost. Each pass uses `ledger.EffectiveTarget` = target x open days now /
+`open_days`, so a life event added later lowers what is owed and never raises it. Debt is
+`target + carried in - ridden - still planned from today`, never negative; at 5 TSS or under
+nothing happens. Opening settles last week (`ledger.Settle`): its own debt, not what it carried,
+rolls into this week up to 10% of this week's target (nothing into a recovery or taper week) and
+the rest is forgiven, so debt never compounds. The current week's `forgivenTss` is therefore *last*
+week's. Repayment lengthens a later session (at most 30% and 45 minutes, keeping its name, so
+"Long ride, with climbing" survives) or, above 20 TSS of debt, upgrades an endurance one at most
+once (new name, and its description restarts from the generated one). Both are written as
+`load_repaid`, which is deliberately **not** an easing: `Flags.EasedBy` ignores it, so
+`scheduler.IsPlanSession` stays true and the session can still be refreshed or trimmed; only
+`ledger.Repayable` stops it being repaid a second time. There is no green-day push;
+that moved to the readiness sub-project. Logs carry counts only, never a TSS beside a rider.
+
 ## Only today's session goes to the head unit
 
 `pushWorkoutsForRider` (`internal/api/workoutpush.go`) is the one automatic

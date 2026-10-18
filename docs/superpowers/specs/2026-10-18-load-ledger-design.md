@@ -1,6 +1,6 @@
 # Load ledger — design (sub-project 2)
 
-Status: approved 2026-10-18. Detailed design for section 2 of
+Status: implemented 2026-10-18. Detailed design for section 2 of
 `2026-10-18-adaptive-training-builder-design.md`, with the deviations listed at
 the end.
 
