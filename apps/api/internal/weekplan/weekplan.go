@@ -5,6 +5,7 @@
 package weekplan
 
 import (
+	"math"
 	"sort"
 	"time"
 
@@ -41,11 +42,12 @@ func contains(ids []string, id string) bool {
 }
 
 // HardNeighbour reports whether a Hard session whose id is not in ignore sits
-// on the day before or after date.
+// on the day before or after date. A date that does not parse fails closed
+// (true): a day we cannot place is not one to put a hard session beside.
 func HardNeighbour(date string, week []workout.Workout, ignore ...string) bool {
 	prev, next := shift(date, -1), shift(date, 1)
 	if prev == "" {
-		return false
+		return true
 	}
 	for _, w := range week {
 		if (w.Date == prev || w.Date == next) && !contains(ignore, w.ID) && Hard(w) {
@@ -56,11 +58,12 @@ func HardNeighbour(date string, week []workout.Workout, ignore ...string) bool {
 }
 
 // EveOfFixed reports whether an FTP test or a crew ride is the day after date:
-// the day before a fixed commitment stays easy.
+// the day before a fixed commitment stays easy. A date that does not parse
+// fails closed (true).
 func EveOfFixed(date string, week []workout.Workout) bool {
 	next := shift(date, 1)
 	if next == "" {
-		return false
+		return true
 	}
 	for _, w := range week {
 		if w.Date == next && (w.TestProtocol != "" || w.CrewRideID != "") {
@@ -104,6 +107,16 @@ func Swappable(w workout.Workout, manualPushed map[string]bool) bool {
 	return !manualPushed[w.ID]
 }
 
+// hardOn reports whether a Hard session whose id is not in ignore sits on date.
+func hardOn(date string, week []workout.Workout, ignore ...string) bool {
+	for _, w := range week {
+		if w.Date == date && !contains(ignore, w.ID) && Hard(w) {
+			return true
+		}
+	}
+	return false
+}
+
 func seconds(w workout.Workout) float64 { return workout.PlannedSeconds(w.Steps) }
 
 // PlanSwap picks today's hard session and an easier session later this week to
@@ -138,10 +151,11 @@ func PlanSwap(in SwapInput) (Swap, bool) {
 	var later, soon []workout.Workout
 	for _, w := range in.Week {
 		if w.Date <= in.Today || w.Date > in.Sunday || w.ID == h.ID ||
-			!Swappable(w, in.ManualPushed) || scheduler.IsHardSession(w) || in.Done[w.ID] {
+			!Swappable(w, in.ManualPushed) || scheduler.IsKeySession(w) ||
+			in.Done[w.ID] || seconds(w) > seconds(h) {
 			continue
 		}
-		if in.NoTestDays[w.Date] || EveOfFixed(w.Date, in.Week) ||
+		if in.NoTestDays[w.Date] || EveOfFixed(w.Date, in.Week) || hardOn(w.Date, in.Week, h.ID) ||
 			HardNeighbour(w.Date, in.Week, h.ID, w.ID) {
 			continue
 		}
@@ -162,8 +176,9 @@ func PlanSwap(in SwapInput) (Swap, bool) {
 		if pool[i].Date != pool[j].Date {
 			return pool[i].Date < pool[j].Date
 		}
-		if si, sj := seconds(pool[i]), seconds(pool[j]); si != sj {
-			return si > sj
+		di, dj := math.Abs(seconds(pool[i])-seconds(h)), math.Abs(seconds(pool[j])-seconds(h))
+		if di != dj {
+			return di < dj
 		}
 		return pool[i].ID < pool[j].ID
 	})

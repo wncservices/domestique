@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ type reoptHarness struct {
 	easy workout.Workout // on Friday
 }
 
-// newReoptHarness plants a hard tempo session today and a two-hour endurance
+// newReoptHarness plants a hard tempo session today and a one-hour endurance
 // ride on Friday, on a rider with a connected Garmin and auto-push on.
 func newReoptHarness(t *testing.T) *reoptHarness {
 	t.Helper()
@@ -42,7 +43,7 @@ func newReoptHarness(t *testing.T) *reoptHarness {
 	// the tests look for is only what the morning does.
 	h.push.garmin.remoteWorkouts, h.push.garmin.calendar = nil, nil
 	h.hard = plantTodaysTempo(t, h.ledgerHarness, reoptToday, 3, 4)
-	h.easy = h.plantEndurance(t, reoptFri, 2)
+	h.easy = h.plantEndurance(t, reoptFri, 1)
 	return h
 }
 
@@ -123,6 +124,9 @@ func TestCautionMorningSwapsTodaysHardSessionWithALaterEasyDay(t *testing.T) {
 	if !strings.Contains(hard.Description, "moved from "+reoptToday+" — swapped with an easier day.") {
 		t.Errorf("hard description %q carries no move note", hard.Description)
 	}
+	if !strings.Contains(easy.Description, "moved from "+reoptFri+" — swapped with a harder day.") {
+		t.Errorf("easy description %q carries no move note", easy.Description)
+	}
 	// Readiness eased the ride that now sits on today, in the same tick.
 	if !hasRule(easy, why.ReadinessCaution) || secs(easy) >= secs(h.easy) {
 		t.Errorf("today's easy ride was not shortened: rules %v, %v s of %v s", easy.Flags.AdaptedRules, secs(easy), secs(h.easy))
@@ -199,7 +203,7 @@ func TestReadyMorningSwapsNothing(t *testing.T) {
 // belongs to would strand it on the wrong day: the next candidate is used.
 func TestAManuallyPushedSessionIsNeverMoved(t *testing.T) {
 	h := newReoptHarness(t)
-	sat := h.plantEndurance(t, reoptSat, 2)
+	sat := h.plantEndurance(t, reoptSat, 1)
 	if err := h.store.SavePush(context.Background(), workout.Push{
 		WorkoutID: h.easy.ID, Provider: "garmin", RemoteID: "mine", ContentHash: "h", Origin: workout.PushOriginManual,
 	}); err != nil {
@@ -320,14 +324,9 @@ func TestAFailedSecondWriteRestoresTheFirst(t *testing.T) {
 	}
 }
 
-func TestReoptimiseLogsCarryNoVerdict(t *testing.T) {
-	h := newReoptHarness(t)
-	logs := captureLogs(h.ledgerHarness)
-	h.cautionMorning(t)
-
-	h.at(7, 7, 0)
-	h.tick()
-
+// reoptLines returns the log lines the pass wrote.
+func reoptLines(t *testing.T, logs *bytes.Buffer) []string {
+	t.Helper()
 	var lines []string
 	for _, l := range strings.Split(logs.String(), "\n") {
 		if strings.Contains(l, "reoptimise") {
@@ -337,6 +336,13 @@ func TestReoptimiseLogsCarryNoVerdict(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatalf("no reoptimise log line:\n%s", logs.String())
 	}
+	return lines
+}
+
+// Past the verdict check even a failure reveals the morning was a Caution or
+// Rest one, so no line may carry the verdict, a reason or the rider.
+func assertNoVerdictOrRider(t *testing.T, lines []string) {
+	t.Helper()
 	for _, l := range lines {
 		lower := strings.ToLower(l)
 		for _, banned := range []string{"caution", "rest", "ready", "verdict", "readiness", "wilant"} {
@@ -344,5 +350,60 @@ func TestReoptimiseLogsCarryNoVerdict(t *testing.T) {
 				t.Errorf("log line %q carries %q", l, banned)
 			}
 		}
+	}
+}
+
+func TestReoptimiseLogsCarryNoVerdict(t *testing.T) {
+	h := newReoptHarness(t)
+	logs := captureLogs(h.ledgerHarness)
+	h.cautionMorning(t)
+
+	h.at(7, 7, 0)
+	h.tick()
+	assertNoVerdictOrRider(t, reoptLines(t, logs))
+}
+
+// The Warn paths are the ones that name a rider by habit: a failed swap, a
+// failed read.
+func TestReoptimiseFailureLogsNameNoRider(t *testing.T) {
+	h := newReoptHarness(t)
+	logs := captureLogs(h.ledgerHarness)
+	h.cautionMorning(t)
+	if _, err := h.conn.Exec(`CREATE TRIGGER reopt_fail BEFORE UPDATE ON workouts WHEN NEW.id = '` + h.easy.ID + `'
+		BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h.at(7, 7, 0)
+	h.srv.ReoptimiseForTest(context.Background())
+	lines := reoptLines(t, logs)
+	if !strings.Contains(strings.Join(lines, "\n"), "level=WARN") {
+		t.Fatalf("expected a Warn line, got %v", lines)
+	}
+	assertNoVerdictOrRider(t, lines)
+}
+
+// The pass decides "done" as the adaptation pass does: a ride that matched the
+// session but was cut short ("incomplete") is a miss however long it lasted,
+// so the hard session is still there to swap.
+func TestAnIncompleteRideDoesNotCountAsDone(t *testing.T) {
+	h := newReoptHarness(t)
+	ctx := context.Background()
+	h.cautionMorning(t)
+	sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "cut-short", Sport: "cycling",
+		Date: reoptToday, DurationSeconds: 4 * 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SaveAnalysis(ctx, workout.SessionAnalysis{
+		SessionID: sess.ID, Rider: "wilant", WorkoutID: h.hard.ID, Outcome: "incomplete",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.at(7, 7, 0)
+	h.srv.ReoptimiseForTest(ctx)
+	if got := h.get(t, h.hard.ID).Date; got != reoptFri {
+		t.Fatalf("hard session on %s, want it swapped to %s", got, reoptFri)
 	}
 }

@@ -23,23 +23,27 @@ scheduling lock, **before** `AdaptWorkouts`:
    - `scheduler.IsHardSession`;
    - not done.
 2. **Candidates.** Swappable sessions dated tomorrow…Sunday of this week that are not
-   `IsHardSession`.
+   key sessions (`!IsKeySession`: the week's long ride is volume, not a rest day, so it
+   never takes a tired day) and are no longer than the hard session
+   (`PlannedSeconds(candidate) <= PlannedSeconds(hard)`).
 3. **The target day.** A candidate's day is allowed when all of these hold:
    - it is not in `lifeevents.NoTestDays` (the blackout plus the return-ramp
      windows);
    - placing the hard session there leaves no hard neighbour: the day before and
      the day after hold no hard session, FTP test or crew ride. Today counts with
      the easy session that will be there.
-   - it is not the eve of an FTP test or a crew ride.
+   - it is not the eve of an FTP test or a crew ride;
+   - it holds no other hard session, FTP test or crew ride of its own.
+   An unparseable date fails closed in both spacing checks.
 4. **Choice.**
    - Prefer the earliest allowed day ≥ the day after tomorrow, so a recovery day
      sits in between.
    - Tomorrow is allowed only when `outlookTomorrow` says Ready.
-   - On a tie, the candidate with the longest planned duration wins: it best
-     absorbs a hard session's slot.
+   - On a tie (same day), the candidate whose planned duration is closest to the hard
+     session's wins, then the lower id: the trade changes today's load least.
 5. **The move.** The two sessions swap dates. Each gets:
    - the adjusted marker and a plain note: `moved from <date> — swapped with an
-     easier day.`;
+     easier day.` on the hard session, `... swapped with a harder day.` on the easy one;
    - flags `WithAdaptation(reshuffle_readiness)`, with `MovedFrom` kept if already
      set, else its old date, and `MovedBy = auto`;
    - an adjustment `reshuffle_readiness` with inputs `{from, to, verdict}`.
@@ -77,7 +81,10 @@ crew ride) and `HardNeighbour(date, workouts, ignore ...string)`.
 - The swap uses them.
 - The adapter's missed-key-session make-up (`nextFreeDay` / `nextEasySlot`) uses
   them too, when the session it moves is hard: it no longer puts two hard days back
-  to back. This is the one behaviour change outside the swap.
+  to back. This is the one behaviour change outside the swap. The check reads the week
+  as this pass has already rearranged it (a session made up earlier in the pass sits on
+  its new date), and a session dated before today that was not done is history, not a
+  neighbour.
 
 ## Display
 

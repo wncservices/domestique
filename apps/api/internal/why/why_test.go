@@ -291,11 +291,10 @@ func TestInputsSurviveAJSONRoundTrip(t *testing.T) {
 
 func TestTitlesForLoadRules(t *testing.T) {
 	for rule, want := range map[why.Rule]string{
-		why.LoadRepaid:   "Load made up",
-		why.LoadRolled:   "Load carried to next week",
-		why.LoadForgiven: "Load forgiven",
-		why.GreenPush:    "Pushed on a good day",
-
+		why.LoadRepaid:         "Load made up",
+		why.LoadRolled:         "Load carried to next week",
+		why.LoadForgiven:       "Load forgiven",
+		why.GreenPush:          "Pushed on a good day",
 		why.ReshuffleReadiness: "Swapped with an easier day",
 	} {
 		if got := why.Title(rule); got != want {
@@ -312,7 +311,8 @@ func TestTitlesForLoadRules(t *testing.T) {
 func TestReshuffleReadinessFacts(t *testing.T) {
 	rec := why.NewRecord(why.ReshuffleReadiness, "s", why.ReshuffleInputs{From: "2026-03-19", To: "2026-03-21", Verdict: "caution"})
 	got := why.Facts(why.ReshuffleReadiness, rec.Inputs)
-	if len(got) != 3 || got[0].Label != "Moved from" || got[1].Label != "Moved to" || got[2].Label != "Readiness" {
-		t.Errorf("Facts = %#v", got)
+	want := []why.Fact{{Label: "Moved from", Value: "Thu 19 Mar"}, {Label: "Moved to", Value: "Sat 21 Mar"}, {Label: "Readiness", Value: "caution"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Facts = %#v, want %#v", got, want)
 	}
 }

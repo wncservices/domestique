@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/weekplan"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -70,8 +71,8 @@ func TestHardNeighbourIgnoresGivenIDs(t *testing.T) {
 	if !weekplan.HardNeighbour(mon, week) {
 		t.Fatal("hard day after should count")
 	}
-	if weekplan.HardNeighbour(thu+"x", week) {
-		t.Fatal("unparseable date has no neighbours")
+	if !weekplan.HardNeighbour(thu+"x", week) {
+		t.Fatal("an unparseable date fails closed")
 	}
 }
 
@@ -83,6 +84,14 @@ func TestEveOfFixed(t *testing.T) {
 	}
 	if weekplan.EveOfFixed(wed, []workout.Workout{hard("h", thu)}) {
 		t.Fatal("a plain hard day is not fixed")
+	}
+	// Isolated from HardNeighbour: ignoring the test itself leaves no hard
+	// neighbour, yet the day before it is still an eve.
+	if weekplan.HardNeighbour(wed, []workout.Workout{test}, "t") || !weekplan.EveOfFixed(wed, []workout.Workout{test}) {
+		t.Fatal("EveOfFixed must hold on its own")
+	}
+	if !weekplan.EveOfFixed("not-a-date", []workout.Workout{test}) {
+		t.Fatal("an unparseable date fails closed")
 	}
 }
 
@@ -183,16 +192,47 @@ func TestPlanSwapSkipsTheEveOfATestOrCrewRide(t *testing.T) {
 	}
 }
 
-func TestPlanSwapTieBreaksOnLongerThenID(t *testing.T) {
-	in := input(mon, hard("h", mon), easy("b", wed, 3600), easy("a", wed, 3600), easy("c", wed, 5400))
+func TestPlanSwapTieBreaksOnClosestLengthThenID(t *testing.T) {
+	// Hard is 3600 s. 3500 is closer than 2400; 5400 is longer than the hard
+	// session and is skipped.
+	in := input(mon, hard("h", mon), easy("b", wed, 2400), easy("a", wed, 3500), easy("c", wed, 5400))
 	got, _ := weekplan.PlanSwap(in)
-	if got.EasyID != "c" {
-		t.Fatalf("longer should win: %+v", got)
+	if got.EasyID != "a" {
+		t.Fatalf("closest length should win: %+v", got)
 	}
 	in = input(mon, hard("h", mon), easy("b", wed, 3600), easy("a", wed, 3600))
 	got, _ = weekplan.PlanSwap(in)
 	if got.EasyID != "a" {
 		t.Fatalf("lower id should win: %+v", got)
+	}
+}
+
+func TestPlanSwapNeverPicksTheLongRideOrALongerSession(t *testing.T) {
+	long := gen("long", sat, workout.ZoneEndurance, 3*3600)
+	long.Name = "Long ride"
+	if !scheduler.IsKeySession(long) {
+		t.Skip("fixture is not a key session")
+	}
+	// Tuesday is Today (Caution). Wed is blocked by Thu's hard session, Sat is
+	// the long ride, Sun is the only fit.
+	in := input(tue, hard("h", tue), easy("wed", wed, 3600), hard("h2", thu), long, easy("sun", sun, 3600))
+	got, ok := weekplan.PlanSwap(in)
+	if !ok || got.EasyID != "sun" {
+		t.Fatalf("got %+v ok=%v", got, ok)
+	}
+	// A candidate longer than the hard session is skipped.
+	in = input(mon, hard("h", mon), easy("long-easy", wed, 7200))
+	if _, ok := weekplan.PlanSwap(in); ok {
+		t.Fatal("a longer session must not take the tired day")
+	}
+}
+
+func TestPlanSwapNeverLandsOnADayThatAlreadyHoldsAHardSession(t *testing.T) {
+	test := hard("t", wed)
+	test.TestProtocol = "ramp"
+	in := input(mon, hard("h", mon), easy("e", wed, 3600), test)
+	if _, ok := weekplan.PlanSwap(in); ok {
+		t.Fatal("must not stack two hard sessions on one day")
 	}
 }
 
@@ -258,5 +298,14 @@ func TestSwappableExcludesRoutedTestCrewKeptRunningManualAndAlreadyReshuffled(t 
 	}
 	if weekplan.Swappable(base, map[string]bool{"a": true}) {
 		t.Error("manual push should not be swappable")
+	}
+}
+
+func TestPlanSwapWithTwoHardSessionsTodayMovesOnlyTheLongerOne(t *testing.T) {
+	long := gen("h2", mon, workout.ZoneThreshold, 5400)
+	in := input(mon, hard("h1", mon), long, easy("e", wed, 3600))
+	got, ok := weekplan.PlanSwap(in)
+	if !ok || got.HardID != "h2" || got.EasyID != "e" {
+		t.Fatalf("got %+v ok=%v", got, ok)
 	}
 }

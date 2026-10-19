@@ -183,6 +183,24 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 	ordered := append([]workout.Workout(nil), workouts...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Date < ordered[j].Date })
 
+	// moved holds the new date of every session this pass has already made up,
+	// so the next miss is checked against the week as it will be, not as it
+	// was stored. A past session the rider did not do is history, not a day
+	// they are recovering from, so it never counts as a hard neighbour.
+	moved := map[string]string{}
+	hardBeside := func(date string, ignore ...string) bool {
+		view := make([]workout.Workout, 0, len(ordered))
+		for _, w := range ordered {
+			if d, ok := moved[w.ID]; ok {
+				w.Date = d
+			} else if w.Date < todayStr && !done(w, sessions, analyses) {
+				continue
+			}
+			view = append(view, w)
+		}
+		return weekplan.HardNeighbour(date, view, ignore...)
+	}
+
 	replaced := map[string]bool{}
 	// claimed holds every workout id this pass has already produced a Change
 	// for (as the changed workout itself, or as the easy slot a missed
@@ -209,9 +227,10 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 			// A hard session is not made up beside another hard day.
 			hardMiss := weekplan.Hard(w)
 			if next, ok := nextFreeDay(today, weekEnd, available, taken, func(d string) bool {
-				return hardMiss && weekplan.HardNeighbour(d, ordered, w.ID)
+				return hardMiss && hardBeside(d, w.ID)
 			}); ok {
 				taken[next] = true
+				moved[w.ID] = next
 				claimed[w.ID] = true
 				changes = append(changes, change(Change{
 					WorkoutID: w.ID, NewDate: next,
@@ -220,9 +239,10 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				continue
 			}
 			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced, blackout, func(slot workout.Workout) bool {
-				return hardMiss && weekplan.HardNeighbour(slot.Date, ordered, w.ID, slot.ID)
+				return hardMiss && hardBeside(slot.Date, w.ID, slot.ID)
 			}); ok {
 				replaced[slot.ID] = true
+				moved[w.ID] = slot.Date
 				claimed[w.ID] = true
 				claimed[slot.ID] = true
 				changes = append(changes, change(Change{
@@ -499,6 +519,13 @@ func feltAllOut(a workout.SessionAnalysis) bool {
 // time rule is the whole test.
 func WorkoutDone(w workout.Workout, sessions []workout.CompletedSession) bool {
 	return done(w, sessions, nil)
+}
+
+// WorkoutDoneWith is WorkoutDone with the ride analyses the adaptation pass
+// reads, so a caller deciding the same thing the pass does agrees with it: an
+// "incomplete" analysis is a miss however much time was logged.
+func WorkoutDoneWith(w workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis) bool {
+	return done(w, sessions, analyses)
 }
 
 // done reports whether the rider did this session. A ride-analysis outcome

@@ -22,7 +22,9 @@ import (
 // is planned and before AdaptWorkouts, so the easy session that now sits on
 // today is eased by readiness in the same tick and the push that follows sends
 // it. It only acts in the day's first sync slot, and never fails the tick: a
-// rider whose pass cannot run is a Warn naming the stage.
+// rider whose pass cannot run is a Warn naming the stage. Once the verdict is
+// known to be Caution or Rest no line names the rider: a failure there would
+// say whose morning it was.
 func (s *Server) reoptimise(ctx context.Context) {
 	if s.Training == nil || !s.inMorningSlot(s.now()) {
 		return
@@ -67,27 +69,40 @@ func (s *Server) reoptimiseRider(ctx context.Context, rider string) bool {
 	}
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
-		s.logger().Warn("reoptimise: could not read workouts", "rider", rider)
+		s.logger().Warn("reoptimise: could not read workouts")
 		return false
 	}
 	profile, _, err := s.Training.GetProfile(ctx, rider)
 	if err != nil {
-		s.logger().Warn("reoptimise: could not read the profile", "rider", rider)
+		s.logger().Warn("reoptimise: could not read the profile")
 		return false
 	}
 	events, err := s.lifeEventsFor(ctx, rider)
 	if err != nil {
-		s.logger().Warn("reoptimise: could not read life events", "rider", rider)
+		s.logger().Warn("reoptimise: could not read life events")
 		return false
 	}
 	pushes, err := s.Training.ListPushes(ctx, rider, garminProvider)
 	if err != nil {
-		s.logger().Warn("reoptimise: could not read push state", "rider", rider)
+		s.logger().Warn("reoptimise: could not read push state")
 		return false
 	}
-
+	// The same analyses the adaptation pass reads, so "done" means the same
+	// thing here: an "incomplete" ride is a miss however long it lasted.
 	now := s.localNow()
 	monday := periodization.MondayOf(now)
+	analysed, err := s.Training.ListAnalyses(ctx, rider, monday.Format(dateLayout))
+	if err != nil {
+		s.logger().Warn("reoptimise: could not read ride analyses")
+		return false
+	}
+	analyses := make(map[string]workout.SessionAnalysis, len(analysed))
+	for _, a := range analysed {
+		if a.WorkoutID != "" {
+			analyses[a.WorkoutID] = a
+		}
+	}
+
 	sunday := monday.AddDate(0, 0, 6).Format(dateLayout)
 	// Next Monday is in the week only so that the spacing rule sees a hard day
 	// across the edge; PlanSwap never picks a day past Sunday.
@@ -99,7 +114,7 @@ func (s *Server) reoptimiseRider(ctx context.Context, rider string) bool {
 			continue
 		}
 		week = append(week, w)
-		if adapter.WorkoutDone(w, sessions) {
+		if adapter.WorkoutDoneWith(w, sessions, analyses) {
 			done[w.ID] = true
 		}
 	}
@@ -126,7 +141,7 @@ func (s *Server) reoptimiseRider(ctx context.Context, rider string) bool {
 	}
 	hard, easy := byID[plan.HardID], byID[plan.EasyID]
 	if err := s.swapSessions(ctx, hard, easy, plan); err != nil {
-		s.logger().Warn("reoptimise: could not swap the sessions", "rider", rider)
+		s.logger().Warn("reoptimise: could not swap the sessions")
 		return false
 	}
 
@@ -148,13 +163,13 @@ func (s *Server) reoptimiseRider(ctx context.Context, rider string) bool {
 // state are the session's own. If the second write fails the first is put back
 // as it was, so a failure never leaves two sessions on one day.
 func (s *Server) swapSessions(ctx context.Context, hard, easy workout.Workout, plan weekplan.Swap) error {
-	if err := s.moveForSwap(ctx, hard, plan.HardTo); err != nil {
+	if err := s.moveForSwap(ctx, hard, plan.HardTo, "an easier day"); err != nil {
 		return err
 	}
-	if err := s.moveForSwap(ctx, easy, plan.EasyTo); err != nil {
+	if err := s.moveForSwap(ctx, easy, plan.EasyTo, "a harder day"); err != nil {
 		date, desc, prior := hard.Date, hard.Description, workout.CurrentFlags(hard)
 		if _, rerr := s.Training.UpdateWorkout(ctx, hard.ID, workout.UpdateWorkoutRequest{Date: &date, Description: &desc, Flags: &prior}); rerr != nil {
-			s.logger().Error("reoptimise: could not put a session back after a failed swap", "rider", hard.Rider)
+			s.logger().Error("reoptimise: could not put a session back after a failed swap")
 		}
 		return err
 	}
@@ -162,10 +177,13 @@ func (s *Server) swapSessions(ctx context.Context, hard, easy workout.Workout, p
 }
 
 // moveForSwap writes one session onto its new day. The note names the day it
-// left; only the first such note counts, so a session already moved keeps its
-// original day and mover.
-func (s *Server) moveForSwap(ctx context.Context, w workout.Workout, to string) error {
-	description := w.Description + " " + scheduler.AdjustedMarker + " moved from " + w.Date + " — swapped with an easier day."
+// leaves and what it swapped with ("an easier day" for the hard session, "a
+// harder day" for the easy one). A session already moved keeps the flags'
+// MovedFrom and MovedBy, which the legacy parse reads as the first "moved
+// from" date and from whichever mover phrase the description holds; the note
+// is appended either way and the two stay in agreement.
+func (s *Server) moveForSwap(ctx context.Context, w workout.Workout, to, with string) error {
+	description := w.Description + " " + scheduler.AdjustedMarker + " moved from " + w.Date + " — swapped with " + with + "."
 	flags := workout.CurrentFlags(w).WithAdaptation(why.ReshuffleReadiness)
 	if flags.MovedFrom == "" {
 		flags.MovedFrom, flags.MovedBy = w.Date, workout.MovedByAuto
