@@ -187,6 +187,10 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 			s.logSeasonPass(g, res)
 		}
 
+		// After scheduling, so this week exists to swap, and before adaptation
+		// so the easy session that takes today is eased by readiness in this
+		// same pass.
+		s.reoptimise(ctx)
 		// After scheduling, so this week exists to be adapted, and before
 		// the push, so an adjustment reaches the rider's watch in the same
 		// pass that makes it rather than half an hour later.
