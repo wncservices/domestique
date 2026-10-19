@@ -291,10 +291,11 @@ func TestInputsSurviveAJSONRoundTrip(t *testing.T) {
 
 func TestTitlesForLoadRules(t *testing.T) {
 	for rule, want := range map[why.Rule]string{
-		why.LoadRepaid:   "Load made up",
-		why.LoadRolled:   "Load carried to next week",
-		why.LoadForgiven: "Load forgiven",
-		why.GreenPush:    "Pushed on a good day",
+		why.LoadRepaid:         "Load made up",
+		why.LoadRolled:         "Load carried to next week",
+		why.LoadForgiven:       "Load forgiven",
+		why.GreenPush:          "Pushed on a good day",
+		why.ReshuffleReadiness: "Swapped with an easier day",
 	} {
 		if got := why.Title(rule); got != want {
 			t.Errorf("Title(%s) = %q, want %q", rule, got, want)
@@ -303,6 +304,15 @@ func TestTitlesForLoadRules(t *testing.T) {
 	rec := why.NewRecord(why.LoadRepaid, "s", why.LoadRepaidInputs{DebtBefore: 80.4, TSSAdded: 31.6})
 	want := []why.Fact{{Label: "Load owed", Value: "80 TSS"}, {Label: "Added", Value: "32 TSS"}}
 	if got := why.Facts(why.LoadRepaid, rec.Inputs); !reflect.DeepEqual(got, want) {
+		t.Errorf("Facts = %#v, want %#v", got, want)
+	}
+}
+
+func TestReshuffleReadinessFacts(t *testing.T) {
+	rec := why.NewRecord(why.ReshuffleReadiness, "s", why.ReshuffleInputs{From: "2026-03-19", To: "2026-03-21", Verdict: "caution"})
+	got := why.Facts(why.ReshuffleReadiness, rec.Inputs)
+	want := []why.Fact{{Label: "Moved from", Value: "Thu 19 Mar"}, {Label: "Moved to", Value: "Sat 21 Mar"}, {Label: "Readiness", Value: "caution"}}
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Facts = %#v, want %#v", got, want)
 	}
 }

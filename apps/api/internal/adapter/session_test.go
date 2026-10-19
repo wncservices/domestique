@@ -736,3 +736,90 @@ func TestHardSessionRulesUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// A hard session made up the day before or after another hard day would undo
+// the spacing the plan was built with, so those days are skipped, both as a
+// free day and as an easy slot to take over.
+func TestAMissedHardSessionIsNotMadeUpNextToAnotherHardDay(t *testing.T) {
+	ws := []workout.Workout{
+		planned("tue", "VO2max intervals", "2026-03-17"),
+		planned("sat", "Tempo ride", "2026-03-21"),
+		planned("fri", "Endurance ride", "2026-03-20"),
+		planned("sun", "Endurance ride", "2026-03-22"),
+	}
+	// Friday and Sunday both sit next to Saturday's tempo ride.
+	got := AdaptSessions(ws, nil, profileAvailable("fri", "sun"), thursday, nil, readiness.Assessment{})
+	if len(got) != 0 {
+		t.Fatalf("changes = %+v, want none: every candidate day touches a hard day", got)
+	}
+
+	// Control: with Saturday easy the same miss is made up on Friday.
+	ws[1] = planned("sat", "Endurance ride", "2026-03-21")
+	got = AdaptSessions(ws, nil, profileAvailable("fri", "sun"), thursday, nil, readiness.Assessment{})
+	if len(got) != 1 || got[0].WorkoutID != "tue" || got[0].NewDate != "2026-03-20" {
+		t.Fatalf("control changes = %+v, want the miss made up on Friday", got)
+	}
+
+	// A free day (no workout on it) is skipped the same way.
+	ws = []workout.Workout{
+		planned("tue", "VO2max intervals", "2026-03-17"),
+		planned("sat", "Tempo ride", "2026-03-21"),
+	}
+	got = AdaptSessions(ws, nil, profileAvailable("fri", "sun"), thursday, nil, readiness.Assessment{})
+	if len(got) != 0 {
+		t.Fatalf("free-day changes = %+v, want none", got)
+	}
+}
+
+// Two missed hard sessions are made up one at a time against the week as this
+// pass has already rearranged it, so they never end up on adjacent days.
+func TestTwoMissedHardSessionsAreNotMadeUpBackToBack(t *testing.T) {
+	wednesday := thursday.AddDate(0, 0, -1)
+	ws := []workout.Workout{
+		planned("mon", "VO2max intervals", "2026-03-16"),
+		planned("tue", "Tempo ride", "2026-03-17"),
+	}
+	got := AdaptSessions(ws, nil, profileAvailable("wed", "thu"), wednesday, nil, readiness.Assessment{})
+	dates := map[string]bool{}
+	for _, c := range got {
+		dates[c.NewDate] = true
+	}
+	if dates["2026-03-18"] && dates["2026-03-19"] {
+		t.Fatalf("changes = %+v: made up on back-to-back days", got)
+	}
+}
+
+// A missed session is history, not a day the rider is recovering from, so it
+// does not block today or tomorrow as a hard neighbour.
+func TestAMissedPastSessionIsNotAHardNeighbour(t *testing.T) {
+	wednesday := thursday.AddDate(0, 0, -1)
+	ws := []workout.Workout{
+		planned("mon", "VO2max intervals", "2026-03-16"),
+		planned("tue", "Tempo ride", "2026-03-17"),
+	}
+	got := AdaptSessions(ws, nil, profileAvailable("wed"), wednesday, nil, readiness.Assessment{})
+	if len(got) == 0 || got[0].WorkoutID != "mon" || got[0].NewDate != "2026-03-18" {
+		t.Fatalf("changes = %+v, want the Monday miss made up today", got)
+	}
+}
+
+// A fixed commitment beside the day is a hard neighbour too.
+func TestAMissedHardSessionIsNotMadeUpBesideATestOrCrewRide(t *testing.T) {
+	for name, set := range map[string]func(*workout.Workout){
+		"test": func(w *workout.Workout) { w.TestProtocol = "ramp" },
+		"crew": func(w *workout.Workout) { w.CrewRideID = "r" },
+	} {
+		fixed := planned("fixed", "Endurance ride", "2026-03-21")
+		fixed.Flags = workout.Flags{Origin: workout.OriginRider}
+		fixed.Description = "mine"
+		set(&fixed)
+		ws := []workout.Workout{
+			planned("tue", "VO2max intervals", "2026-03-17"), fixed,
+			planned("fri", "Endurance ride", "2026-03-20"), planned("sun", "Endurance ride", "2026-03-22"),
+		}
+		got := AdaptSessions(ws, nil, profileAvailable("fri", "sun"), thursday, nil, readiness.Assessment{})
+		if len(got) != 0 {
+			t.Errorf("%s: changes = %+v, want none", name, got)
+		}
+	}
+}

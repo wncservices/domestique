@@ -609,6 +609,26 @@ a session that is not repayable, gets no push. Rule `green_push`, ignored by `Ea
 subtracted from the debt before later days are repaid; it does not consume `upgraded_at`;
 the marker is "Pushed on a good day." with no figure. Logs carry counts only, never a TSS beside a rider.
 
+**On a Caution or Rest morning a hard session trades days with an easy one.** `reoptimise`
+(`internal/api/reoptimise.go`) runs in `AutoScheduleTick` under the scheduling lock, after the
+season is planned and **before** `AdaptWorkouts`, `repayLoad` and the push, only in the day's
+first sync slot, so the easy session that lands on today is eased by readiness in the same tick
+and is what the push sends. `weekplan.PlanSwap` (pure) picks today's longest unridden hard
+session and the earliest easier one from the day after tomorrow to Sunday (tomorrow only when
+its outlook is Ready). **Swappable** (`weekplan.Swappable`) means generated and untouched, cycling,
+no route, test or crew ride, never swapped before, and **no manual Garmin copy** (the push pass
+never withdraws one, so moving it would leave a stale copy on the device). The one spacing
+rule lives in `internal/weekplan` (`Hard`, `HardNeighbour`, `EveOfFixed`) and the adapter's
+missed make-up uses it too, so a hard session is not made up beside another hard day; a tired
+rider's missed session is not made up at all (`tired` skip in `adapter/session.go`).
+**Next Monday is read into the week** so the rule sees a hard day across the edge; `PlanSwap`
+never moves anything past Sunday. The two writes are not one transaction: if the second fails the
+first is put back as it was (`swapSessions`), and the `reshuffle_readiness` rows are recorded
+only after both land. `reshuffle_readiness` is ignored by `EasedBy` like `load_repaid`, so it
+does not lock the session: readiness can still ease it, and `ReshuffleReadiness` in
+`AdaptedRules` is what stops a second swap. Replan rebuilds the week and may undo a swap;
+that is accepted. Logs carry a rider count only, never who swapped or the verdict.
+
 ## Only today's session goes to the head unit
 
 `pushWorkoutsForRider` (`internal/api/workoutpush.go`) is the one automatic

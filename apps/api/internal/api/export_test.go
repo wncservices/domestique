@@ -71,3 +71,7 @@ func (s *Server) NoteMetricsFailureForTest(rider string) { s.noteMetricsFailure(
 
 // MetricsFailedForTest reports whether the last metrics pass marked the rider.
 func (s *Server) MetricsFailedForTest(rider string) bool { return s.metricsFailedRider(rider) }
+
+// ReoptimiseForTest runs only the morning readiness swap, so a test can look at
+// it without the adaptation that follows it in a tick.
+func (s *Server) ReoptimiseForTest(ctx context.Context) { s.reoptimise(ctx) }
