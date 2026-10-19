@@ -295,6 +295,8 @@ func TestTitlesForLoadRules(t *testing.T) {
 		why.LoadRolled:   "Load carried to next week",
 		why.LoadForgiven: "Load forgiven",
 		why.GreenPush:    "Pushed on a good day",
+
+		why.ReshuffleReadiness: "Swapped with an easier day",
 	} {
 		if got := why.Title(rule); got != want {
 			t.Errorf("Title(%s) = %q, want %q", rule, got, want)
@@ -304,5 +306,13 @@ func TestTitlesForLoadRules(t *testing.T) {
 	want := []why.Fact{{Label: "Load owed", Value: "80 TSS"}, {Label: "Added", Value: "32 TSS"}}
 	if got := why.Facts(why.LoadRepaid, rec.Inputs); !reflect.DeepEqual(got, want) {
 		t.Errorf("Facts = %#v, want %#v", got, want)
+	}
+}
+
+func TestReshuffleReadinessFacts(t *testing.T) {
+	rec := why.NewRecord(why.ReshuffleReadiness, "s", why.ReshuffleInputs{From: "2026-03-19", To: "2026-03-21", Verdict: "caution"})
+	got := why.Facts(why.ReshuffleReadiness, rec.Inputs)
+	if len(got) != 3 || got[0].Label != "Moved from" || got[1].Label != "Moved to" || got[2].Label != "Readiness" {
+		t.Errorf("Facts = %#v", got)
 	}
 }

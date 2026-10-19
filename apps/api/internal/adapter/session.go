@@ -10,6 +10,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/weekplan"
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -205,7 +206,11 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 			if tired {
 				continue
 			}
-			if next, ok := nextFreeDay(today, weekEnd, available, taken); ok {
+			// A hard session is not made up beside another hard day.
+			hardMiss := weekplan.Hard(w)
+			if next, ok := nextFreeDay(today, weekEnd, available, taken, func(d string) bool {
+				return hardMiss && weekplan.HardNeighbour(d, ordered, w.ID)
+			}); ok {
 				taken[next] = true
 				claimed[w.ID] = true
 				changes = append(changes, change(Change{
@@ -214,7 +219,9 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				}, why.MissedMoved, why.MissedMovedInputs{From: w.Date, To: next}))
 				continue
 			}
-			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced, blackout); ok {
+			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced, blackout, func(slot workout.Workout) bool {
+				return hardMiss && weekplan.HardNeighbour(slot.Date, ordered, w.ID, slot.ID)
+			}); ok {
 				replaced[slot.ID] = true
 				claimed[w.ID] = true
 				claimed[slot.ID] = true
@@ -531,12 +538,13 @@ const (
 )
 
 // nextFreeDay is the first day from today to the end of the week that the
-// rider can train and has nothing planned on.
-func nextFreeDay(today time.Time, weekEnd string, available, taken map[string]bool) (string, bool) {
+// rider can train and has nothing planned on. skip rules a day out beyond that
+// (a hard session never lands beside another hard day).
+func nextFreeDay(today time.Time, weekEnd string, available, taken map[string]bool, skip func(date string) bool) (string, bool) {
 	names := [...]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 	for d := today; d.Format("2006-01-02") <= weekEnd; d = d.AddDate(0, 0, 1) {
 		date := d.Format("2006-01-02")
-		if available[names[d.Weekday()]] && !taken[date] {
+		if available[names[d.Weekday()]] && !taken[date] && !skip(date) {
 			return date, true
 		}
 	}
@@ -546,8 +554,8 @@ func nextFreeDay(today time.Time, weekEnd string, available, taken map[string]bo
 // nextEasySlot is the first generated, untouched, easy workout from today to
 // the end of the week that the rider has not already done — the one a missed
 // key session may take the place of. replaced holds slots already promised to
-// an earlier miss this pass.
-func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, today, weekEnd string, replaced, blackout map[string]bool) (workout.Workout, bool) {
+// an earlier miss this pass. skip rules a slot out beyond that.
+func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession, analyses map[string]workout.SessionAnalysis, today, weekEnd string, replaced, blackout map[string]bool, skip func(workout.Workout) bool) (workout.Workout, bool) {
 	for _, w := range ordered {
 		if w.Date < today || w.Date > weekEnd || replaced[w.ID] || blackout[w.Date] {
 			continue
@@ -558,7 +566,7 @@ func nextEasySlot(ordered []workout.Workout, sessions []workout.CompletedSession
 		// A routed ride is given up for nothing: taking its slot deletes it, and
 		// the rider chose that route for that day. Readiness easing may shorten
 		// it (unless it is routed, then it is left alone), but never remove it.
-		if w.RouteSlug != "" {
+		if w.RouteSlug != "" || skip(w) {
 			continue
 		}
 		return w, true

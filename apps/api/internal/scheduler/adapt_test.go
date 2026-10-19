@@ -209,6 +209,15 @@ func TestGreenPushDoesNotLockASession(t *testing.T) {
 	}
 }
 
+func TestReshuffleDoesNotLockASession(t *testing.T) {
+	w := workout.Workout{GoalID: "g", Flags: workout.Flags{
+		Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.ReshuffleReadiness},
+	}}
+	if !IsGenerated(w) || !IsPlanSession(w) || len(w.Flags.EasedBy()) != 0 {
+		t.Error("a session that only carries reshuffle_readiness should still be generated")
+	}
+}
+
 func TestAnyOtherRuleStillLocks(t *testing.T) {
 	w := workout.Workout{GoalID: "g", Flags: workout.Flags{
 		Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.LoadRepaid, why.ReadinessRest},

@@ -86,12 +86,13 @@ func IsLifeRule(r why.Rule) bool { return r == why.LifeEvent || r == why.Illness
 func (f Flags) Adapted() bool { return len(f.AdaptedRules) > 0 }
 
 // EasedBy returns the adaptation rules that changed the session's content,
-// which is every rule except why.LoadRepaid and why.GreenPush: making a session bigger to pay
-// back owed load must not stop the next pass from touching it again.
+// which is every rule except why.LoadRepaid, why.GreenPush and why.ReshuffleReadiness:
+// making a session bigger to pay back owed load, or trading its day, changes
+// nothing about its content and must not stop the next pass from touching it.
 func (f Flags) EasedBy() []why.Rule {
 	var out []why.Rule
 	for _, r := range f.AdaptedRules {
-		if r != why.LoadRepaid && r != why.GreenPush {
+		if r != why.LoadRepaid && r != why.GreenPush && r != why.ReshuffleReadiness {
 			out = append(out, r)
 		}
 	}

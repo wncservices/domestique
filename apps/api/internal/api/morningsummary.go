@@ -420,6 +420,7 @@ func (s *Server) morningSummaryInput(ctx context.Context, rider string, now time
 var easingRules = map[why.Rule]bool{
 	why.ReadinessRest: true, why.ReadinessCaution: true, why.ReadinessTomorrow: true,
 	why.FatigueStruggles: true, why.FatigueOverload: true, why.StruggleStepDown: true, why.FTPTestEve: true,
+	why.ReshuffleReadiness: true,
 }
 
 func (s *Server) sessionEasedToday(ctx context.Context, rider, today string, todays []workout.Workout) bool {

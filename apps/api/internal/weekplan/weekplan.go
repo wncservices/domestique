@@ -14,10 +14,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
-// reshuffleRule is the adaptation a swapped session carries. Task 2 replaces it
-// with why.ReshuffleReadiness.
-const reshuffleRule = why.Rule("reshuffle_readiness")
-
 const dateLayout = "2006-01-02"
 
 // Hard reports whether w is a day that must not touch another: a structured
@@ -101,7 +97,7 @@ func Swappable(w workout.Workout, manualPushed map[string]bool) bool {
 		return false
 	}
 	for _, r := range w.Flags.AdaptedRules {
-		if r == reshuffleRule {
+		if r == why.ReshuffleReadiness {
 			return false
 		}
 	}

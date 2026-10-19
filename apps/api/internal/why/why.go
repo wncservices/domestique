@@ -39,13 +39,14 @@ const (
 	CrewRideEve        Rule = "crew_ride_eve"
 	CrewRideAfter      Rule = "crew_ride_after"
 	CrewRideShorten    Rule = "crew_ride_shorten"
-	Legacy             Rule = "legacy"             // an adaptation the backfill could not name
-	LifeEvent          Rule = "life_event"         // a life event's move, ease or shortening
-	RideTogetherMove   Rule = "ride_together_move" // a ride-together answer moved the session
-	LoadRepaid         Rule = "load_repaid"        // a session lengthened or upgraded to make up owed load
-	GreenPush          Rule = "green_push"         // today's session raised on a good day, with load owed
-	LoadRolled         Rule = "load_rolled"        // owed load carried into next week
-	LoadForgiven       Rule = "load_forgiven"      // owed load dropped at the week's end
+	Legacy             Rule = "legacy"              // an adaptation the backfill could not name
+	LifeEvent          Rule = "life_event"          // a life event's move, ease or shortening
+	RideTogetherMove   Rule = "ride_together_move"  // a ride-together answer moved the session
+	LoadRepaid         Rule = "load_repaid"         // a session lengthened or upgraded to make up owed load
+	GreenPush          Rule = "green_push"          // today's session raised on a good day, with load owed
+	ReshuffleReadiness Rule = "reshuffle_readiness" // a hard session swapped with an easier day on a tired morning
+	LoadRolled         Rule = "load_rolled"         // owed load carried into next week
+	LoadForgiven       Rule = "load_forgiven"       // owed load dropped at the week's end
 )
 
 // Fact is one label/value row in the popover.
@@ -146,6 +147,14 @@ type GreenPushInputs struct {
 	TSSAdded   float64 `json:"tssAdded"`
 }
 
+// ReshuffleInputs: two sessions traded places because the rider was not ready
+// for today's hard one. Verdict is caution or rest.
+type ReshuffleInputs struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Verdict string `json:"verdict"`
+}
+
 // CrewRideInputs: the day before, or after, a crew ride the rider is going to.
 // Kind is long, endurance or short. Nothing about any other rider.
 type CrewRideInputs struct {
@@ -238,6 +247,8 @@ func Title(rule Rule) string {
 		return "Load made up"
 	case GreenPush:
 		return "Pushed on a good day"
+	case ReshuffleReadiness:
+		return "Swapped with an easier day"
 	case LoadRolled:
 		return "Load carried to next week"
 	case LoadForgiven:
@@ -331,6 +342,16 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 		return []Fact{
 			{"Load owed", fmt.Sprintf("%.0f TSS", in.DebtBefore)},
 			{"Added", fmt.Sprintf("%.0f TSS", in.TSSAdded)},
+		}
+	case ReshuffleReadiness:
+		in, ok := decode[ReshuffleInputs](inputs)
+		if !ok {
+			return nil
+		}
+		return []Fact{
+			{"Moved from", dayLabel(in.From)},
+			{"Moved to", dayLabel(in.To)},
+			{"Readiness", in.Verdict},
 		}
 	case CrewRideEve, CrewRideAfter:
 		in, ok := decode[CrewRideInputs](inputs)
