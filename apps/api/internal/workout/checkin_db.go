@@ -62,7 +62,7 @@ FROM daily_checkins WHERE rider = ? AND date >= ? ORDER BY date`), normalizeRide
 	if err != nil {
 		return nil, fmt.Errorf("workout: list check-ins: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []CheckIn
 	for rows.Next() {
 		var c CheckIn
