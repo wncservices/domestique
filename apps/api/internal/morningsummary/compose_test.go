@@ -274,3 +274,24 @@ func TestSubjectCannotCarryALineBreak(t *testing.T) {
 		t.Errorf("subject has a line break: %q", subject)
 	}
 }
+
+func TestPushIsInWords(t *testing.T) {
+	in := base()
+	in.Verdict = readiness.Push
+	_, body := Compose(in)
+	if !strings.Contains(body, "Readiness: Good to push.") {
+		t.Errorf("body lacks the push word:\n%s", body)
+	}
+}
+
+func TestCheckInLinkInFooter(t *testing.T) {
+	_, body := Compose(base())
+	if want := "Answer today's check-in: " + appURL + "/today\n"; !strings.Contains(body, want) {
+		t.Errorf("body lacks %q:\n%s", want, body)
+	}
+	in := base()
+	in.AppURL = ""
+	if _, body := Compose(in); strings.Contains(body, "check-in") {
+		t.Errorf("a check-in link with no public address:\n%s", body)
+	}
+}

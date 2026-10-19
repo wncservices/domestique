@@ -200,6 +200,15 @@ func TestLoadRepaidDoesNotLockASession(t *testing.T) {
 	}
 }
 
+func TestGreenPushDoesNotLockASession(t *testing.T) {
+	w := workout.Workout{GoalID: "g", Flags: workout.Flags{
+		Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.GreenPush},
+	}}
+	if !IsGenerated(w) || !IsPlanSession(w) || len(w.Flags.EasedBy()) != 0 {
+		t.Error("a session that only carries green_push should still be generated")
+	}
+}
+
 func TestAnyOtherRuleStillLocks(t *testing.T) {
 	w := workout.Workout{GoalID: "g", Flags: workout.Flags{
 		Origin: workout.OriginPlan, AdaptedRules: []why.Rule{why.LoadRepaid, why.ReadinessRest},

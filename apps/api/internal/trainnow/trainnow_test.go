@@ -1,6 +1,7 @@
 package trainnow
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -364,5 +365,20 @@ func TestRunningUsesRunningLadders(t *testing.T) {
 	w, ok := byKind(out, Wanted)
 	if !ok || w.Zone != "intervals" || !strings.Contains(w.Name, "Intervals") {
 		t.Errorf("wanted = %+v (%v), want the running intervals ladder", w, ok)
+	}
+}
+
+// Push is a green light, not a state of its own here: it suggests exactly what
+// Ready does.
+func TestPushIsTreatedAsReady(t *testing.T) {
+	in := base(90)
+	in.Today = planSession(t, model.SportCycling, "threshold", 5)
+	in.PlannedIsToday = true
+	in.WeekZones = []string{"threshold", "sweet_spot"}
+	in.Verdict = readiness.Ready
+	want := Suggest(in)
+	in.Verdict = readiness.Push
+	if got := Suggest(in); !reflect.DeepEqual(got, want) {
+		t.Errorf("push = %+v, want what ready gives: %+v", got, want)
 	}
 }

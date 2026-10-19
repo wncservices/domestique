@@ -115,7 +115,7 @@ func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) 
 	// swaps today's hard session for an easy one and says why.
 	swapped, _ := h.store.GetWorkout(ctx, hard.ID)
 	if swapped.Name != "Endurance ride" || !strings.Contains(swapped.Description, "Swapped for an easy ride") ||
-		!strings.Contains(swapped.Description, "your form is") ||
+		strings.Contains(swapped.Description, "your form is") ||
 		!strings.Contains(swapped.Description, "VO2max intervals") {
 		t.Errorf("today's workout = %q / %q, want an easy ride with the reason and what it replaced", swapped.Name, swapped.Description)
 	}

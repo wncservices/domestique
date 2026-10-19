@@ -53,7 +53,15 @@ export function todayHeadline(
   const base = workout.testProtocol
     ? 'FTP test. Ride it fresh and give it everything.'
     : (workout.zone && ZONE_HEADLINES[workout.zone]) || 'A structured session. Follow the steps on your device.'
-  return verdict === 'caution' ? `${base} You are a bit run down, so ease off if it feels hard.` : base
+  if (verdict === 'caution') return `${base} You are a bit run down, so ease off if it feels hard.`
+  if (verdict === 'push') return `${base} You are fresh, so a good day to push.`
+  return base
+}
+
+/** True once all three morning check-in scores are answered (0 = unanswered).
+ *  The card then shows compact but stays editable. */
+export function checkInComplete(c: { legs: number; mood: number; sleepQuality: number } | null | undefined): boolean {
+  return !!c && c.legs > 0 && c.mood > 0 && c.sleepQuality > 0
 }
 
 // ---- Tiles ----

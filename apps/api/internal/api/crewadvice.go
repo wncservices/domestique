@@ -54,13 +54,13 @@ func (s *Server) crewRideAdvice(ctx context.Context, rider string, today time.Ti
 		}
 	}
 
-	if todayRide != nil && !blackout[todayStr] && todayVerdict != readiness.Ready {
+	if todayRide != nil && !blackout[todayStr] && readinessEases(todayVerdict) {
 		return adviceFor(*todayRide, "today", todayVerdict, profile.FTPWatts)
 	}
 	if tomorrowRide != nil && !blackout[tomorrowStr] {
 		assessment := s.assessReadinessForForecast(ctx, rider, sessions, latest, today)
 		forecast := outlookTomorrow(today, workouts, sessions, latest, assessment, profile)
-		if forecast.Verdict != readiness.Ready {
+		if readinessEases(forecast.Verdict) {
 			return adviceFor(*tomorrowRide, "tomorrow", forecast.Verdict, profile.FTPWatts)
 		}
 	}

@@ -93,6 +93,7 @@ import type {
   TrainingWeek,
   ProgressionResponse,
   SessionAnalysis,
+  CheckIn,
   ReadinessResponse,
   ProjectionResponse,
   RideImport,
@@ -1280,6 +1281,15 @@ export const api = {
    *  handleGetReadiness. */
   readiness: (today?: string) =>
     request<ReadinessResponse>(`/api/training/readiness${today ? `?today=${encodeURIComponent(today)}` : ''}`),
+  /** Today's morning check-in (zeros when unanswered). The rider and the date
+   *  come from the session, never the request. */
+  checkIn: () => request<CheckIn>('/api/training/checkin'),
+  saveCheckIn: (c: Pick<CheckIn, 'legs' | 'mood' | 'sleepQuality' | 'note'>) =>
+    request<CheckIn>('/api/training/checkin', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(c),
+    }),
   /** The race-day projection for the nearest A goal (or the one named): form
    *  rolled forward through the planned season. Read-only; see
    *  internal/api/projection.go. */

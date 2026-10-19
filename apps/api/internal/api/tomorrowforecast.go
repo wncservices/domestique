@@ -249,7 +249,7 @@ func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions
 	if blackout, err := s.blackoutFor(ctx, rider); err == nil && blackout[today.AddDate(0, 0, 1).Format(dateLayout)] {
 		ok = false
 	}
-	if ok && forecast.Verdict != readiness.Ready {
+	if ok && readinessEases(forecast.Verdict) {
 		s.logger().Info("tomorrow's session may need easing", "rider", rider, "risk", string(forecast.Verdict))
 	}
 }

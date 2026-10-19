@@ -111,6 +111,7 @@ func Suggest(in Input) []Suggestion {
 	if in.Sport == "" {
 		in.Sport = model.SportCycling
 	}
+	// Push is Ready here: only Rest and Caution change what is suggested.
 	if in.Verdict == readiness.Rest {
 		s := easy(in, math.Min(float64(in.Minutes), restCapMinutes))
 		s.Why = restWhy(in.ReadinessReasons)

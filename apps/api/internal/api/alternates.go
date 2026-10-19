@@ -15,7 +15,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
-	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -195,7 +194,7 @@ func (s *Server) readinessIsLow(ctx context.Context, rider string, today time.Ti
 		s.logger().Warn("alternates: could not read fitness for the readiness warning", "rider", rider, "err", err)
 		return false
 	}
-	return s.assessReadinessAt(ctx, rider, sessions, latest, today).Verdict != readiness.Ready
+	return readinessEases(s.assessReadinessAt(ctx, rider, sessions, latest, today).Verdict)
 }
 
 // shownSteps is the form of an option the rider will get: the outdoor steps

@@ -55,7 +55,7 @@ func decodeInputs[T any](t *testing.T, a workout.Adjustment) T {
 func (h *tomorrowHarness) cautionToday() workout.Workout {
 	h.t.Helper()
 	if err := h.store.SaveWellness(context.Background(), workout.DailyWellness{
-		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52,
+		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52, ReadinessLevel: "LOW", ReadinessScore: 40,
 	}); err != nil {
 		h.t.Fatal(err)
 	}
@@ -112,10 +112,10 @@ func TestAReadinessEasingRecordsTheHRVNumbers(t *testing.T) {
 		t.Fatalf("adjustment = %+v (found %v), want readiness_caution", a, ok)
 	}
 	in := decodeInputs[why.ReadinessInputs](t, a)
-	if in.Verdict != "caution" || len(in.Signals) != 1 || in.Signals[0].Kind != "hrv" {
+	if in.Verdict != "caution" || len(in.Signals) != 2 || in.Signals[1].Kind != "hrv" {
 		t.Fatalf("inputs = %+v", in)
 	}
-	if got := in.Signals[0].Numbers; len(got) != 2 || got[0] != 41 || got[1] != 52 {
+	if got := in.Signals[1].Numbers; len(got) != 2 || got[0] != 41 || got[1] != 52 {
 		t.Errorf("hrv numbers = %v, want [41 52] from the wellness row", got)
 	}
 	if in.Indoor {
@@ -130,7 +130,7 @@ func TestKeepingASessionIndoorIsPartOfTheEasingRow(t *testing.T) {
 	h := newTomorrowHarness(t)
 	h.saveProfile(true)
 	if err := h.store.SaveWellness(context.Background(), workout.DailyWellness{
-		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52,
+		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52, ReadinessLevel: "LOW", ReadinessScore: 40,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestKeepingASessionIndoorIsPartOfTheEasingRow(t *testing.T) {
 func TestAChangeThatCannotBeAppliedRecordsNothing(t *testing.T) {
 	h := newTomorrowHarness(t)
 	if err := h.store.SaveWellness(context.Background(), workout.DailyWellness{
-		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52,
+		Rider: "wilant", Date: tmToday, HRVStatus: "UNBALANCED", HRVLastNight: 41, HRVWeeklyAvg: 52, ReadinessLevel: "LOW", ReadinessScore: 40,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -102,7 +102,13 @@ func TestACautionVerdictAdvisesSitInWithAWattCapOnlyWhenFTPIsKnown(t *testing.T)
 	h := newCrewPlanHarness(t)
 	h.ftp("wilant", 260)
 	h.joinOn(cpToday)
-	h.wellness("wilant", "LOW", 40)
+	// Two sources, since one amber alone no longer cautions: Garmin readiness
+	// LOW and an unbalanced HRV night.
+	if err := h.training.SaveWellness(context.Background(), workout.DailyWellness{
+		Rider: "wilant", Date: cpToday, ReadinessLevel: "LOW", ReadinessScore: 40, SleepScore: 70, HRVStatus: "UNBALANCED",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	c := h.readiness("wilant").CrewRide
 	if c == nil || c.Severity != "caution" {

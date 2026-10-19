@@ -16,15 +16,19 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/why"
 )
 
-// Verdict is how hard today should be allowed to be. Readiness only ever
-// makes a day easier, never harder — there is no verdict that raises a
-// planned session.
+// Verdict is how hard today should be allowed to be. Ready, Caution and Rest
+// only ever make a day easier; Push is the single exception a caller may act
+// on by raising a session, and only under its own further conditions.
 type Verdict string
 
 const (
 	Ready   Verdict = "ready"
 	Caution Verdict = "caution"
 	Rest    Verdict = "rest"
+	// Push is the one verdict that does not ease the day: every own-range
+	// signal is at or above the rider's usual and nothing is amber. It exists
+	// so a good morning can be told apart from an unremarkable one.
+	Push Verdict = "push"
 )
 
 // Assessment is Assess's result: the verdict and why, in the fixed order
@@ -84,13 +88,8 @@ const dateLayout = "2006-01-02"
 // snapshot and recent daily loads into a verdict and reasons.
 //
 // now is used only to judge how stale the TSB snapshot is and to anchor the
-// 7/28-day load and resting-HR windows — it is deliberately not used to
-// decide what "today" means for pairing today's HRV with last night's
-// (that comes from the Date fields themselves), so a caller can pass
-// slightly-out-of-step dates in tests without the window math moving too.
-//
-// With no Garmin row for today (Present false), only the form and load
-// rules can fire — there is nothing else to read.
+// 7/28-day load and resting-HR windows. With no Garmin row for today
+// (Present false), only the form, load and survey rules can fire.
 func Assess(today Day, history []Day, tsb *float64, tsbDate string, loads []Load, now time.Time) Assessment {
 	return AssessWithSurvey(today, history, tsb, tsbDate, loads, nil, now)
 }
@@ -105,87 +104,24 @@ type SurveyDay struct {
 	Stress string
 }
 
-// AssessWithSurvey is Assess with the survey days of the last few days. The
-// survey adds one caution reason at most (see surveyCaution) and never a rest:
-// how the legs felt is the rider's word, worth a step down, not a day off.
+// AssessWithSurvey is Assess with the survey days of the last few days. It is
+// Evaluate with no morning check-in.
 func AssessWithSurvey(today Day, history []Day, tsb *float64, tsbDate string, loads []Load, survey []SurveyDay, now time.Time) Assessment {
-	nowDate := dateOnly(now)
-
-	var rest, caution findings
-
-	if today.Present {
-		if r, sig, ok := readinessRestReason(today); ok {
-			rest.add(r, sig)
-		} else if r, sig, ok := readinessCautionReason(today); ok {
-			caution.add(r, sig)
-		}
-
-		if r, sig, ok := hrvRestReason(today, history); ok {
-			rest.add(r, sig)
-		} else if r, sig, ok := hrvCautionReason(today); ok {
-			caution.add(r, sig)
-		}
-
-		if r, sig, ok := sleepRestReason(today); ok {
-			rest.add(r, sig)
-		} else if r, sig, ok := sleepCautionReason(today); ok {
-			caution.add(r, sig)
-		}
-
-		if today.RestingHR > 0 {
-			if baseline, ok := restingHRBaseline(history, nowDate); ok {
-				// Round once, here, and use that same rounded value for both
-				// the bucket decision and the displayed text below — a
-				// half-integer delta (e.g. 6.5) must not round up to 7 for
-				// display while the raw 6.5 decided "caution".
-				delta := math.Round(float64(today.RestingHR) - baseline)
-				switch {
-				case delta >= 7:
-					rest.add(rhrReason(delta, baseline), rhrSignal(today.RestingHR, delta, baseline))
-				case delta >= 4:
-					caution.add(rhrReason(delta, baseline), rhrSignal(today.RestingHR, delta, baseline))
-				}
-			}
-		}
-	}
-
-	if tsb != nil && *tsb < -30 && tsbFresh(tsbDate, nowDate) {
-		rest.add(formReason(*tsb), formSignal(*tsb))
-	}
-
-	// The load that decides how today may go is what came before today.
-	// Counted through today, the ride the verdict is about raises its own
-	// acute load: finish the session and the same day turns "take care".
-	if ratio, ok := acwr(loads, nowDate.AddDate(0, 0, -1)); ok && ratio >= 1.5 {
-		caution.add(loadReason(ratio), loadSignal(ratio))
-	}
-
-	if r, sig, ok := surveyCaution(survey, nowDate); ok {
-		caution.add(r, sig)
-	}
-
-	switch {
-	case len(rest.reasons) > 0:
-		return Assessment{
-			Verdict: Rest,
-			Reasons: append(rest.reasons, caution.reasons...),
-			Signals: append(rest.signals, caution.signals...),
-		}
-	case len(caution.reasons) > 0:
-		return Assessment{Verdict: Caution, Reasons: caution.reasons, Signals: caution.signals}
-	default:
-		return Assessment{Verdict: Ready}
-	}
+	return Evaluate(Input{Today: today, History: history, TSB: tsb, TSBDate: tsbDate, Loads: loads, Survey: survey, Now: now})
 }
 
 // findings collects reasons and their signals in step, so the two can never
 // drift out of line: every reason is added together with its numbers.
 type findings struct {
-	reasons []string
-	signals []Signal
+	severity string
+	reasons  []string
+	signals  []Signal
 }
 
-func (f *findings) add(reason string, sig Signal) {
+// add records a reason under its source, stamping the signal with the source
+// and this list's severity so no signal can leave without either.
+func (f *findings) add(source, reason string, sig Signal) {
+	sig.Source, sig.Severity = source, f.severity
 	f.reasons = append(f.reasons, reason)
 	f.signals = append(f.signals, sig)
 }

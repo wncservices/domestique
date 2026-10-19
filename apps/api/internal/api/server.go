@@ -673,6 +673,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/season", s.handleSeasonReview)
 	mux.HandleFunc("GET /api/training/progression", s.handleGetProgression)
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)
+	mux.HandleFunc("GET /api/training/checkin", s.handleGetCheckIn)
+	mux.HandleFunc("PUT /api/training/checkin", s.handlePutCheckIn)
 	mux.HandleFunc("GET /api/training/projection", s.handleGetProjection)
 	mux.HandleFunc("POST /api/training/readiness/tomorrow/ease", s.handleEaseTomorrow)
 	mux.HandleFunc("PUT /api/training/sessions/{id}/feel", s.handleSetSessionFeel)

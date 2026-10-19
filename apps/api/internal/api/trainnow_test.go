@@ -256,7 +256,7 @@ func TestTrainNowCautionTakesOneRungDownAndDropsWanted(t *testing.T) {
 	goal := h.tnSetup(false)
 	h.altRung(goal, indoorToday, "threshold", 4)
 	if err := h.training.SaveWellness(context.Background(), workout.DailyWellness{
-		Rider: "wilant", Date: indoorToday, ReadinessLevel: "LOW", ReadinessScore: 40,
+		Rider: "wilant", Date: indoorToday, ReadinessLevel: "LOW", ReadinessScore: 40, HRVStatus: "UNBALANCED",
 	}); err != nil {
 		t.Fatal(err)
 	}

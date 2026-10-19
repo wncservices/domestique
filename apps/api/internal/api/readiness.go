@@ -149,7 +149,7 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 	if blackout[today.AddDate(0, 0, 1).Format(dateLayout)] {
 		ok = false
 	}
-	if ok && forecast.Verdict != readiness.Ready {
+	if ok && readinessEases(forecast.Verdict) {
 		out.Tomorrow = &tomorrowForecastDTO{
 			Date: today.AddDate(0, 0, 1).Format(dateFormat), Risk: string(forecast.Verdict),
 			Reasons: forecast.Reasons, WorkoutID: target.ID, WorkoutName: target.Name,
@@ -279,7 +279,7 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if !ok || forecast.Verdict == readiness.Ready {
+	if !ok || !readinessEases(forecast.Verdict) {
 		s.logger().Warn("ease tomorrow refused: nothing to ease", "rider", rider, "eligible", ok)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": easeTomorrowRefusedMessage})
 		return
@@ -299,8 +299,10 @@ func (s *Server) handleEaseTomorrow(w http.ResponseWriter, r *http.Request) {
 	for _, r := range forecast.Reasons {
 		signals = append(signals, forecastSignal(r))
 	}
+	// The description reaches the calendar feed, and the forecast's reasons
+	// carry projected form and load: they stay in the Why record and the reply.
 	change := adapter.Change{
-		WorkoutID: target.ID, Reason: reason,
+		WorkoutID: target.ID, Reason: "Eased ahead of time for readiness.",
 		Why: why.NewRecord(why.ReadinessTomorrow, reason, why.ReadinessInputs{Verdict: string(forecast.Verdict), Signals: signals}),
 	}
 	if forecast.Verdict == readiness.Rest {

@@ -108,6 +108,7 @@ func Compose(in Input) (subject, body string) {
 
 	if in.AppURL != "" {
 		b.WriteString("\n")
+		fmt.Fprintf(&b, "Answer today's check-in: %s\n", link(in.AppURL, "/today"))
 		fmt.Fprintf(&b, "Open the plan: %s\n", link(in.AppURL, "/plan"))
 		fmt.Fprintf(&b, "Change or turn off this email: %s\n", link(in.AppURL, "/settings#notifications"))
 	}
@@ -160,6 +161,8 @@ func verdictWord(v readiness.Verdict) string {
 	switch v {
 	case readiness.Ready:
 		return "Ready"
+	case readiness.Push:
+		return "Good to push"
 	case readiness.Caution:
 		return "Take it easy"
 	case readiness.Rest:

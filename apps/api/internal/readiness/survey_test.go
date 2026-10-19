@@ -9,9 +9,9 @@ func assessSurvey(days ...SurveyDay) Assessment {
 	return AssessWithSurvey(Day{Date: surveyToday, Present: true}, nil, nil, "", nil, days, date(surveyToday))
 }
 
-func TestHeavyLegsTwoDaysRunningIsACaution(t *testing.T) {
+func TestHeavyLegsTwoDaysRunningIsAnAmberReason(t *testing.T) {
 	got := assessSurvey(SurveyDay{Date: "2026-09-28", Legs: "heavy"}, SurveyDay{Date: "2026-09-29", Legs: "heavy"})
-	assertAssessment(t, got, Caution, "you reported heavy legs on Monday and Tuesday")
+	assertAssessment(t, got, Ready, "you reported heavy legs on Monday and Tuesday")
 	if len(got.Signals) != 1 || got.Signals[0].Kind != "survey_legs" || got.Signals[0].Value != "heavy Monday and Tuesday" {
 		t.Errorf("signals = %+v", got.Signals)
 	}
@@ -19,21 +19,21 @@ func TestHeavyLegsTwoDaysRunningIsACaution(t *testing.T) {
 
 func TestHeavyLegsEndingYesterdayStillCounts(t *testing.T) {
 	got := assessSurvey(SurveyDay{Date: "2026-09-27", Legs: "heavy"}, SurveyDay{Date: "2026-09-28", Legs: "heavy"})
-	assertAssessment(t, got, Caution, "you reported heavy legs on Sunday and Monday")
+	assertAssessment(t, got, Ready, "you reported heavy legs on Sunday and Monday")
 }
 
 func TestHighStressOnBothHeavyDaysIsInTheWording(t *testing.T) {
 	got := assessSurvey(
 		SurveyDay{Date: "2026-09-28", Legs: "heavy", Stress: "high"},
 		SurveyDay{Date: "2026-09-29", Legs: "heavy", Stress: "high"})
-	assertAssessment(t, got, Caution, "you reported heavy legs on Monday and Tuesday, both high-stress days")
+	assertAssessment(t, got, Ready, "you reported heavy legs on Monday and Tuesday, both high-stress days")
 }
 
-func TestHeavyLegsAfterTwoHighStressDaysIsACaution(t *testing.T) {
+func TestHeavyLegsAfterTwoHighStressDaysIsAnAmberReason(t *testing.T) {
 	got := assessSurvey(
 		SurveyDay{Date: "2026-09-28", Legs: "normal", Stress: "high"},
 		SurveyDay{Date: "2026-09-29", Legs: "heavy", Stress: "high"})
-	assertAssessment(t, got, Caution, "heavy legs after two high-stress days")
+	assertAssessment(t, got, Ready, "heavy legs after two high-stress days")
 }
 
 func TestNothingElseInTheSurveyDoesAnything(t *testing.T) {
@@ -60,15 +60,15 @@ func TestNothingElseInTheSurveyDoesAnything(t *testing.T) {
 	}
 }
 
-// TestTheSurveyNeverProducesRest is the review-focus rule: however heavy the
+// TestTheSurveyNeverProducesRestOrCautionAlone is the review-focus rule: however heavy the
 // legs and however stressed, the survey is a caution reason and nothing more.
-func TestTheSurveyNeverProducesRest(t *testing.T) {
+func TestTheSurveyNeverProducesRestOrCautionAlone(t *testing.T) {
 	got := assessSurvey(
 		SurveyDay{Date: "2026-09-27", Legs: "heavy", Stress: "high"},
 		SurveyDay{Date: "2026-09-28", Legs: "heavy", Stress: "high"},
 		SurveyDay{Date: "2026-09-29", Legs: "heavy", Stress: "high"})
-	if got.Verdict != Caution {
-		t.Errorf("verdict = %q, want caution", got.Verdict)
+	if got.Verdict != Ready || len(got.Reasons) != 1 {
+		t.Errorf("verdict = %q, reasons %v, want ready with the survey reason listed", got.Verdict, got.Reasons)
 	}
 }
 

@@ -262,6 +262,21 @@ CREATE TABLE IF NOT EXISTS load_ledger (
     PRIMARY KEY (rider, week_start)
 );
 
+-- daily_checkins is the rider's own morning answer: legs, mood and sleep
+-- quality scored 1-5 (0 = not answered) and an optional note. One row per
+-- rider per day, in the training timezone.
+CREATE TABLE IF NOT EXISTS daily_checkins (
+    rider         TEXT NOT NULL,
+    date          TEXT NOT NULL,
+    legs          INTEGER NOT NULL DEFAULT 0,
+    mood          INTEGER NOT NULL DEFAULT 0,
+    sleep_quality INTEGER NOT NULL DEFAULT 0,
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (rider, date)
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_weeks (
     goal_id    TEXT NOT NULL,
     week_start TEXT NOT NULL,
@@ -374,6 +389,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
 		`DELETE FROM load_ledger WHERE rider = ?`,
 		`DELETE FROM daily_wellness WHERE rider = ?`,
+		`DELETE FROM daily_checkins WHERE rider = ?`,
 		`DELETE FROM progression_history WHERE rider = ?`,
 		`DELETE FROM progression_levels WHERE rider = ?`,
 		`DELETE FROM threshold_suggestions WHERE rider = ?`,

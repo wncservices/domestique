@@ -1149,10 +1149,22 @@ export interface ProgressionResponse {
   history: ProgressionPoint[]
 }
 
-/** How hard today should be allowed to be — readiness only ever makes a day
- *  easier, never harder. Mirrors internal/readiness.Verdict. See
- *  docs/superpowers/specs/2026-09-28-readiness-design.md. */
-export type ReadinessVerdict = 'ready' | 'caution' | 'rest'
+/** GET/PUT /api/training/checkin — mirrors apps/api/internal/api's checkInDTO.
+ *  Scores are 1-5, 0 meaning not answered; the note is at most 500 characters.
+ *  PUT sends the same body without date. */
+export interface CheckIn {
+  date: string
+  legs: number
+  mood: number
+  sleepQuality: number
+  note: string
+}
+
+/** How today should go: `push` is a green light (everything at or above the
+ *  rider's own usual), `ready` changes nothing, `caution` and `rest` ease the
+ *  day. Mirrors internal/readiness.Verdict. See
+ *  docs/superpowers/specs/2026-10-18-readiness-v2-design.md. */
+export type ReadinessVerdict = 'ready' | 'push' | 'caution' | 'rest'
 
 /** One rider's Garmin recovery signals for one calendar day — mirrors
  *  apps/api/internal/api's dailyWellnessDTO (itself workout.DailyWellness).
@@ -1941,7 +1953,7 @@ export interface TrainNowSuggestion {
  *  verdict that shaped them. Nothing is stored or applied. */
 export interface TrainNowResponse {
   minutes: number
-  verdict: 'ready' | 'caution' | 'rest'
+  verdict: ReadinessVerdict
   suggestions: TrainNowSuggestion[]
   /** Why there is nothing to suggest: a life event rules riding out today. */
   notice?: string

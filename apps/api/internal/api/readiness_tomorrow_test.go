@@ -226,7 +226,7 @@ func TestEaseTomorrowSwapsForAnEasyRideOnARestForecast(t *testing.T) {
 
 	got, _ := h.store.GetWorkout(context.Background(), tomorrow.ID)
 	if got.Name != "Endurance ride" || !strings.Contains(got.Description, scheduler.AdjustedMarker) ||
-		!strings.Contains(got.Description, "Eased ahead of time — ") || !strings.Contains(got.Description, "Threshold 3x12") {
+		!strings.Contains(got.Description, "Eased ahead of time for readiness.") || !strings.Contains(got.Description, "Threshold 3x12") {
 		t.Errorf("workout = %q / %q, want an easy ride carrying the reason and what it replaced", got.Name, got.Description)
 	}
 	if scheduler.IsGenerated(got) {
@@ -268,7 +268,7 @@ func TestEaseTomorrowStepsDownOneRungOnACautionForecast(t *testing.T) {
 		t.Errorf("level/date = %v/%s, want one rung down (4) on the same day", got.Level, got.Date)
 	}
 	if !strings.Contains(got.Description, "readiness-forecast:"+tmTomorrow) ||
-		!strings.Contains(got.Description, "Eased ahead of time — tomorrow would be your third hard day in a row") {
+		!strings.Contains(got.Description, "Eased ahead of time for readiness.") {
 		t.Errorf("description = %q, want the forecast source marker and the reason", got.Description)
 	}
 	if scheduler.IsGenerated(got) {
