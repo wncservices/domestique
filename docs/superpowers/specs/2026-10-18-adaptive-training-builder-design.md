@@ -66,7 +66,7 @@ does the opposite of the last part:
 | 1 | Load model: weekly TSS budget from CTL and a ramp target (shipped) | 0 |
 | 2 | Load ledger: debt, repayment, carry-over (shipped; green-day push moves to 3) | 1 |
 | 3 | Readiness v2: HRV band, sleep debt, check-in, four verdicts (shipped) | 0 (uses 2 for debt) |
-| 4 | Daily re-optimiser for today → Sunday | 2, 3 |
+| 4 | Daily re-optimiser for today → Sunday (shipped, narrowed) | 2, 3 |
 | 5 | Intensity buckets and progression fixes | 1 |
 | 6 | Local AI layer | 3 (check-in), why log |
 

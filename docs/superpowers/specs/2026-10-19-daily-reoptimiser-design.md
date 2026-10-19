@@ -1,6 +1,6 @@
 # Daily re-optimiser — design (sub-project 4)
 
-Status: approved 2026-10-19. Detailed design for section 4 of
+Status: implemented 2026-10-19. Detailed design for section 4 of
 `2026-10-18-adaptive-training-builder-design.md`, narrowed (see Deviations).
 
 ## Why
