@@ -12,7 +12,7 @@ RUN npm ci
 COPY apps/web apps/web
 RUN npm --workspace @domestique/web run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS api
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS api
 WORKDIR /src
 COPY apps/api/go.mod apps/api/go.sum apps/api/
 RUN cd apps/api && go mod download
