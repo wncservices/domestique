@@ -96,3 +96,58 @@ func TestAnEnduranceRideOnAnEnduranceDayRemovesExactlyOneSession(t *testing.T) {
 		t.Errorf("changes = %+v, want exactly the Saturday session removed", d.Changes)
 	}
 }
+
+// A recovery week keeps one short structured session on the first available
+// day. A crew ride on that day must be removed by the preview exactly where the
+// fill drops it.
+func TestThePreviewAgreesWithTheFillInARecoveryWeekWithASessionOnTheRideDay(t *testing.T) {
+	days := []string{"tue", "thu", "sat", "sun"}
+	week := periodization.Week{StartDate: mon, Phase: periodization.PhasePeak, Recovery: true, TargetHours: 5}
+	profile := workout.RiderProfile{FTPWatts: 250, AvailableDays: days}
+	plain, err := scheduler.WeekWorkouts(week, profile, nil, "wilant", "goal", model.SportCycling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var existing []workout.Workout
+	hardDate := ""
+	for _, r := range plain {
+		if r.Zone != workout.ZoneEndurance {
+			hardDate = r.Date
+		}
+		existing = append(existing, workout.Workout{
+			ID: r.Date, Rider: "wilant", Sport: r.Sport, Name: r.Name, GoalID: "goal", Date: r.Date,
+			Description: r.Description, Flags: workout.Flags{Origin: workout.OriginPlan}, Zone: r.Zone, Steps: r.Steps,
+		})
+	}
+	if hardDate == "" {
+		t.Fatal("the recovery week has no structured session; the case would test nothing")
+	}
+	for kind, seconds := range map[string]float64{"long": 4 * 3600, "endurance": 90 * 60, "short": 30 * 60} {
+		fixed, err := scheduler.WeekWorkouts(week, profile, nil, "wilant", "goal", model.SportCycling,
+			scheduler.WithFixed([]scheduler.Fixed{{Date: hardDate, Seconds: seconds}}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		kept := map[string]bool{}
+		for _, r := range fixed {
+			kept[r.Date] = true
+		}
+		var dropped, removed []string
+		for _, r := range plain {
+			if !kept[r.Date] {
+				dropped = append(dropped, r.Date)
+			}
+		}
+		d := Preview(Input{Ride: Ride{ID: "r", Date: hardDate, RouteName: "R", Seconds: seconds}, Workouts: existing, Recovery: true, Now: now.AddDate(0, 0, -2)})
+		for _, c := range d.Changes {
+			if c.Op == OpRemove {
+				removed = append(removed, c.Date)
+			}
+		}
+		sort.Strings(dropped)
+		sort.Strings(removed)
+		if strings.Join(dropped, ",") != strings.Join(removed, ",") {
+			t.Errorf("%s ride on %s: the fill drops %v, the preview removes %v", kind, hardDate, dropped, removed)
+		}
+	}
+}

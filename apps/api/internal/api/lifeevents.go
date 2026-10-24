@@ -411,6 +411,8 @@ func (s *Server) refillRequests(ctx context.Context, rider string, freed []strin
 			if week.LoadCapped {
 				opts = append(opts, scheduler.WithTargetTSS(week.TargetTSS))
 			}
+			// The zones come from the same mix fillWeek read.
+			opts = append(opts, sc.mixOptions()...)
 			reqs, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, rider, g.ID, g.Sport, opts...)
 			if err != nil {
 				return nil, err
