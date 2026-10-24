@@ -18,12 +18,17 @@ var mixDays = []string{"tue", "thu", "sat"} // three days: one structured slot a
 // the 3 h under which there is no mix).
 func (h *seasonHarness) seedPower(t *testing.T, before time.Time, zones []int) {
 	t.Helper()
+	h.seedPowerSport(t, before, zones, "cycling")
+}
+
+func (h *seasonHarness) seedPowerSport(t *testing.T, before time.Time, zones []int, sport string) {
+	t.Helper()
 	ctx := context.Background()
 	for i := 1; i <= 3; i++ {
 		date := before.AddDate(0, 0, -i*3).Format("2006-01-02")
 		sess, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
-			Rider: "wilant", Provider: "garmin", ExternalID: fmt.Sprintf("mix-%s", date),
-			Sport: "cycling", Date: date, DurationSeconds: 4000,
+			Rider: "wilant", Provider: "garmin", ExternalID: fmt.Sprintf("mix-%s-%s", sport, date),
+			Sport: sport, Date: date, DurationSeconds: 4000,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -71,6 +76,20 @@ func TestARiderWithHeavyThresholdHistoryGetsVO2InBuild(t *testing.T) {
 	week, zones := h.buildWeekZones(t, g, 0)
 	if len(zones) != 1 || zones[0] != "vo2max" {
 		t.Errorf("build week %s holds %v, want [vo2max]: the history is all threshold", week, zones)
+	}
+}
+
+// Running power is scored against the cycling FTP, so it says nothing about
+// how the rider's cycling splits across intensity.
+func TestPowerScoredRunningDoesNotChangeTheCyclingMix(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, mixDays, 250)
+	h.seedPowerSport(t, h.now, heavyThreshold, "running")
+	g := h.createGoal(t, `{"name":"Gran Fondo","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+
+	if week, zones := h.buildWeekZones(t, g, 0); len(zones) != 1 || zones[0] != "threshold" {
+		t.Errorf("build week %s holds %v, want today's [threshold]: running is not cycling", week, zones)
 	}
 }
 

@@ -93,3 +93,34 @@ func TestTrainNowAndLifeEventRefillAgreeWithFill(t *testing.T) {
 		t.Errorf("life event refill zones = %v, fill = %v", refilled, fill)
 	}
 }
+
+// The window is 28 calendar days including today: a ride 27 days back counts,
+// one 28 days back does not.
+func TestZoneMixWindowIsTwentyEightDaysIncludingToday(t *testing.T) {
+	ctx := context.Background()
+	s := newThresholdTestServer(t)
+	today := time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC)
+	seed := func(daysBack int) {
+		date := today.AddDate(0, 0, -daysBack).Format(dateLayout)
+		sess, err := s.Training.UpsertSession(ctx, workout.UpsertSessionRequest{
+			Rider: "wilant", Provider: "garmin", ExternalID: fmt.Sprintf("w-%d", daysBack), Sport: "cycling", Date: date, DurationSeconds: 11000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Training.SaveAnalysis(ctx, workout.SessionAnalysis{
+			SessionID: sess.ID, Rider: "wilant", Outcome: "unplanned", LoadSource: "fit_power",
+			NormalizedPower: 200, PowerZoneSeconds: []int{0, 0, 0, 11000, 0, 0, 0},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(28)
+	if mix := s.zoneMixFor(ctx, "wilant", today); mix != nil {
+		t.Errorf("a ride 28 days back counted: %+v", mix)
+	}
+	seed(27)
+	if mix := s.zoneMixFor(ctx, "wilant", today); mix == nil {
+		t.Error("a ride 27 days back did not count")
+	}
+}

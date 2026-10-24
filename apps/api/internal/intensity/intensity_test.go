@@ -124,3 +124,43 @@ func TestChooseZonesIsPrefixConsistent(t *testing.T) {
 		}
 	}
 }
+
+func TestPeakTieGoesToTheLargerGapFirst(t *testing.T) {
+	// Peak: high gap 0.15-0.05 and anaerobic gap 0.10-0.0 are equal; allowed
+	// order (anaerobic bucket first) breaks the tie, low is over target.
+	mix := Mix{Low: .85, High: .15, Anaerobic: 0, Seconds: 20000}
+	got := ChooseZones(periodization.PhasePeak, mix, 2)
+	want := []workout.Zone{workout.ZoneVO2Max, workout.ZoneAnaerobic}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestBaseHasOneBucketAndCyclesIt(t *testing.T) {
+	mix := Mix{Low: .60, High: .38, Anaerobic: .02, Seconds: 20000}
+	got := ChooseZones(periodization.PhaseBase, mix, 3)
+	want := []workout.Zone{workout.ZoneSweetSpot, workout.ZoneTempo, workout.ZoneSweetSpot}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestNoSlotsIsNil(t *testing.T) {
+	mix := Mix{Low: .5, High: .5, Seconds: 20000}
+	for _, k := range []int{0, -1} {
+		if got := ChooseZones(periodization.PhaseBuild, mix, k); got != nil {
+			t.Errorf("k=%d: want nil, got %v", k, got)
+		}
+	}
+}
+
+func TestAllNegativeGapsStillPickInOrder(t *testing.T) {
+	// Every bucket over target is impossible for shares that sum to 1, but a
+	// caller-built Mix may not; the largest (least negative) gap still leads.
+	mix := Mix{Low: .9, High: .4, Anaerobic: .2, Seconds: 20000}
+	got := ChooseZones(periodization.PhaseBuild, mix, 2)
+	want := []workout.Zone{workout.ZoneVO2Max, workout.ZoneThreshold}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

@@ -20,6 +20,9 @@ type SessionAnalysis struct {
 	WorkoutID  string
 	Outcome    string
 	LoadSource string
+	// Sport is the ride's sport. Only ListAnalyses fills it (from the
+	// completed session); every other reader leaves it empty.
+	Sport string
 
 	NormalizedPower float64
 	IntensityFactor float64
@@ -188,7 +191,7 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
                a.normalized_power, a.intensity_factor, a.tss, a.duration_ratio,
                a.max_hr, a.best_hr_1200, a.best_speed_1200, a.best_speed_1800,
                a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps,
-               a.feel, a.level_delta, a.legs, a.stress, a.analysed_at
+               a.feel, a.level_delta, a.legs, a.stress, a.analysed_at, s.sport
         FROM session_analyses a
         JOIN completed_sessions s ON s.id = a.session_id
         WHERE a.rider = ? AND s.date >= ?
@@ -200,13 +203,26 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
 
 	var analyses []SessionAnalysis
 	for rows.Next() {
-		a, err := scanAnalysis(rows)
+		var sport string
+		a, err := scanAnalysis(extraColumn{rows, &sport})
 		if err != nil {
 			return nil, err
 		}
+		a.Sport = sport
 		analyses = append(analyses, a)
 	}
 	return analyses, rows.Err()
+}
+
+// extraColumn lets scanAnalysis, which scans the analysis columns, read one
+// more column the caller selected after them.
+type extraColumn struct {
+	rowScanner
+	dest any
+}
+
+func (e extraColumn) Scan(dest ...any) error {
+	return e.rowScanner.Scan(append(dest, e.dest)...)
 }
 
 // scanAnalysis serves both GetAnalysis and ListAnalyses, the same

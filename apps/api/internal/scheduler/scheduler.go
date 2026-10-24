@@ -494,8 +494,8 @@ func zonesFor(phase periodization.Phase, table []structuredSlot, count int, mix 
 // carry k structured sessions. The hard constraint — no two structured
 // slots calendar-adjacent — rules candidate combinations out; among what is
 // left, the one that spreads structured days furthest from the long day and
-// from each other wins (the design's own placement heuristic). k is always
-// 0, 1 or 2 in practice (structuredSlotsFor never asks for more), so an
+// from each other wins (the design's own placement heuristic). k is 0 to
+// 3 in practice (structuredSlotsFor never asks for more), so an
 // exhaustive search over combinations is cheap; it degrades gracefully for
 // a larger k too. Returns fewer than k positions only if the week has fewer
 // eligible slots than sessions to place, or (vanishingly unlikely given

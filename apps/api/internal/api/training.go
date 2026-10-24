@@ -810,20 +810,28 @@ func (sc seasonContext) mixOptions() []scheduler.Option {
 	return []scheduler.Option{scheduler.WithZoneMix(*sc.mix)}
 }
 
-// mixWindowDays is how far back the intensity mix looks.
+// mixWindowDays is how far back the intensity mix looks, today included.
 const mixWindowDays = 28
 
 // zoneMixFor is the rider's intensity mix as of today, or nil when there is
 // none to speak of. A read error is not fatal: planning goes on from today's
 // table, and the log carries the rider and the stage only.
 func (s *Server) zoneMixFor(ctx context.Context, rider string, today time.Time) *intensity.Mix {
-	since := today.AddDate(0, 0, -mixWindowDays).Format(dateLayout)
+	since := today.AddDate(0, 0, -(mixWindowDays - 1)).Format(dateLayout)
 	analyses, err := s.Training.ListAnalyses(ctx, rider, since)
 	if err != nil {
 		s.logger().Warn("zone mix: analyses unreadable, planning without it", "rider", rider, "stage", "list analyses")
 		return nil
 	}
-	mix, ok := intensity.FromAnalyses(analyses)
+	// Running power is scored against the cycling FTP, so it would read as
+	// cycling intensity.
+	cycling := analyses[:0:0]
+	for _, a := range analyses {
+		if a.Sport == "" || model.Sport(a.Sport) == model.SportCycling {
+			cycling = append(cycling, a)
+		}
+	}
+	mix, ok := intensity.FromAnalyses(cycling)
 	if !ok {
 		return nil
 	}

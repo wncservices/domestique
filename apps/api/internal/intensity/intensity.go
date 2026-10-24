@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -42,7 +43,7 @@ const (
 func FromAnalyses(as []workout.SessionAnalysis) (Mix, bool) {
 	var low, high, ana int
 	for _, a := range as {
-		if a.LoadSource != "fit_power" || a.NormalizedPower <= 0 || len(a.PowerZoneSeconds) < 7 {
+		if a.LoadSource != string(rideanalysis.LoadSourceFITPower) || a.NormalizedPower <= 0 || len(a.PowerZoneSeconds) < 7 {
 			continue
 		}
 		z := a.PowerZoneSeconds

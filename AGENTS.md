@@ -635,9 +635,10 @@ anaerobic (5-7), counting only power-scored rides (`LoadSource == "fit_power"`, 
 heart-rate-scored, estimated and imported-without-power rides do not count, and under 3 hours counted
 there is no mix. `ChooseZones` takes the phase's target split (base 80/18/2, build 75/20/5, peak
 75/15/10) and gives each slot a zone from the bucket with the largest shortfall, drawn only from
-`intensity.AllowedZones(phase)`; if the three gaps sit within a point of each other, there is no mix,
-the phase is taper or the sport is running, today's table stands. Build and peak weeks of 6 or more
-available days with `PlannedCTL` of 60 or more get a third structured session, only when
+`intensity.AllowedZones(phase)`; when the gaps sit within a point of each other, there is no mix, the phase is taper, or the sport
+is running, today's table stands. Only cycling sessions count towards the mix (`SessionAnalysis.Sport`,
+filled by `ListAnalyses` alone: running power is scored against the cycling FTP). Build and peak weeks
+of 6 or more available days with `PlannedCTL` of 60 or more get a cycling-only third structured session, only when
 `placeStructuredDays` can place it with no two structured days adjacent, else two. A recovery week
 holds one structured session, the phase's first zone at the rider's level minus one, at most 60
 minutes, on the first available day; `WithTargetTSS` never boosts it. `seasonContext` computes the
