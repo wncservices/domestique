@@ -217,8 +217,18 @@ func TestAutoScheduleTickNextWeekIsARecoveryWeekWhenThePlanSaysSo(t *testing.T) 
 	if structured(thisWeek) == 0 {
 		t.Errorf("this week (a load week) has no structured session: %+v", thisWeek)
 	}
-	if got := structured(nextWeek); got > 1 {
-		t.Errorf("next week is a recovery week but has %d structured sessions, want at most 1", got)
+	// Four available days: a recovery week keeps exactly one short session,
+	// below the rider's default level 3, and has no long ride.
+	if got := structured(nextWeek); got != 1 {
+		t.Errorf("next week is a recovery week but has %d structured sessions, want 1", got)
+	}
+	for _, w := range nextWeek {
+		if workout.IsStructuredZone(w.Zone) && (w.Level >= 3 || workout.PlannedSeconds(w.Steps) > 3600) {
+			t.Errorf("recovery session %q level %v, %v s: want level below 3 and at most an hour", w.Name, w.Level, workout.PlannedSeconds(w.Steps))
+		}
+		if w.Name == "Long ride" {
+			t.Errorf("recovery week holds a long ride")
+		}
 	}
 }
 

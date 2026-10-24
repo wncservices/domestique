@@ -195,3 +195,13 @@ func TestRouteDemandStillBiasesWithinTheChosenZone(t *testing.T) {
 		t.Errorf("names = %q / %q, want Threshold 4×8 / Threshold 3×12", plain.Name, biased.Name)
 	}
 }
+
+// The target-TSS retry lifts structured levels; a recovery week must never be
+// lifted, so the option changes nothing there.
+func TestTargetTSSLeavesARecoveryWeekAlone(t *testing.T) {
+	week, profile, levels := mixWeek(periodization.PhasePeak, true, 80, []string{"tue", "thu", "sat", "sun"})
+	week.LoadCapped = true
+	if !reflect.DeepEqual(mixBuild(t, week, profile, levels), mixBuild(t, week, profile, levels, WithTargetTSS(900))) {
+		t.Error("WithTargetTSS changed a recovery week")
+	}
+}

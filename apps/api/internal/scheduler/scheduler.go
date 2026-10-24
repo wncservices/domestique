@@ -177,7 +177,7 @@ func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels 
 func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
 	o := applyOptions(opts)
 	out, err := buildWeek(week, profile, levels, rider, goalID, sport, o)
-	if err != nil || o.targetTSS <= 0 || o.levelBoost != 0 || sport != model.SportCycling || profile.FTPWatts <= 0 {
+	if err != nil || o.targetTSS <= 0 || o.levelBoost != 0 || week.Recovery || sport != model.SportCycling || profile.FTPWatts <= 0 {
 		return out, err
 	}
 	// Building with levelBoost set and the target cleared is what stops the
@@ -394,20 +394,6 @@ const thirdSlotMinCTL = 60
 // thirdSlotMinDays is how many available days a third hard session needs.
 const thirdSlotMinDays = 6
 
-// allowedZones is the cycling zones a phase may hold, in today's order, used
-// to pick a third session's zone when the mix does not choose one.
-func allowedZones(phase periodization.Phase) []string {
-	switch phase {
-	case periodization.PhaseBase:
-		return []string{"sweet_spot", "tempo"}
-	case periodization.PhaseBuild:
-		return []string{"threshold", "sweet_spot", "vo2max"}
-	case periodization.PhasePeak:
-		return []string{"vo2max", "anaerobic", "threshold"}
-	}
-	return nil
-}
-
 // assignSlots decides every available day's slotKind, and for a structured
 // day its zone and target level.
 //
@@ -482,7 +468,10 @@ func zonesFor(phase periodization.Phase, table []structuredSlot, count int, mix 
 		}
 	}
 	out := append([]structuredSlot(nil), table...)
-	allowed := allowedZones(phase)
+	var allowed []string
+	for _, z := range intensity.AllowedZones(phase) {
+		allowed = append(allowed, string(z))
+	}
 	for len(out) < count && len(allowed) > 0 {
 		pick := allowed[len(out)%len(allowed)]
 		for _, z := range allowed {

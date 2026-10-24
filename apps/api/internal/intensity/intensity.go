@@ -97,6 +97,17 @@ func allowed(phase periodization.Phase) []bucketZones {
 	return nil
 }
 
+// AllowedZones is the cycling zones a phase may hold, in today's order: the
+// allowed buckets in listed order, each bucket's zones in order. It is nil for
+// a phase with no targets.
+func AllowedZones(phase periodization.Phase) []workout.Zone {
+	var out []workout.Zone
+	for _, g := range allowed(phase) {
+		out = append(out, g.zones...)
+	}
+	return out
+}
+
 // ChooseZones returns k cycling zones for a week of the phase, the bucket
 // with the largest shortfall first. A zone does not repeat until the allowed
 // set is exhausted, then the order cycles. It returns nil when the phase has

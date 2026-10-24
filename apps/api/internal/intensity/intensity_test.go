@@ -2,6 +2,7 @@ package intensity
 
 import (
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
@@ -109,5 +110,17 @@ func TestTiedGapsFallBack(t *testing.T) {
 func TestTaperHasNoChoice(t *testing.T) {
 	if got := ChooseZones(periodization.PhaseTaper, Mix{Low: 1, Seconds: 20000}, 2); got != nil {
 		t.Fatalf("want nil, got %v", got)
+	}
+}
+
+// zonesFor trims a 3-zone choice to 2 when no third slot can be placed, which
+// is only right if the shorter choice is a prefix of the longer.
+func TestChooseZonesIsPrefixConsistent(t *testing.T) {
+	mix := Mix{Low: .75, High: .05, Anaerobic: .20, Seconds: 40000}
+	for _, phase := range []periodization.Phase{periodization.PhaseBase, periodization.PhaseBuild, periodization.PhasePeak} {
+		three, two := ChooseZones(phase, mix, 3), ChooseZones(phase, mix, 2)
+		if !reflect.DeepEqual(three[:2], two) {
+			t.Errorf("%s: %v is not prefixed by %v", phase, three, two)
+		}
 	}
 }
