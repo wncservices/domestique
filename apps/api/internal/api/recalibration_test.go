@@ -157,19 +157,89 @@ func TestRecalibrateFiresOnceForAQualifyingRise(t *testing.T) {
 	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 3.3)
 }
 
-func TestRecalibrateNeverMovesLevelsOnADecrease(t *testing.T) {
+func TestRecalibrateRaisesLevelsOnADrop(t *testing.T) {
 	h := newRecalHarness(t)
 	h.seedProfile(255)
 	h.seedCyclingLevels()
 
-	before := h.changeFTP(240)
+	before := h.changeFTP(240) // -5.9%, delta about +0.87
+	dto, changed := h.recalibrate(before)
+	if !changed || dto.FromFTPWatts != 255 || dto.ToFTPWatts != 240 {
+		t.Fatalf("got %+v changed=%v, want 255 -> 240 recalibrated", dto, changed)
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 6.2)
+	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 4.9)
+	h.wantLevel(model.SportCycling, workout.ZoneTempo, 2.4)
+	if _, reason, _ := h.level(model.SportCycling, workout.ZoneThreshold); reason != "FTP 255 → 240 W — threshold 5.3 → 6.2" {
+		t.Errorf("reason = %q", reason)
+	}
+	if got := h.marker(); got != 240 {
+		t.Errorf("marker = %v, want 240", got)
+	}
+
+	// Same FTP again, with the same stale before, moves nothing more.
 	if _, changed := h.recalibrate(before); changed {
-		t.Error("a decrease recalibrated levels")
+		t.Error("a second call at the same FTP recalibrated again")
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 6.2)
+}
+
+func TestRecalibrateDropIsCappedAndBounded(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(100)
+	h.seedCyclingLevels()
+	before := h.changeFTP(80) // exactly -20%, raw +3.2, capped at +2.0
+	if _, changed := h.recalibrate(before); !changed {
+		t.Fatal("a 20% drop did not recalibrate")
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 7.3)
+	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 6.0)
+}
+
+func TestALargeDropOnlyMovesTheMarker(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(100)
+	h.seedCyclingLevels()
+	before := h.changeFTP(79.9) // just under 1/1.25 of the old FTP
+	if _, changed := h.recalibrate(before); changed {
+		t.Error("a drop past the band recalibrated")
 	}
 	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 5.3)
 	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 4.0)
-	if got := h.marker(); got != 240 {
-		t.Errorf("marker = %v, want it to follow the drop to 240", got)
+	if got := h.marker(); got != 79.9 {
+		t.Errorf("marker = %v, want 79.9", got)
+	}
+}
+
+func TestAnFTPDropUnderThreePercentMovesNothing(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(255)
+	h.seedCyclingLevels()
+	before := h.changeFTP(250) // -1.96%
+	if _, changed := h.recalibrate(before); changed {
+		t.Error("a sub-3% drop recalibrated levels")
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 5.3)
+	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 4.0)
+	if got := h.marker(); got != 250 {
+		t.Errorf("marker = %v, want it to follow the small drop to 250", got)
+	}
+}
+
+func TestEnduranceIsNeverRecalibrated(t *testing.T) {
+	for _, ftp := range []float64{268, 240} { // a rise, then a drop
+		h := newRecalHarness(t)
+		h.seedProfile(255)
+		h.seedCyclingLevels()
+		h.seedLevel(model.SportCycling, workout.ZoneEndurance, 4.0)
+		before := h.changeFTP(ftp)
+		if _, changed := h.recalibrate(before); !changed {
+			t.Fatalf("FTP %v did not recalibrate the structured zones", ftp)
+		}
+		h.wantLevel(model.SportCycling, workout.ZoneEndurance, 4.0)
+		if _, reason, _ := h.level(model.SportCycling, workout.ZoneEndurance); reason != "seeded" {
+			t.Errorf("endurance reason = %q, want it untouched", reason)
+		}
 	}
 }
 
@@ -460,7 +530,7 @@ func TestRecalibrateRestoresTheMarkerWhenALevelWriteFails(t *testing.T) {
 		t.Fatalf("changed=%v err=%v, want the write failure reported", changed, err)
 	}
 	if got := h.marker(); got != 255 {
-		t.Fatalf("marker = %v, want it restored to 255 so the rise is retried", got)
+		t.Fatalf("marker = %v, want it restored to 255 so the change is retried", got)
 	}
 	if !strings.Contains(h.log.String(), "level=ERROR") {
 		t.Errorf("log = %q, want an Error line", h.log.String())

@@ -270,6 +270,11 @@ const (
 	// the jump is far likelier a correction or a typo than fitness, and
 	// lowering every level for it would punish the rider for a mistake.
 	RecalibrationMaxFactor = 1.25
+	// RecalibrationDownFactor is the smallest FTP drop (new/old) that
+	// recalibrates: the mirror of RecalibrationUpFactor, so a 3% rise and a 3%
+	// drop are equally worth acting on. The 25% ceiling is the same
+	// 1/RecalibrationMaxFactor, past which a drop is a correction, not fitness.
+	RecalibrationDownFactor = 1 / 1.03
 	// RecalibrationLevelsPerDoubling is the one tunable: how many levels a
 	// full doubling of FTP would cost. Smaller rises scale logarithmically.
 	RecalibrationLevelsPerDoubling = 10
@@ -278,14 +283,16 @@ const (
 	RecalibrationMaxDrop = 2.0
 )
 
-// RecalibrationDelta is how far to lower a level after FTP moves from oldFTP
-// to newFTP: -RecalibrationLevelsPerDoubling*log2(new/old), capped at
-// -RecalibrationMaxDrop. It is deliberately unconditional — a decrease yields
-// a positive delta — because the caller owns the trigger gate (3-25% rise
-// only), the same split thresholds.Detect has with its caller. The cap is
+// RecalibrationDelta is how far to move a level after FTP goes from oldFTP to
+// newFTP: -RecalibrationLevelsPerDoubling*log2(new/old), clamped to
+// [-RecalibrationMaxDrop, +RecalibrationMaxDrop]. A rise lowers levels (the
+// same rung is now an easier percentage of a bigger FTP) and a drop raises
+// them. It is unconditional about size — the caller owns the 3-25% trigger
+// gate, the same split thresholds.Detect has with its caller. The clamp is
 // part of the delta so no caller can forget it.
 func RecalibrationDelta(oldFTP, newFTP float64) float64 {
-	return math.Max(-RecalibrationMaxDrop, -RecalibrationLevelsPerDoubling*math.Log2(newFTP/oldFTP))
+	d := -RecalibrationLevelsPerDoubling * math.Log2(newFTP/oldFTP)
+	return math.Max(-RecalibrationMaxDrop, math.Min(RecalibrationMaxDrop, d))
 }
 
 // RecalibrationReason builds the text recorded on a recalibrated level, e.g.

@@ -202,9 +202,12 @@ func TestRecalibrationDelta(t *testing.T) {
 		}
 	})
 
-	t.Run("a decrease is unconditional and positive; gating is the caller's job", func(t *testing.T) {
+	t.Run("a decrease is positive and symmetric with a rise", func(t *testing.T) {
 		if got := RecalibrationDelta(255, 240); got <= 0 {
-			t.Errorf("RecalibrationDelta(255, 240) = %v, want a positive delta (caller must never apply it)", got)
+			t.Errorf("RecalibrationDelta(255, 240) = %v, want a positive delta", got)
+		}
+		if got := RecalibrationDelta(100, 80); got != 2.0 {
+			t.Errorf("RecalibrationDelta(100, 80) = %v, want exactly +2.0 (capped)", got)
 		}
 	})
 

@@ -12,7 +12,7 @@ import (
 )
 
 // levelsRecalibratedDTO tells the client that a rider's progression levels
-// were just lowered because their FTP rose — the same small shape on every
+// just moved because their FTP changed (lowered on a rise, raised on a drop) — the same small shape on every
 // response that can carry it, so the toast text is built once.
 type levelsRecalibratedDTO struct {
 	FromFTPWatts float64 `json:"fromFtpWatts"`
@@ -47,7 +47,14 @@ var recalibratedZones = map[workout.Zone]bool{
 // holding a stale before, lower the levels exactly once. SaveProfile never
 // writes the marker, so no whole-row save can revert it.
 //
-// The marker follows FTP down (a drop, a typo, its correction) and up (a
+// A 3-25% drop raises the levels by the mirror of a rise's delta: the same
+// rung is now a harder percentage of a smaller FTP. A drop under 3% or over
+// 25% only moves the marker, as a typo-sized rise does.
+//
+// The endurance level is never touched (see recalibratedZones): it is not
+// FTP-relative, in either direction.
+//
+// The marker follows FTP down (a small drop, a typo, its correction) and up (a
 // qualifying rise or a typo), but a rise under the 3% trigger leaves it
 // where it is: those levels are still calibrated against the old FTP, and
 // moving the marker would let a run of sub-3% steps add up to any total
@@ -55,7 +62,7 @@ var recalibratedZones = map[workout.Zone]bool{
 // the marker at 255, FTP 262 (+2.7%, nothing), then 250 (a drop, marker
 // follows to 250), then 262 again recalibrates 250 -> 262 even though 262
 // was seen once already — the levels really were calibrated at 250 by then.
-// Levels move only for a 3-25% rise, and only for zones the rider already
+// Levels move only for a 3-25% change, and only for zones the rider already
 // has a saved level for.
 //
 // trigger says what moved the FTP ("auto_applied", "suggestion_accepted" or
@@ -95,10 +102,19 @@ func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, befo
 	// inside the band whatever float rounding does to base*factor.
 	const eps = 1e-9
 	switch {
-	case base <= 0 || newFTP <= 0 || newFTP < base:
+	case base <= 0 || newFTP <= 0:
 		_, err := cas(newFTP)
 		return levelsRecalibratedDTO{}, false, err
-	case newFTP < base*progression.RecalibrationUpFactor*(1-eps):
+	case newFTP < base && newFTP < base/progression.RecalibrationMaxFactor*(1-eps):
+		// A drop this large is a correction or a typo, not detraining.
+		s.logger().Info("level recalibration skipped: FTP drop too large to be fitness", "rider", rider, "field", "ftp")
+		_, err := cas(newFTP)
+		return levelsRecalibratedDTO{}, false, err
+	case newFTP < base && newFTP > base*progression.RecalibrationDownFactor*(1+eps):
+		// A small drop: no levels move, and the marker follows it down.
+		_, err := cas(newFTP)
+		return levelsRecalibratedDTO{}, false, err
+	case newFTP >= base && newFTP < base*progression.RecalibrationUpFactor*(1-eps):
 		// Under the trigger: nothing to do, but a legacy profile still
 		// records the FTP its levels are calibrated against.
 		_, err := cas(base)
@@ -126,7 +142,7 @@ func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, befo
 		if restored, rerr := s.Training.SetFTPCalibrated(ctx, rider, newFTP, stored); rerr != nil || !restored {
 			s.logger().Error("level recalibration failed and its marker could not be restored", "rider", rider, "err", rerr)
 		} else {
-			s.logger().Error("level recalibration failed; marker restored so the rise is retried", "rider", rider, "err", err)
+			s.logger().Error("level recalibration failed; marker restored so the change is retried", "rider", rider, "err", err)
 		}
 		return levelsRecalibratedDTO{}, false, err
 	}
@@ -135,8 +151,8 @@ func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, befo
 	if err != nil {
 		return fail(err)
 	}
-	// A retry after a partial failure must not lower again the zones the
-	// first attempt already wrote: their Reason names this same rise.
+	// A retry after a partial failure must not move again the zones the
+	// first attempt already wrote: their Reason names this same change.
 	done := fmt.Sprintf("FTP %.0f → %.0f W — ", base, newFTP)
 	delta := progression.RecalibrationDelta(base, newFTP)
 	moved := false
