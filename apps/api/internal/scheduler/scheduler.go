@@ -63,7 +63,7 @@ const (
 func slotWeight(k slotKind) float64 {
 	switch k {
 	case slotLong:
-		return 1.8
+		return baseLongWeight
 	case slotStructured:
 		return 1.3
 	default:
@@ -71,10 +71,11 @@ func slotWeight(k slotKind) float64 {
 	}
 }
 
-// baseLongWeight is the long slot's weight before any durability growth.
 const (
+	// baseLongWeight is the long slot's weight before any durability growth.
 	baseLongWeight = 1.8
-	maxLongWeight  = 2.4
+	// maxLongWeight caps that growth, so the long ride never takes the whole week.
+	maxLongWeight = 2.4
 )
 
 // longWeight grows the long slot's weight by 0.1 per endurance level above the
