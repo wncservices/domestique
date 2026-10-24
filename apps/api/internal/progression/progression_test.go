@@ -18,17 +18,17 @@ func TestInitial(t *testing.T) {
 		wantValue  float64
 	}{
 		{"beginner cycling", "beginner", model.SportCycling,
-			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}, 2.0},
+			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic", "endurance"}, 2.0},
 		{"intermediate cycling", "intermediate", model.SportCycling,
-			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}, 4.0},
+			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic", "endurance"}, 4.0},
 		{"advanced cycling", "advanced", model.SportCycling,
-			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}, 6.0},
+			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic", "endurance"}, 6.0},
 		{"unset cycling", "", model.SportCycling,
-			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}, 3.0},
+			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic", "endurance"}, 3.0},
 		{"unrecognised experience", "pro", model.SportCycling,
-			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}, 3.0},
+			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic", "endurance"}, 3.0},
 		{"case and whitespace insensitive", "  BEGINNER  ", model.SportCycling,
-			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}, 2.0},
+			[]string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic", "endurance"}, 2.0},
 		{"beginner running", "beginner", model.SportRunning,
 			[]string{"tempo", "threshold", "intervals"}, 2.0},
 		{"intermediate running", "intermediate", model.SportRunning,
@@ -230,5 +230,53 @@ func TestRecalibrationConstants(t *testing.T) {
 	if RecalibrationUpFactor != 1.03 || RecalibrationMaxFactor != 1.25 ||
 		RecalibrationLevelsPerDoubling != 10 || RecalibrationMaxDrop != 2.0 {
 		t.Error("recalibration constants drifted from the spec")
+	}
+}
+
+func TestInitialIncludesEnduranceForCyclingOnly(t *testing.T) {
+	has := func(sport model.Sport) bool {
+		for _, l := range Initial("intermediate", sport) {
+			if l.Zone == "endurance" {
+				return l.Value == 4.0
+			}
+		}
+		return false
+	}
+	if !has(model.SportCycling) {
+		t.Error("cycling Initial has no endurance level at the experience value")
+	}
+	if has(model.SportRunning) {
+		t.Error("running Initial must not carry endurance")
+	}
+}
+
+func TestDurabilityDelta(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name  string
+		dec   *float64
+		ratio float64
+		want  float64
+		moved bool
+	}{
+		{"cut short, no decoupling", nil, 0.79, -0.2, true},
+		{"cut short beats good decoupling", f(2), 0.5, -0.2, true},
+		{"ratio exactly 0.8 is not cut short, nil decoupling", nil, 0.8, 0, false},
+		{"decoupling nil, full ride", nil, 1, 0, false},
+		{"decoupling just under 5", f(4.9), 1, 0.3, true},
+		{"decoupling exactly 5", f(5), 1, 0.1, true},
+		{"decoupling exactly 8", f(8), 1, 0.1, true},
+		{"decoupling just over 8", f(8.1), 1, 0, false},
+		{"decoupling exactly 10", f(10), 1, 0, false},
+		{"decoupling just over 10", f(10.1), 1, -0.2, true},
+		{"negative decoupling is good", f(-3), 1.1, 0.3, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, moved := DurabilityDelta(c.dec, c.ratio)
+			if got != c.want || moved != c.moved {
+				t.Errorf("DurabilityDelta = (%v, %v), want (%v, %v)", got, moved, c.want, c.moved)
+			}
+		})
 	}
 }

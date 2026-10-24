@@ -657,7 +657,8 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 // progression.Initial(profile.ExperienceLevel, sport), and persisted via
 // SaveLevel, so a rider's levels start somewhere sensible and stay there
 // across every subsequent schedule call rather than being recomputed (and
-// silently drifting) each time.
+// silently drifting) each time. A zone Initial later gained is seeded the
+// same way for a rider who already has rows.
 func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.RiderProfile, sport model.Sport) (map[string]float64, error) {
 	existing, err := s.Training.ListLevels(ctx, rider)
 	if err != nil {
@@ -665,19 +666,20 @@ func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.Ri
 	}
 
 	levels := make(map[string]float64)
-	found := false
 	for _, l := range existing {
 		if l.Sport != sport {
 			continue
 		}
 		levels[string(l.Zone)] = l.Level
-		found = true
-	}
-	if found {
-		return levels, nil
 	}
 
+	// Seed every Initial zone the rider has no row for, not only a sport with
+	// no rows at all: a rider seeded before a zone existed (cycling's
+	// endurance) would otherwise never get it.
 	for _, l := range progression.Initial(profile.ExperienceLevel, sport) {
+		if _, ok := levels[l.Zone]; ok {
+			continue
+		}
 		if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
 			Rider:  rider,
 			Sport:  sport,

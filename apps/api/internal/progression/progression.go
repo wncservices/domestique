@@ -47,15 +47,23 @@ const (
 
 // cyclingZones and runningZones are the structured zones progression levels
 // apply to, per sport — the spec's "Levels" list. Endurance/easy/long
-// sessions stay volume-sized and carry no level (out of scope). These
-// mirror workout.Zone's string values by hand rather than importing that
+// sessions stay volume-sized and carry no ladder level. Cycling's Initial
+// adds one more, endurance (see enduranceZone), which is not a ladder zone.
+// These mirror workout.Zone's string values by hand rather than importing that
 // package, keeping this package free of the storage layer it lives beside.
 var (
 	cyclingZones = []string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}
 	runningZones = []string{"tempo", "threshold", "intervals"}
 )
 
+// enduranceZone is the one level that is not a structured zone: it is moved
+// by long-ride durability (DurabilityDelta), sizes the long ride's share of
+// the week, and is not FTP-relative, so recalibration never touches it. It is
+// seeded by Initial for cycling only.
+const enduranceZone = "endurance"
+
 // Initial returns the starting level for every structured zone of sport,
+// plus cycling's endurance level,
 // seeded from the rider's profile experience level: beginner 2.0,
 // intermediate 4.0, advanced 6.0, anything else (unset, unrecognised) 3.0.
 // experience is matched case-insensitively and trimmed.
@@ -73,7 +81,7 @@ func Initial(experience string, sport model.Sport) []Level {
 	var zones []string
 	switch sport {
 	case model.SportCycling:
-		zones = cyclingZones
+		zones = append(append(zones, cyclingZones...), enduranceZone)
 	case model.SportRunning:
 		zones = runningZones
 	}
@@ -132,6 +140,29 @@ func Delta(cur, workoutLevel float64, outcome Outcome, feel int) float64 {
 		// recognise: no zone to move, so no change.
 		return 0
 	}
+}
+
+// DurabilityDelta is how far a generated long ride moves the endurance level:
+// a ride cut short (under 80% of the planned duration) costs 0.2; otherwise
+// the ride's aerobic decoupling decides. Under 5% earns 0.3, 5-8% earns 0.1,
+// over 10% costs 0.2, and 8-10% (or no decoupling) moves nothing. The bool is
+// false when there is no move, so the caller can skip a zero-delta write.
+func DurabilityDelta(decoupling *float64, durationRatio float64) (float64, bool) {
+	if durationRatio < 0.8 {
+		return -0.2, true
+	}
+	if decoupling == nil {
+		return 0, false
+	}
+	switch d := *decoupling; {
+	case d < 5:
+		return 0.3, true
+	case d <= 8:
+		return 0.1, true
+	case d > 10:
+		return -0.2, true
+	}
+	return 0, false
 }
 
 // feelAdjustment is the spec's feel table, applied only to a nailed bump.

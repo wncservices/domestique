@@ -12,9 +12,12 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
 	"github.com/wncservices/domestique/apps/api/internal/rideanalysis"
 	"github.com/wncservices/domestique/apps/api/internal/rideimport"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -297,7 +300,7 @@ func (s *Server) analyseNewSessions(
 		// level move idempotent across syncs, with no extra bookkeeping
 		// needed here. A failure here is a Warn — the sync as a whole still
 		// succeeds, the ride's own analysis already saved.
-		if err := s.applyProgressionForAnalysis(ctx, rider, profile, matched, sess.ID, sa.Outcome); err != nil {
+		if err := s.applyProgressionForAnalysis(ctx, rider, profile, matched, sa); err != nil {
 			s.logger().Warn("ride analysis: applying the progression level change failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", err)
 		}
 
@@ -486,14 +489,19 @@ func powerCurveDTO(curve map[int]float64) map[string]float64 {
 // Only for a ride that matched a planned workout (matched != nil) whose zone
 // is one of the structured ones and whose level is real (> 0) — an
 // unplanned ride, or one matched to an endurance workout, has no ladder rung
-// to measure against and moves nothing.
+// to measure against and moves nothing. The one exception is a generated long
+// ride, which moves the endurance level by its durability (applyDurability).
 //
 // feel is always 0 here: this is the first, automatic application from a
 // fresh sync, before the rider has had any chance to rate how the ride
 // felt. PUT /api/training/sessions/{id}/feel (handleSetSessionFeel,
 // progression.go) is what recomputes with a real feel later, replacing —
 // not stacking onto — the delta this call stores via SetAnalysisFeel.
-func (s *Server) applyProgressionForAnalysis(ctx context.Context, rider string, profile workout.RiderProfile, matched *workout.Workout, sessionID, outcome string) error {
+func (s *Server) applyProgressionForAnalysis(ctx context.Context, rider string, profile workout.RiderProfile, matched *workout.Workout, sa workout.SessionAnalysis) error {
+	sessionID, outcome := sa.SessionID, sa.Outcome
+	if matched != nil && isLongRide(*matched) {
+		return s.applyDurability(ctx, rider, profile, matched, sa)
+	}
 	if matched == nil || !workout.IsStructuredZone(matched.Zone) || matched.Level <= 0 {
 		return nil
 	}
@@ -523,6 +531,59 @@ func (s *Server) applyProgressionForAnalysis(ctx context.Context, rider string, 
 		return err
 	}
 	return s.Training.SetAnalysisFeel(ctx, sessionID, 0, applied)
+}
+
+// isLongRide reports whether w is a cycling long ride: the endurance session
+// whose durability the endurance level measures.
+func isLongRide(w workout.Workout) bool {
+	return w.Sport == model.SportCycling && w.Zone == workout.ZoneEndurance && scheduler.IsLongRideName(w.Name)
+}
+
+// applyDurability moves the endurance level after a generated long ride: up
+// for a ride that held steady (low aerobic decoupling), down for one cut short
+// or that drifted a lot. Only a plan-made, untouched long ride counts: an eased
+// or rider-made one was not the planned test of durability. The delta is stored
+// in level_delta like any other move, but applySurvey skips long rides, since
+// this move has no outcome or feel to recompute from.
+func (s *Server) applyDurability(ctx context.Context, rider string, profile workout.RiderProfile, matched *workout.Workout, sa workout.SessionAnalysis) error {
+	if !scheduler.IsGenerated(*matched) {
+		return nil
+	}
+	delta, moved := progression.DurabilityDelta(sa.DecouplingPct, sa.DurationRatio)
+	if !moved {
+		return nil
+	}
+	levels, err := s.levelsFor(ctx, rider, profile, matched.Sport)
+	if err != nil {
+		return err
+	}
+	zone := string(workout.ZoneEndurance)
+	cur := levels[zone]
+	newLevel := progression.Apply(cur, delta)
+	applied := roundLevelDelta(newLevel - cur)
+	if applied == 0 {
+		return nil
+	}
+
+	reason := fmt.Sprintf("Long ride held steady — endurance %.1f → %.1f", cur, newLevel)
+	switch {
+	case sa.DurationRatio < 0.8:
+		reason = fmt.Sprintf("Long ride cut short — endurance %.1f → %.1f", cur, newLevel)
+	case applied < 0:
+		reason = fmt.Sprintf("Long ride drifted late — endurance %.1f → %.1f", cur, newLevel)
+	}
+	if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
+		Rider: rider, Sport: matched.Sport, Zone: workout.ZoneEndurance, Level: newLevel, Reason: reason,
+	}); err != nil {
+		return err
+	}
+	// After the level is saved, and never a reason to fail: the level has
+	// moved and its own Reason still says why.
+	s.recordSubjectAdjustment(ctx, rider, workout.SubjectLevel, string(matched.Sport)+":"+zone, why.NewRecord(
+		why.DurabilityMove, reason, why.DurabilityInputs{
+			Decoupling: sa.DecouplingPct, DurationRatio: sa.DurationRatio, From: cur, To: newLevel,
+		}))
+	return s.Training.SetAnalysisFeel(ctx, sa.SessionID, 0, applied)
 }
 
 // analysisStepsDTO mirrors rideanalysis.StepResult into

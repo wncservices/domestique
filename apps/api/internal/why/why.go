@@ -47,6 +47,7 @@ const (
 	ReshuffleReadiness Rule = "reshuffle_readiness" // a hard session swapped with an easier day on a tired morning
 	LoadRolled         Rule = "load_rolled"         // owed load carried into next week
 	LoadForgiven       Rule = "load_forgiven"       // owed load dropped at the week's end
+	DurabilityMove     Rule = "durability_move"     // the endurance level moved by a long ride's decoupling or length
 )
 
 // Fact is one label/value row in the popover.
@@ -188,6 +189,16 @@ type LevelRecalibrationInputs struct {
 	Trigger   string  `json:"trigger"`
 }
 
+// DurabilityInputs: the endurance level moved after a generated long ride.
+// Decoupling is nil when the ride had none (a ride cut short moves the level
+// without it); DurationRatio is ridden over planned.
+type DurabilityInputs struct {
+	Decoupling    *float64 `json:"decoupling,omitempty"`
+	DurationRatio float64  `json:"durationRatio"`
+	From          float64  `json:"from"`
+	To            float64  `json:"to"`
+}
+
 // SeasonRefreshInputs: a far week rebuilt from current levels and FTP.
 type SeasonRefreshInputs struct {
 	NameFrom  string  `json:"nameFrom"`
@@ -253,6 +264,8 @@ func Title(rule Rule) string {
 		return "Load carried to next week"
 	case LoadForgiven:
 		return "Load forgiven"
+	case DurabilityMove:
+		return "Long-ride durability"
 	}
 	return ""
 }
@@ -400,6 +413,18 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 			{"Level", arrow(in.LevelFrom, in.LevelTo)},
 			{"Because", triggerLabel(in.Trigger)},
 		}
+	case DurabilityMove:
+		in, ok := decode[DurabilityInputs](inputs)
+		if !ok {
+			return nil
+		}
+		var out []Fact
+		if in.Decoupling != nil {
+			out = append(out, Fact{"Drift", num(*in.Decoupling) + "%"})
+		}
+		return append(out,
+			Fact{"Ride length", fmt.Sprintf("%.0f%% of planned", in.DurationRatio*100)},
+			Fact{"Endurance level", arrow(in.From, in.To)})
 	case IllnessRamp:
 		in, ok := decode[IllnessRampInputs](inputs)
 		if !ok {

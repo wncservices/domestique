@@ -316,3 +316,27 @@ func TestReshuffleReadinessFacts(t *testing.T) {
 		t.Errorf("Facts = %#v, want %#v", got, want)
 	}
 }
+
+func TestDurabilityMoveTitleAndFacts(t *testing.T) {
+	if got := why.Title(why.DurabilityMove); got != "Long-ride durability" {
+		t.Errorf("Title = %q", got)
+	}
+	dec := 3.2
+	rec := why.NewRecord(why.DurabilityMove, "s", why.DurabilityInputs{Decoupling: &dec, DurationRatio: 0.97, From: 4, To: 4.3})
+	want := []why.Fact{
+		{Label: "Drift", Value: "3.2%"},
+		{Label: "Ride length", Value: "97% of planned"},
+		{Label: "Endurance level", Value: "4 → 4.3"},
+	}
+	if got := why.Facts(why.DurabilityMove, rec.Inputs); !reflect.DeepEqual(got, want) {
+		t.Errorf("Facts = %#v, want %#v", got, want)
+	}
+	short := why.NewRecord(why.DurabilityMove, "s", why.DurabilityInputs{DurationRatio: 0.6, From: 4, To: 3.8})
+	want = []why.Fact{
+		{Label: "Ride length", Value: "60% of planned"},
+		{Label: "Endurance level", Value: "4 → 3.8"},
+	}
+	if got := why.Facts(why.DurabilityMove, short.Inputs); !reflect.DeepEqual(got, want) {
+		t.Errorf("Facts = %#v, want %#v", got, want)
+	}
+}
