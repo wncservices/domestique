@@ -48,6 +48,7 @@ const (
 	LoadRolled         Rule = "load_rolled"         // owed load carried into next week
 	LoadForgiven       Rule = "load_forgiven"       // owed load dropped at the week's end
 	DurabilityMove     Rule = "durability_move"     // the endurance level moved by a long ride's decoupling or length
+	LevelDecay         Rule = "level_decay"         // a level slipped for a zone left untrained
 )
 
 // Fact is one label/value row in the popover.
@@ -199,6 +200,14 @@ type DurabilityInputs struct {
 	To            float64  `json:"to"`
 }
 
+// LevelDecayInputs: a level lowered because its zone went untrained.
+// LastTrained is the date of the last matched ride, empty when there never was one.
+type LevelDecayInputs struct {
+	From        float64 `json:"from"`
+	To          float64 `json:"to"`
+	LastTrained string  `json:"lastTrained,omitempty"`
+}
+
 // SeasonRefreshInputs: a far week rebuilt from current levels and FTP.
 type SeasonRefreshInputs struct {
 	NameFrom  string  `json:"nameFrom"`
@@ -266,6 +275,8 @@ func Title(rule Rule) string {
 		return "Load forgiven"
 	case DurabilityMove:
 		return "Long-ride durability"
+	case LevelDecay:
+		return "Not trained lately"
 	}
 	return ""
 }
@@ -425,6 +436,19 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 		return append(out,
 			Fact{"Ride length", fmt.Sprintf("%.0f%% of planned", in.DurationRatio*100)},
 			Fact{"Endurance level", arrow(in.From, in.To)})
+	case LevelDecay:
+		in, ok := decode[LevelDecayInputs](inputs)
+		if !ok {
+			return nil
+		}
+		last := "no matched ride yet"
+		if in.LastTrained != "" {
+			last = dayLabel(in.LastTrained)
+		}
+		return []Fact{
+			{"Last trained", last},
+			{"Level", arrow(in.From, in.To)},
+		}
 	case IllnessRamp:
 		in, ok := decode[IllnessRampInputs](inputs)
 		if !ok {

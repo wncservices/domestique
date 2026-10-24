@@ -282,3 +282,30 @@ func TestDurabilityDelta(t *testing.T) {
 		})
 	}
 }
+
+func TestDecay(t *testing.T) {
+	cases := []struct {
+		name        string
+		cur, start  float64
+		lastTrained string
+		want        float64
+		decays      bool
+	}{
+		{"trained 21 days ago is still fresh", 4.0, 3.0, "2026-10-03", 4.0, false},
+		{"trained 22 days ago decays", 4.0, 3.0, "2026-10-02", 3.9, true},
+		{"trained yesterday", 4.0, 3.0, "2026-10-23", 4.0, false},
+		{"never trained decays", 4.0, 3.0, "", 3.9, true},
+		{"at the starting floor", 3.0, 3.0, "", 3.0, false},
+		{"below the start is left alone", 2.5, 3.0, "", 2.5, false},
+		{"floor holds against a step", 3.05, 3.0, "", 3.0, true},
+		{"unreadable date is not neglect", 4.0, 3.0, "garbage", 4.0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, moved := Decay(c.cur, c.start, c.lastTrained, "2026-10-24")
+			if !almostEqual(got, c.want) || moved != c.decays {
+				t.Errorf("Decay = (%v, %v), want (%v, %v)", got, moved, c.want, c.decays)
+			}
+		})
+	}
+}

@@ -128,6 +128,46 @@ func (d *DB) SaveLevelIfAbsent(ctx context.Context, l ProgressionLevel) (bool, e
 	return true, err
 }
 
+// LastTrainedByZone is, for each zone of sport, the date of the rider's latest
+// ride matched to a planned workout of that zone (the completed session's
+// date). A zone never ridden is absent. It follows the same join as
+// backfillProgressionHistory.
+func (d *DB) LastTrainedByZone(ctx context.Context, rider, sport string) (map[string]string, error) {
+	rows, err := d.db.QueryContext(ctx, d.query(`
+        SELECT w.zone, MAX(s.date) FROM session_analyses a
+        JOIN completed_sessions s ON s.id = a.session_id
+        JOIN workouts w ON w.id = a.workout_id
+        WHERE a.rider = ? AND w.sport = ?
+        GROUP BY w.zone`), normalizeRider(rider), sport)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var zone, date string
+		if err := rows.Scan(&zone, &date); err != nil {
+			return nil, err
+		}
+		out[zone] = date
+	}
+	return out, rows.Err()
+}
+
+// ClaimDecayWeek takes the rider's level-decay pass for the week beginning
+// weekStart. It reports false when the week was already claimed; the claim is
+// one insert, so two replicas cannot both win.
+func (d *DB) ClaimDecayWeek(ctx context.Context, rider, weekStart string) (bool, error) {
+	res, err := d.db.ExecContext(ctx, d.query(`
+        INSERT INTO level_decay_runs (rider, week_start, created_at) VALUES (?, ?, ?)
+        ON CONFLICT (rider, week_start) DO NOTHING`), normalizeRider(rider), weekStart, d.timestamp())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
 func scanLevel(row rowScanner) (ProgressionLevel, error) {
 	var (
 		l           ProgressionLevel

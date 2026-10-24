@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 )
@@ -165,6 +166,35 @@ func DurabilityDelta(decoupling *float64, durationRatio float64) (float64, bool)
 		return -0.2, true
 	}
 	return 0, false
+}
+
+// DecayAfterDays is how long a zone may go without a matched ride before its
+// level starts to slip; DecayStep is how much it slips per weekly pass.
+const (
+	DecayAfterDays = 21
+	DecayStep      = 0.1
+)
+
+// Decay is the weekly slip of a level in a zone the rider has left alone:
+// 0.1 when the last matched ride (a YYYY-MM-DD date; "" for never) is more
+// than 21 days before today, and never below start, the level the rider
+// began on. The bool is false when nothing changes (recently trained, or
+// already at or below start), so the caller can skip the write.
+func Decay(cur, start float64, lastTrained, today string) (float64, bool) {
+	if lastTrained != "" {
+		last, errL := time.Parse("2006-01-02", lastTrained)
+		now, errN := time.Parse("2006-01-02", today)
+		// A date that does not parse is not evidence of neglect.
+		if errL != nil || errN != nil || now.Sub(last) <= DecayAfterDays*24*time.Hour {
+			return cur, false
+		}
+	}
+	if cur <= start {
+		return cur, false
+	}
+	to := math.Max(start, Apply(cur, -DecayStep))
+	to = math.Round(to*10) / 10
+	return to, to < cur
 }
 
 // feelAdjustment is the spec's feel table, applied only to a nailed bump.

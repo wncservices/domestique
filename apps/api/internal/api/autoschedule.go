@@ -191,6 +191,9 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		// so the easy session that takes today is eased by readiness in this
 		// same pass.
 		s.reoptimise(ctx)
+		// Once a week, in the morning slot: a zone left untrained slips, and
+		// the sessions adaptation and the push see already use that level.
+		s.decayLevels(ctx)
 		// After scheduling, so this week exists to be adapted, and before
 		// the push, so an adjustment reaches the rider's watch in the same
 		// pass that makes it rather than half an hour later.

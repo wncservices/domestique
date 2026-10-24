@@ -340,3 +340,18 @@ func TestDurabilityMoveTitleAndFacts(t *testing.T) {
 		t.Errorf("Facts = %#v, want %#v", got, want)
 	}
 }
+
+func TestLevelDecayTitleAndFacts(t *testing.T) {
+	if got := why.Title(why.LevelDecay); got != "Not trained lately" {
+		t.Errorf("Title = %q", got)
+	}
+	rec := why.NewRecord(why.LevelDecay, "s", why.LevelDecayInputs{From: 4.2, To: 4.1, LastTrained: "2026-09-20"})
+	want := []why.Fact{{Label: "Last trained", Value: "Sun 20 Sep"}, {Label: "Level", Value: "4.2 → 4.1"}}
+	if got := why.Facts(why.LevelDecay, rec.Inputs); !reflect.DeepEqual(got, want) {
+		t.Errorf("Facts = %#v, want %#v", got, want)
+	}
+	never := why.NewRecord(why.LevelDecay, "s", why.LevelDecayInputs{From: 4.2, To: 4.1})
+	if got := why.Facts(why.LevelDecay, never.Inputs); got[0].Value != "no matched ride yet" {
+		t.Errorf("never trained facts = %#v", got)
+	}
+}

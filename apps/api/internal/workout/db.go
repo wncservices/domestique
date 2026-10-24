@@ -263,6 +263,15 @@ CREATE TABLE IF NOT EXISTS load_ledger (
     PRIMARY KEY (rider, week_start)
 );
 
+-- level_decay_runs is the once-a-week claim for the progression-level decay
+-- pass: a row means that Monday's week has already been decayed for the rider.
+CREATE TABLE IF NOT EXISTS level_decay_runs (
+    rider      TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (rider, week_start)
+);
+
 -- daily_checkins is the rider's own morning answer: legs, mood and sleep
 -- quality scored 1-5 (0 = not answered) and an optional note. One row per
 -- rider per day, in the training timezone.
@@ -389,6 +398,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM completed_sessions WHERE rider = ?`,
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
 		`DELETE FROM load_ledger WHERE rider = ?`,
+		`DELETE FROM level_decay_runs WHERE rider = ?`,
 		`DELETE FROM daily_wellness WHERE rider = ?`,
 		`DELETE FROM daily_checkins WHERE rider = ?`,
 		`DELETE FROM progression_history WHERE rider = ?`,
