@@ -54,14 +54,14 @@ var recalibratedZones = map[workout.Zone]bool{
 // The endurance level is never touched (see recalibratedZones): it is not
 // FTP-relative, in either direction.
 //
-// The marker follows FTP down (a small drop, a typo, its correction) and up (a
-// qualifying rise or a typo), but a rise under the 3% trigger leaves it
-// where it is: those levels are still calibrated against the old FTP, and
-// moving the marker would let a run of sub-3% steps add up to any total
-// without ever recalibrating. The price is a memory of the old base: with
-// the marker at 255, FTP 262 (+2.7%, nothing), then 250 (a drop, marker
-// follows to 250), then 262 again recalibrates 250 -> 262 even though 262
-// was seen once already — the levels really were calibrated at 250 by then.
+// Inside the 3% dead band, in either direction, nothing moves and the marker
+// stays where it is: those levels are still calibrated against the old FTP,
+// and moving the marker would let a run of sub-3% steps add up to any total
+// without ever recalibrating. Drifting 255 -> 250 -> 244 therefore
+// recalibrates at the second step, measured against 255, and 255 -> 250 -> 255
+// recalibrates nothing. Only a typo-sized change (over 25%, either way) moves
+// the marker without moving levels, so a later real change is measured against
+// the right base.
 // Levels move only for a 3-25% change, and only for zones the rider already
 // has a saved level for.
 //
@@ -110,13 +110,9 @@ func (s *Server) recalibrateLevelsForFTP(ctx context.Context, rider string, befo
 		s.logger().Info("level recalibration skipped: FTP drop too large to be fitness", "rider", rider, "field", "ftp")
 		_, err := cas(newFTP)
 		return levelsRecalibratedDTO{}, false, err
-	case newFTP < base && newFTP > base*progression.RecalibrationDownFactor*(1+eps):
-		// A small drop: no levels move, and the marker follows it down.
-		_, err := cas(newFTP)
-		return levelsRecalibratedDTO{}, false, err
-	case newFTP >= base && newFTP < base*progression.RecalibrationUpFactor*(1-eps):
-		// Under the trigger: nothing to do, but a legacy profile still
-		// records the FTP its levels are calibrated against.
+	case newFTP > base*progression.RecalibrationDownFactor*(1+eps) && newFTP < base*progression.RecalibrationUpFactor*(1-eps):
+		// The dead band: nothing to do, but a legacy profile still records
+		// the FTP its levels are calibrated against.
 		_, err := cas(base)
 		return levelsRecalibratedDTO{}, false, err
 	case newFTP > base*progression.RecalibrationMaxFactor*(1+eps):

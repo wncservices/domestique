@@ -3,7 +3,8 @@
 Status: draft 2026-09-28. Update: drops now recalibrate too (3-25% raises
 structured-zone levels, capped at +2.0); this document's "a decrease never moves
 levels" rule is superseded by the 2026-10-24 progression spec. The endurance
-level stays excluded in both directions. Follow-up named in
+level stays excluded in both directions. The marker no longer follows changes
+inside the 3% dead band, in either direction, so small drifts add up. Follow-up named in
 `2026-09-28-threshold-detection-design.md`'s own "Out of scope": "Recalibrating
 progression levels after an FTP change."
 

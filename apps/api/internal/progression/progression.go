@@ -270,8 +270,8 @@ const (
 	// the jump is far likelier a correction or a typo than fitness, and
 	// lowering every level for it would punish the rider for a mistake.
 	RecalibrationMaxFactor = 1.25
-	// RecalibrationDownFactor is the smallest FTP drop (new/old) that
-	// recalibrates: the mirror of RecalibrationUpFactor, so a 3% rise and a 3%
+	// RecalibrationDownFactor is the ratio (new/old) a drop must fall
+	// to or below to recalibrate: the mirror of RecalibrationUpFactor, so a 3% rise and a 3%
 	// drop are equally worth acting on. The 25% ceiling is the same
 	// 1/RecalibrationMaxFactor, past which a drop is a correction, not fitness.
 	RecalibrationDownFactor = 1 / 1.03

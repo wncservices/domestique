@@ -221,8 +221,8 @@ func TestAnFTPDropUnderThreePercentMovesNothing(t *testing.T) {
 	}
 	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 5.3)
 	h.wantLevel(model.SportCycling, workout.ZoneSweetSpot, 4.0)
-	if got := h.marker(); got != 250 {
-		t.Errorf("marker = %v, want it to follow the small drop to 250", got)
+	if got := h.marker(); got != 255 {
+		t.Errorf("marker = %v, want it to stay at 255 inside the dead band", got)
 	}
 }
 
@@ -550,27 +550,46 @@ func TestRecalibrateRestoresTheMarkerWhenALevelWriteFails(t *testing.T) {
 	}
 }
 
-// The consequence of leaving the marker alone on a sub-3% rise: levels
-// calibrated at 255 are measured against 255 until something recalibrates.
+// Inside the dead band the marker stays, in both directions, so small
+// drifts add up; and a round trip back to the base recalibrates nothing.
 func TestRecalibrateSubThreeMarkerRuleConsequence(t *testing.T) {
 	h := newRecalHarness(t)
 	h.seedProfile(255)
 	h.seedCyclingLevels()
-	// 255 -> 262 is +2.75%: nothing, marker stays 255.
-	before := h.changeFTP(262)
+	before := h.changeFTP(250)
 	if _, changed := h.recalibrate(before); changed {
-		t.Fatal("+2.75% recalibrated")
+		t.Fatal("255 -> 250 recalibrated")
 	}
-	// 262 -> 250 is a drop: marker follows down to 250.
-	before = h.changeFTP(250)
-	h.recalibrate(before)
-	if got := h.marker(); got != 250 {
-		t.Fatalf("marker = %v, want 250", got)
+	if got := h.marker(); got != 255 {
+		t.Fatalf("marker = %v, want 255", got)
 	}
-	// 250 -> 262 is +4.8% against the marker: recalibrates, although 262 was
-	// already seen once without effect.
-	before = h.changeFTP(262)
+	before = h.changeFTP(244) // -4.3% against 255
 	if _, changed := h.recalibrate(before); !changed {
-		t.Error("255 -> 262 -> 250 -> 262: the final rise did not recalibrate")
+		t.Fatal("250 -> 244 did not recalibrate against the 255 marker")
 	}
+	if _, reason, _ := h.level(model.SportCycling, workout.ZoneThreshold); !strings.HasPrefix(reason, "FTP 255 → 244 W") {
+		t.Errorf("reason = %q", reason)
+	}
+}
+
+func TestRecalibrateRoundTripInTheDeadBandMovesNothing(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(255)
+	h.seedCyclingLevels()
+	for _, ftp := range []float64{250, 255} {
+		before := h.changeFTP(ftp)
+		if _, changed := h.recalibrate(before); changed {
+			t.Fatalf("FTP %v recalibrated", ftp)
+		}
+	}
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 5.3)
+}
+
+func TestRecalibrateADropNeverPushesALevelPastTen(t *testing.T) {
+	h := newRecalHarness(t)
+	h.seedProfile(100)
+	h.seedLevel(model.SportCycling, workout.ZoneThreshold, 9.5)
+	before := h.changeFTP(90)
+	h.recalibrate(before)
+	h.wantLevel(model.SportCycling, workout.ZoneThreshold, 10)
 }
