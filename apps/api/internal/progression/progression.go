@@ -148,7 +148,9 @@ func Delta(cur, workoutLevel float64, outcome Outcome, feel int) float64 {
 // over 10% costs 0.2, and 8-10% (or no decoupling) moves nothing. The bool is
 // false when there is no move, so the caller can skip a zero-delta write.
 func DurabilityDelta(decoupling *float64, durationRatio float64) (float64, bool) {
-	if durationRatio < 0.8 {
+	// A ratio of 0 or less means the planned length was unknown, not that the
+	// ride was cut short.
+	if durationRatio > 0 && durationRatio < 0.8 {
 		return -0.2, true
 	}
 	if decoupling == nil {

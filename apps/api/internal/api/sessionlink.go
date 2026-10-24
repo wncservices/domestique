@@ -267,7 +267,9 @@ func (s *Server) undoLevelMove(ctx context.Context, rider string, a workout.Sess
 	if err != nil {
 		return err
 	}
-	if !workout.IsStructuredZone(wk.Zone) {
+	// A long ride's delta is its durability move on the endurance level, which
+	// is not a structured zone but must be taken back all the same.
+	if !workout.IsStructuredZone(wk.Zone) && !isLongRide(wk) {
 		return nil
 	}
 	profile, _, err := s.Training.GetProfile(ctx, rider)

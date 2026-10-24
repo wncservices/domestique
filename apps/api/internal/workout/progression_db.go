@@ -98,6 +98,36 @@ func (d *DB) SaveLevel(ctx context.Context, l ProgressionLevel) error {
 	return err
 }
 
+// SaveLevelIfAbsent inserts l only when the rider has no level for that sport
+// and zone yet, reporting whether it did. The start row of the history is
+// written only for an insert, so a seed that lost a race to a real move leaves
+// that move (and its history) alone.
+func (d *DB) SaveLevelIfAbsent(ctx context.Context, l ProgressionLevel) (bool, error) {
+	rider := normalizeRider(l.Rider)
+	if rider == "" || l.Sport == "" || l.Zone == "" {
+		return false, errors.New("workout: a level needs a rider, a sport and a zone")
+	}
+	updatedAt := l.UpdatedAt
+	if updatedAt == "" {
+		updatedAt = d.timestamp()
+	}
+	res, err := d.db.ExecContext(ctx, d.query(`
+        INSERT INTO progression_levels (rider, sport, zone, level, reason, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (rider, sport, zone) DO NOTHING`),
+		rider, string(l.Sport), string(l.Zone), l.Level, l.Reason, updatedAt)
+	if err != nil {
+		return false, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, err
+	}
+	_, err = d.db.ExecContext(ctx, d.query(
+		`INSERT INTO progression_history (rider, sport, zone, level, reason, at) VALUES (?, ?, ?, ?, ?, ?)`),
+		rider, string(l.Sport), string(l.Zone), l.Level, l.Reason, updatedAt)
+	return true, err
+}
+
 func scanLevel(row rowScanner) (ProgressionLevel, error) {
 	var (
 		l           ProgressionLevel

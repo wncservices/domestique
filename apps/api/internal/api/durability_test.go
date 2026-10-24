@@ -212,3 +212,38 @@ func TestASurveyDoesNotReapplyADurabilityMove(t *testing.T) {
 		t.Errorf("LevelDelta after a survey = %v, want 0.3", a.LevelDelta)
 	}
 }
+
+// Re-linking a long ride scores it afresh; the durability move of its first
+// analysis must be taken back first, or the endurance level moves twice.
+func TestRelinkingALongRideUndoesItsDurabilityMove(t *testing.T) {
+	h, session := syncLongRide(t, 6000, 6000, 130, 133)
+	h.syncOK()
+	if l, _ := h.enduranceLevel(); l.Level != 3.3 {
+		t.Fatalf("endurance = %v, want 3.3", l.Level)
+	}
+
+	link := func(body string) {
+		t.Helper()
+		resp := h.as("wilant", "cyclists", http.MethodPut, "/api/training/sessions/"+session+"/workout", body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("link %s = %d", body, resp.StatusCode)
+		}
+	}
+	link(`{"workoutId":""}`) // "not a planned session"
+	if l, _ := h.enduranceLevel(); l.Level != 3.0 {
+		t.Errorf("endurance after unlink = %v, want 3.0", l.Level)
+	}
+
+	other, err := h.srv.Training.CreateWorkout(context.Background(), api.LegacyFlagged(workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: model.SportCycling, Name: "Long ride", Date: time.Now().AddDate(0, 0, 2).Format("2006-01-02"),
+		GoalID: "g1", Zone: workout.ZoneEndurance, Description: workout.GeneratedDescription,
+		Steps: []workout.WorkoutStep{{Name: "Ride", Duration: workout.DurationTime, Seconds: 6000, Target: workout.TargetOpen}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	link(`{"workoutId":"` + other.ID + `"}`)
+	if l, _ := h.enduranceLevel(); l.Level != 3.3 {
+		t.Errorf("endurance after relinking to a long ride = %v, want one move (3.3)", l.Level)
+	}
+}

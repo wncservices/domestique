@@ -680,16 +680,31 @@ func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.Ri
 		if _, ok := levels[l.Zone]; ok {
 			continue
 		}
-		if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
+		// Insert-if-absent: a move that landed between the read above and
+		// here (a durability move, a concurrent request) must not be
+		// overwritten by the starting value.
+		inserted, err := s.Training.SaveLevelIfAbsent(ctx, workout.ProgressionLevel{
 			Rider:  rider,
 			Sport:  sport,
 			Zone:   workout.Zone(l.Zone),
 			Level:  l.Value,
 			Reason: "Starting level from your experience",
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, err
 		}
 		levels[l.Zone] = l.Value
+		if !inserted {
+			cur, err := s.Training.ListLevels(ctx, rider)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range cur {
+				if c.Sport == sport && string(c.Zone) == l.Zone {
+					levels[l.Zone] = c.Level
+				}
+			}
+		}
 	}
 	return levels, nil
 }

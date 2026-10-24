@@ -262,6 +262,8 @@ func TestDurabilityDelta(t *testing.T) {
 		{"cut short, no decoupling", nil, 0.79, -0.2, true},
 		{"cut short beats good decoupling", f(2), 0.5, -0.2, true},
 		{"ratio exactly 0.8 is not cut short, nil decoupling", nil, 0.8, 0, false},
+		{"unknown ratio is not cut short", nil, 0, 0, false},
+		{"unknown ratio still reads decoupling", f(3), 0, 0.3, true},
 		{"decoupling nil, full ride", nil, 1, 0, false},
 		{"decoupling just under 5", f(4.9), 1, 0.3, true},
 		{"decoupling exactly 5", f(5), 1, 0.1, true},

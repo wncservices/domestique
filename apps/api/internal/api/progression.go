@@ -314,8 +314,7 @@ func (s *Server) applySurvey(ctx context.Context, analysis workout.SessionAnalys
 		// outcome or feel to recompute from, so a survey leaves it alone.
 		if err == nil && isLongRide(wk) {
 			newDelta = analysis.LevelDelta
-		}
-		if err == nil && !isLongRide(wk) && workout.IsStructuredZone(wk.Zone) && wk.Level > 0 {
+		} else if err == nil && workout.IsStructuredZone(wk.Zone) && wk.Level > 0 {
 			profile, _, err := s.Training.GetProfile(ctx, analysis.Rider)
 			if err != nil {
 				return analysis, err
