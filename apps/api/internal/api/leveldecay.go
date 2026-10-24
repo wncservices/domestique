@@ -30,12 +30,18 @@ func (s *Server) decayLevels(ctx context.Context) {
 		return
 	}
 	seen := map[string]bool{}
-	decayed, failed := 0, 0
+	decayed, failed, unseen := 0, 0, 0
 	for _, g := range goals {
 		if seen[g.Rider] || ctx.Err() != nil {
 			continue
 		}
 		seen[g.Rider] = true
+		// Rides the app has not seen must not read as zones left alone: same
+		// rule as the load ledger. The week stays unclaimed for a later tick.
+		if s.metricsFailedRider(g.Rider) || s.garminSessionExpired(g.Rider) {
+			unseen++
+			continue
+		}
 		n, err := s.decayRiderLevels(ctx, g.Rider)
 		if err != nil {
 			failed++
@@ -48,6 +54,9 @@ func (s *Server) decayLevels(ctx context.Context) {
 	}
 	if failed > 0 {
 		s.logger().Warn("level decay: riders skipped, their levels could not be read", "riders", failed)
+	}
+	if unseen > 0 {
+		s.logger().Warn("level decay: riders skipped, their rides could not be read", "riders", unseen)
 	}
 }
 

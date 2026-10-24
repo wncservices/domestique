@@ -172,3 +172,16 @@ func TestDecayRecordsItsWhy(t *testing.T) {
 		}
 	}
 }
+
+// An expired Garmin session means the rider's recent rides are unknown, so
+// nothing decays: an unsynced month is not a month off the bike.
+func TestDecaySkipsARiderWhoseRidesCannotBeRead(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	linkGarmin(t, h, "2020-01-01T00:00:00Z")
+	h.setLevel(t, workout.ZoneVO2Max, 5.0)
+	h.at(7, 7, 0)
+	h.tick()
+	if got := h.levelOf(t, workout.ZoneVO2Max); got != 5.0 {
+		t.Fatalf("level = %v, want 5.0 untouched", got)
+	}
+}
