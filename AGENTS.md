@@ -629,6 +629,23 @@ does not lock the session: readiness can still ease it, and `ReshuffleReadiness`
 `AdaptedRules` is what stops a second swap. Replan rebuilds the week and may undo a swap;
 that is accepted. Logs carry a rider count only, never who swapped or the verdict.
 
+**A cycling week's structured zones follow the rider's own intensity mix.** `internal/intensity`
+buckets the last 28 days (`mixWindowDays`) of Coggan zone seconds into low (zones 1-2), high (3-4) and
+anaerobic (5-7), counting only power-scored rides (`LoadSource == "fit_power"`, normalised power > 0);
+heart-rate-scored, estimated and imported-without-power rides do not count, and under 3 hours counted
+there is no mix. `ChooseZones` takes the phase's target split (base 80/18/2, build 75/20/5, peak
+75/15/10) and gives each slot a zone from the bucket with the largest shortfall, drawn only from
+`intensity.AllowedZones(phase)`; if the three gaps sit within a point of each other, there is no mix,
+the phase is taper or the sport is running, today's table stands. Build and peak weeks of 6 or more
+available days with `PlannedCTL` of 60 or more get a third structured session, only when
+`placeStructuredDays` can place it with no two structured days adjacent, else two. A recovery week
+holds one structured session, the phase's first zone at the rider's level minus one, at most 60
+minutes, on the first available day; `WithTargetTSS` never boosts it. `seasonContext` computes the
+mix once (`zoneMixFor`) and `weekOptions`/`mixOptions` hand it to every builder: fill, refresh, the
+crew-ride preview, Train now (`weekZones`) and the life-event refill (`refillRequests`), so none
+can disagree. `scheduler.StructuredZones` deliberately stays today's table: the ledger's upgrade
+count reads it, and a mix-dependent answer there would change how many sessions it may upgrade.
+
 ## Only today's session goes to the head unit
 
 `pushWorkoutsForRider` (`internal/api/workoutpush.go`) is the one automatic
