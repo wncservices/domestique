@@ -71,6 +71,33 @@ func slotWeight(k slotKind) float64 {
 	}
 }
 
+// baseLongWeight is the long slot's weight before any durability growth.
+const (
+	baseLongWeight = 1.8
+	maxLongWeight  = 2.4
+)
+
+// longWeight grows the long slot's weight by 0.1 per endurance level above the
+// rider's starting value (cycling only), clamped to [1.8, 2.4]. With no
+// endurance level it is today's 1.8. Only the rest-share split uses it, so
+// the week's hours stay equal: the long ride gains what endurance rides lose.
+func longWeight(levels map[string]float64, profile workout.RiderProfile, sport model.Sport) float64 {
+	if sport != model.SportCycling {
+		return baseLongWeight
+	}
+	cur, ok := levels["endurance"]
+	if !ok {
+		return baseLongWeight
+	}
+	start := 3.0
+	for _, l := range progression.Initial(profile.ExperienceLevel, sport) {
+		if l.Zone == "endurance" {
+			start = l.Value
+		}
+	}
+	return math.Min(maxLongWeight, math.Max(baseLongWeight, baseLongWeight+0.1*(cur-start)))
+}
+
 // structuredSlot is one structured session a phase's zone mix calls for:
 // which zone, and how far above (productive sessions) or below (the taper
 // opener) the rider's current level in that zone to aim.
@@ -294,6 +321,9 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 			continue
 		}
 		restWeights[i] = slotWeight(k)
+		if k == slotLong {
+			restWeights[i] = longWeight(levels, profile, sport)
+		}
 	}
 	restShares := normalizeWeights(restWeights)
 
