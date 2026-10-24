@@ -29,6 +29,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/intensity"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
@@ -221,8 +222,8 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		return nil, fmt.Errorf("scheduler: parse week start %q: %w", week.StartDate, err)
 	}
 
-	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days)
-	if o.levelBoost != 0 && week.Phase != periodization.PhaseTaper {
+	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days, o.mix)
+	if o.levelBoost != 0 && week.Phase != periodization.PhaseTaper && !week.Recovery {
 		// The taper opener is deliberately easy, so only the other phases'
 		// structured slots are lifted. Boost and route demand each move the
 		// pick, so the ladder is clamped below at the pick without the boost
@@ -261,6 +262,9 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 			continue
 		}
 		capSeconds := shares[i] * targetHours * 3600
+		if week.Recovery {
+			capSeconds = math.Min(capSeconds, recoverySessionMaxSeconds)
+		}
 		rung, ok := workoutlib.PickNear(ladder, targetLevels[i], capSeconds, demand.wantFor(zones[i]))
 		if ok && o.levelBoost != 0 {
 			rung = clampToBoostedCeiling(ladder, rung, targetLevels[i]-o.levelBoost, capSeconds, demand.wantFor(zones[i]))
@@ -377,31 +381,123 @@ func applyFixed(fixed []Fixed, week periodization.Week, weekStart time.Time, day
 	return dropped, target
 }
 
+// recoverySessionMaxSeconds caps the one structured session a recovery week
+// keeps: enough to stay in the habit of the phase's work, short enough that
+// the week still sheds load.
+const recoverySessionMaxSeconds = 2700
+
+// thirdSlotMinCTL is the planned CTL from which a build or peak week with six
+// or more available days takes a third hard session: a rider carrying less
+// fitness would not absorb it.
+const thirdSlotMinCTL = 60
+
+// thirdSlotMinDays is how many available days a third hard session needs.
+const thirdSlotMinDays = 6
+
+// allowedZones is the cycling zones a phase may hold, in today's order, used
+// to pick a third session's zone when the mix does not choose one.
+func allowedZones(phase periodization.Phase) []string {
+	switch phase {
+	case periodization.PhaseBase:
+		return []string{"sweet_spot", "tempo"}
+	case periodization.PhaseBuild:
+		return []string{"threshold", "sweet_spot", "vo2max"}
+	case periodization.PhasePeak:
+		return []string{"vo2max", "anaerobic", "threshold"}
+	}
+	return nil
+}
+
 // assignSlots decides every available day's slotKind, and for a structured
-// day its zone and target level. A recovery week (Week.Recovery) is easy
-// across every day — no long day, no structured session — whatever phase it
-// falls in: it exists to shed load, not to reshuffle it. Otherwise the
-// rider's last available day always carries the long session, and
+// day its zone and target level.
+//
+// A recovery week (Week.Recovery) has no long day and, of structured work,
+// one session at most: the phase's first zone, a level below the rider's,
+// placed furthest from the week's last available day (see
+// recoverySessionMaxSeconds for its length). Weeks too short for any
+// structured session (structuredSlotsFor) are all easy, as before.
+//
+// Otherwise the rider's last available day carries the long session and
 // structuredSlotsFor's zones are placed among the rest via
-// placeStructuredDays.
-func assignSlots(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, sport model.Sport, days []string) (kinds []slotKind, zones []string, targetLevels []float64) {
+// placeStructuredDays. For a cycling build or peak week with enough days
+// and planned CTL a third zone is added (when it can be placed without
+// adjacency), and a non-nil mix replaces the table's zones slot for slot.
+func assignSlots(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, sport model.Sport, days []string, mix *intensity.Mix) (kinds []slotKind, zones []string, targetLevels []float64) {
 	n := len(days)
 	kinds = make([]slotKind, n)
 	zones = make([]string, n)
 	targetLevels = make([]float64, n)
+
+	structured := structuredSlotsFor(week.Phase, sport, n)
 	if week.Recovery {
+		if len(structured) == 0 {
+			return kinds, zones, targetLevels
+		}
+		// Eligible slots are 0..n-2; the earliest is the furthest from the
+		// last available day.
+		zone := structured[0].zone
+		kinds[0] = slotStructured
+		zones[0] = zone
+		targetLevels[0] = math.Max(levelFor(levels, sport, zone, profile)-1.0, 1.0)
 		return kinds, zones, targetLevels
 	}
 	kinds[n-1] = slotLong
 
-	structured := structuredSlotsFor(week.Phase, sport, n)
+	cycling := sport != model.SportRunning
+	wantThird := cycling && len(structured) > 0 &&
+		(week.Phase == periodization.PhaseBuild || week.Phase == periodization.PhasePeak) &&
+		n >= thirdSlotMinDays && week.PlannedCTL >= thirdSlotMinCTL
+	count := len(structured)
+	if wantThird {
+		count++
+	}
+	if cycling && week.Phase != periodization.PhaseTaper && count > 0 {
+		structured = zonesFor(week.Phase, structured, count, mix)
+	}
+
 	positions := placeStructuredDays(days, len(structured))
+	if wantThird && len(positions) < len(structured) {
+		structured = structured[:len(structured)-1]
+		positions = placeStructuredDays(days, len(structured))
+	}
 	for i, pos := range positions {
 		kinds[pos] = slotStructured
 		zones[pos] = structured[i].zone
 		targetLevels[pos] = levelFor(levels, sport, structured[i].zone, profile) + structured[i].levelOffset
 	}
 	return kinds, zones, targetLevels
+}
+
+// zonesFor lists count productive slots for a cycling week: the mix's zones
+// when it has a choice, else today's table, extended by the phase's allowed
+// zones (the first not yet used, then in order) when count exceeds it.
+func zonesFor(phase periodization.Phase, table []structuredSlot, count int, mix *intensity.Mix) []structuredSlot {
+	if mix != nil {
+		if chosen := intensity.ChooseZones(phase, *mix, count); len(chosen) == count {
+			out := make([]structuredSlot, count)
+			for i, z := range chosen {
+				out[i] = structuredSlot{string(z), productiveOffset}
+			}
+			return out
+		}
+	}
+	out := append([]structuredSlot(nil), table...)
+	allowed := allowedZones(phase)
+	for len(out) < count && len(allowed) > 0 {
+		pick := allowed[len(out)%len(allowed)]
+		for _, z := range allowed {
+			used := false
+			for _, s := range out {
+				used = used || s.zone == z
+			}
+			if !used {
+				pick = z
+				break
+			}
+		}
+		out = append(out, structuredSlot{pick, productiveOffset})
+	}
+	return out
 }
 
 // placeStructuredDays picks which of days' slots (0-indexed, calendar

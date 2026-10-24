@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/wncservices/domestique/apps/api/internal/climbs"
+	"github.com/wncservices/domestique/apps/api/internal/intensity"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 )
 
@@ -68,6 +69,8 @@ type options struct {
 	// by a caller.
 	targetTSS  float64
 	levelBoost float64
+	// mix is the rider's recent intensity split; nil means today's table.
+	mix *intensity.Mix
 }
 
 // Fixed is a session the rider has committed to that the week is built around:
@@ -106,6 +109,15 @@ func WithRouteDemand(d *RouteDemand) Option {
 // it is without the option.
 func WithTargetTSS(tss float64) Option {
 	return func(o *options) { o.targetTSS = tss }
+}
+
+// WithZoneMix chooses a cycling Base, Build or Peak week's structured zones
+// from the rider's recent intensity split (intensity.ChooseZones), replacing
+// the phase table's zones slot for slot. When the mix has no preference the
+// table stands. Taper and running are unaffected. The caller passes a mix
+// only when intensity.FromAnalyses found enough power-scored riding.
+func WithZoneMix(m intensity.Mix) Option {
+	return func(o *options) { o.mix = &m }
 }
 
 func applyOptions(opts []Option) options {
