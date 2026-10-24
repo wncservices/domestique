@@ -59,6 +59,11 @@ type SessionAnalysis struct {
 	Legs   string
 	Stress string
 
+	// DecouplingPct is the ride's aerobic decoupling (rideanalysis.Decoupling),
+	// nil when it was not computed. Unlike Feel it is a property of the file,
+	// so a re-analysis overwrites it.
+	DecouplingPct *float64
+
 	AnalysedAt string
 }
 
@@ -141,8 +146,8 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
                     normalized_power, intensity_factor, tss, duration_ratio,
                     max_hr, best_hr_1200, best_speed_1200, best_speed_1800,
                     power_zone_seconds, hr_zone_seconds, power_curve, steps,
-                    feel, level_delta, analysed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    feel, level_delta, decoupling_pct, analysed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (session_id) DO UPDATE SET
             rider = excluded.rider, workout_id = excluded.workout_id, outcome = excluded.outcome,
             load_source = excluded.load_source, normalized_power = excluded.normalized_power,
@@ -152,11 +157,11 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
             best_speed_1800 = excluded.best_speed_1800,
             power_zone_seconds = excluded.power_zone_seconds,
             hr_zone_seconds = excluded.hr_zone_seconds, power_curve = excluded.power_curve,
-            steps = excluded.steps, analysed_at = excluded.analysed_at`),
+            steps = excluded.steps, decoupling_pct = excluded.decoupling_pct, analysed_at = excluded.analysed_at`),
 		a.SessionID, rider, a.WorkoutID, a.Outcome, a.LoadSource,
 		a.NormalizedPower, a.IntensityFactor, a.TSS, a.DurationRatio,
 		a.MaxHR, a.BestHR1200, a.BestSpeed1200, a.BestSpeed1800,
-		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, analysedAt)
+		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, a.DecouplingPct, analysedAt)
 	return err
 }
 
@@ -169,7 +174,7 @@ func (d *DB) GetAnalysis(ctx context.Context, sessionID string) (SessionAnalysis
                normalized_power, intensity_factor, tss, duration_ratio,
                max_hr, best_hr_1200, best_speed_1200, best_speed_1800,
                power_zone_seconds, hr_zone_seconds, power_curve, steps,
-               feel, level_delta, legs, stress, analysed_at
+               feel, level_delta, legs, stress, decoupling_pct, analysed_at
         FROM session_analyses WHERE session_id = ?`), sessionID)
 	a, err := scanAnalysis(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -191,7 +196,7 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
                a.normalized_power, a.intensity_factor, a.tss, a.duration_ratio,
                a.max_hr, a.best_hr_1200, a.best_speed_1200, a.best_speed_1800,
                a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps,
-               a.feel, a.level_delta, a.legs, a.stress, a.analysed_at, s.sport
+               a.feel, a.level_delta, a.legs, a.stress, a.decoupling_pct, a.analysed_at, s.sport
         FROM session_analyses a
         JOIN completed_sessions s ON s.id = a.session_id
         WHERE a.rider = ? AND s.date >= ?
@@ -231,13 +236,18 @@ func scanAnalysis(row rowScanner) (SessionAnalysis, error) {
 	var (
 		a                                      SessionAnalysis
 		powerZones, hrZones, powerCurve, steps []byte
+		decoupling                             sql.NullFloat64
 	)
 	if err := row.Scan(&a.SessionID, &a.Rider, &a.WorkoutID, &a.Outcome, &a.LoadSource,
 		&a.NormalizedPower, &a.IntensityFactor, &a.TSS, &a.DurationRatio,
 		&a.MaxHR, &a.BestHR1200, &a.BestSpeed1200, &a.BestSpeed1800,
 		&powerZones, &hrZones, &powerCurve, &steps,
-		&a.Feel, &a.LevelDelta, &a.Legs, &a.Stress, &a.AnalysedAt); err != nil {
+		&a.Feel, &a.LevelDelta, &a.Legs, &a.Stress, &decoupling, &a.AnalysedAt); err != nil {
 		return SessionAnalysis{}, err
+	}
+	if decoupling.Valid {
+		v := decoupling.Float64
+		a.DecouplingPct = &v
 	}
 	if len(powerZones) > 0 {
 		if err := json.Unmarshal(powerZones, &a.PowerZoneSeconds); err != nil {

@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     hr_zone_seconds      TEXT NOT NULL DEFAULT '', -- basis (LTHR or max HR) known at analysis time; never re-analysed
     power_curve          TEXT NOT NULL DEFAULT '',
     steps                TEXT NOT NULL DEFAULT '',
+    decoupling_pct       DOUBLE PRECISION, -- NULL: not computed
     analysed_at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider);
@@ -588,6 +589,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addAnalysisFeelColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addDecouplingColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.addThresholdColumns(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
@@ -1021,6 +1025,20 @@ func (d *DB) addAnalysisFeelColumns() error {
 		return err
 	}
 	return nil
+}
+
+// addDecouplingColumn adds the nullable decoupling_pct to a session_analyses
+// table that predates it. NULL is right for every old row: not computed.
+func (d *DB) addDecouplingColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE session_analyses ADD COLUMN decoupling_pct DOUBLE PRECISION`)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
 }
 
 // addThresholdColumns adds max_hr/best_hr_1200/best_speed_1200/best_speed_1800 to a

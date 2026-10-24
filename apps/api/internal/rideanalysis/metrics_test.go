@@ -431,3 +431,85 @@ func TestPowerCurveHasAnEightMinuteWindowOnlyForLongEnoughRides(t *testing.T) {
 		t.Errorf("480 s window present on a 7-minute ride: %v", short)
 	}
 }
+
+// steadySamples is a 1 Hz ride of n seconds at constant power and HR.
+func steadySamples(n int, watts, bpm float64) []Sample {
+	out := make([]Sample, n)
+	for i := range out {
+		out[i] = Sample{Seconds: i, Power: watts, HeartRate: bpm, HasPower: true, HasHR: true}
+	}
+	return out
+}
+
+func TestDecouplingSteadyRideIsNearZero(t *testing.T) {
+	pct, ok := Decoupling(steadySamples(7200, 180, 130), 280)
+	if !ok || pct != 0 {
+		t.Fatalf("Decoupling = %v, %v; want 0, true", pct, ok)
+	}
+}
+
+func TestDecouplingDriftingHR(t *testing.T) {
+	s := steadySamples(7200, 180, 130)
+	for i := 600 + (7200-600)/2; i < len(s); i++ {
+		s[i].HeartRate = 130 * 1.08
+	}
+	pct, ok := Decoupling(s, 280)
+	if !ok || math.Abs(pct-7.4) > 0.05 {
+		t.Fatalf("Decoupling = %v, %v; want 7.4, true", pct, ok)
+	}
+}
+
+func TestDecouplingNeedsNinetyMinutesPowerAndHRAndLowIF(t *testing.T) {
+	if _, ok := Decoupling(steadySamples(5399, 180, 130), 280); ok {
+		t.Error("a ride under 5400 s must not be computed")
+	}
+	if _, ok := Decoupling(steadySamples(5400, 180, 130), 280); !ok {
+		t.Error("a ride of exactly 5400 s should be computed")
+	}
+	if _, ok := Decoupling(steadySamples(7200, 180, 130), 0); ok {
+		t.Error("no FTP means no IF, so no decoupling")
+	}
+	if _, ok := Decoupling(steadySamples(7200, 250, 130), 280); ok {
+		t.Error("IF above 0.85 must not be computed")
+	}
+	hrGaps := steadySamples(7200, 180, 130)
+	for i := 0; i < len(hrGaps); i++ {
+		if i%100 < 15 { // 15 % dropouts
+			hrGaps[i].HasHR, hrGaps[i].HeartRate = false, 0
+		}
+	}
+	if _, ok := Decoupling(hrGaps, 280); ok {
+		t.Error("15 % HR dropouts must not be computed")
+	}
+	powerGaps := steadySamples(7200, 180, 130)
+	for i := 0; i < len(powerGaps); i++ {
+		if i%100 < 15 {
+			powerGaps[i].HasPower, powerGaps[i].Power = false, 0
+		}
+	}
+	if _, ok := Decoupling(powerGaps, 280); ok {
+		t.Error("15 % power dropouts must not be computed")
+	}
+	// 5 % dropouts are tolerated.
+	fine := steadySamples(7200, 180, 130)
+	for i := 0; i < len(fine); i++ {
+		if i%100 < 5 {
+			fine[i].HasHR, fine[i].HeartRate = false, 0
+		}
+	}
+	if _, ok := Decoupling(fine, 280); !ok {
+		t.Error("5 % HR dropouts should still compute")
+	}
+}
+
+func TestDecouplingSkipsTheWarmup(t *testing.T) {
+	s := steadySamples(7200, 180, 130)
+	// A hot, high-HR warm-up must not count as drift.
+	for i := 0; i < 600; i++ {
+		s[i].HeartRate = 170
+	}
+	pct, ok := Decoupling(s, 280)
+	if !ok || pct != 0 {
+		t.Fatalf("Decoupling = %v, %v; want 0, true", pct, ok)
+	}
+}

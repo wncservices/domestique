@@ -126,6 +126,10 @@ type Analysis struct {
 	HRZoneSeconds    [5]int
 	PowerCurve       map[int]float64
 
+	// DecouplingPct is the ride's aerobic decoupling (see Decoupling), nil
+	// when the ride does not qualify.
+	DecouplingPct *float64
+
 	Steps []StepResult
 }
 
@@ -573,6 +577,11 @@ func Analyze(in Input) Analysis {
 			a.HRZoneSeconds = HRZoneSeconds(samples, in.Profile.MaxHR)
 		}
 		a.PowerCurve = PowerCurve(samples)
+		if in.Sport == "cycling" {
+			if pct, ok := Decoupling(samples, in.Profile.FTPWatts); ok {
+				a.DecouplingPct = &pct
+			}
+		}
 		a.MaxHR = MaxHR(samples)
 		a.BestHR1200 = BestHR(samples)
 		a.BestSpeed1200, a.BestSpeed1800 = BestSpeeds(samples)

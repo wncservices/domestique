@@ -262,6 +262,7 @@ func (s *Server) analyseNewSessions(
 			HRZoneSeconds:    analysis.HRZoneSeconds[:],
 			PowerCurve:       powerCurveDTO(analysis.PowerCurve),
 			Steps:            analysisStepsDTO(analysis.Steps),
+			DecouplingPct:    analysis.DecouplingPct,
 		}
 
 		if err := s.Training.SaveAnalysis(ctx, sa); err != nil {
