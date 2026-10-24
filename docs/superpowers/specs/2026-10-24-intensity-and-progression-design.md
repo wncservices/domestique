@@ -1,6 +1,6 @@
 # Intensity mix and progression — design (sub-project 5)
 
-Status: approved 2026-10-24; 5a implemented 2026-10-24. This is the detailed design for section 5 of
+Status: approved 2026-10-24; 5a implemented 2026-10-24; 5b implemented 2026-10-24. This is the detailed design for section 5 of
 `2026-10-18-adaptive-training-builder-design.md`. It ships as two PRs, 5a (intensity
 mix) and 5b (progression).
 
