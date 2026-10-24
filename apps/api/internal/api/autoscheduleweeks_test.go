@@ -217,8 +217,8 @@ func TestAutoScheduleTickNextWeekIsARecoveryWeekWhenThePlanSaysSo(t *testing.T) 
 	if structured(thisWeek) == 0 {
 		t.Errorf("this week (a load week) has no structured session: %+v", thisWeek)
 	}
-	if got := structured(nextWeek); got != 0 {
-		t.Errorf("next week is a recovery week but has %d structured sessions", got)
+	if got := structured(nextWeek); got > 1 {
+		t.Errorf("next week is a recovery week but has %d structured sessions, want at most 1", got)
 	}
 }
 

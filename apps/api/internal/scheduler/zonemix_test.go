@@ -121,7 +121,7 @@ func TestThirdHardSessionNeedsSixDaysAndCTL60(t *testing.T) {
 
 func TestRecoveryWeekHasOneShortStructuredSession(t *testing.T) {
 	// Peak's first zone is vo2max, the one ladder whose easiest rungs fit
-	// 45 minutes. Level 4 gives a target of 3 (level - 1); rung 3 is 50 minutes, so the cap drops it to rung 2.
+	// an hour. Level 4 gives a target of 3 (level - 1); rung 3 is 50 minutes and fits the hour.
 	week, profile, levels := mixWeek(periodization.PhasePeak, true, 80, []string{"tue", "thu", "sat", "sun"})
 	for _, opts := range [][]Option{nil, {WithZoneMix(highShort)}} {
 		out := mixBuild(t, week, profile, levels, opts...)
@@ -138,19 +138,39 @@ func TestRecoveryWeekHasOneShortStructuredSession(t *testing.T) {
 			t.Fatalf("%d structured sessions, want 1", len(hard))
 		}
 		h := hard[0]
-		if h.Zone != workout.ZoneVO2Max || h.Level != 2 || h.Date != "2026-10-06" {
-			t.Errorf("session = zone %s level %v on %s; want vo2max level 2 (target 3, rung 3 is over 45 min) on the first day", h.Zone, h.Level, h.Date)
+		if h.Zone != workout.ZoneVO2Max || h.Level != 3 || h.Date != "2026-10-06" {
+			t.Errorf("session = zone %s level %v on %s; want vo2max level 3 on the first day", h.Zone, h.Level, h.Date)
 		}
-		if s := totalSeconds(h.Steps); s > 2700 {
-			t.Errorf("session lasts %v s, over 2700", s)
+		if s := totalSeconds(h.Steps); s > 3600 {
+			t.Errorf("session lasts %v s, over 3600", s)
 		}
 	}
 
-	// A floor of 1, and no session when no rung fits the cap (build's
-	// threshold starts at 50 minutes): all easy, as before.
+	// Base and build recovery weeks keep one session too: sweet spot and
+	// threshold at level - 1 (4 -> 3, rung 3 or the longest that fits the hour).
 	build1, p1, l1 := mixWeek(periodization.PhaseBuild, true, 0, []string{"tue", "thu", "sat", "sun"})
-	if z := structuredZones(mixBuild(t, build1, p1, l1)); len(z) != 0 {
-		t.Errorf("build recovery gave %v; threshold has no rung under 45 minutes", z)
+	for phase, zone := range map[periodization.Phase]workout.Zone{
+		periodization.PhaseBase: workout.ZoneSweetSpot, periodization.PhaseBuild: workout.ZoneThreshold,
+	} {
+		wk := build1
+		wk.Phase = phase
+		out := mixBuild(t, wk, p1, l1)
+		hard := 0
+		for _, w := range out {
+			if w.Zone == workout.ZoneEndurance {
+				if w.Name != "Endurance ride" {
+					t.Errorf("%s: easy day is %q", phase, w.Name)
+				}
+				continue
+			}
+			hard++
+			if w.Zone != zone || w.Level > 3 || w.Date != "2026-10-06" || totalSeconds(w.Steps) > 3600 {
+				t.Errorf("%s recovery session = %s level %v on %s (%v s)", phase, w.Zone, w.Level, w.Date, totalSeconds(w.Steps))
+			}
+		}
+		if hard != 1 {
+			t.Errorf("%s: %d structured sessions, want 1", phase, hard)
+		}
 	}
 	l1 = map[string]float64{"vo2max": 1}
 	peak := week

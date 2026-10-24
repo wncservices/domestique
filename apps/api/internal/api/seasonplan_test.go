@@ -252,10 +252,17 @@ func TestARecoveryWeekFarAheadHasRecoveryContent(t *testing.T) {
 	if len(sessions) == 0 {
 		t.Fatalf("recovery week %s is empty", recovery.StartDate)
 	}
+	structured := 0
 	for _, s := range sessions {
-		if workout.IsStructuredZone(s.Zone) || s.Name == "Long ride" {
-			t.Errorf("recovery week %s holds %q (%s), want easy sessions only", recovery.StartDate, s.Name, s.Zone)
+		if workout.IsStructuredZone(s.Zone) {
+			structured++
 		}
+		if s.Name == "Long ride" {
+			t.Errorf("recovery week %s holds %q (%s), want no long ride", recovery.StartDate, s.Name, s.Zone)
+		}
+	}
+	if structured > 1 {
+		t.Errorf("recovery week %s holds %d structured sessions, want at most 1", recovery.StartDate, structured)
 	}
 }
 

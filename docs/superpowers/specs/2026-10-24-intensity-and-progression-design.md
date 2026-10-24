@@ -71,7 +71,7 @@ FTP):
 **Recovery weeks** keep one short structured session:
 
 - the phase's first allowed zone, at the rider's level − 1 (no productive offset);
-- capped at 45 minutes, on the available day furthest from the week's last day.
+- capped at 60 minutes, on the available day furthest from the week's last day.
 
 The rest of the week stays easy, and there is still no long ride.
 
@@ -130,7 +130,7 @@ The rest of the week stays easy, and there is still no long ride.
   - pure tests for buckets, the counted-ride filter and the 3-hour floor;
   - zone choice per phase, including tie fallback and no repeats;
   - the third-slot conditions;
-  - the recovery session (zone, level − 1, 45-minute cap, placement);
+  - the recovery session (zone, level − 1, 60-minute cap, placement);
   - the scheduler agreement tests (`StructuredZones`, crew preview) still green;
   - an API test that a rider with heavy threshold history gets vo2max in build.
 - **5b:** decoupling on synthetic samples; the durability moves; the long-slot weight;

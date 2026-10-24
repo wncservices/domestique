@@ -384,7 +384,7 @@ func applyFixed(fixed []Fixed, week periodization.Week, weekStart time.Time, day
 // recoverySessionMaxSeconds caps the one structured session a recovery week
 // keeps: enough to stay in the habit of the phase's work, short enough that
 // the week still sheds load.
-const recoverySessionMaxSeconds = 2700
+const recoverySessionMaxSeconds = 3600
 
 // thirdSlotMinCTL is the planned CTL from which a build or peak week with six
 // or more available days takes a third hard session: a rider carrying less

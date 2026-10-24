@@ -36,7 +36,7 @@
 - **Recovery week:**
   - Exactly one structured slot when n ≥ 3: the phase's first allowed zone, or today's table's first zone when the phase has none (base → sweet_spot).
   - Target level = level − 1.0, floored at 1.
-  - Cap 2700 s.
+  - Cap 3600 s.
   - Placed on the available day furthest from the last available day.
   - No long ride.
 - `StructuredZones(phase, sport, n)` keeps today's table and behaviour.
@@ -109,7 +109,7 @@ func WithZoneMix(m intensity.Mix) Option
   - `TestZoneMixChangesBuildZones`
   - `TestNoMixIsTodaysTable`, the existing behaviour
   - `TestThirdHardSessionNeedsSixDaysAndCTL60` (Review Focus 3, including no adjacency)
-  - `TestRecoveryWeekHasOneShortStructuredSession` (Review Focus 4: level − 1, ≤ 2700 s, placement, no long ride)
+  - `TestRecoveryWeekHasOneShortStructuredSession` (Review Focus 4: level − 1, ≤ 3600 s, placement, no long ride)
   - `TestRouteDemandStillBiasesWithinTheChosenZone`
   - Update `TestRecoveryWeekIsAllEasy` to the new rule, and list it and any other changed test in the report.
   - `TestStructuredZonesMatchesTheScheduler` must stay green. If its recovery cases differ, note it.

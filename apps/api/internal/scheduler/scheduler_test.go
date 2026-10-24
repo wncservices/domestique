@@ -127,23 +127,33 @@ func TestWeekWorkoutsTotalDurationMatchesTargetHours(t *testing.T) {
 	}
 }
 
-// A recovery week is easy across every available day, whatever phase it
-// falls in — no long day, no structured session of any zone.
+// A recovery week (n >= 3 days) holds exactly one structured session, at
+// most an hour, at level - 1 (a missing level starts at the experience
+// default), on the first available day; every other day is an easy Endurance
+// ride and there is no long ride.
 func TestRecoveryWeekIsAllEasy(t *testing.T) {
 	week := periodization.Week{StartDate: "2026-01-05", Phase: periodization.PhaseBuild, Recovery: true, TargetHours: 6}
 	profile := workout.RiderProfile{AvailableDays: []string{"tue", "thu", "sat", "sun"}}
 
-	out, err := WeekWorkouts(week, profile, nil, "wilant", "goal-1", model.SportCycling)
+	out, err := WeekWorkouts(week, profile, map[string]float64{"threshold": 4}, "wilant", "goal-1", model.SportCycling)
 	if err != nil {
 		t.Fatal(err)
 	}
+	hard := 0
 	for _, w := range out {
+		if w.Zone != workout.ZoneEndurance {
+			hard++
+			if w.Zone != workout.ZoneThreshold || w.Level > 3 || totalSeconds(w.Steps) > 3600 || w.Date != "2026-01-06" {
+				t.Errorf("recovery session = %s level %v, %v s on %s", w.Zone, w.Level, totalSeconds(w.Steps), w.Date)
+			}
+			continue
+		}
 		if w.Name != "Endurance ride" {
 			t.Errorf("recovery week workout = %q, want an easy Endurance ride", w.Name)
 		}
-		if w.Zone != workout.ZoneEndurance {
-			t.Errorf("recovery week workout zone = %q, want endurance", w.Zone)
-		}
+	}
+	if hard != 1 {
+		t.Errorf("%d structured sessions, want 1", hard)
 	}
 }
 
