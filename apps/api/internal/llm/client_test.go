@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/wncservices/domestique/apps/api/internal/config"
 )
@@ -458,5 +462,51 @@ func TestRetryDoesNotKeepStaleFields(t *testing.T) {
 	}
 	if stale.Text != "" {
 		t.Errorf("out.Text = %q after ErrInvalid, want zero", stale.Text)
+	}
+}
+
+// The caller's span is tagged with the job and nothing else from the call: the
+// system and user text carry the rider's words and must never reach a span.
+func TestCompleteTagsTheCallersSpan(t *testing.T) {
+	const systemText = "SYSTEM-SECRET-OSPREY"
+	const userText = "USER-SECRET-HERON"
+	exp := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+	ctx, span := tp.Tracer("test").Start(context.Background(), "caller")
+
+	f := newFake(t, answer(t, `{"text":"ok"}`))
+	c := newClient(t, f.srv.URL, "")
+	var out struct {
+		Text string `json:"text"`
+	}
+	schema := map[string]any{"type": "object"}
+	if err := c.Complete(ctx, JobExplainPlan, systemText, userText, schema, 200, &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	span.End()
+
+	// The outbound HTTP client span is recorded too; only the caller's matters.
+	var caller tracetest.SpanStub
+	for _, sp := range exp.GetSpans() {
+		if sp.Name == "caller" {
+			caller = sp
+		}
+	}
+	if caller.Name == "" {
+		t.Fatal("the caller's span was not recorded")
+	}
+	var job string
+	for _, kv := range caller.Attributes {
+		if kv.Key == "llm.job" {
+			job = kv.Value.AsString()
+		}
+		for _, secret := range []string{systemText, userText} {
+			if strings.Contains(kv.Value.Emit(), secret) {
+				t.Errorf("span attribute %s carries the prompt text", kv.Key)
+			}
+		}
+	}
+	if job != string(JobExplainPlan) {
+		t.Errorf("llm.job = %q, want %q", job, JobExplainPlan)
 	}
 }

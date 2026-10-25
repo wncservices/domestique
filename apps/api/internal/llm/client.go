@@ -27,6 +27,9 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/wncservices/domestique/apps/api/internal/config"
 	"github.com/wncservices/domestique/apps/api/internal/telemetry"
 )
@@ -135,6 +138,9 @@ func (c *Client) SetOnResult(f func(job Job, result string)) {
 // Errors: ErrInvalid after two bad answers, ErrTimeout when the budget runs out,
 // and a plain error for a refused or unreachable endpoint.
 func (c *Client) Complete(ctx context.Context, j Job, system, user string, schema map[string]any, maxTokens int, out any, validate func() error) error {
+	// The job is the only thing tagged on the caller's span. The prompt and
+	// the answer carry the rider's words and never go on a span.
+	trace.SpanFromContext(ctx).SetAttributes(attribute.String("llm.job", string(j)))
 	result := "error"
 	defer func() {
 		if c != nil && c.onResult != nil {

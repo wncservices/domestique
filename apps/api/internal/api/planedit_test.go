@@ -300,7 +300,7 @@ func TestTheWholeReplyIsRejectedWhenItIsNotTheSchema(t *testing.T) {
 			if status != http.StatusBadGateway {
 				t.Fatalf("status %d, want 502", status)
 			}
-			if name != "prose reply" && !strings.Contains(res.Error, "Life event form") {
+			if !strings.Contains(res.Error, "Life event form") {
 				t.Errorf("error %q should point at the form", res.Error)
 			}
 			if h.snapshot(t) != before {
@@ -381,12 +381,16 @@ func TestAModelFailureIs502WithAWarnAndNoSentenceInTheLog(t *testing.T) {
 	h := newOnceHarness(t)
 	var logs bytes.Buffer
 	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	f := h.withLLMReply(t, `{"error":{"message":"boom"}}`)
-	f.code = 500
+	// A real non-200 from the endpoint: the reply is never read.
+	f := h.withLLMReply(t, "")
+	f.code = http.StatusInternalServerError
 
-	status, _ := h.propose(t, "wilant", secretSession)
+	status, res := h.propose(t, "wilant", secretSession)
 	if status != http.StatusBadGateway {
 		t.Fatalf("status %d, want 502", status)
+	}
+	if res.Error != "could not reach the narration service" {
+		t.Errorf("error %q, want the unavailable message", res.Error)
 	}
 	out := logs.String()
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "rider=wilant") || !strings.Contains(out, "outcome=") {
