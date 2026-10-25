@@ -35,7 +35,7 @@ func (c *Client) ExplainPlan(ctx context.Context, goal workout.Goal, plan period
 	var reply struct {
 		Text string `json:"text"`
 	}
-	err := c.Complete(ctx, JobExplainPlan, explainSystem, explainPlanPrompt(goal, plan), explainSchema, 200, &reply, func() error {
+	err := c.Complete(ctx, JobExplainPlan, explainSystem, explainPlanPrompt(goal, plan), explainSchema, 450, &reply, func() error {
 		text := strings.TrimSpace(reply.Text)
 		if text == "" || utf8.RuneCountInString(text) > maxExplainRunes {
 			return errExplainShape

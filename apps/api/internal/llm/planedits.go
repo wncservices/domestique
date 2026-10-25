@@ -187,7 +187,7 @@ type intentWire struct {
 // offer, after one retry; any other error is a transport or model failure.
 func (c *Client) ProposePlanEdits(ctx context.Context, text string, view PlanView) (PlanEdits, error) {
 	var reply planEditsReply
-	err := c.Complete(ctx, JobPlanEdits, planEditsSystem, planEditsPrompt(text, view), planEditSchema(view.Capabilities), 400, &reply, func() error {
+	err := c.Complete(ctx, JobPlanEdits, planEditsSystem, planEditsPrompt(text, view), planEditSchema(view.Capabilities), 700, &reply, func() error {
 		return checkIntents(reply, view.Capabilities)
 	})
 	if err != nil {

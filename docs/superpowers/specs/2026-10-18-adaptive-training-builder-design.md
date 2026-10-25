@@ -270,9 +270,9 @@ server-side validation. This is the rule `narration` already follows.
   sync and re-optimiser so they don't compete with them for CPU.
 - **Client**: `internal/llm`, hand-rolled (one POST to the OpenAI-compatible
   `/v1/chat/completions`, JSON parse), within the dependency budget. It uses
-  JSON-schema-constrained output, `telemetry.OutboundTransport`, and a per-job
-  timeout (90 s). Config: `llm.base_url` and `llm.model`; no URL means the
-  features are off. A span carries only job and provider.
+  JSON-schema-constrained output, `telemetry.OutboundTransport`, and a 120 s budget per call,
+  covering one retry. Config: `llm.base_url` and `llm.model`; no URL means the
+  features are off. The caller's span carries only `llm.job`.
 - **Jobs**:
 
   | Job | Input | Fallback |

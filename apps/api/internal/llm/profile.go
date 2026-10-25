@@ -58,6 +58,8 @@ type profileReply struct {
 // retried; only an answer that does not decode is retried.
 func (c *Client) ProposeProfileChange(ctx context.Context, note string, profile workout.RiderProfile) (ProfileChangeProposal, error) {
 	var reply profileReply
+	// No validate on purpose: an empty {} yields the unchanged profile with no
+	// explanation, matching the old fallback.
 	err := c.Complete(ctx, JobProposeProfile, profileSystem, profilePrompt(note, profile), profileSchema, 250, &reply, nil)
 	if err != nil {
 		return ProfileChangeProposal{}, err

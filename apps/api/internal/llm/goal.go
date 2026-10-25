@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Bounds on what a goal proposal may claim, whatever the model returns: past
@@ -87,8 +88,8 @@ func (c *Client) ProposeGoal(ctx context.Context, note string, today time.Time) 
 
 func goalFrom(raw goalReply, today time.Time) GoalProposal {
 	name := strings.TrimSpace(raw.Name)
-	if len(name) > maxSaneGoalNameLen {
-		name = strings.TrimSpace(name[:maxSaneGoalNameLen])
+	if utf8.RuneCountInString(name) > maxSaneGoalNameLen {
+		name = strings.TrimSpace(string([]rune(name)[:maxSaneGoalNameLen]))
 	}
 
 	p := GoalProposal{Name: name, Sport: "cycling", Priority: "B", Explanation: raw.Explanation}

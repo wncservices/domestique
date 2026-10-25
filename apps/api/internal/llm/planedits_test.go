@@ -53,8 +53,8 @@ func TestTheRequestIsOneStrictJSONSchemaWithNoTools(t *testing.T) {
 	f.mu.Lock()
 	body := f.body
 	f.mu.Unlock()
-	if body["max_tokens"] != float64(400) {
-		t.Errorf("max_tokens = %v, want 400", body["max_tokens"])
+	if body["max_tokens"] != float64(700) {
+		t.Errorf("max_tokens = %v, want 700", body["max_tokens"])
 	}
 	if _, ok := body["tools"]; ok {
 		t.Error("the request uses tools; the reply is a schema-constrained object now")

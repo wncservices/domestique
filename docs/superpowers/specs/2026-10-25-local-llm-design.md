@@ -38,11 +38,18 @@ and removes the Anthropic client.
   - Free-text jobs use a schema with one `text` string, so there is one code path
     and no fences to strip.
   - `temperature` is 0.2.
-- **API.** `llm.Client.Complete(ctx, Job, system, user string, schema json.RawMessage,
-  maxTokens int, out any) error`.
-  - It unmarshals into `out` with `DisallowUnknownFields`.
-  - Callers validate the result. A parse failure or a validator rejection triggers
-    **one retry**, then returns `llm.ErrInvalid`.
+- **API.** `llm.Client.Complete(ctx, j Job, system, user string, schema map[string]any,
+  maxTokens int, out any, validate func() error) error`.
+  - It unmarshals into `out` with `DisallowUnknownFields`; `out` is zeroed before each
+    attempt and left zero on any error.
+  - A parse failure or a `validate` rejection triggers **one retry**, then returns
+    `llm.ErrInvalid`. `validate` may be nil.
+  - A 503 (a cold model load) is not an answer: the client waits 2 s and sends again,
+    inside the same budget, without spending the invalid-answer retry. A persistent 503
+    ends in `llm.ErrTimeout` when the budget runs out.
+  - `llm.ErrRejected` is the plan-edit refusal: the model answered with a refusal, which is
+    complete, so it is not retried and nothing is applied.
+  - A caller that cancels its context is not counted in the result metric.
 - **Transport.**
   - `http.Client{Transport: telemetry.OutboundTransport(http.DefaultTransport)}`.
   - Every request goes through `http.NewRequestWithContext` with the caller's context.
@@ -51,8 +58,8 @@ and removes the Anthropic client.
   - `*url.Error` is unwrapped (keep `.Err`). A non-200 returns the status only; the
     body is never echoed.
   - No `Origin` header is sent: the gateway refuses requests that carry one.
-- **Jobs and token caps**: `explain_plan` 200, `propose_profile` 250,
-  `propose_goal` 250, `plan_edits` 400.
+- **Jobs and token caps**: `explain_plan` 450, `propose_profile` 250,
+  `propose_goal` 250, `plan_edits` 700.
 - **Span.** The span is the otelhttp client span. One attribute, `llm.job`, is set on
   the caller's span. There is no prompt, output or model text.
 - **Metric**: `domestique_llm_requests_total{job, result}` with result `ok`, `invalid`,

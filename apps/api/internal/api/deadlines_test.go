@@ -107,6 +107,9 @@ func TestRequestsGetTheWriteDeadlineTheirKindNeeds(t *testing.T) {
 		{"shared GPX", http.MethodGet, "/api/shares/tok/gpx", 10 * time.Minute},
 		{"komoot tour list", http.MethodGet, "/api/komoot/tours", 10 * time.Minute},
 		{"pacing FIT", http.MethodGet, "/api/routes/some-route/pacing.fit", 10 * time.Minute},
+		// The explanation is a model call: a cold load can take most of its 120 s
+		// budget, which is longer than the server's own write timeout.
+		{"plan explanation", http.MethodGet, "/api/training/goals/g1/explain", 10 * time.Minute},
 		{"an ordinary read keeps the server default", http.MethodGet, "/api/routes", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

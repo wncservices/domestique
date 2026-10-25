@@ -69,6 +69,9 @@ const (
 	maxBodyBytes = 1 << 20
 
 	attempts = 2
+
+	// coldLoadPause is the wait before sending again after a 503.
+	coldLoadPause = 2 * time.Second
 )
 
 // Client calls the endpoint. A nil *Client means the features are off; every
@@ -80,6 +83,9 @@ type Client struct {
 	jobs       map[Job]bool
 	httpClient *http.Client
 	timeout    time.Duration
+	// retryPause is how long a 503 (a model still loading) waits before the
+	// next send. Tests shorten it.
+	retryPause time.Duration
 	onResult   func(job Job, result string)
 }
 
@@ -102,7 +108,8 @@ func New(cfg config.LLMConfig, apiKey string) *Client {
 		httpClient: &http.Client{
 			Transport: telemetry.OutboundTransport(http.DefaultTransport),
 		},
-		timeout: defaultTimeout,
+		timeout:    defaultTimeout,
+		retryPause: coldLoadPause,
 	}
 }
 
@@ -142,8 +149,11 @@ func (c *Client) Complete(ctx context.Context, j Job, system, user string, schem
 	// the answer carry the rider's words and never go on a span.
 	trace.SpanFromContext(ctx).SetAttributes(attribute.String("llm.job", string(j)))
 	result := "error"
+	// cancelled is set when the caller gave up. That is not a model outcome,
+	// so the hook (and the metric behind it) does not count it.
+	cancelled := false
 	defer func() {
-		if c != nil && c.onResult != nil {
+		if c != nil && c.onResult != nil && !cancelled {
 			c.onResult(j, result)
 		}
 	}()
@@ -162,8 +172,21 @@ func (c *Client) Complete(ctx context.Context, j Job, system, user string, schem
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	parent := ctx
+	ctx, cancel := context.WithTimeout(parent, c.timeout)
 	defer cancel()
+
+	// fail turns a send error into the call's error and its result word.
+	fail := func(err error) error {
+		switch {
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			result = "timeout"
+			return ErrTimeout
+		case errors.Is(parent.Err(), context.Canceled):
+			cancelled = true
+		}
+		return err
+	}
 
 	body, err := json.Marshal(chatRequest{
 		Model: c.model,
@@ -186,15 +209,21 @@ func (c *Client) Complete(ctx context.Context, j Job, system, user string, schem
 		return errors.New("llm: encode request failed")
 	}
 
-	for range attempts {
+	// A 503 is a model still loading: wait and send again. It is not an
+	// answer, so it does not use up the one invalid-answer retry. The shared
+	// budget is the only bound on how often that happens.
+	for tries := 0; tries < attempts; {
 		outV.SetZero()
 		content, err := c.send(ctx, body)
-		if err != nil {
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				result = "timeout"
-				return ErrTimeout
+		if errors.Is(err, errUnavailable) {
+			if err := sleepCtx(ctx, c.retryPause); err != nil {
+				return fail(err)
 			}
-			return err
+			continue
+		}
+		tries++
+		if err != nil {
+			return fail(err)
 		}
 		if err := decodeStrict(content, out); err != nil {
 			continue
@@ -207,6 +236,21 @@ func (c *Client) Complete(ctx context.Context, j Job, system, user string, schem
 	}
 	result = "invalid"
 	return ErrInvalid
+}
+
+// errUnavailable is a 503: the endpoint is up but the model is not ready.
+var errUnavailable = errors.New("llm: endpoint returned 503")
+
+// sleepCtx waits d, or until ctx is done, whichever is first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // send makes one POST and returns the first choice's content.
@@ -230,6 +274,9 @@ func (c *Client) send(ctx context.Context, body []byte) (string, error) {
 		return "", fmt.Errorf("llm: request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		return "", errUnavailable
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("llm: endpoint returned %d", resp.StatusCode)
 	}

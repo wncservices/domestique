@@ -510,3 +510,102 @@ func TestCompleteTagsTheCallersSpan(t *testing.T) {
 		t.Errorf("llm.job = %q, want %q", job, JobExplainPlan)
 	}
 }
+
+// A 503 is how a cold model load answers while the model is still loading.
+// It is retried after a pause, inside the one budget, and it does not spend
+// the invalid-answer retry.
+func TestColdLoad503IsRetriedWithinTheBudget(t *testing.T) {
+	f := newFake(t, func(w http.ResponseWriter, _ *http.Request, n int) {
+		if n < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, reply(t, `{"text":"warm"}`))
+	})
+	c := newClient(t, f.srv.URL, "")
+	c.retryPause = time.Millisecond
+	var rec recorder
+	rec.set(c)
+
+	var out textOut
+	if err := c.Complete(t.Context(), JobExplainPlan, "s", "u", testSchema, 200, &out, nil); err != nil {
+		t.Fatalf("err = %v, want nil once the model is warm", err)
+	}
+	if out.Text != "warm" {
+		t.Errorf("out.Text = %q, want warm", out.Text)
+	}
+	if n := f.requests.Load(); n != 3 {
+		t.Errorf("requests = %d, want 3 (two 503s then the answer)", n)
+	}
+	if got := rec.got(); len(got) != 1 || got[0] != "ok" {
+		t.Errorf("results = %v, want [ok]", got)
+	}
+}
+
+func TestA503DoesNotSpendTheInvalidRetry(t *testing.T) {
+	f := newFake(t, func(w http.ResponseWriter, _ *http.Request, n int) {
+		switch n {
+		case 0:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case 1:
+			_, _ = io.WriteString(w, reply(t, "not json"))
+		default:
+			_, _ = io.WriteString(w, reply(t, `{"text":"fine"}`))
+		}
+	})
+	c := newClient(t, f.srv.URL, "")
+	c.retryPause = time.Millisecond
+
+	var out textOut
+	if err := c.Complete(t.Context(), JobExplainPlan, "s", "u", testSchema, 200, &out, nil); err != nil {
+		t.Fatalf("err = %v, want nil: the invalid answer's retry must still be available", err)
+	}
+	if n := f.requests.Load(); n != 3 {
+		t.Errorf("requests = %d, want 3", n)
+	}
+}
+
+func TestPersistent503EndsInTimeout(t *testing.T) {
+	f := newFake(t, func(w http.ResponseWriter, _ *http.Request, _ int) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	c := newClient(t, f.srv.URL, "")
+	c.timeout = 200 * time.Millisecond
+	c.retryPause = 10 * time.Millisecond
+	var rec recorder
+	rec.set(c)
+
+	var out textOut
+	err := c.Complete(t.Context(), JobExplainPlan, "s", "u", testSchema, 200, &out, nil)
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("err = %v, want ErrTimeout", err)
+	}
+	if n := f.requests.Load(); n < 2 {
+		t.Errorf("requests = %d, want the 503 retried until the budget ran out", n)
+	}
+	if got := rec.got(); len(got) != 1 || got[0] != "timeout" {
+		t.Errorf("results = %v, want [timeout]", got)
+	}
+}
+
+// A caller that goes away is not a model failure: the result hook, which feeds
+// the llm_requests metric, must not count it.
+func TestCallerCancelIsNotCounted(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	f := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		cancel()
+		<-r.Context().Done()
+	})
+	c := newClient(t, f.srv.URL, "")
+	var rec recorder
+	rec.set(c)
+
+	var out textOut
+	err := c.Complete(ctx, JobExplainPlan, "s", "u", testSchema, 200, &out, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if got := rec.got(); len(got) != 0 {
+		t.Errorf("results = %v, want none for a cancelled caller", got)
+	}
+}

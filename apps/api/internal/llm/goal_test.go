@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var goalToday = time.Date(2026, 3, 18, 0, 0, 0, 0, time.UTC)
@@ -61,8 +62,24 @@ func TestProposeGoalCutsALongNameTo80Characters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProposeGoal: %v", err)
 	}
-	if len(p.Name) != 80 || p.Sport != "running" || p.Priority != "C" {
-		t.Errorf("name length %d, sport %q, priority %q", len(p.Name), p.Sport, p.Priority)
+	if utf8.RuneCountInString(p.Name) != 80 || p.Sport != "running" || p.Priority != "C" {
+		t.Errorf("name length %d runes, sport %q, priority %q", utf8.RuneCountInString(p.Name), p.Sport, p.Priority)
+	}
+}
+
+// The cut is in runes: a byte cut through a multi-byte name would keep only
+// 40 letters of an accented name and can split a character.
+func TestProposeGoalCutsAMultiByteNameByRunes(t *testing.T) {
+	long := strings.Repeat("é", 120)
+	f := newFake(t, answer(t, `{"name":"`+long+`","sport":"cycling","eventDate":"","priority":"B","targetDistanceKm":0,"targetElevationM":0,"explanation":""}`))
+	c := newClient(t, f.srv.URL+"/v1", "")
+
+	p, err := c.ProposeGoal(t.Context(), "x", goalToday)
+	if err != nil {
+		t.Fatalf("ProposeGoal: %v", err)
+	}
+	if n := utf8.RuneCountInString(p.Name); n != 80 || !utf8.ValidString(p.Name) {
+		t.Errorf("name = %d runes (valid UTF-8: %v), want 80 valid runes", n, utf8.ValidString(p.Name))
 	}
 }
 

@@ -112,7 +112,7 @@ test:
 # Run the local-model evaluation set against a live endpoint (set DOMESTIQUE_LLM_EVAL_URL).
 # Never part of CI: it needs a model running.
 llm-eval:
-    go test -tags llmeval ./apps/api/internal/llm/ -run TestEval -count=1 -v
+    go test -tags llmeval ./apps/api/internal/llm/ -run TestEval -count=1 -v -timeout 90m
 
 check: lint test
 

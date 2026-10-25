@@ -56,6 +56,7 @@ var patternWriteDeadlines = map[string]time.Duration{
 	"GET /api/shares/{token}/gpx":              downloadWriteDeadline,
 	"GET /api/shares/{token}/fit":              downloadWriteDeadline,
 	"GET /api/training/workouts/{id}/fit":      downloadWriteDeadline,
+	"GET /api/training/goals/{id}/explain":     downloadWriteDeadline,
 	"GET /api/komoot/tours":                    downloadWriteDeadline,
 	"GET /api/garmin/courses":                  downloadWriteDeadline,
 	"GET /api/wahoo/routes":                    downloadWriteDeadline,
