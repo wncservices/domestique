@@ -232,7 +232,7 @@ export function usePlanGoals(deps: {
     }
   }
 
-  // --- plan explanation: Phase E's read-only half — see internal/narration ---
+  // --- plan explanation: Phase E's read-only half — see internal/llm ---
 
   const explainingGoal = ref('')
   const explanationFor = ref<string | null>(null)

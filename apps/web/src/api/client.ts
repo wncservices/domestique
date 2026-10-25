@@ -884,9 +884,9 @@ export const api = {
       method: 'POST',
       ...(weekStart ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ weekStart }) } : {}),
     }),
-  /** Asks internal/narration for a few plain-language sentences about this
-   *  same reconciled plan — 412 when the deployment has no
-   *  ANTHROPIC_API_KEY configured, 502 when the model call itself fails. */
+  /** Asks the app's own model for a few plain-language sentences about this
+   *  same reconciled plan — 412 when the explain job is off or no model is
+   *  configured, 502 when the model call itself fails. */
   explainPlan: (id: string) =>
     request<PlanExplanation>(`/api/training/goals/${encodeURIComponent(id)}/explain`),
 
@@ -1215,7 +1215,7 @@ export const api = {
    *  other training route. */
   replan: () => request<ReplanResult>('/api/training/replan', { method: 'POST' }),
   /** Turns one sentence into a validated preview; applies nothing. `today` is
-   *  the browser's own day. 412 means this deployment has no narration key. */
+   *  the browser's own day. 412 means the plan-edit job is off or no model is configured. */
   proposePlanEdit: (text: string, today: string) =>
     request<PlanEditResponse>(`/api/training/plan/propose-edit?today=${encodeURIComponent(today)}`, {
       method: 'POST',

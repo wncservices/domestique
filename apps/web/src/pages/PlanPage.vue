@@ -73,7 +73,7 @@ const route = useRoute()
 const router = useRouter()
 const { canSyncGarmin, routingConfigured } = useLibrary()
 
-// --- me: only fetched here for narrationEnabled, so "Explain this plan"
+// --- me: only fetched here for llmJobs, so "Explain this plan"
 // can avoid offering a button that would 412 — see meDTO's own doc comment
 // on the server for why this is the established shape for every optional
 // feature flag, not just auth. ---
@@ -873,7 +873,7 @@ const pageState = computed(() =>
 
     <PlanEmptyState
       v-else-if="pageState === 'empty'"
-      :narration-enabled="!!me?.narrationEnabled"
+      :propose-goal-enabled="!!me?.llmJobs.proposeGoal"
       :starting="startingGeneralPlan"
       @goal="openCreateGoal"
       @from-route="fromRoute"
@@ -885,7 +885,7 @@ const pageState = computed(() =>
         :focus="effectiveFocus"
         :goals="goals"
         :projection="projection"
-        :narration-enabled="!!me?.narrationEnabled"
+        :explain-enabled="!!me?.llmJobs.explainPlan"
         :explaining="headerExplaining"
         :explanation="headerExplanation"
         @explain="headerExplain"
@@ -959,7 +959,7 @@ const pageState = computed(() =>
         @decline="(id: string) => answerRideTogether(id, false)"
       />
 
-      <PlanEditBox v-if="me?.narrationEnabled" :loading="proposingEdit" :message="planEditMessage" @submit="proposeEdit" />
+      <PlanEditBox v-if="me?.llmJobs.planEdits" :loading="proposingEdit" :message="planEditMessage" @submit="proposeEdit" />
 
       <WeekStrip
         v-if="week"
@@ -1026,7 +1026,7 @@ const pageState = computed(() =>
       v-model:note="goalNote"
       :editing="!!editingGoalId"
       :form="goalForm"
-      :narration-enabled="!!me?.narrationEnabled"
+      :propose-goal-enabled="!!me?.llmJobs.proposeGoal"
       :saving="savingGoal"
       :proposing="proposingGoal"
       :explanation="goalExplanation"

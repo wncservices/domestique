@@ -9,7 +9,7 @@ import type { ThresholdField } from '@/utils/fitnessMath'
 
 const props = defineProps<{
   profile: RiderProfile
-  narrationEnabled: boolean
+  proposeProfileEnabled: boolean
   canSyncGarmin: boolean
   proposing: boolean
   explanation: string
@@ -286,7 +286,7 @@ const experienceItems = computed(() => {
           </UButton>
         </div>
       </UFormField>
-      <div v-if="narrationEnabled" class="mt-4 pt-4 border-t border-default">
+      <div v-if="proposeProfileEnabled" class="mt-4 pt-4 border-t border-default">
         <p class="text-[length:var(--text-body)] font-medium mb-1">Tell us about an upcoming change</p>
         <p class="text-[length:var(--text-label)] text-muted mb-2">
           e.g. "I'm traveling for work next week, only free on the weekend" — suggests changes to the fields
@@ -305,6 +305,7 @@ const experienceItems = computed(() => {
             Suggest changes
           </UButton>
         </div>
+        <p v-if="proposing" class="mt-2 text-[length:var(--text-label)] text-muted">This can take up to a minute.</p>
         <p v-if="explanation" class="mt-2 text-[length:var(--text-body)] text-muted italic">{{ explanation }}</p>
       </div>
     </div>
