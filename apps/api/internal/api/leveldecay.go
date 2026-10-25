@@ -16,9 +16,10 @@ import (
 // zone whose last matched ride is more than 21 days back (or that was never
 // ridden) loses 0.1, never going below the level the rider started on.
 //
-// It runs inside AutoScheduleTick, under the scheduling lock, after the season
-// is planned and reoptimise, and before AdaptWorkouts, so a session built or
-// eased in the same pass already sees the lowered level. It never fails the
+// It runs inside AutoScheduleTick, so only with auto-schedule on, under the
+// scheduling lock, after the metrics pass and before the season is planned:
+// a week filled or refreshed in the same tick is built from the lowered
+// level. Sessions already built keep theirs until they are refreshed. It never fails the
 // tick, and logs counts only: a level next to a rider would be health data.
 func (s *Server) decayLevels(ctx context.Context) {
 	if s.Training == nil || !s.inMorningSlot(s.now()) {

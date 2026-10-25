@@ -48,8 +48,7 @@ var recalibratedZones = map[workout.Zone]bool{
 // writes the marker, so no whole-row save can revert it.
 //
 // A 3-25% drop raises the levels by the mirror of a rise's delta: the same
-// rung is now a harder percentage of a smaller FTP. A drop under 3% or over
-// 25% only moves the marker, as a typo-sized rise does.
+// rung is now a harder percentage of a smaller FTP.
 //
 // The endurance level is never touched (see recalibratedZones): it is not
 // FTP-relative, in either direction.
@@ -61,9 +60,8 @@ var recalibratedZones = map[workout.Zone]bool{
 // recalibrates at the second step, measured against 255, and 255 -> 250 -> 255
 // recalibrates nothing. Only a typo-sized change (over 25%, either way) moves
 // the marker without moving levels, so a later real change is measured against
-// the right base.
-// Levels move only for a 3-25% change, and only for zones the rider already
-// has a saved level for.
+// the right base. Levels move only for a 3-25% change, and only for zones the
+// rider already has a saved level for.
 //
 // trigger says what moved the FTP ("auto_applied", "suggestion_accepted" or
 // "profile_saved") and is stored with each lowered zone's reason: the levels

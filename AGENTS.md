@@ -733,8 +733,10 @@ is no move; clamped to [1, 10]; rule `durability_move`, subject `cycling:enduran
 shortened long ride is not generated, so it does not move it. The scheduler's long slot weighs
 `1.8 + 0.1 x (endurance level - starting level)`, clamped to 1.8-2.4 (1.8 with no endurance level):
 only the split of the week's rest hours changes, and there is no per-day-hours cap on it, as there
-never was. **Decay** (`decayLevels`, `internal/api/leveldecay.go`) runs from `AutoScheduleTick`
-under the scheduling lock, in the day's first sync slot (`inMorningSlot`), once per rider per ISO week:
+never was. **Decay** (`decayLevels`, `internal/api/leveldecay.go`) runs from `AutoScheduleTick`, so
+only with auto-schedule on, under the scheduling lock, after the metrics pass and before the season
+pass (a week filled or refreshed in that tick uses the lowered level; sessions already built keep
+theirs until refreshed), in the day's first sync slot (`inMorningSlot`), once per rider per ISO week:
 `level_decay_runs (rider, week_start)` is the claim, registered in `riderTables` and removed by
 `DeleteRider`, and it is written only after every read succeeded. It covers riders with a goal, and
 only **matched** rides count as training a zone (the last analysis linked to a workout of that zone,

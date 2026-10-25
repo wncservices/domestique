@@ -41,7 +41,7 @@ const keyOf = (sport: string, zone: string) => `${sport}:${zone}`
 
 // Easiest to hardest, so the tiles read up the intensity ladder rather than
 // alphabetically. An unknown zone goes last.
-const ZONE_ORDER = ['tempo', 'sweet_spot', 'threshold', 'vo2max', 'anaerobic', 'intervals']
+const ZONE_ORDER = ['endurance', 'tempo', 'sweet_spot', 'threshold', 'vo2max', 'anaerobic', 'intervals']
 function zoneOrder(zone: string): number {
   const i = ZONE_ORDER.indexOf(zone)
   return i === -1 ? ZONE_ORDER.length : i
