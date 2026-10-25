@@ -19,6 +19,7 @@ import type {
   ReadinessResponse,
   RideTogether,
   RiderProfile,
+  TrainingNotes,
   TrainingWeek,
   WeekDay,
 } from '@/api/types'
@@ -26,6 +27,7 @@ import AlternatesMenu from '@/components/plan/AlternatesMenu.vue'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
 import CheckInCard from '@/components/today/CheckInCard.vue'
+import WhyPopover from '@/components/plan/WhyPopover.vue'
 import ReadinessChip from '@/components/plan/ReadinessChip.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
 import AppPage from '@/components/ui/AppPage.vue'
@@ -72,6 +74,8 @@ const snapshots = ref<FitnessSnapshot[]>([])
 const ftpTests = ref<FtpTests | null>(null)
 const rideTogether = ref<RideTogether[]>([])
 const lifeEvents = ref<LifeEvent[]>([])
+// Today's model-written changes note; null when there is none (or the read failed).
+const notes = ref<TrainingNotes | null>(null)
 // True only once that read has succeeded. Until then (pending or failed) the
 // matching prompt stays hidden, so neither a slow nor a failed read looks like
 // "you have not set this up".
@@ -145,6 +149,7 @@ async function loadAll() {
     quietly(api.ftpTests(), null).then((v) => (ftpTests.value = v)),
     quietly(api.rideTogether(), { proposals: [] }).then((v) => (rideTogether.value = v.proposals)),
     quietly(api.lifeEvents(), { events: [] }).then((v) => (lifeEvents.value = v.events)),
+    quietly(api.trainingNotes(), { changes: null, weekly: null }).then((v) => (notes.value = v)),
     weather.load(),
   ])
 }
@@ -206,6 +211,15 @@ async function pushToGarmin() {
 async function onCheckInSaved(c: CheckIn) {
   checkIn.value = c
   await loadReadiness()
+}
+
+// A life event applied from the check-in changes the week and the verdict.
+async function onLifeChanged() {
+  await Promise.all([
+    loadWeek(),
+    loadReadiness(),
+    quietly(api.lifeEvents(), { events: [] }).then((v) => (lifeEvents.value = v.events)),
+  ])
 }
 
 async function reloadAfterSwap() {
@@ -300,7 +314,7 @@ async function dismissSuggestion() {
       <template v-else-if="week">
         <UAlert v-if="weekFailed" color="error" variant="subtle" icon="i-lucide-triangle-alert" title="Could not refresh today. Showing what was loaded earlier." />
 
-        <CheckInCard :check-in="checkIn" @saved="onCheckInSaved" />
+        <CheckInCard :check-in="checkIn" @saved="onCheckInSaved" @life-changed="onLifeChanged" />
 
         <UCard variant="outline" data-testid="today-card">
           <div class="flex flex-col gap-3">
@@ -367,6 +381,16 @@ async function dismissSuggestion() {
                 <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Finish your profile</RouterLink>.
               </p>
             </template>
+          </div>
+        </UCard>
+
+        <UCard v-if="notes?.changes" variant="outline" data-testid="today-changes">
+          <div class="flex flex-col gap-2">
+            <h2 class="text-[length:var(--text-label)] font-medium text-muted">This morning's changes</h2>
+            <p class="text-[length:var(--text-body)] text-highlighted">{{ notes.changes.text }}</p>
+            <div v-if="workout?.why">
+              <WhyPopover :why="workout.why" />
+            </div>
           </div>
         </UCard>
 
