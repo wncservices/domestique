@@ -104,7 +104,7 @@ func TestOutboundSpansKeepSchemeHostAndRoute(t *testing.T) {
 // Every outbound client must build its transport through telemetry
 // .OutboundTransport; a client that calls otelhttp.NewTransport itself skips
 // the span name formatter, and a future change to that helper would miss it.
-// This is the eleven-client checklist from AGENTS.md as a test.
+// This is the twelve-client checklist from AGENTS.md as a test.
 func TestEveryOutboundClientUsesTheRedactingTransport(t *testing.T) {
 	root := ".."
 	var users []string
@@ -131,7 +131,7 @@ func TestEveryOutboundClientUsesTheRedactingTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(users) != 11 {
-		t.Errorf("%d clients use telemetry.OutboundTransport (%v), want the 11 outbound clients", len(users), users)
+	if len(users) != 12 {
+		t.Errorf("%d clients use telemetry.OutboundTransport (%v), want the 12 outbound clients", len(users), users)
 	}
 }
