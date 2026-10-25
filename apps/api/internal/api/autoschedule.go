@@ -201,4 +201,8 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		s.repayLoad(ctx)
 		s.autoPushWorkouts(ctx)
 	})
+
+	// After the scheduling pass has released its lock: a model call can take
+	// seconds, and the morning notes explain what this pass just changed.
+	s.runLLMNotes(ctx)
 }
