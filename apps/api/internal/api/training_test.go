@@ -15,7 +15,6 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
-	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -683,19 +682,6 @@ func TestGoalPeriodizationOfAGoalWithNoEventDateIsARollingPlan(t *testing.T) {
 	}
 }
 
-// fakeAnthropic stands in for the real Anthropic API — see
-// internal/narration's own test file for the lower-level client tests;
-// these exercise the wiring through the HTTP handlers instead.
-func fakeAnthropic(t *testing.T, text string) *httptest.Server {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"content":[{"type":"text","text":%q}]}`, text)
-	}))
-	t.Cleanup(server.Close)
-	return server
-}
-
 func TestExplainPlanRequiresNarrationConfigured(t *testing.T) {
 	h := newTrainingHarness(t)
 	now := h.pinClock()
@@ -705,17 +691,14 @@ func TestExplainPlanRequiresNarrationConfigured(t *testing.T) {
 
 	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/explain", "")
 	if resp.StatusCode != http.StatusPreconditionFailed {
-		t.Errorf("status = %d, want 412 (no ANTHROPIC_API_KEY configured)", resp.StatusCode)
+		t.Errorf("status = %d, want 412 (no llm.base_url configured)", resp.StatusCode)
 	}
 }
 
 func TestExplainPlanReturnsTheModelsTextAndIsOwnerOnly(t *testing.T) {
 	h := newTrainingHarness(t)
 	now := h.pinClock()
-	fake := fakeAnthropic(t, "This week starts your base phase — steady, easy miles.")
-	client := narration.New("test-key")
-	client.APIBase = fake.URL
-	h.srv.Narration = client
+	withLLM(t, h.srv, fixed(`{"text":"This week starts your base phase — steady, easy miles."}`))
 
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
 		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, now.AddDate(0, 0, 70).Format("2006-01-02")))
@@ -748,13 +731,13 @@ func TestProposeProfileChangeRequiresNarrationConfigured(t *testing.T) {
 	h := newTrainingHarness(t)
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/profile/propose", `{"note":"traveling next week"}`)
 	if resp.StatusCode != http.StatusPreconditionFailed {
-		t.Errorf("status = %d, want 412 (no ANTHROPIC_API_KEY configured)", resp.StatusCode)
+		t.Errorf("status = %d, want 412 (no llm.base_url configured)", resp.StatusCode)
 	}
 }
 
 func TestProposeProfileChangeRequiresANote(t *testing.T) {
 	h := newTrainingHarness(t)
-	h.srv.Narration = narration.New("test-key")
+	withLLM(t, h.srv, fixed(`{}`))
 
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/profile/propose", `{"note":""}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -768,10 +751,7 @@ func TestProposeProfileChangeRequiresANote(t *testing.T) {
 // actually stored. See handleProposeProfileChange's own doc comment.
 func TestProposeProfileChangeNeverWritesTheStoredProfile(t *testing.T) {
 	h := newTrainingHarness(t)
-	fake := fakeAnthropic(t, `{"availableDays": ["sat", "sun"], "hoursPerAvailableDay": 4, "explanation": "Only weekends free while traveling."}`)
-	client := narration.New("test-key")
-	client.APIBase = fake.URL
-	h.srv.Narration = client
+	withLLM(t, h.srv, fixed(`{"availableDays": ["sat", "sun"], "hoursPerAvailableDay": 4, "explanation": "Only weekends free while traveling."}`))
 
 	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
 		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
@@ -1064,7 +1044,7 @@ func TestProposeGoalRequiresNarrationConfigured(t *testing.T) {
 	h := newTrainingHarness(t)
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/propose", `{"note":"gran fondo in june"}`)
 	if resp.StatusCode != http.StatusPreconditionFailed {
-		t.Errorf("status = %d, want 412 (no ANTHROPIC_API_KEY configured)", resp.StatusCode)
+		t.Errorf("status = %d, want 412 (no llm.base_url configured)", resp.StatusCode)
 	}
 }
 
@@ -1074,11 +1054,8 @@ func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
 	h := newTrainingHarness(t)
 	now := h.pinClock()
 	future := now.AddDate(0, 3, 0).Format("2006-01-02")
-	fake := fakeAnthropic(t, fmt.Sprintf(
-		`{"name":"Gran Fondo","sport":"cycling","eventDate":%q,"priority":"A","targetDistanceKm":180,"targetElevationM":2400,"explanation":"ok"}`, future))
-	client := narration.New("test-key")
-	client.APIBase = fake.URL
-	h.srv.Narration = client
+	withLLM(t, h.srv, fixed(fmt.Sprintf(
+		`{"name":"Gran Fondo","sport":"cycling","eventDate":%q,"priority":"A","targetDistanceKm":180,"targetElevationM":2400,"explanation":"ok"}`, future)))
 
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/propose",
 		`{"note":"gran fondo, 180km, 2400m of climbing"}`)

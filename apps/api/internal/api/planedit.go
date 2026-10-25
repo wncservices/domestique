@@ -16,8 +16,8 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
+	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/model"
-	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 	"github.com/wncservices/domestique/apps/api/internal/workoutlib"
@@ -90,7 +90,7 @@ type planEditResponseDTO struct {
 	Unsupported string               `json:"unsupported,omitempty"`
 }
 
-var planEditCaps = narration.Capabilities{SwapAlternate: true, ConvertIndoor: indoorAvailable}
+var planEditCaps = llm.Capabilities{SwapAlternate: true, ConvertIndoor: indoorAvailable}
 
 // handleProposePlanEdit is POST /api/training/plan/propose-edit {text}.
 func (s *Server) handleProposePlanEdit(w http.ResponseWriter, r *http.Request) {
@@ -98,8 +98,8 @@ func (s *Server) handleProposePlanEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rider := auth.FromContext(r.Context()).User
-	if s.Narration == nil {
-		s.logger().Warn("plan edit requested but no ANTHROPIC_API_KEY is configured", "rider", rider)
+	if !s.LLM.Enabled(llm.JobPlanEdits) {
+		s.logger().Warn("plan edit requested but the plan_edits job is off or llm.base_url is not set", "rider", rider)
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": planEditNoKeyMessage})
 		return
 	}
@@ -129,23 +129,22 @@ func (s *Server) handleProposePlanEdit(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	edits, err := s.Narration.ProposePlanEdits(ctx, text, view.view)
+	edits, err := s.LLM.ProposePlanEdits(ctx, text, view.view)
 	if err != nil {
-		outcome := "model_error"
+		// A refusal and an answer that is not the schema both read as "could
+		// not understand", the same message the form fallback has always had.
+		// The outcome word only: an error can carry a fragment of the request.
+		outcome, msg := "model_error", planEditUnavailableMsg
 		switch {
-		case errors.Is(err, narration.ErrRejected):
-			outcome = "rejected"
-			s.logger().Warn("plan edit proposal rejected", "rider", rider, "outcome", outcome)
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": planEditConfusedMessage})
-			return
-		case errors.Is(err, narration.ErrNoToolCall):
-			outcome = "no_tool_call"
-		case errors.Is(err, context.DeadlineExceeded):
+		case errors.Is(err, llm.ErrRejected):
+			outcome, msg = "rejected", planEditConfusedMessage
+		case errors.Is(err, llm.ErrInvalid):
+			outcome, msg = "invalid", planEditConfusedMessage
+		case errors.Is(err, llm.ErrTimeout):
 			outcome = "timeout"
 		}
-		// The outcome word only: an error can carry a fragment of the request.
 		s.logger().Warn("plan edit proposal failed", "rider", rider, "outcome", outcome)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": planEditUnavailableMsg})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": msg})
 		return
 	}
 
@@ -161,7 +160,7 @@ func (s *Server) handleProposePlanEdit(w http.ResponseWriter, r *http.Request) {
 
 // planView is the model's view and the key back from its handles.
 type planView struct {
-	view    narration.PlanView
+	view    llm.PlanView
 	handles map[string]workout.Workout
 	// workouts, events and profile are what validation reads, fetched once.
 	workouts []workout.Workout
@@ -200,12 +199,12 @@ func (s *Server) buildPlanView(ctx context.Context, rider string, today time.Tim
 	})
 	pv := planView{
 		handles: map[string]workout.Workout{}, workouts: workouts, events: events, profile: profile, ridden: ridden,
-		view: narration.PlanView{
+		view: llm.PlanView{
 			Today: todayStr, AvailableDays: append([]string(nil), profile.AvailableDays...),
 			Capabilities: planEditCaps,
 		},
 	}
-	byDate := map[string][]narration.ViewSession{}
+	byDate := map[string][]llm.ViewSession{}
 	n := 0
 	lastDay := today.AddDate(0, 0, planEditWindowDays-1).Format(dateLayout)
 	for _, wk := range workouts {
@@ -215,7 +214,7 @@ func (s *Server) buildPlanView(ctx context.Context, rider string, today time.Tim
 		n++
 		handle := fmt.Sprintf("w%d", n)
 		pv.handles[handle] = wk
-		vs := narration.ViewSession{
+		vs := llm.ViewSession{
 			Handle: handle, Sport: string(wk.Sport), Zone: string(wk.Zone),
 			Minutes: int(workout.PlannedSeconds(wk.Steps)/60 + 0.5),
 			FTPTest: wk.TestProtocol != "", Indoor: wk.Indoor, Ridden: ridden[wk.ID],
@@ -234,7 +233,7 @@ func (s *Server) buildPlanView(ctx context.Context, rider string, today time.Tim
 	}
 	for i := 0; i < planEditWindowDays; i++ {
 		d := today.AddDate(0, 0, i).Format(dateLayout)
-		pv.view.Days = append(pv.view.Days, narration.ViewDay{Date: d, Sessions: byDate[d]})
+		pv.view.Days = append(pv.view.Days, llm.ViewDay{Date: d, Sessions: byDate[d]})
 	}
 	return pv, nil
 }
@@ -270,7 +269,7 @@ func generatedName(wk workout.Workout) bool {
 
 // validatePlanEdits re-checks every intent, never trusting the model, and turns
 // the survivors into diffs by the same code as the form.
-func (s *Server) validatePlanEdits(ctx context.Context, rider string, today time.Time, pv planView, edits narration.PlanEdits) (planEditResponseDTO, error) {
+func (s *Server) validatePlanEdits(ctx context.Context, rider string, today time.Time, pv planView, edits llm.PlanEdits) (planEditResponseDTO, error) {
 	out := planEditResponseDTO{Items: []planEditItemDTO{}, Dropped: []planEditDroppedDTO{}, Unsupported: edits.Unsupported}
 	todayStr := today.Format(dateLayout)
 	horizon := today.AddDate(0, 0, planEditHorizonDays).Format(dateLayout)
@@ -279,14 +278,14 @@ func (s *Server) validatePlanEdits(ctx context.Context, rider string, today time
 	// Events accepted so far in this reply, so two of them cannot overlap.
 	events := append([]lifeevents.Event(nil), pv.events...)
 
-	drop := func(in narration.Intent, reason string) {
+	drop := func(in llm.Intent, reason string) {
 		out.Dropped = append(out.Dropped, planEditDroppedDTO{Type: in.Type, Reason: capitalizeFirst(reason) + "."})
 	}
 	inRange := func(date string) bool { return date >= todayStr && date <= horizon }
 
 	for _, in := range edits.Intents {
 		switch in.Type {
-		case narration.IntentCreateLifeEvent:
+		case llm.IntentCreateLifeEvent:
 			e := lifeevents.Event{Rider: rider, Kind: in.Kind, Start: in.StartDate, End: in.EndDate, Option: in.Option}
 			if err := lifeevents.Validate(e, now); err != nil {
 				drop(in, err.Error())
@@ -314,7 +313,7 @@ func (s *Server) validatePlanEdits(ctx context.Context, rider string, today time
 				Diff:   lifeDiffDTOFrom(plan.diff),
 			})
 
-		case narration.IntentMoveWorkout, narration.IntentSwapAlternate, narration.IntentConvertIndoor:
+		case llm.IntentMoveWorkout, llm.IntentSwapAlternate, llm.IntentConvertIndoor:
 			wk, why := pv.resolve(in.Workout, in.Type)
 			if why != "" {
 				drop(in, why)
@@ -342,7 +341,7 @@ func (pv planView) resolve(handle, intentType string) (workout.Workout, string) 
 		return workout.Workout{}, planEditSessionGoneNote
 	case pv.ridden[wk.ID]:
 		return workout.Workout{}, planEditRiddenNote
-	case wk.TestProtocol != "" && intentType != narration.IntentMoveWorkout:
+	case wk.TestProtocol != "" && intentType != llm.IntentMoveWorkout:
 		return workout.Workout{}, planEditFTPTestNote
 	case wk.TestProtocol == "" && !scheduler.IsPlanMade(wk):
 		return workout.Workout{}, planEditNotPlanMadeNote
@@ -353,13 +352,13 @@ func (pv planView) resolve(handle, intentType string) (workout.Workout, string) 
 // singleSessionItem validates one move, swap or conversion and builds its diff
 // line. why is non-empty when the intent is dropped.
 func (s *Server) singleSessionItem(ctx context.Context, rider string, today time.Time, pv planView, events []lifeevents.Event,
-	wk workout.Workout, in narration.Intent, inRange func(string) bool, horizon string) (planEditItemDTO, string, error) {
+	wk workout.Workout, in llm.Intent, inRange func(string) bool, horizon string) (planEditItemDTO, string, error) {
 
 	item := planEditItemDTO{Intent: planEditIntentDTO{Type: in.Type, WorkoutID: wk.ID}}
 	change := lifeevents.Change{WorkoutID: wk.ID, Date: wk.Date, Name: wk.Name, Default: true}
 
 	switch in.Type {
-	case narration.IntentMoveWorkout:
+	case llm.IntentMoveWorkout:
 		if !inRange(in.ToDate) {
 			return item, fmt.Sprintf(planEditOutOfRangeFormat, horizon), nil
 		}
@@ -373,7 +372,7 @@ func (s *Server) singleSessionItem(ctx context.Context, rider string, today time
 		change.Reason = fmt.Sprintf("Move it to %s, as you asked.", dayLabel(in.ToDate))
 		item.Intent.ToDate = in.ToDate
 
-	case narration.IntentSwapAlternate:
+	case llm.IntentSwapAlternate:
 		kind := alternates.Kind(in.Alternate)
 		if !kind.Valid() {
 			return item, "that is not an alternate I can offer", nil
@@ -394,7 +393,7 @@ func (s *Server) singleSessionItem(ctx context.Context, rider string, today time
 		change.Reason = fmt.Sprintf("Swap it for the %s version: %s, %d min.", in.Alternate, opt.Name, minutes)
 		item.Intent.Alternate = in.Alternate
 
-	case narration.IntentConvertIndoor:
+	case llm.IntentConvertIndoor:
 		if !indoorAvailable {
 			return item, "indoor conversion is not available here", nil
 		}

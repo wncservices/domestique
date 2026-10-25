@@ -16,6 +16,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
+	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
@@ -952,7 +953,7 @@ func (s *Server) autoScheduleGoalWeek(ctx context.Context, g workout.Goal, weekS
 	return s.scheduleGoalWeek(ctx, g, weekStart, "")
 }
 
-// handleExplainPlan asks internal/narration for a plain-language summary
+// handleExplainPlan asks internal/llm for a plain-language summary
 // of a goal's reconciled periodization plan — Phase E of
 // docs/training-plan.md, layered on top of the exact same plan
 // handleGoalPeriodization already computes and shows as a table (via
@@ -961,8 +962,8 @@ func (s *Server) handleExplainPlan(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
 	}
-	if s.Narration == nil {
-		s.logger().Warn("plan explanation requested but no ANTHROPIC_API_KEY is configured")
+	if !s.LLM.Enabled(llm.JobExplainPlan) {
+		s.logger().Warn("plan explanation requested but the explain_plan job is off or llm.base_url is not set")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment has no narration configured",
 		})
@@ -994,7 +995,7 @@ func (s *Server) handleExplainPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	text, err := s.Narration.ExplainPlan(r.Context(), g, plan)
+	text, err := s.LLM.ExplainPlan(r.Context(), g, plan)
 	if err != nil {
 		// Contained the same way Komoot's own undocumented-API failures are
 		// (see AGENTS.md's Komoot section): a third-party outage degrades
@@ -1137,7 +1138,7 @@ type profileProposalDTO struct {
 	Explanation          string   `json:"explanation,omitempty"`
 }
 
-// maxNarrationNoteRunes bounds the free text sent to the paid model by the
+// maxNarrationNoteRunes bounds the free text sent to the model by the
 // profile and goal proposal endpoints. A sentence or two; the plan-edit
 // endpoint's typed sentence is capped at 300, and these notes get a little
 // more room because they describe a whole event or a week.
@@ -1184,8 +1185,8 @@ func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Reque
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
 	}
-	if s.Narration == nil {
-		s.logger().Warn("profile change proposal requested but no ANTHROPIC_API_KEY is configured")
+	if !s.LLM.Enabled(llm.JobProposeProfile) {
+		s.logger().Warn("profile change proposal requested but the propose_profile job is off or llm.base_url is not set")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment has no narration configured",
 		})
@@ -1208,7 +1209,7 @@ func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	proposal, err := s.Narration.ProposeProfileChange(r.Context(), body.Note, profile)
+	proposal, err := s.LLM.ProposeProfileChange(r.Context(), body.Note, profile)
 	if err != nil {
 		s.logger().Warn("profile change proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not reach the narration service"})
@@ -1241,8 +1242,8 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
 	}
-	if s.Narration == nil {
-		s.logger().Warn("goal proposal requested but no ANTHROPIC_API_KEY is configured")
+	if !s.LLM.Enabled(llm.JobProposeGoal) {
+		s.logger().Warn("goal proposal requested but the propose_goal job is off or llm.base_url is not set")
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "this deployment has no narration configured",
 		})
@@ -1259,7 +1260,7 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proposal, err := s.Narration.ProposeGoal(r.Context(), body.Note, s.now())
+	proposal, err := s.LLM.ProposeGoal(r.Context(), body.Note, s.now())
 	if err != nil {
 		s.logger().Warn("goal proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not turn that into a goal — try rephrasing it, or fill the form in by hand"})

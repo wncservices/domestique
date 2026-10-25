@@ -204,3 +204,19 @@ routing:
   # API key is required, even for the public instance's free tier — set
   # DOMESTIQUE_ROUTING_API_KEY in the environment, never here.
   # url: https://api.openrouteservice.org
+
+# The AI-assisted features: a plain-language plan explanation, goal and profile
+# suggestions from a sentence, and the plan edit box. They run on the
+# self-hosted model behind any OpenAI-compatible endpoint, so a rider's own
+# words stay in the deployment. Off unless base_url is set. The API key, if the
+# endpoint wants one, is DOMESTIQUE_LLM_API_KEY in the environment, never here.
+llm:
+  # In the cluster: the gateway in front of the local model.
+  # base_url: http://agentgateway.agentgateway.svc.cluster.local:4000/v1
+  # model: qwen3.5-9b
+  # Switch single features off by job name; every job defaults to on.
+  # jobs:
+  #   explain_plan: true
+  #   propose_profile: true
+  #   propose_goal: true
+  #   plan_edits: true

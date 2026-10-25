@@ -8,20 +8,18 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
-	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
-// The natural-language box. A fake Anthropic server answers every request; the
-// real API is never called. The clock is Wednesday 2026-10-07 and the rider
+// The natural-language box. A fake OpenAI-compatible endpoint answers every
+// request; the real model is never called. The clock is Wednesday 2026-10-07 and the rider
 // trains Tue/Thu/Sat/Sun.
 
 const (
@@ -29,35 +27,6 @@ const (
 	secretGoal    = "Zoersel Gran Fondo Quest"
 	secretSession = "SECRET-SENTENCE-PIZZA"
 )
-
-type fakeModel struct {
-	srv   *httptest.Server
-	body  []byte
-	reply string
-	code  int
-	calls int
-}
-
-func (h *onceHarness) withNarration(t *testing.T, reply string) *fakeModel {
-	t.Helper()
-	f := &fakeModel{reply: reply, code: 200}
-	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		f.calls++
-		f.body, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(f.code)
-		_, _ = io.WriteString(w, f.reply)
-	}))
-	t.Cleanup(f.srv.Close)
-	c := narration.New("test-key")
-	c.APIBase = f.srv.URL
-	h.srv.Narration = c
-	return f
-}
-
-func tool(input string) string {
-	return `{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"propose_plan_edits","input":` + input + `}]}`
-}
 
 func intent(typ string, fields map[string]string) string {
 	get := func(k string) string {
@@ -190,14 +159,14 @@ func TestARequestCarriesTheMinimumAndNothingPrivate(t *testing.T) {
 	if !renamed {
 		t.Fatal("no plan-made session to rename")
 	}
-	f := h.withNarration(t, tool(intents()))
+	f := h.withLLMReply(t, intents())
 
 	if status, _ := h.propose(t, "wilant", "I am travelling Thursday to Sunday "+secretSession); status != http.StatusOK {
 		t.Fatalf("status %d", status)
 	}
-	body := string(f.body)
-	if f.calls != 1 {
-		t.Fatalf("%d calls to the model, want 1", f.calls)
+	body := string(f.last)
+	if f.calls.Load() != 1 {
+		t.Fatalf("%d calls to the model, want 1", f.calls.Load())
 	}
 
 	for _, secret := range []string{
@@ -217,7 +186,7 @@ func TestARequestCarriesTheMinimumAndNothingPrivate(t *testing.T) {
 		}
 	}
 	// What it does need.
-	for _, want := range []string{secretSession, "2026-10-07", "Wednesday", "tue", "w1", "rider_built", "propose_plan_edits"} {
+	for _, want := range []string{secretSession, "2026-10-07", "Wednesday", "tue", "w1", "rider_built", "plan_edits"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the request lacks %q", want)
 		}
@@ -228,10 +197,10 @@ func TestAWellFormedReplyIsAPreviewAndNothingIsWritten(t *testing.T) {
 	h := newOnceHarness(t)
 	h.tickedWithFreeSaturday(t)
 	handle, thu := h.handleFor(t, "2026-10-08")
-	h.withNarration(t, tool(intents(
+	h.withLLMReply(t, intents(
 		intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-10-14", "end_date": "2026-10-15", "option": "no_bike"}),
 		intent("move_workout", map[string]string{"workout": handle, "to_date": "2026-10-10"}),
-	)))
+	))
 	before := h.snapshot(t)
 
 	status, res := h.propose(t, "wilant", "away on the 14th and 15th, and put Thursday's ride on Saturday")
@@ -272,7 +241,7 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 	thuHandle, _ := h.handleFor(t, "2026-10-08")
 	sunHandle, _ := h.handleFor(t, "2026-10-11")
 
-	h.withNarration(t, tool(intents(
+	h.withLLMReply(t, intents(
 		intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-13-45", "end_date": "2026-10-15"}),                   // bad date
 		intent("create_life_event", map[string]string{"kind": "busy", "start_date": "2027-03-01", "end_date": "2027-03-02"}),                     // beyond 60 days
 		intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-10-20", "end_date": "2026-10-21", "option": "mild"}), // illegal pair
@@ -281,7 +250,7 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 		intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-09"}),                                                 // not an available day
 		intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-17"}),                                                 // inside an event
 		intent("move_workout", map[string]string{"workout": sunHandle, "to_date": "2026-10-05"}),                                                 // past
-	)))
+	))
 	// Eight intents is over the limit, so this reply is rejected outright:
 	// check the drops with five at a time below.
 	status, res := h.propose(t, "wilant", "x")
@@ -301,7 +270,7 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 	}
 	for name, c := range want {
 		t.Run(name, func(t *testing.T) {
-			h.withNarration(t, tool(intents(c[0])))
+			h.withLLMReply(t, intents(c[0]))
 			status, res := h.propose(t, "wilant", "x")
 			if status != http.StatusOK {
 				t.Fatalf("status %d: %s", status, res.Error)
@@ -318,20 +287,20 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 
 func TestTheWholeReplyIsRejectedWhenItIsNotTheSchema(t *testing.T) {
 	cases := map[string]string{
-		"unknown type": tool(intents(intent("wipe_plan", nil))),
-		"extra field":  tool(`{"intents":[],"unsupported":null,"apply":true}`),
-		"no tool call": `{"stop_reason":"end_turn","content":[{"type":"text","text":"done!"}]}`,
+		"unknown type": intents(intent("wipe_plan", nil)),
+		"extra field":  `{"intents":[],"unsupported":null,"apply":true}`,
+		"prose reply":  "done!",
 	}
 	for name, reply := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := newOnceHarness(t)
-			h.withNarration(t, reply)
+			h.withLLMReply(t, reply)
 			before := h.snapshot(t)
 			status, res := h.propose(t, "wilant", "x")
 			if status != http.StatusBadGateway {
 				t.Fatalf("status %d, want 502", status)
 			}
-			if name != "no tool call" && !strings.Contains(res.Error, "Life event form") {
+			if name != "prose reply" && !strings.Contains(res.Error, "Life event form") {
 				t.Errorf("error %q should point at the form", res.Error)
 			}
 			if h.snapshot(t) != before {
@@ -343,7 +312,7 @@ func TestTheWholeReplyIsRejectedWhenItIsNotTheSchema(t *testing.T) {
 
 func TestUnsupportedIsPassedAlongAsPlainText(t *testing.T) {
 	h := newOnceHarness(t)
-	h.withNarration(t, tool(`{"intents":[],"unsupported":"I can't book flights"}`))
+	h.withLLMReply(t, `{"intents":[],"unsupported":"I can't book flights"}`)
 	status, res := h.propose(t, "wilant", "book me a flight")
 	if status != http.StatusOK || res.Unsupported != "I can't book flights" || len(res.Items) != 0 {
 		t.Fatalf("status %d: %+v", status, res)
@@ -360,10 +329,10 @@ func TestASwapAndAnIndoorConversionAreValidatedByTheirOwnRules(t *testing.T) {
 	if wk.Zone != workout.ZoneEndurance {
 		kind = "easier"
 	}
-	h.withNarration(t, tool(intents(
+	h.withLLMReply(t, intents(
 		intent("swap_alternate", map[string]string{"workout": handle, "alternate": kind}),
 		intent("convert_indoor", map[string]string{"workout": handle}),
-	)))
+	))
 	status, res := h.propose(t, "wilant", "make Thursday easier and indoors")
 	if status != http.StatusOK {
 		t.Fatalf("status %d: %s", status, res.Error)
@@ -393,10 +362,10 @@ func TestASwapAndAnIndoorConversionAreValidatedByTheirOwnRules(t *testing.T) {
 			testHandle = hd
 		}
 	}
-	h.withNarration(t, tool(intents(
+	h.withLLMReply(t, intents(
 		intent("swap_alternate", map[string]string{"workout": handle, "alternate": other}),
 		intent("convert_indoor", map[string]string{"workout": testHandle}),
-	)))
+	))
 	_, res = h.propose(t, "wilant", "x")
 	if len(res.Dropped) < 1 {
 		t.Fatalf("expected drops, got items %d dropped %d", len(res.Items), len(res.Dropped))
@@ -412,7 +381,7 @@ func TestAModelFailureIs502WithAWarnAndNoSentenceInTheLog(t *testing.T) {
 	h := newOnceHarness(t)
 	var logs bytes.Buffer
 	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	f := h.withNarration(t, `{"error":{"message":"boom"}}`)
+	f := h.withLLMReply(t, `{"error":{"message":"boom"}}`)
 	f.code = 500
 
 	status, _ := h.propose(t, "wilant", secretSession)
@@ -429,7 +398,7 @@ func TestAModelFailureIs502WithAWarnAndNoSentenceInTheLog(t *testing.T) {
 
 	// And a success logs counts only.
 	logs.Reset()
-	f.code, f.reply = 200, tool(intents())
+	f.code, f.reply = 200, fixed(intents())
 	if status, _ := h.propose(t, "wilant", secretSession); status != http.StatusOK {
 		t.Fatalf("status %d", status)
 	}
@@ -441,7 +410,7 @@ func TestAModelFailureIs502WithAWarnAndNoSentenceInTheLog(t *testing.T) {
 	}
 }
 
-func TestWithoutAKeyTheBoxLogsAndSaysSo(t *testing.T) {
+func TestWithoutTheModelTheBoxLogsAndSaysSo(t *testing.T) {
 	h := newOnceHarness(t)
 	var logs bytes.Buffer
 	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -449,14 +418,14 @@ func TestWithoutAKeyTheBoxLogsAndSaysSo(t *testing.T) {
 	if status != http.StatusPreconditionFailed || res.Error == "" {
 		t.Fatalf("status %d %q, want 412 with the guard message", status, res.Error)
 	}
-	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "ANTHROPIC_API_KEY") {
+	if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "plan_edits") {
 		t.Errorf("the guard did not log a Warn:\n%s", logs.String())
 	}
 }
 
 func TestInputLimitsOwnerOnlyAndTheLimiter(t *testing.T) {
 	h := newOnceHarness(t)
-	f := h.withNarration(t, tool(intents()))
+	f := h.withLLMReply(t, intents())
 	if status, _ := h.propose(t, "wilant", ""); status != http.StatusBadRequest {
 		t.Errorf("empty text: status %d, want 400", status)
 	}
@@ -466,8 +435,8 @@ func TestInputLimitsOwnerOnlyAndTheLimiter(t *testing.T) {
 	if status, _ := h.propose(t, "wilant", strings.Repeat("é", 300)); status != http.StatusOK {
 		t.Errorf("300 characters: status %d, want 200", status)
 	}
-	if f.calls != 1 {
-		t.Errorf("%d model calls for three requests, want 1", f.calls)
+	if f.calls.Load() != 1 {
+		t.Errorf("%d model calls for three requests, want 1", f.calls.Load())
 	}
 	// A viewer cannot manage training.
 	resp := h.as("watcher", "viewers", http.MethodPost, "/api/training/plan/propose-edit", `{"text":"x"}`)

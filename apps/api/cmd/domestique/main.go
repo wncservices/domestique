@@ -47,10 +47,10 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
+	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/mailer"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
-	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -768,6 +768,25 @@ func runState(store state.Store) error {
 	return w.Flush()
 }
 
+// wireLLM hands the self-hosted model to srv. Only the llm block and
+// DOMESTIQUE_LLM_API_KEY are read: nothing else in the environment can turn a
+// feature on.
+func wireLLM(srv *api.Server, cfg config.LLMConfig, log *slog.Logger) {
+	c := llm.New(cfg, os.Getenv("DOMESTIQUE_LLM_API_KEY"))
+	srv.UseLLM(c)
+	if c == nil {
+		log.Info("no llm.base_url configured; the LLM features are off")
+		return
+	}
+	var on []string
+	for _, j := range llm.Jobs {
+		if c.Enabled(j) {
+			on = append(on, string(j))
+		}
+	}
+	log.Info("llm enabled", "jobs", on)
+}
+
 func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDir string) error {
 	routes, problems, err := src.List(context.Background())
 	if err != nil {
@@ -1211,18 +1230,11 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 			"hint", "set WAHOO_CLIENT_ID and WAHOO_CLIENT_SECRET to let riders connect Wahoo")
 	}
 
-	// Narration (docs/training-plan.md's Phase E) is entirely optional and
-	// additive — a deployment with no ANTHROPIC_API_KEY simply does not
-	// offer plan explanations or free-text profile proposals, the same
-	// "quietly unavailable" shape Wahoo just above uses for its own
-	// optional credential.
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
-		srv.Narration = narration.New(apiKey)
-		log.Info("narration enabled")
-	} else {
-		log.Info("no ANTHROPIC_API_KEY in the environment",
-			"hint", "set ANTHROPIC_API_KEY to enable plan explanations and profile suggestions")
-	}
+	// The AI-assisted features (docs/training-plan.md's Phase E) are entirely
+	// optional and additive: with no llm.base_url they are off, the same
+	// "quietly unavailable" shape Wahoo just above uses for its own optional
+	// credential.
+	wireLLM(srv, cfg.LLM, log)
 
 	if cfg.Komoot.Enabled {
 		switch {

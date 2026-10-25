@@ -38,10 +38,10 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
+	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/loops"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
-	"github.com/wncservices/domestique/apps/api/internal/narration"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -314,13 +314,14 @@ type Server struct {
 	candidates     *candidateStore
 	candidatesOnce sync.Once
 
-	// Narration is Phase E of docs/training-plan.md — an LLM layer that
+	// LLM is Phase E of docs/training-plan.md — the self-hosted model that
 	// explains a plan and proposes profile edits from free text, strictly
 	// on top of the deterministic engine, never in place of it (see
-	// internal/narration's own doc comment). Nil means ANTHROPIC_API_KEY is
-	// not set — the same "quietly unavailable" shape Wahoo/Garmin/Komoot
-	// already use for their own optional credentials.
-	Narration *narration.Client
+	// internal/llm's own doc comment). Nil, or a job switched off in config,
+	// means that feature answers 412 — the same "quietly unavailable" shape
+	// Wahoo/Garmin/Komoot already use for their own optional credentials.
+	// Set it with UseLLM so the result metric is wired too.
+	LLM *llm.Client
 
 	// Shares holds share links to a single route — see internal/routeshare.
 	// Same no-nil-degradation story as Crew and Schedule: no external
@@ -1023,13 +1024,47 @@ type meDTO struct {
 	// — a Google-linked rider has no password here to change.
 	CanEditName       bool `json:"canEditName"`
 	CanChangePassword bool `json:"canChangePassword"`
-	// NarrationEnabled tells the training page whether to offer plan
-	// explanations and free-text profile suggestions at all — see
-	// internal/narration's own doc comment. False whenever the deployment
-	// has no ANTHROPIC_API_KEY configured, the same "let the frontend avoid
-	// offering a button that would 412" reasoning this DTO's own doc
+	// LLMJobs says which AI-assisted features this deployment offers, one
+	// per job. The UI hides only the button of a job that is off.
+	LLMJobs llmJobsDTO `json:"llmJobs"`
+	// NarrationEnabled is true when any LLM job is on, so a page can tell
+	// "no AI features at all" from "some of them". The same "let the frontend
+	// avoid offering a button that would 412" reasoning this DTO's own doc
 	// comment already states for every other feature flag here.
 	NarrationEnabled bool `json:"narrationEnabled"`
+}
+
+// llmJobsDTO mirrors llm.Jobs one field per job.
+type llmJobsDTO struct {
+	ExplainPlan    bool `json:"explainPlan"`
+	ProposeProfile bool `json:"proposeProfile"`
+	ProposeGoal    bool `json:"proposeGoal"`
+	PlanEdits      bool `json:"planEdits"`
+}
+
+func (j llmJobsDTO) anyOn() bool {
+	return j.ExplainPlan || j.ProposeProfile || j.ProposeGoal || j.PlanEdits
+}
+
+// UseLLM sets the model client and, when there is one, the hook that counts
+// its results in domestique_llm_requests_total. A nil client turns every job
+// off.
+func (s *Server) UseLLM(c *llm.Client) {
+	s.LLM = c
+	if c != nil {
+		c.SetOnResult(s.recordLLMResult)
+	}
+}
+
+// llmJobs reports which jobs are on. Enabled is nil-safe, so no LLM at all
+// reads as all false.
+func (s *Server) llmJobs() llmJobsDTO {
+	return llmJobsDTO{
+		ExplainPlan:    s.LLM.Enabled(llm.JobExplainPlan),
+		ProposeProfile: s.LLM.Enabled(llm.JobProposeProfile),
+		ProposeGoal:    s.LLM.Enabled(llm.JobProposeGoal),
+		PlanEdits:      s.LLM.Enabled(llm.JobPlanEdits),
+	}
 }
 
 // handleMe tells the UI who it is talking to and what to show. Without it the
@@ -1037,6 +1072,7 @@ type meDTO struct {
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	id := auth.FromContext(r.Context())
 	canEditName := s.People != nil && id.Sub != ""
+	jobs := s.llmJobs()
 	writeJSON(w, http.StatusOK, meDTO{
 		// Enabled() alone used to be enough, because under mode: proxy an
 		// anonymous request never reached this handler at all — Traefik's
@@ -1055,7 +1091,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		LogoutURL:         s.authenticator().LogoutURL(),
 		CanEditName:       canEditName,
 		CanChangePassword: canEditName && id.Provider() == "auth0",
-		NarrationEnabled:  s.Narration != nil,
+		LLMJobs:           jobs,
+		NarrationEnabled:  jobs.anyOn(),
 	})
 }
 

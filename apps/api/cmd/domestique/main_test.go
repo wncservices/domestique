@@ -3,12 +3,22 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
+	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/config"
+	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 )
@@ -319,5 +329,38 @@ func TestCLIImportRequiresFrom(t *testing.T) {
 	workspace(t)
 	if _, err := capture(t, "import"); err == nil {
 		t.Fatal("import without --from succeeded")
+	}
+}
+
+// ANTHROPIC_API_KEY is not read any more. serve cannot be started from a test,
+// so this checks what serve wires: with no base_url no job is on, and with one
+// the client sends DOMESTIQUE_LLM_API_KEY and never the Anthropic key.
+func TestANTHROPICKeyIsNotRead(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-not-for-this")
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	off := &api.Server{}
+	wireLLM(off, config.LLMConfig{}, quiet)
+	for _, j := range llm.Jobs {
+		if off.LLM.Enabled(j) {
+			t.Errorf("job %s is on with no llm.base_url, and only ANTHROPIC_API_KEY is set", j)
+		}
+	}
+
+	t.Setenv("DOMESTIQUE_LLM_API_KEY", "llm-key")
+	var got string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("Authorization")
+		content, _ := json.Marshal(`{"name":"Gran Fondo","sport":"cycling","eventDate":"","priority":"B","targetDistanceKm":0,"targetElevationM":0,"explanation":"ok"}`)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":` + string(content) + `}}]}`))
+	}))
+	t.Cleanup(fake.Close)
+	on := &api.Server{}
+	wireLLM(on, config.LLMConfig{BaseURL: fake.URL, Model: "qwen3.5-9b"}, quiet)
+	if _, err := on.LLM.ProposeGoal(context.Background(), "a gran fondo", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got != "Bearer llm-key" {
+		t.Errorf("Authorization = %q, want the DOMESTIQUE_LLM_API_KEY bearer only", got)
 	}
 }

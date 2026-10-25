@@ -1,15 +1,11 @@
 package api_test
 
 import (
-	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/wncservices/domestique/apps/api/internal/narration"
 )
 
 // Audit N7: both proposal endpoints took a note of up to 256 KiB straight into
@@ -19,14 +15,10 @@ func TestProposalNotesAreCappedBeforeTheModelSeesThem(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			h := newTrainingHarness(t)
 			var calls atomic.Int32
-			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			withLLM(t, h.srv, func(string, []byte) string {
 				calls.Add(1)
-				http.Error(w, "unused", http.StatusInternalServerError)
-			}))
-			defer fake.Close()
-			client := narration.New("test-key")
-			client.APIBase = fake.URL
-			h.srv.Narration = client
+				return "unused"
+			})
 
 			long := strings.Repeat("é", 501) // 501 runes, 1002 bytes: the cap counts characters
 			resp := h.as("wilant", "cyclists", http.MethodPost, path, `{"note":"`+long+`"}`)
@@ -48,22 +40,15 @@ func TestProposalNotesAreCappedBeforeTheModelSeesThem(t *testing.T) {
 	}
 }
 
-// An Anthropic error body can quote the request, which holds the rider's note
-// ("I am ill"). complete() put up to 4 KiB of it in the error and the handlers
-// log the error. Status and type only now.
+// A gateway's error body can quote the request, which holds the rider's note
+// ("I am ill"). The client once put up to 4 KiB of it in the error and the
+// handlers log the error. Status only now.
 func TestNarrationFailureLogsNeverQuoteTheNote(t *testing.T) {
 	for _, path := range []string{"/api/training/profile/propose", "/api/training/goals/propose"} {
 		t.Run(path, func(t *testing.T) {
 			h := newTrainingHarness(t)
-			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"bad prompt: ` + strings.ReplaceAll(string(body), `"`, `'`) + `"}}`))
-			}))
-			defer fake.Close()
-			client := narration.New("test-key")
-			client.APIBase = fake.URL
-			h.srv.Narration = client
+			f := withLLM(t, h.srv, fixed(""))
+			f.code = http.StatusBadRequest
 			var logs strings.Builder
 			h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
 
