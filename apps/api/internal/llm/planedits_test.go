@@ -374,20 +374,17 @@ func TestMoveWithoutToDateIsRetried(t *testing.T) {
 	}
 }
 
-// The llm layer checks shape only. A handle the plan does not hold, and a date
-// outside the window, pass through: the API drops that one intent with a reason.
-func TestAnUnknownHandleAndAWindowDateReachTheAPI(t *testing.T) {
-	c, f := planClient(t, `{"refused":false,"intents":[`+
-		`{"type":"convert_indoor","workout":"w99"},`+
-		`{"type":"move_workout","workout":"w1","to_date":"2030-01-01"}],"unsupported":null}`)
-	got, err := propose(t, c, "x")
+func TestUnknownWorkoutHandleIsRetried(t *testing.T) {
+	bad := `{"refused":false,"intents":[{"type":"convert_indoor","workout":"w99"}],"unsupported":null}`
+	good := `{"refused":false,"intents":[{"type":"convert_indoor","workout":"w2"}],"unsupported":null}`
+	got, err, f := retriedReply(t, bad, good)
 	if err != nil {
-		t.Fatalf("err = %v, want the intents through", err)
+		t.Fatalf("err = %v, want the retry to succeed", err)
 	}
-	if n := f.requests.Load(); n != 1 {
-		t.Errorf("requests = %d, want 1: shape is fine, no retry", n)
+	if n := f.requests.Load(); n != 2 {
+		t.Errorf("requests = %d, want 2", n)
 	}
-	if len(got.Intents) != 2 || got.Intents[0].Workout != "w99" || got.Intents[1].ToDate != "2030-01-01" {
+	if len(got.Intents) != 1 || got.Intents[0].Workout != "w2" {
 		t.Errorf("intents = %+v", got.Intents)
 	}
 }
