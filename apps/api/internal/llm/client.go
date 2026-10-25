@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
@@ -124,8 +125,12 @@ func (c *Client) SetOnResult(f func(job Job, result string)) {
 
 // Complete asks the model for one answer to system and user, constrained to
 // schema, and decodes it into out. It makes at most two attempts: a reply that
-// does not decode strictly into out, or that validate rejects, is retried once.
-// validate may be nil.
+// is not a JSON object, does not decode strictly into out, or that validate
+// rejects, is retried once. validate may be nil.
+//
+// out is zeroed before each attempt and left zero on any error, so a failed
+// first attempt cannot leave fields behind. A reply of {} decodes cleanly and
+// is not invalid here: a job's validate is what rejects missing required fields.
 //
 // Errors: ErrInvalid after two bad answers, ErrTimeout when the budget runs out,
 // and a plain error for a refused or unreachable endpoint.
@@ -139,6 +144,17 @@ func (c *Client) Complete(ctx context.Context, j Job, system, user string, schem
 	if c == nil {
 		return errors.New("llm: not configured")
 	}
+
+	outV := reflect.ValueOf(out)
+	if outV.Kind() != reflect.Pointer || outV.IsNil() {
+		return errors.New("llm: out must be a non-nil pointer")
+	}
+	outV = outV.Elem()
+	defer func() {
+		if result != "ok" {
+			outV.SetZero()
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -165,6 +181,7 @@ func (c *Client) Complete(ctx context.Context, j Job, system, user string, schem
 	}
 
 	for range attempts {
+		outV.SetZero()
 		content, err := c.send(ctx, body)
 		if err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -224,6 +241,9 @@ func (c *Client) send(ctx context.Context, body []byte) (string, error) {
 // decodeStrict decodes exactly one JSON object into out, refusing unknown
 // fields and any trailing text. Prose or fenced JSON therefore fails here.
 func decodeStrict(content string, out any) error {
+	if !strings.HasPrefix(strings.TrimLeft(content, " \t\r\n"), "{") {
+		return errors.New("llm: answer is not a JSON object")
+	}
 	dec := json.NewDecoder(strings.NewReader(content))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {

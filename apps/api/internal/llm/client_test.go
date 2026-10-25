@@ -335,13 +335,13 @@ func TestTimeoutCoversBothAttempts(t *testing.T) {
 	t.Run("invalid first answer uses the shared budget", func(t *testing.T) {
 		f := newFake(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 			select {
-			case <-time.After(120 * time.Millisecond):
+			case <-time.After(150 * time.Millisecond):
 				_, _ = io.WriteString(w, reply(t, "not json"))
 			case <-r.Context().Done():
 			}
 		})
 		c := newClient(t, f.srv.URL, "")
-		c.timeout = 200 * time.Millisecond
+		c.timeout = 250 * time.Millisecond
 		var rec recorder
 		rec.set(c)
 
@@ -400,5 +400,63 @@ func TestJobListMatchesConfig(t *testing.T) {
 		if string(j) != config.LLMJobNames[i] {
 			t.Errorf("Jobs[%d] = %q, config says %q", i, j, config.LLMJobNames[i])
 		}
+	}
+}
+
+// A reply that is valid JSON but not an object must not count as an answer:
+// json.Decode accepts null into a struct without error, so it has to be refused
+// before decoding.
+func TestNullReplyIsInvalid(t *testing.T) {
+	for _, content := range []string{"null", "[]", `"x"`} {
+		t.Run(content, func(t *testing.T) {
+			f := newFake(t, answer(t, content))
+			c := newClient(t, f.srv.URL, "")
+			var rec recorder
+			rec.set(c)
+
+			var out textOut
+			err := c.Complete(t.Context(), JobExplainPlan, "s", "u", testSchema, 200, &out, nil)
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err = %v, want ErrInvalid", err)
+			}
+			if n := f.requests.Load(); n != 2 {
+				t.Errorf("requests = %d, want 2 (one retry)", n)
+			}
+			if got := rec.got(); len(got) != 1 || got[0] != "invalid" {
+				t.Errorf("results = %v, want [invalid]", got)
+			}
+		})
+	}
+}
+
+// A failed first attempt must not leave fields behind in out: the second
+// attempt's {} has no text, so out.Text has to be empty, and on ErrInvalid out
+// has to be zero.
+func TestRetryDoesNotKeepStaleFields(t *testing.T) {
+	f := newFake(t, func(w http.ResponseWriter, _ *http.Request, n int) {
+		content := `{"text":"a","extra":1}`
+		if n > 0 {
+			content = `{}`
+		}
+		_, _ = io.WriteString(w, reply(t, content))
+	})
+	c := newClient(t, f.srv.URL, "")
+
+	var out textOut
+	if err := c.Complete(t.Context(), JobExplainPlan, "s", "u", testSchema, 200, &out, nil); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if out.Text != "" {
+		t.Errorf("out.Text = %q, want empty: a failed attempt left a field behind", out.Text)
+	}
+
+	g := newFake(t, answer(t, `{"text":"a","extra":1}`))
+	d := newClient(t, g.srv.URL, "")
+	var stale textOut
+	if err := d.Complete(t.Context(), JobExplainPlan, "s", "u", testSchema, 200, &stale, nil); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
+	}
+	if stale.Text != "" {
+		t.Errorf("out.Text = %q after ErrInvalid, want zero", stale.Text)
 	}
 }
