@@ -1550,6 +1550,10 @@ rider's own note are never logged or put in a span; the span carries only `llm.j
 Quality is gated by the evaluation set in `apps/api/internal/llm/testdata/eval`: synthetic notes in
 English and Dutch, run through the real job functions by `just llm-eval` against a live endpoint
 (`DOMESTIQUE_LLM_EVAL_URL`). It is never part of CI, and a job is switched on only when it passes.
+On `qwen3.5-9b` (2026-10-25) profile proposals scored 10/10 and goal proposals 9/10; plan edits
+scored 6/10 (moves put the target date in the wrong field, "until Wednesday" landed a week late), so
+deployments run it with `llm.jobs.plan_edits: false`. One schema shape per intent type (`anyOf`) was
+tried and scored worse (3/10, with timeouts), so the flat schema stays.
 
 ## Conventions
 

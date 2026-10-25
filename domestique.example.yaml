@@ -215,8 +215,7 @@ llm:
   # base_url: http://agentgateway.agentgateway.svc.cluster.local:4000/v1
   # model: qwen3.5-9b
   # Switch single features off by job name; every job defaults to on.
+  # plan_edits stays off on qwen3.5-9b: it scored 6/10 on the evaluation set
+  # (the bar is 8/10). Turn it on only after `just llm-eval` passes it.
   # jobs:
-  #   explain_plan: true
-  #   propose_profile: true
-  #   propose_goal: true
-  #   plan_edits: true
+  #   plan_edits: false
