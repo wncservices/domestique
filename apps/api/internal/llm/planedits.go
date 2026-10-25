@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -245,7 +246,7 @@ type intentWire struct {
 func (c *Client) ProposePlanEdits(ctx context.Context, text string, view PlanView) (PlanEdits, error) {
 	var reply planEditsReply
 	err := c.Complete(ctx, JobPlanEdits, planEditsSystem, planEditsPrompt(text, view), planEditSchema(view.Capabilities), 700, &reply, func() error {
-		return checkIntents(reply, view)
+		return checkIntents(reply, view.Capabilities)
 	})
 	if err != nil {
 		return PlanEdits{}, err
@@ -256,10 +257,14 @@ func (c *Client) ProposePlanEdits(ctx context.Context, text string, view PlanVie
 	return editsFrom(reply), nil
 }
 
-// checkIntents is the post-parse rule. At most maxIntents, and every type one
-// this deployment offers; then each intent must fit its own type (see
-// checkIntent). A refusal has no intents to check.
-func checkIntents(reply planEditsReply, view PlanView) error {
+// checkIntents is the post-parse rule: at most maxIntents, every type one this
+// deployment offers, and each intent of its own type's shape (see checkIntent).
+// A refusal has no intents to check.
+//
+// This layer checks shape only. A handle the plan does not hold, or a date
+// outside the window, is the API's to judge, and it drops that one intent with
+// a reason; retrying over it would turn one bad intent into a refused reply.
+func checkIntents(reply planEditsReply, caps Capabilities) error {
 	if reply.Refused {
 		return nil
 	}
@@ -267,18 +272,17 @@ func checkIntents(reply planEditsReply, view PlanView) error {
 		return errIntentShape
 	}
 	allowed := []string{IntentCreateLifeEvent, IntentMoveWorkout}
-	if view.Capabilities.SwapAlternate {
+	if caps.SwapAlternate {
 		allowed = append(allowed, IntentSwapAlternate)
 	}
-	if view.Capabilities.ConvertIndoor {
+	if caps.ConvertIndoor {
 		allowed = append(allowed, IntentConvertIndoor)
 	}
-	handles := handleSet(view)
 	for _, in := range reply.Intents {
 		if !slices.Contains(allowed, in.Type) {
 			return errIntentShape
 		}
-		if err := checkIntent(in, view, handles); err != nil {
+		if err := checkIntent(in); err != nil {
 			return err
 		}
 	}
@@ -294,12 +298,15 @@ var shapeFields = map[string]struct{ required, optional []string }{
 	IntentConvertIndoor:   {required: []string{"workout"}},
 }
 
-// checkIntent holds one intent to its own type: the fields it needs are there
-// and no other type's field is set, every enum value is one the schema names,
-// every handle is in the plan, and every date is a real day in the window.
-// Whether a move is possible (a ridden session, an unavailable weekday) is the
-// caller's to judge, against the rider's own data.
-func checkIntent(in intentWire, view PlanView, handles map[string]bool) error {
+// dateForm is the shape of every date the reply may carry. Whether the day
+// exists, is in the window, or the plan holds the handle is decided by the API.
+var dateForm = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// checkIntent holds one intent to its own type's shape: the fields it needs are
+// set, no other type's field is, each enum value is one the schema names, and
+// each date has the YYYY-MM-DD form. A life event's end is not before its start
+// when both are real days.
+func checkIntent(in intentWire) error {
 	fields := map[string]string{
 		"kind": strings.TrimSpace(in.Kind), "start_date": strings.TrimSpace(in.StartDate),
 		"end_date": strings.TrimSpace(in.EndDate), "option": strings.TrimSpace(in.Option),
@@ -326,46 +333,19 @@ func checkIntent(in intentWire, view PlanView, handles map[string]bool) error {
 	if v := fields["alternate"]; v != "" && !slices.Contains(alternateKinds, v) {
 		return errIntentMismatch
 	}
-	if v := fields["workout"]; v != "" && !handles[v] {
-		return errIntentMismatch
-	}
 	for _, name := range []string{"start_date", "end_date", "to_date"} {
-		if v := fields[name]; v != "" && !inWindow(view.Today, v) {
+		if v := fields[name]; v != "" && !dateForm.MatchString(v) {
 			return errIntentMismatch
 		}
 	}
 	if in.Type == IntentCreateLifeEvent {
-		start, _ := parseDay(fields["start_date"])
-		end, _ := parseDay(fields["end_date"])
-		if end.Before(start) {
+		start, errS := parseDay(fields["start_date"])
+		end, errE := parseDay(fields["end_date"])
+		if errS == nil && errE == nil && end.Before(start) {
 			return errIntentMismatch
 		}
 	}
 	return nil
-}
-
-// handleSet is every handle the model was shown.
-func handleSet(view PlanView) map[string]bool {
-	set := map[string]bool{}
-	for _, d := range view.Days {
-		for _, s := range d.Sessions {
-			set[s.Handle] = true
-		}
-	}
-	return set
-}
-
-// inWindow reports whether date is a real day from today to today+maxDaysAhead.
-func inWindow(today, date string) bool {
-	t, err := parseDay(today)
-	if err != nil {
-		return false
-	}
-	d, err := parseDay(date)
-	if err != nil {
-		return false
-	}
-	return !d.Before(t) && !d.After(t.AddDate(0, 0, maxDaysAhead))
 }
 
 // parseDay reads a YYYY-MM-DD day. The round trip rejects anything time.Parse
