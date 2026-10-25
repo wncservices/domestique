@@ -202,7 +202,7 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		s.autoPushWorkouts(ctx)
 	})
 
-	// After the scheduling pass has released its lock: a model call can take
-	// seconds, and the morning notes explain what this pass just changed.
-	s.runLLMNotes(ctx)
+	// After the scheduling pass has released its lock, and on its own goroutine:
+	// a model call can take seconds, and the tick must not wait for it.
+	s.startLLMNotes()
 }

@@ -146,6 +146,9 @@ type Server struct {
 	// flight, for WaitForBackground.
 	seasonMu   sync.Mutex
 	background sync.WaitGroup
+	// llmNotesBusy is set while a morning notes pass is in flight, so the
+	// scheduling tick starts at most one at a time in this process.
+	llmNotesBusy atomic.Bool
 
 	Source   source.Library
 	Config   *config.Config

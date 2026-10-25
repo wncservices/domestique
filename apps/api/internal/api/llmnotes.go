@@ -8,6 +8,8 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/compliance"
+	"github.com/wncservices/domestique/apps/api/internal/ledger"
+	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/why"
@@ -39,6 +41,22 @@ func (s *Server) runLLMNotes(ctx context.Context) {
 	if !withDBLock(ctx, s.dbConn(), llmNotesLockKey, func() { s.writeLLMNotes(ctx, now) }) {
 		s.logger().Info("llm notes: another pass holds the lock, skipped")
 	}
+}
+
+// startLLMNotes runs the morning notes pass on a goroutine of the server's
+// lifecycle. At most one is in flight per process: a tick that finds one
+// running does nothing, and the next tick of the morning slot tries again.
+func (s *Server) startLLMNotes() {
+	if !s.llmNotesBusy.CompareAndSwap(false, true) {
+		return
+	}
+	ctx := s.lifecycle()
+	s.background.Add(1)
+	go func() {
+		defer s.background.Done()
+		defer s.llmNotesBusy.Store(false)
+		s.runLLMNotes(ctx)
+	}()
 }
 
 // writeLLMNotes is runLLMNotes' body, run under the advisory lock.
@@ -211,9 +229,30 @@ func (s *Server) weekFigures(ctx context.Context, rider, weekStart string) (llm.
 	}
 	if found {
 		known = true
-		f.TargetTSS = &row.TargetTSS
+		// The target the week owes now, worked out the way the settle pass
+		// works it out, with the days the rider has lost to life events.
+		profile, _, err := s.Training.GetProfile(ctx, rider)
+		if err != nil {
+			return f, false, err
+		}
+		events, err := s.lifeEventsFor(ctx, rider)
+		if err != nil {
+			return f, false, err
+		}
+		blackout := lifeevents.NoTestDays(events)
+		target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, blackout))
+		f.TargetTSS = &target
 		f.DebtTSS = &row.CarriedInTSS
-		f.ForgivenTSS = &row.ForgivenTSS
+
+		// Forgiveness is written onto this row when the following week opens,
+		// so it is known only once that row exists.
+		_, nextFound, err := s.Training.GetLedgerWeek(ctx, rider, dayOffset(weekStart, 7))
+		if err != nil {
+			return f, false, err
+		}
+		if nextFound {
+			f.ForgivenTSS = &row.ForgivenTSS
+		}
 	}
 
 	monday, err := time.ParseInLocation(dateLayout, weekStart, s.localNow().Location())
@@ -292,11 +331,17 @@ func (s *Server) weekFigures(ctx context.Context, rider, weekStart string) (llm.
 // daysBefore is day (YYYY-MM-DD) moved back by n days. A day that does not parse
 // comes back unchanged, so a bad clock cannot move a prune cut-off forwards.
 func daysBefore(day string, n int) string {
+	return dayOffset(day, -n)
+}
+
+// dayOffset is day (YYYY-MM-DD) moved forward by n days, unchanged when it does
+// not parse.
+func dayOffset(day string, n int) string {
 	t, err := time.Parse(dateLayout, day)
 	if err != nil {
 		return day
 	}
-	return t.AddDate(0, 0, -n).Format(dateLayout)
+	return t.AddDate(0, 0, n).Format(dateLayout)
 }
 
 // llmNotesDTO is GET /api/training/notes: today's changes note and last week's

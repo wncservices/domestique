@@ -3,10 +3,13 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/why"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -20,6 +23,16 @@ const (
 	checkInReply = `{"legs":2,"sleep":2,"mood":3,"life_event":null}`
 	explainText  = "Today's ride was eased one level because readiness dipped."
 )
+
+// morningPass is one morning tick as the server runs it: the scheduling pass,
+// then the notes pass, which runs in the background once the tick has
+// returned. The notes pass is also run here synchronously so the test can look
+// at what it wrote.
+func morningPass(h *ledgerHarness) {
+	h.tick()
+	h.srv.WaitForBackground()
+	h.srv.RunLLMNotesForTest(context.Background())
+}
 
 // recordCaution stores one readiness adjustment for the rider on a day.
 func recordCaution(t *testing.T, h *ledgerHarness, workoutID, day string) {
@@ -60,7 +73,7 @@ func TestChangesNoteWrittenOnAMorningWithAdjustments(t *testing.T) {
 	f := withLLM(t, h.srv, fixed(explainReply))
 
 	h.at(6, 6, 45)
-	h.tick()
+	morningPass(h)
 
 	got, ok := storedNote(t, h, workout.LLMNoteChanges, "2026-10-06")
 	if !ok || got != explainText {
@@ -81,7 +94,7 @@ func TestChangesFallbackWhenTheJobIsOff(t *testing.T) {
 	f := withLLMJobs(t, h.srv, map[string]bool{"explain_changes": false}, fixed(explainReply))
 
 	h.at(6, 6, 45)
-	h.tick()
+	morningPass(h)
 
 	// The morning pass makes up Monday's missed session too, so the note is
 	// longer than this one rule; the rule must still appear once, not twice.
@@ -112,7 +125,7 @@ func TestNoChangesNoteWithoutAdjustments(t *testing.T) {
 	})
 
 	h.at(5, 6, 45)
-	h.tick()
+	morningPass(h)
 
 	adjustments, err := h.store.AdjustmentsOnDay(context.Background(), "wilant", "2026-10-05")
 	if err != nil || len(adjustments) != 0 {
@@ -133,7 +146,7 @@ func TestWeeklyNoteOnlyOnMonday(t *testing.T) {
 	withLLM(t, h.srv, fixed(weeklyReply))
 
 	h.at(6, 6, 45)
-	h.tick()
+	morningPass(h)
 	for _, day := range []string{"2026-09-28", "2026-10-05"} {
 		if _, ok := storedNote(t, h, workout.LLMNoteWeekly, day); ok {
 			t.Fatalf("a weekly note for %s was written on a Tuesday", day)
@@ -141,7 +154,7 @@ func TestWeeklyNoteOnlyOnMonday(t *testing.T) {
 	}
 
 	h.at(12, 6, 45)
-	h.tick()
+	morningPass(h)
 	if got, ok := storedNote(t, h, workout.LLMNoteWeekly, "2026-10-05"); !ok || got == "" {
 		t.Fatalf("no weekly note for the week of 2026-10-05 on the Monday")
 	}
@@ -156,7 +169,7 @@ func TestWeeklySummaryOmitsUnknownFigures(t *testing.T) {
 	// Monday 12 October: the week of 5 October was never opened by the ledger,
 	// so there is no target, no carried debt and no forgiveness to report.
 	h.at(12, 6, 45)
-	h.tick()
+	morningPass(h)
 
 	body := string(f.last)
 	if !strings.Contains(body, "Sessions:") {
@@ -178,7 +191,7 @@ func TestNothingOutsideTheMorningSlot(t *testing.T) {
 
 	for _, at := range [][2]int{{13, 0}, {21, 0}} {
 		h.at(6, at[0], at[1])
-		h.tick()
+		morningPass(h)
 	}
 
 	if _, ok := storedNote(t, h, workout.LLMNoteChanges, "2026-10-06"); ok {
@@ -208,9 +221,9 @@ func TestLLMNotesRunOnce(t *testing.T) {
 	})
 
 	h.at(12, 6, 45)
-	h.tick()
+	morningPass(h)
 	h.at(12, 7, 10)
-	h.tick()
+	morningPass(h)
 
 	if n := changes.Load(); n != 1 {
 		t.Fatalf("explain_changes calls = %d, want 1", n)
@@ -256,7 +269,7 @@ func TestNotesAreOwnerOnly(t *testing.T) {
 		return explainReply
 	})
 	h.at(12, 6, 45)
-	h.tick()
+	morningPass(h)
 
 	own := getNotes(t, h, "wilant", "cyclists")
 	if own.Changes == nil || own.Changes.Day != "2026-10-12" || own.Changes.Text != explainText {
@@ -291,10 +304,21 @@ func TestNotesNeverLogTheNoteOrText(t *testing.T) {
 		t.Fatalf("put check-in: status %d", resp.StatusCode)
 	}
 
-	h.tick()
+	morningPass(h)
 	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/checkin/understand", ""); resp.StatusCode != http.StatusOK {
 		t.Fatalf("understand: status %d", resp.StatusCode)
 	}
+
+	// A failing model: the understanding and the morning's changes note both
+	// fail, and their errors must not carry the note or the reply either.
+	f := withLLM(t, h.srv, func(job string, _ []byte) string { return explainReply })
+	f.code = http.StatusInternalServerError
+	if resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/checkin/understand", ""); resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("understand with a failing model: status %d, want 502", resp.StatusCode)
+	}
+	recordCaution(t, h, firstWorkoutIDs(t, h, 1)[0], "2026-10-07")
+	h.at(7, 6, 45)
+	morningPass(h)
 
 	for _, leak := range []string{secretNote, "readiness dipped"} {
 		if strings.Contains(logs.String(), leak) {
@@ -411,5 +435,132 @@ func TestMeListsTheNewJobs(t *testing.T) {
 	}
 	if !me.LLMJobs.ExplainChanges || !me.LLMJobs.UnderstandCheckin || me.LLMJobs.WeeklySummary {
 		t.Fatalf("llmJobs = %+v", me.LLMJobs)
+	}
+}
+
+// TestTheTickDoesNotWaitForTheNotes: the tick returns while the model is still
+// answering; the notes are written once the model is released.
+func TestTheTickDoesNotWaitForTheNotes(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	recordCaution(t, h, firstWorkoutIDs(t, h, 1)[0], "2026-10-06")
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	defer releaseOnce()
+	withLLM(t, h.srv, func(job string, _ []byte) string {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return explainReply
+	})
+
+	h.at(6, 6, 45)
+	done := make(chan struct{})
+	go func() {
+		h.tick()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the tick waited for the model")
+	}
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the notes never reached the model")
+	}
+	if _, ok := storedNote(t, h, workout.LLMNoteChanges, "2026-10-06"); ok {
+		t.Fatal("a note was written before the model answered")
+	}
+
+	releaseOnce()
+	h.srv.WaitForBackground()
+	if got, ok := storedNote(t, h, workout.LLMNoteChanges, "2026-10-06"); !ok || got != explainText {
+		t.Fatalf("changes note = %q (ok %v), want %q", got, ok, explainText)
+	}
+}
+
+// plantCTL sets the fitness snapshot for a day, replacing one a pass wrote.
+func plantCTL(t *testing.T, h *ledgerHarness, date string, ctl float64) {
+	t.Helper()
+	if _, err := h.conn.Exec(`INSERT INTO fitness_snapshots (rider, date, ctl, atl, tsb) VALUES ('wilant', ?, ?, ?, 0)
+ON CONFLICT (rider, date) DO UPDATE SET ctl = excluded.ctl`, date, ctl, ctl); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWeeklySummaryReportsTheWeeksOwnFigures: on the Monday after, the summary
+// of the week carries that week's own target, ridden load, carried debt,
+// forgiveness and CTL at both ends.
+func TestWeeklySummaryReportsTheWeeksOwnFigures(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	f := withLLM(t, h.srv, fixed(weeklyReply))
+
+	// Open the week of 5 October on Tuesday, and ride two sessions in it.
+	h.at(6, 6, 45)
+	morningPass(h)
+	for _, date := range []string{"2026-10-05", "2026-10-06"} {
+		if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+			Rider: "wilant", Provider: "garmin", ExternalID: "w-" + date, Sport: "cycling",
+			Date: date, DurationSeconds: 3600, TrainingLoad: 42,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plantCTL(t, h, "2026-10-04", 31)
+	plantCTL(t, h, "2026-10-11", 47)
+	// Opened with twice as many days as the rider now has, so the effective
+	// target is half the stored one: the summary must use the effective figure.
+	if _, err := h.conn.Exec(`UPDATE load_ledger SET open_days = 14 WHERE rider = 'wilant' AND week_start = '2026-10-05'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Monday 12 October opens the next week, which settles the week of 5
+	// October and writes its forgiveness, then summarises it.
+	h.at(12, 6, 45)
+	morningPass(h)
+
+	row, ok, err := h.store.GetLedgerWeek(ctx, "wilant", "2026-10-05")
+	if err != nil || !ok {
+		t.Fatalf("the week of 5 October has no ledger row: %v %v", ok, err)
+	}
+	body := string(f.last)
+	for _, want := range []string{
+		"The week starting 2026-10-05",
+		fmt.Sprintf("Target: %.0f TSS", row.TargetTSS/2),
+		"Ridden: 84 TSS",
+		fmt.Sprintf("Debt carried in: %.0f TSS", row.CarriedInTSS),
+		fmt.Sprintf("Forgiven: %.0f TSS", row.ForgivenTSS),
+		"CTL: 31 at the start of the week, 47 at the end",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("weekly request lacks %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestWeeklyForgivenIsOnlyShownOnceTheNextWeekIsOpen: forgiveness is written
+// when the following week opens. Without that row the figure is unknown, so
+// the summary leaves the line out.
+func TestWeeklyForgivenIsOnlyShownOnceTheNextWeekIsOpen(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	f := withLLM(t, h.srv, fixed(weeklyReply))
+	h.at(6, 6, 45)
+	morningPass(h)
+
+	// Monday 12 October, with no ledger pass: the week after is never opened.
+	h.at(12, 6, 45)
+	h.srv.RunLLMNotesForTest(context.Background())
+
+	body := string(f.last)
+	if !strings.Contains(body, "Debt carried in:") {
+		t.Fatalf("the week's own row is missing from the request:\n%s", body)
+	}
+	if strings.Contains(body, "Forgiven:") {
+		t.Fatalf("forgiveness shown before the next week opened:\n%s", body)
 	}
 }
