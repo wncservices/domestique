@@ -1,0 +1,65 @@
+{
+  "today": "2026-10-25",
+  "cases": [
+    {
+      "name": "weekend only, three hours",
+      "lang": "en",
+      "input": {"note": "From now on I can only train on Saturdays and Sundays, and I have 3 hours on each of those days.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["sat", "sun"], "hoursPerAvailableDay": 3}
+    },
+    {
+      "name": "wednesday added",
+      "lang": "en",
+      "input": {"note": "Work moved, so I can now also train on Wednesdays.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["tue", "wed", "thu", "sat", "sun"], "hoursPerAvailableDay": 2}
+    },
+    {
+      "name": "one hour for a few weeks",
+      "lang": "en",
+      "input": {"note": "For the next few weeks only one hour per day is possible.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 1}
+    },
+    {
+      "name": "no change",
+      "lang": "en",
+      "input": {"note": "Nothing has changed, I am just checking my profile.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2}
+    },
+    {
+      "name": "monday added, two and a half hours",
+      "lang": "en",
+      "input": {"note": "I can ride on Mondays now too, and I have 2.5 hours on each training day.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["mon", "tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2.5}
+    },
+    {
+      "name": "alleen zaterdag, drie uur",
+      "lang": "nl",
+      "input": {"note": "Vanaf volgende week kan ik alleen op zaterdag trainen, dan heb ik 3 uur.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["sat"], "hoursPerAvailableDay": 3}
+    },
+    {
+      "name": "maandag erbij",
+      "lang": "nl",
+      "input": {"note": "Ik kan ook op maandag trainen, de rest blijft zoals het is.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["mon", "tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2}
+    },
+    {
+      "name": "anderhalf uur per dag",
+      "lang": "nl",
+      "input": {"note": "Ik heb de komende weken maar anderhalf uur per dag beschikbaar.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 1.5}
+    },
+    {
+      "name": "woensdag en vrijdag erbij",
+      "lang": "nl",
+      "input": {"note": "Woensdag en vrijdag erbij, en elke trainingsdag 2 uur.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 1},
+      "want": {"availableDays": ["tue", "wed", "thu", "fri", "sat", "sun"], "hoursPerAvailableDay": 2}
+    },
+    {
+      "name": "niets veranderd",
+      "lang": "nl",
+      "input": {"note": "Niets veranderd, ik heb alleen even naar mijn profiel gekeken.", "availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2},
+      "want": {"availableDays": ["tue", "thu", "sat", "sun"], "hoursPerAvailableDay": 2}
+    }
+  ]
+}

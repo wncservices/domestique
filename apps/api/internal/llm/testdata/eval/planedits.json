@@ -1,0 +1,85 @@
+{
+  "today": "2026-10-25",
+  "plan": {
+    "availableDays": ["tue", "thu", "sat", "sun"],
+    "capabilities": {"swapAlternate": true, "convertIndoor": true},
+    "days": [
+      {"date": "2026-10-25", "sessions": [{"handle": "w1", "name": "Endurance ride", "sport": "cycling", "zone": "endurance", "minutes": 120, "ridden": true}]},
+      {"date": "2026-10-26", "sessions": []},
+      {"date": "2026-10-27", "sessions": [{"handle": "w2", "name": "Threshold 3x12", "sport": "cycling", "zone": "threshold", "minutes": 75}]},
+      {"date": "2026-10-28", "sessions": []},
+      {"date": "2026-10-29", "sessions": [{"handle": "w3", "name": "Sweet spot 2x20", "sport": "cycling", "zone": "sweetspot", "minutes": 90}]},
+      {"date": "2026-10-30", "sessions": []},
+      {"date": "2026-10-31", "sessions": [{"handle": "w4", "name": "Long ride", "sport": "cycling", "zone": "endurance", "minutes": 180}]},
+      {"date": "2026-11-01", "sessions": [{"handle": "w5", "name": "VO2 5x3", "sport": "cycling", "zone": "vo2", "minutes": 60}]},
+      {"date": "2026-11-02", "sessions": []},
+      {"date": "2026-11-03", "sessions": [{"handle": "w6", "name": "Endurance", "sport": "cycling", "zone": "endurance", "minutes": 60}]},
+      {"date": "2026-11-04", "sessions": []},
+      {"date": "2026-11-05", "sessions": [{"handle": "w7", "name": "Threshold", "sport": "cycling", "zone": "threshold", "minutes": 60}]},
+      {"date": "2026-11-06", "sessions": []},
+      {"date": "2026-11-07", "sessions": []}
+    ]
+  },
+  "cases": [
+    {
+      "name": "travel Thursday to Sunday",
+      "lang": "en",
+      "input": {"text": "I'm travelling from Thursday 29 October to Sunday 1 November."},
+      "want": {"intents": [{"type": "create_life_event", "kind": "travel", "start_date": "2026-10-29", "end_date": "2026-11-01"}]}
+    },
+    {
+      "name": "move Tuesday session to Wednesday",
+      "lang": "en",
+      "input": {"text": "Move the Tuesday threshold session to Wednesday 28 October."},
+      "want": {"intents": [{"type": "move_workout", "workout": "w2", "to_date": "2026-10-28"}]}
+    },
+    {
+      "name": "ill tomorrow until Wednesday",
+      "lang": "en",
+      "input": {"text": "I'm ill from tomorrow until Wednesday."},
+      "want": {"intents": [{"type": "create_life_event", "kind": "illness", "start_date": "2026-10-26", "end_date": "2026-10-28"}]}
+    },
+    {
+      "name": "easier Saturday ride",
+      "lang": "en",
+      "input": {"text": "Make the long ride on Saturday easier."},
+      "want": {"intents": [{"type": "swap_alternate", "workout": "w4", "alternate": "easier"}]}
+    },
+    {
+      "name": "refused: delete the year",
+      "lang": "en",
+      "input": {"text": "Delete every session in my plan for the next year."},
+      "want": {"refused": true}
+    },
+    {
+      "name": "reizen van donderdag tot zondag",
+      "lang": "nl",
+      "input": {"text": "Ik ben van donderdag 29 oktober tot en met zondag 1 november weg."},
+      "want": {"intents": [{"type": "create_life_event", "kind": "travel", "start_date": "2026-10-29", "end_date": "2026-11-01"}]}
+    },
+    {
+      "name": "training verplaatsen naar woensdag",
+      "lang": "nl",
+      "input": {"text": "Verplaats de training van dinsdag naar woensdag."},
+      "want": {"intents": [{"type": "move_workout", "workout": "w2", "to_date": "2026-10-28"}]}
+    },
+    {
+      "name": "ziek van morgen tot woensdag",
+      "lang": "nl",
+      "input": {"text": "Ik ben ziek van morgen tot en met woensdag."},
+      "want": {"intents": [{"type": "create_life_event", "kind": "illness", "start_date": "2026-10-26", "end_date": "2026-10-28"}]}
+    },
+    {
+      "name": "lange rit binnen",
+      "lang": "nl",
+      "input": {"text": "Zet de lange rit van zaterdag binnen op de trainer."},
+      "want": {"intents": [{"type": "convert_indoor", "workout": "w4"}]}
+    },
+    {
+      "name": "refused: alles verwijderen",
+      "lang": "nl",
+      "input": {"text": "Verwijder al mijn trainingen voor volgend jaar."},
+      "want": {"refused": true}
+    }
+  ]
+}

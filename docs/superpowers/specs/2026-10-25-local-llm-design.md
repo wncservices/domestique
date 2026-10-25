@@ -1,6 +1,6 @@
 # Local LLM — design (sub-project 6a)
 
-Status: approved 2026-10-25. Detailed design for section 6 of
+Status: approved 2026-10-25. 6a implemented 2026-10-25. Detailed design for section 6 of
 `2026-10-18-adaptive-training-builder-design.md`, first half. 6a moves the existing
 narration features onto the lab's own model. 6b (the morning-changes explanation,
 check-in parsing and the weekly summary) is a separate spec.

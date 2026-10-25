@@ -1,0 +1,65 @@
+{
+  "today": "2026-10-25",
+  "cases": [
+    {
+      "name": "spring classic, A race",
+      "lang": "en",
+      "input": {"note": "Spring classic on 20 March 2027, a 150 km ride with about 2000 m of climbing. It is my A race."},
+      "want": {"sport": "cycling", "eventDate": "2027-03-20", "priority": "A", "targetDistanceKm": 150, "targetElevationM": 2000}
+    },
+    {
+      "name": "first 10k run",
+      "lang": "en",
+      "input": {"note": "I want to run my first 10k on 6 December 2026."},
+      "want": {"sport": "running", "eventDate": "2026-12-06", "targetDistanceKm": 10}
+    },
+    {
+      "name": "no date given",
+      "lang": "en",
+      "input": {"note": "Some charity ride next summer, I have no date for it yet."},
+      "want": {"sport": "cycling", "eventDate": ""}
+    },
+    {
+      "name": "half marathon for fun",
+      "lang": "en",
+      "input": {"note": "Half marathon on 14 February 2027, C priority, just for fun."},
+      "want": {"sport": "running", "eventDate": "2027-02-14", "priority": "C", "targetDistanceKm": 21.1}
+    },
+    {
+      "name": "city marathon, main race",
+      "lang": "en",
+      "input": {"note": "City marathon on 17 April 2027, 42.2 km, my main race of the year."},
+      "want": {"sport": "running", "eventDate": "2027-04-17", "priority": "A", "targetDistanceKm": 42.2}
+    },
+    {
+      "name": "belangrijkste koers",
+      "lang": "nl",
+      "input": {"note": "Mijn grote koers is op 9 mei 2027, ongeveer 140 km met 1500 hoogtemeters. Het is mijn belangrijkste doel."},
+      "want": {"sport": "cycling", "eventDate": "2027-05-09", "priority": "A", "targetDistanceKm": 140, "targetElevationM": 1500}
+    },
+    {
+      "name": "halve marathon voor de lol",
+      "lang": "nl",
+      "input": {"note": "Ik wil een halve marathon lopen op 21 maart 2027, gewoon voor de lol."},
+      "want": {"sport": "running", "eventDate": "2027-03-21", "priority": "C", "targetDistanceKm": 21.1}
+    },
+    {
+      "name": "toertocht zonder datum",
+      "lang": "nl",
+      "input": {"note": "Ergens volgend jaar een toertocht, er is nog geen datum bekend."},
+      "want": {"sport": "cycling", "eventDate": ""}
+    },
+    {
+      "name": "10 km loopwedstrijd",
+      "lang": "nl",
+      "input": {"note": "Een loopwedstrijd van 10 kilometer op 5 juni 2027."},
+      "want": {"sport": "running", "eventDate": "2027-06-05", "targetDistanceKm": 10}
+    },
+    {
+      "name": "wielerwedstrijd, gemiddeld belangrijk",
+      "lang": "nl",
+      "input": {"note": "Een wielerwedstrijd van 100 km op 3 juli 2027, middelmatig belangrijk."},
+      "want": {"sport": "cycling", "eventDate": "2027-07-03", "priority": "B", "targetDistanceKm": 100}
+    }
+  ]
+}
