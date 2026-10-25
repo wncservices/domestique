@@ -93,11 +93,12 @@ func (s *Server) writeLLMNotes(ctx context.Context, now time.Time) {
 // writeChangesNote explains the day's adjustments for one rider. It reports
 // whether a note was saved.
 func (s *Server) writeChangesNote(ctx context.Context, rider, today string) bool {
-	adjustments, err := s.Training.AdjustmentsOnDay(ctx, rider, today)
+	all, err := s.Training.AdjustmentsOnDay(ctx, rider, today)
 	if err != nil {
 		s.logger().Warn("llm notes: could not read the day's changes", "rider", rider, "err", err)
 		return false
 	}
+	adjustments := workoutChanges(all)
 	if len(adjustments) == 0 {
 		return false
 	}
@@ -160,6 +161,19 @@ func (s *Server) writeWeeklyNote(ctx context.Context, rider, today string) bool 
 		return false
 	}
 	return true
+}
+
+// workoutChanges keeps the adjustments that changed a session and have a title
+// a rider can read. Level rows (a threshold or a level moved) and rules with no
+// title are left out: the changes note is about sessions only.
+func workoutChanges(all []workout.Adjustment) []workout.Adjustment {
+	var out []workout.Adjustment
+	for _, a := range all {
+		if a.SubjectKind == workout.SubjectWorkout && why.Title(a.Rule) != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // changesFor turns one day's adjustments into what the model is shown. The

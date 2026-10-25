@@ -1567,7 +1567,10 @@ is refused. The check-in reading only suggests: it fills empty scores and previe
 nothing is saved without the rider's tap; a failed reading leaves the saved check-in alone. The notes
 are app-only (`/api/training/notes`, `/api/training/checkin/understand`), so the morning email is
 unchanged, and neither the note, the prompt nor the reply is logged. The weekly summary's
-forgiven figure is passed only once the following week is open.
+forgiven figure is passed only once the following week is open. The weekly note is written on Monday for the
+previous week; each note is one attempt per claim, so a failed or interrupted call is not retried that day.
+The changes note falls back to the rule titles when the model fails or the job is off, and only workout
+adjustments count (level rows and untitled rules are left out).
 
 ## Conventions
 

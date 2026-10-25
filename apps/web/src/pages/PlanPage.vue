@@ -692,9 +692,10 @@ function fromRoute() {
 
 const lifeEvents = ref<LifeEvent[]>([])
 
-// --- last week: the model's summary of the week just gone, shown on a Monday
-// until the rider dismisses it. The dismissal is remembered per week in this
-// browser only; a failed read or a storage error just leaves the card out. ---
+// --- last week: the model's summary of the week just gone. It is written on a
+// Monday and shown all week until the rider dismisses it. The dismissal is
+// remembered per week in this browser only; a failed read or a storage error
+// just leaves the card out. ---
 
 const lastWeek = ref<TrainingNotes['weekly']>(null)
 

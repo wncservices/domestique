@@ -139,6 +139,58 @@ func TestNoChangesNoteWithoutAdjustments(t *testing.T) {
 	}
 }
 
+// TestChangesNoteIgnoresLevelAdjustments: a level adjustment, or a workout rule
+// with no title, is not a change to a session. A day with only those writes no
+// changes note and makes no model call, and a day with a workout change and a
+// level change sends the model the workout line alone.
+func TestChangesNoteIgnoresLevelAdjustments(t *testing.T) {
+	const day = "2026-10-04"
+	h := newLedgerHarness(t, 250)
+	rec := why.NewRecord(why.LevelRecalibration, "Recalibrated", why.ReadinessInputs{Verdict: "caution"})
+	if err := h.store.RecordAdjustment(context.Background(), "wilant", workout.SubjectLevel, "run:threshold", rec, day); err != nil {
+		t.Fatal(err)
+	}
+	untitled := why.NewRecord(why.Rule("unknown_rule"), "Recorded", why.ReadinessInputs{Verdict: "caution"})
+	if err := h.store.RecordAdjustment(context.Background(), "wilant", workout.SubjectWorkout, firstWorkoutIDs(t, h, 1)[0], untitled, day); err != nil {
+		t.Fatal(err)
+	}
+	f := withLLM(t, h.srv, fixed(explainReply))
+
+	h.at(4, 6, 45)
+	morningPass(h)
+
+	if _, ok := storedNote(t, h, workout.LLMNoteChanges, day); ok {
+		t.Fatal("a changes note was written for level and untitled adjustments only")
+	}
+	if n := f.calls.Load(); n != 0 {
+		t.Fatalf("model calls = %d for level and untitled adjustments only, want 0", n)
+	}
+}
+
+// TestChangesNoteSendsWorkoutChangesOnly: the model is shown the workout change
+// of a day and not the level change made the same day.
+func TestChangesNoteSendsWorkoutChangesOnly(t *testing.T) {
+	const day = "2026-10-04"
+	h := newLedgerHarness(t, 250)
+	recordCaution(t, h, firstWorkoutIDs(t, h, 1)[0], day)
+	rec := why.NewRecord(why.LevelRecalibration, "Recalibrated", why.ReadinessInputs{Verdict: "caution"})
+	if err := h.store.RecordAdjustment(context.Background(), "wilant", workout.SubjectLevel, "run:threshold", rec, day); err != nil {
+		t.Fatal(err)
+	}
+	f := withLLM(t, h.srv, fixed(explainReply))
+
+	h.at(4, 6, 45)
+	morningPass(h)
+
+	body := string(f.last)
+	if !strings.Contains(body, why.Title(why.ReadinessCaution)) {
+		t.Fatalf("the workout change is missing from the request:\n%s", body)
+	}
+	if strings.Contains(body, why.Title(why.LevelRecalibration)) {
+		t.Fatalf("the level change was sent to the model:\n%s", body)
+	}
+}
+
 // TestWeeklyNoteOnlyOnMonday: the weekly summary is written on the Monday
 // morning, keyed by the Monday of the week it summarises, and no other day.
 func TestWeeklyNoteOnlyOnMonday(t *testing.T) {
