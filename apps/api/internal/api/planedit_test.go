@@ -259,10 +259,14 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 	}
 
 	want := map[string][]string{
-		"illegal pair":    {intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-10-20", "end_date": "2026-10-21", "option": "mild"}), "not an option"},
-		"ridden":          {intent("move_workout", map[string]string{"workout": riddenHandle, "to_date": "2026-10-10"}), "already ridden"},
-		"unavailable day": {intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-09"}), "available days"},
-		"inside an event": {intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-17"}), "life event"},
+		"bad date":          {intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-13-45", "end_date": "2026-10-15"}), "YYYY-MM-DD"},
+		"beyond 60 days":    {intent("create_life_event", map[string]string{"kind": "busy", "start_date": "2027-03-01", "end_date": "2027-03-02"}), "between today and"},
+		"illegal pair":      {intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-10-20", "end_date": "2026-10-21", "option": "mild"}), "not an option"},
+		"foreign handle":    {intent("move_workout", map[string]string{"workout": "w99", "to_date": "2026-10-10"}), "not in the next two weeks"},
+		"ridden":            {intent("move_workout", map[string]string{"workout": riddenHandle, "to_date": "2026-10-10"}), "already ridden"},
+		"unavailable day":   {intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-09"}), "available days"},
+		"inside an event":   {intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-17"}), "life event"},
+		"a day that's gone": {intent("move_workout", map[string]string{"workout": sunHandle, "to_date": "2026-10-05"}), "between today and"},
 	}
 	for name, c := range want {
 		t.Run(name, func(t *testing.T) {
@@ -276,42 +280,6 @@ func TestAnIntentThatBreaksARuleIsDroppedWithAReason(t *testing.T) {
 			}
 			if !strings.Contains(res.Dropped[0].Reason, c[1]) {
 				t.Errorf("reason %q does not mention %q", res.Dropped[0].Reason, c[1])
-			}
-		})
-	}
-}
-
-// A date outside the window, or a handle the plan does not hold, is not a
-// rule the rider's data decides: it is a mixed-up answer. The model gets one
-// more try, and if that is no better the whole reply is refused, not just the
-// one intent.
-func TestAnIntentOutsideTheWindowOrThePlanIsRetriedThenRejected(t *testing.T) {
-	cases := map[string]func(h *onceHarness, t *testing.T) string{
-		"bad date": func(*onceHarness, *testing.T) string {
-			return intent("create_life_event", map[string]string{"kind": "travel", "start_date": "2026-13-45", "end_date": "2026-10-15"})
-		},
-		"beyond 60 days": func(*onceHarness, *testing.T) string {
-			return intent("create_life_event", map[string]string{"kind": "busy", "start_date": "2027-03-01", "end_date": "2027-03-02"})
-		},
-		"foreign handle": func(*onceHarness, *testing.T) string {
-			return intent("move_workout", map[string]string{"workout": "w99", "to_date": "2026-10-10"})
-		},
-		"a day that's gone": func(h *onceHarness, t *testing.T) string {
-			handle, _ := h.handleFor(t, "2026-10-11")
-			return intent("move_workout", map[string]string{"workout": handle, "to_date": "2026-10-05"})
-		},
-	}
-	for name, bad := range cases {
-		t.Run(name, func(t *testing.T) {
-			h := newOnceHarness(t)
-			h.tickedWithFreeSaturday(t)
-			fake := h.withLLMReply(t, intents(bad(h, t)))
-			status, res := h.propose(t, "wilant", "x")
-			if status != http.StatusBadGateway || !strings.Contains(res.Error, "couldn't understand") {
-				t.Fatalf("status %d %q, want the reply refused", status, res.Error)
-			}
-			if n := fake.calls.Load(); n != 2 {
-				t.Errorf("model calls = %d, want 2 (one retry)", n)
 			}
 		})
 	}

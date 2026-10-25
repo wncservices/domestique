@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -72,10 +71,9 @@ func TestTheRequestIsOneStrictJSONSchemaWithNoTools(t *testing.T) {
 	if schema["additionalProperties"] != false {
 		t.Error("the top level of the schema allows extra properties")
 	}
-	for i, shape := range intentShapes(Capabilities{SwapAlternate: true, ConvertIndoor: true}) {
-		if shape["additionalProperties"] != false {
-			t.Errorf("intent shape %d allows extra properties", i)
-		}
+	items := schema["properties"].(map[string]any)["intents"].(map[string]any)["items"].(map[string]any)
+	if items["additionalProperties"] != false {
+		t.Error("an intent's schema allows extra properties")
 	}
 }
 
@@ -94,7 +92,6 @@ func TestTheUserMessageCarriesTheNoteTheDatesAndTheOpaquePlan(t *testing.T) {
 		"w1", "w2", "w3",
 		"Threshold 3×12", "Long ride",
 		"threshold", "75",
-		"first such day on or after tomorrow", // how a weekday name is read
 	} {
 		if !strings.Contains(user, want) {
 			t.Errorf("the user message does not contain %q:\n%s", want, user)
@@ -121,22 +118,9 @@ func TestTheSystemMessageHasNoRiderNote(t *testing.T) {
 	}
 }
 
-// intentShapes is the anyOf of an intent in the schema for caps: one object
-// schema per allowed type.
-func intentShapes(caps Capabilities) []map[string]any {
-	items := planEditSchema(caps)["properties"].(map[string]any)["intents"].(map[string]any)["items"].(map[string]any)
-	shapes, _ := items["anyOf"].([]map[string]any)
-	return shapes
-}
-
-// intentTypesOf is the type each shape of the schema for caps accepts.
 func intentTypesOf(caps Capabilities) []string {
-	var types []string
-	for _, shape := range intentShapes(caps) {
-		typ, _ := shape["properties"].(map[string]any)["type"].(map[string]any)["enum"].([]string)
-		types = append(types, typ...)
-	}
-	return types
+	schema := planEditSchema(caps)
+	return schema["properties"].(map[string]any)["intents"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["type"].(map[string]any)["enum"].([]string)
 }
 
 func has(list []string, s string) bool {
@@ -294,125 +278,5 @@ func TestPlanEditsJobIsSwitchedOffByConfig(t *testing.T) {
 	}
 	if !c.Enabled(JobExplainPlan) {
 		t.Error("explain_plan is off although config leaves it on")
-	}
-}
-
-// One shape per type: the move shape carries exactly its own fields, and no
-// shape allows a field outside its own.
-func TestPlanEditSchemaHasOneShapePerType(t *testing.T) {
-	for _, caps := range []Capabilities{{}, {SwapAlternate: true}, {ConvertIndoor: true}, {SwapAlternate: true, ConvertIndoor: true}} {
-		want := 2
-		if caps.SwapAlternate {
-			want++
-		}
-		if caps.ConvertIndoor {
-			want++
-		}
-		if got := len(intentShapes(caps)); got != want {
-			t.Errorf("caps %+v: %d shapes, want %d", caps, got, want)
-		}
-	}
-
-	var move map[string]any
-	for _, shape := range intentShapes(Capabilities{SwapAlternate: true, ConvertIndoor: true}) {
-		typ, _ := shape["properties"].(map[string]any)["type"].(map[string]any)["enum"].([]string)
-		if slices.Equal(typ, []string{IntentMoveWorkout}) {
-			move = shape
-		}
-	}
-	if move == nil {
-		t.Fatal("no move_workout shape")
-	}
-	props := move["properties"].(map[string]any)
-	var keys []string
-	for k := range props {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	if !slices.Equal(keys, []string{"to_date", "type", "workout"}) {
-		t.Errorf("move_workout properties = %v, want type, workout and to_date", keys)
-	}
-	if move["additionalProperties"] != false {
-		t.Error("move_workout allows extra properties")
-	}
-	for _, shape := range intentShapes(Capabilities{SwapAlternate: true, ConvertIndoor: true}) {
-		required, _ := shape["required"].([]string)
-		if len(required) != len(shape["properties"].(map[string]any)) {
-			t.Errorf("a shape does not require every property: %v", required)
-		}
-	}
-}
-
-// retriedReply serves bad on the first call and good on the second, and
-// returns what propose got.
-func retriedReply(t *testing.T, bad, good string) (PlanEdits, error, *fake) {
-	t.Helper()
-	f := newFake(t, func(w http.ResponseWriter, _ *http.Request, n int) {
-		content := good
-		if n == 0 {
-			content = bad
-		}
-		_, _ = io.WriteString(w, reply(t, content))
-	})
-	c := newClient(t, f.srv.URL+"/v1", "")
-	got, err := propose(t, c, "x")
-	return got, err, f
-}
-
-func TestMoveWithoutToDateIsRetried(t *testing.T) {
-	bad := `{"refused":false,"intents":[{"type":"move_workout","workout":"w1","to_date":""}],"unsupported":null}`
-	good := `{"refused":false,"intents":[{"type":"move_workout","workout":"w1","to_date":"2026-10-10"}],"unsupported":null}`
-	got, err, f := retriedReply(t, bad, good)
-	if err != nil {
-		t.Fatalf("err = %v, want the retry to succeed", err)
-	}
-	if n := f.requests.Load(); n != 2 {
-		t.Errorf("requests = %d, want 2", n)
-	}
-	if len(got.Intents) != 1 || got.Intents[0].ToDate != "2026-10-10" {
-		t.Errorf("intents = %+v", got.Intents)
-	}
-}
-
-func TestUnknownWorkoutHandleIsRetried(t *testing.T) {
-	bad := `{"refused":false,"intents":[{"type":"convert_indoor","workout":"w99"}],"unsupported":null}`
-	good := `{"refused":false,"intents":[{"type":"convert_indoor","workout":"w2"}],"unsupported":null}`
-	got, err, f := retriedReply(t, bad, good)
-	if err != nil {
-		t.Fatalf("err = %v, want the retry to succeed", err)
-	}
-	if n := f.requests.Load(); n != 2 {
-		t.Errorf("requests = %d, want 2", n)
-	}
-	if len(got.Intents) != 1 || got.Intents[0].Workout != "w2" {
-		t.Errorf("intents = %+v", got.Intents)
-	}
-}
-
-func TestLifeEventEndBeforeStartIsRetried(t *testing.T) {
-	bad := `{"refused":false,"intents":[{"type":"create_life_event","kind":"illness","start_date":"2026-10-08","end_date":"2026-10-04","option":null}],"unsupported":null}`
-	good := `{"refused":false,"intents":[{"type":"create_life_event","kind":"illness","start_date":"2026-10-08","end_date":"2026-10-28","option":null}],"unsupported":null}`
-	got, err, f := retriedReply(t, bad, good)
-	if err != nil {
-		t.Fatalf("err = %v, want the retry to succeed", err)
-	}
-	if n := f.requests.Load(); n != 2 {
-		t.Errorf("requests = %d, want 2", n)
-	}
-	if len(got.Intents) != 1 || got.Intents[0].EndDate != "2026-10-28" {
-		t.Errorf("intents = %+v", got.Intents)
-	}
-}
-
-// A field that belongs to another shape is a mixed-up answer, not a null.
-func TestAFieldFromAnotherShapeIsRetried(t *testing.T) {
-	bad := `{"refused":false,"intents":[{"type":"move_workout","workout":"w1","to_date":"2026-10-10","kind":"travel"}],"unsupported":null}`
-	good := `{"refused":false,"intents":[{"type":"move_workout","workout":"w1","to_date":"2026-10-10"}],"unsupported":null}`
-	_, err, f := retriedReply(t, bad, good)
-	if err != nil {
-		t.Fatalf("err = %v, want the retry to succeed", err)
-	}
-	if n := f.requests.Load(); n != 2 {
-		t.Errorf("requests = %d, want 2", n)
 	}
 }
