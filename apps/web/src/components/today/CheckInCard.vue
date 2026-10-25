@@ -12,8 +12,9 @@
 // failed reading leaves the saved check-in alone and shows one quiet line.
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api/client'
-import type { CheckIn, CheckInReading, PlanEditResponse } from '@/api/types'
+import type { CheckIn, CheckInReading, LifeEvent, PlanEditResponse } from '@/api/types'
 import LifeEventModal from '@/components/plan/LifeEventModal.vue'
+import { eventLabel, rangeLabel } from '@/components/plan/lifeEvents'
 import { useLibrary } from '@/composables/useLibrary'
 import { checkInComplete } from '@/utils/today'
 import { useToast } from '@nuxt/ui/composables'
@@ -80,11 +81,12 @@ const readLine = computed(() => {
 })
 
 const lifeEvent = computed(() => reading.value?.lifeEvent ?? null)
-const LIFE_KIND: Record<'travel' | 'illness', string> = { travel: 'Travel', illness: 'Illness' }
 const lifeLine = computed(() => {
   const le = lifeEvent.value
   if (!le) return ''
-  return `${LIFE_KIND[le.kind]}, ${le.startDate} to ${le.endDate}`
+  // The same wording and dates the Plan page's life-event modal uses.
+  const event: LifeEvent = { id: '', kind: le.kind, startDate: le.startDate, endDate: le.endDate, option: le.option ?? undefined }
+  return `${eventLabel(event)}, ${rangeLabel(event)}`
 })
 
 let readRequest = 0
@@ -235,7 +237,7 @@ async function planLifeEvent() {
 
       <div v-else-if="reading" class="flex flex-col gap-3">
         <p class="text-[length:var(--text-body)] text-muted">
-          <span class="font-medium text-highlighted">We understood:</span>
+          <span class="font-medium text-highlighted">We understood: </span>
           <span v-if="!readLine && !lifeLine"> nothing about your scores or your plans.</span>
           <span v-if="readLine" class="tabular-nums text-highlighted">{{ readLine }}</span>
           <span v-if="readLine && lifeLine"> · </span>

@@ -149,7 +149,9 @@ async function loadAll() {
     quietly(api.ftpTests(), null).then((v) => (ftpTests.value = v)),
     quietly(api.rideTogether(), { proposals: [] }).then((v) => (rideTogether.value = v.proposals)),
     quietly(api.lifeEvents(), { events: [] }).then((v) => (lifeEvents.value = v.events)),
-    quietly(api.trainingNotes(), { changes: null, weekly: null }).then((v) => (notes.value = v)),
+    me.value?.llmJobs.explainChanges
+      ? quietly(api.trainingNotes(), { changes: null, weekly: null }).then((v) => (notes.value = v))
+      : Promise.resolve(),
     weather.load(),
   ])
 }
@@ -384,11 +386,11 @@ async function dismissSuggestion() {
           </div>
         </UCard>
 
-        <UCard v-if="notes?.changes" variant="outline" data-testid="today-changes">
+        <UCard v-if="notes?.changes && me?.llmJobs.explainChanges" variant="outline" data-testid="today-changes">
           <div class="flex flex-col gap-2">
             <h2 class="text-[length:var(--text-label)] font-medium text-muted">This morning's changes</h2>
             <p class="text-[length:var(--text-body)] text-highlighted">{{ notes.changes.text }}</p>
-            <div v-if="workout?.why">
+            <div v-if="today?.planned.length === 1 && workout?.why">
               <WhyPopover :why="workout.why" />
             </div>
           </div>

@@ -711,6 +711,7 @@ function weeklyDismissed(weekStart: string): boolean {
 }
 
 async function loadNotes() {
+  if (!me.value?.llmJobs.weeklySummary) return
   try {
     const notes = await api.trainingNotes()
     lastWeek.value = notes.weekly && !weeklyDismissed(notes.weekly.weekStart) ? notes.weekly : null
@@ -878,7 +879,7 @@ const yesterday = computed(() => {
 })
 
 onMounted(() => {
-  api.me().then((m) => { me.value = m }).catch(() => {})
+  api.me().then((m) => { me.value = m; void loadNotes() }).catch(() => {})
   loadProfile()
   loadGoals()
   loadWorkouts()
@@ -888,7 +889,6 @@ onMounted(() => {
   loadFtpTests()
   loadWeather()
   loadLifeEvents()
-  loadNotes()
   startGoalFromRoute()
 })
 
@@ -921,7 +921,7 @@ const pageState = computed(() =>
     />
 
     <template v-else>
-      <UCard v-if="lastWeek" variant="outline" data-testid="plan-last-week">
+      <UCard v-if="lastWeek && me?.llmJobs.weeklySummary" variant="outline" data-testid="plan-last-week">
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between gap-3">
             <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted">Last week</h2>
