@@ -1,0 +1,41 @@
+{
+  "today": "2026-10-26",
+  "cases": [
+    {
+      "name": "full build week, all figures",
+      "lang": "en",
+      "input": {"week_start": "2026-10-19", "phase": "build", "target_tss": 420, "ridden_tss": 395, "debt_tss": 12, "forgiven_tss": 4, "done": 4, "partial": 1, "missed": 1, "ctl_start": 58, "ctl_end": 61},
+      "want": {}
+    },
+    {
+      "name": "recovery week, figures known",
+      "lang": "en",
+      "input": {"week_start": "2026-10-12", "phase": "recovery", "target_tss": 260, "ridden_tss": 240, "debt_tss": 0, "forgiven_tss": 0, "done": 3, "partial": 0, "missed": 0, "ctl_start": 61, "ctl_end": 60},
+      "want": {}
+    },
+    {
+      "name": "only the target and what was ridden",
+      "lang": "en",
+      "input": {"week_start": "2026-10-05", "phase": "", "target_tss": 300, "ridden_tss": 180},
+      "want": {}
+    },
+    {
+      "name": "taper week, CTL falling",
+      "lang": "en",
+      "input": {"week_start": "2026-11-09", "phase": "taper", "target_tss": 210, "ridden_tss": 205, "done": 2, "partial": 0, "missed": 0, "ctl_start": 72, "ctl_end": 68},
+      "want": {}
+    },
+    {
+      "name": "week met in Dutch",
+      "lang": "nl",
+      "input": {"week_start": "2026-10-19", "phase": "build", "target_tss": 380, "ridden_tss": 350, "debt_tss": 25, "forgiven_tss": 10, "done": 3, "partial": 1, "missed": 2},
+      "want": {}
+    },
+    {
+      "name": "week with debt carried in",
+      "lang": "nl",
+      "input": {"week_start": "2026-10-12", "phase": "base", "target_tss": 300, "ridden_tss": 310, "debt_tss": 30, "done": 4, "partial": 0, "missed": 0, "ctl_start": 50, "ctl_end": 52},
+      "want": {}
+    }
+  ]
+}

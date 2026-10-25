@@ -1,6 +1,6 @@
 # LLM jobs — design (sub-project 6b)
 
-Status: approved 2026-10-26. This is the second half of section 6 of
+Status: approved 2026-10-26. 6b implemented 2026-10-26. This is the second half of section 6 of
 `2026-10-18-adaptive-training-builder-design.md`. It builds on 6a
 (`2026-10-25-local-llm-design.md`), which supplies the `internal/llm` client.
 

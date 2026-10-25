@@ -1555,6 +1555,20 @@ scored 6/10 (moves put the target date in the wrong field, "until Wednesday" lan
 deployments run it with `llm.jobs.plan_edits: false`. One schema shape per intent type (`anyOf`) was
 tried and scored worse (3/10, with timeouts), so the flat schema stays.
 
+Three more jobs sit on the same client (sub-project 6b): `explain_changes` (one to three sentences on
+why the morning's changes were made, from the Why facts), `weekly_summary` (at most five sentences on
+a plan week, from its own figures) and `understand_checkin` (reads a morning check-in note into scores
+and a life event). The first two write `llm_notes(rider, kind, day, text, created_at)`, registered in
+`riderTables`, read as absent while claimed and pruned after 60 days. A background step runs after
+`AutoScheduleTick` releases its lock, under the advisory lock `domestique:llm-notes`, only in the
+morning slot and only with auto-schedule on, and covers riders with a goal. Text jobs are checked by
+`checkProse`: every number in the reply must appear in the input, so a reply that paraphrases a figure
+is refused. The check-in reading only suggests: it fills empty scores and previews a life event, and
+nothing is saved without the rider's tap; a failed reading leaves the saved check-in alone. The notes
+are app-only (`/api/training/notes`, `/api/training/checkin/understand`), so the morning email is
+unchanged, and neither the note, the prompt nor the reply is logged. The weekly summary's
+forgiven figure is passed only once the following week is open.
+
 ## Conventions
 
 - Go: standard library first. The dependencies are `gopkg.in/yaml.v3`, `modernc.org/sqlite`
