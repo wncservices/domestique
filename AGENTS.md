@@ -1553,7 +1553,10 @@ English and Dutch, run through the real job functions by `just llm-eval` against
 On `qwen3.5-9b` (2026-10-25) profile proposals scored 10/10 and goal proposals 9/10; plan edits
 scored 6/10 (moves put the target date in the wrong field, "until Wednesday" landed a week late), so
 deployments run it with `llm.jobs.plan_edits: false`. One schema shape per intent type (`anyOf`) was
-tried and scored worse (3/10, with timeouts), so the flat schema stays.
+tried and scored worse (3/10, with timeouts), so the flat schema stays. The 6b jobs on the same model
+(2026-10-26): `explain_changes` 6/6 and `weekly_summary` 6/6 ship on; `understand_checkin` scored 9/12
+(every score reading passed; the misses were Dutch life events, one of them "tot donderdag" landing a
+week late), so deployments run it with `llm.jobs.understand_checkin: false`.
 
 Three more jobs sit on the same client (sub-project 6b): `explain_changes` (one to three sentences on
 why the morning's changes were made, from the Why facts), `weekly_summary` (at most five sentences on
