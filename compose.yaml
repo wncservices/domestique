@@ -100,7 +100,7 @@ services:
 
   node:
     profiles: [tools]
-    image: node:24.19.0-alpine
+    image: node:24.22.1-alpine
     working_dir: /src
     volumes:
       - .:/src
