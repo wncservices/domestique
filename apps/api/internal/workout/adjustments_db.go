@@ -3,6 +3,7 @@ package workout
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -145,16 +146,10 @@ func (d *DB) LatestAdjustments(ctx context.Context, rider, kind string, subjectI
 			return nil, err
 		}
 		for rows.Next() {
-			var a Adjustment
-			var rule, inputs string
-			if err := rows.Scan(&a.ID, &a.Rider, &a.SubjectKind, &a.SubjectID, &rule, &inputs, &a.Text, &a.Day, &a.CreatedAt); err != nil {
+			a, err := scanAdjustment(rows)
+			if err != nil {
 				_ = rows.Close()
 				return nil, err
-			}
-			a.Rule = why.Rule(rule)
-			if inputs != "" {
-				// An unreadable blob leaves Inputs nil: the sentence still shows.
-				_ = json.Unmarshal([]byte(inputs), &a.Inputs)
 			}
 			out[a.SubjectID] = a // ascending, so the last one written wins
 		}
@@ -165,6 +160,44 @@ func (d *DB) LatestAdjustments(ctx context.Context, rider, kind string, subjectI
 		_ = rows.Close()
 	}
 	return out, nil
+}
+
+// AdjustmentsOnDay returns every reason stored for the rider on day, oldest
+// first. The day is the one the change was made, not the day it applies to.
+func (d *DB) AdjustmentsOnDay(ctx context.Context, rider, day string) ([]Adjustment, error) {
+	rows, err := d.db.QueryContext(ctx, d.query(`
+        SELECT id, rider, subject_kind, subject_id, rule, inputs, text, day, created_at
+        FROM adjustments WHERE rider = ? AND day = ?
+        ORDER BY created_at ASC, id ASC`), normalizeRider(rider), day)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Adjustment
+	for rows.Next() {
+		a, err := scanAdjustment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// scanAdjustment reads one row of the adjustments columns in the order
+// LatestAdjustments and AdjustmentsOnDay select them.
+func scanAdjustment(rows *sql.Rows) (Adjustment, error) {
+	var a Adjustment
+	var rule, inputs string
+	if err := rows.Scan(&a.ID, &a.Rider, &a.SubjectKind, &a.SubjectID, &rule, &inputs, &a.Text, &a.Day, &a.CreatedAt); err != nil {
+		return Adjustment{}, err
+	}
+	a.Rule = why.Rule(rule)
+	if inputs != "" {
+		// An unreadable blob leaves Inputs nil: the sentence still shows.
+		_ = json.Unmarshal([]byte(inputs), &a.Inputs)
+	}
+	return a, nil
 }
 
 // DeleteRiderAdjustments removes every reason a rider has, workouts and

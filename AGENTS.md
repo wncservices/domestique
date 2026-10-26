@@ -1553,7 +1553,27 @@ English and Dutch, run through the real job functions by `just llm-eval` against
 On `qwen3.5-9b` (2026-10-25) profile proposals scored 10/10 and goal proposals 9/10; plan edits
 scored 6/10 (moves put the target date in the wrong field, "until Wednesday" landed a week late), so
 deployments run it with `llm.jobs.plan_edits: false`. One schema shape per intent type (`anyOf`) was
-tried and scored worse (3/10, with timeouts), so the flat schema stays.
+tried and scored worse (3/10, with timeouts), so the flat schema stays. The 6b jobs on the same model
+(2026-10-26): `explain_changes` 6/6 and `weekly_summary` 6/6 ship on; `understand_checkin` scored 9/12
+(every score reading passed; the misses were Dutch life events, one of them "tot donderdag" landing a
+week late), so deployments run it with `llm.jobs.understand_checkin: false`.
+
+Three more jobs sit on the same client (sub-project 6b): `explain_changes` (one to three sentences on
+why the morning's changes were made, from the Why facts), `weekly_summary` (at most five sentences on
+a plan week, from its own figures) and `understand_checkin` (reads a morning check-in note into scores
+and a life event). The first two write `llm_notes(rider, kind, day, text, created_at)`, registered in
+`riderTables`, read as absent while claimed and pruned after 60 days. A background step runs after
+`AutoScheduleTick` releases its lock, under the advisory lock `domestique:llm-notes`, only in the
+morning slot and only with auto-schedule on, and covers riders with a goal. Text jobs are checked by
+`checkProse`: every number in the reply must appear in the input, so a reply that paraphrases a figure
+is refused. The check-in reading only suggests: it fills empty scores and previews a life event, and
+nothing is saved without the rider's tap; a failed reading leaves the saved check-in alone. The notes
+are app-only (`/api/training/notes`, `/api/training/checkin/understand`), so the morning email is
+unchanged, and neither the note, the prompt nor the reply is logged. The weekly summary's
+forgiven figure is passed only once the following week is open. The weekly note is written on Monday for the
+previous week; each note is one attempt per claim, so a failed or interrupted call is not retried that day.
+The changes note falls back to the rule titles when the model fails or the job is off, and only workout
+adjustments count (level rows and untitled rules are left out).
 
 ## Conventions
 

@@ -146,6 +146,9 @@ type Server struct {
 	// flight, for WaitForBackground.
 	seasonMu   sync.Mutex
 	background sync.WaitGroup
+	// llmNotesBusy is set while a morning notes pass is in flight, so the
+	// scheduling tick starts at most one at a time in this process.
+	llmNotesBusy atomic.Bool
 
 	Source   source.Library
 	Config   *config.Config
@@ -676,6 +679,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/readiness", s.handleGetReadiness)
 	mux.HandleFunc("GET /api/training/checkin", s.handleGetCheckIn)
 	mux.HandleFunc("PUT /api/training/checkin", s.handlePutCheckIn)
+	mux.HandleFunc("POST /api/training/checkin/understand", s.handleUnderstandCheckIn)
+	mux.HandleFunc("GET /api/training/notes", s.handleLLMNotes)
 	mux.HandleFunc("GET /api/training/projection", s.handleGetProjection)
 	mux.HandleFunc("POST /api/training/readiness/tomorrow/ease", s.handleEaseTomorrow)
 	mux.HandleFunc("PUT /api/training/sessions/{id}/feel", s.handleSetSessionFeel)
@@ -1040,10 +1045,16 @@ type llmJobsDTO struct {
 	ProposeProfile bool `json:"proposeProfile"`
 	ProposeGoal    bool `json:"proposeGoal"`
 	PlanEdits      bool `json:"planEdits"`
+	// ExplainChanges, UnderstandCheckin and WeeklySummary are the morning
+	// notes and the check-in reading.
+	ExplainChanges    bool `json:"explainChanges"`
+	UnderstandCheckin bool `json:"understandCheckin"`
+	WeeklySummary     bool `json:"weeklySummary"`
 }
 
 func (j llmJobsDTO) anyOn() bool {
-	return j.ExplainPlan || j.ProposeProfile || j.ProposeGoal || j.PlanEdits
+	return j.ExplainPlan || j.ProposeProfile || j.ProposeGoal || j.PlanEdits ||
+		j.ExplainChanges || j.UnderstandCheckin || j.WeeklySummary
 }
 
 // UseLLM sets the model client and, when there is one, the hook that counts
@@ -1060,10 +1071,13 @@ func (s *Server) UseLLM(c *llm.Client) {
 // reads as all false.
 func (s *Server) llmJobs() llmJobsDTO {
 	return llmJobsDTO{
-		ExplainPlan:    s.LLM.Enabled(llm.JobExplainPlan),
-		ProposeProfile: s.LLM.Enabled(llm.JobProposeProfile),
-		ProposeGoal:    s.LLM.Enabled(llm.JobProposeGoal),
-		PlanEdits:      s.LLM.Enabled(llm.JobPlanEdits),
+		ExplainPlan:       s.LLM.Enabled(llm.JobExplainPlan),
+		ProposeProfile:    s.LLM.Enabled(llm.JobProposeProfile),
+		ProposeGoal:       s.LLM.Enabled(llm.JobProposeGoal),
+		PlanEdits:         s.LLM.Enabled(llm.JobPlanEdits),
+		ExplainChanges:    s.LLM.Enabled(llm.JobExplainChanges),
+		UnderstandCheckin: s.LLM.Enabled(llm.JobUnderstandCheckIn),
+		WeeklySummary:     s.LLM.Enabled(llm.JobWeeklySummary),
 	}
 }
 

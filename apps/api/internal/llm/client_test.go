@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -393,6 +394,16 @@ func TestTransportIsOutbound(t *testing.T) {
 	c := newClient(t, "http://llm.example/v1", "")
 	if c.httpClient.Transport == http.DefaultTransport {
 		t.Fatal("the transport is the bare default; it must be wrapped in telemetry.OutboundTransport")
+	}
+}
+
+// The three text and check-in jobs must be switchable from config like the rest.
+func TestNewJobsAreInTheJobListAndConfig(t *testing.T) {
+	want := []Job{JobExplainChanges, JobUnderstandCheckIn, JobWeeklySummary}
+	for _, j := range want {
+		if !slices.Contains(Jobs, j) || !slices.Contains(config.LLMJobNames, string(j)) {
+			t.Errorf("%q is missing from llm.Jobs or config.LLMJobNames", j)
+		}
 	}
 }
 

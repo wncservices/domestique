@@ -1,0 +1,77 @@
+{
+  "today": "2026-10-26",
+  "cases": [
+    {
+      "name": "explicit scores",
+      "lang": "en",
+      "input": {"note": "Legs 2 out of 5 this morning, sleep 3 out of 5, mood 4 out of 5."},
+      "want": {"legs": 2, "sleep": 3, "mood": 4, "life_event": null}
+    },
+    {
+      "name": "all very good",
+      "lang": "en",
+      "input": {"note": "Legs feel fantastic, I slept really well and I'm in a great mood."},
+      "want": {"legs": 5, "sleep": 5, "mood": 5, "life_event": null}
+    },
+    {
+      "name": "nothing stated",
+      "lang": "en",
+      "input": {"note": "Nothing special to report, all fine."},
+      "want": {"legs": 0, "sleep": 0, "mood": 0, "life_event": null}
+    },
+    {
+      "name": "work trip without bike",
+      "lang": "en",
+      "input": {"note": "Work trip from Wednesday 28 October to Friday 30 October, no bike with me, only the hotel gym."},
+      "want": {"legs": 0, "sleep": 0, "mood": 0, "life_event": {"kind": "travel", "start_date": "2026-10-28", "end_date": "2026-10-30", "option": "gym"}}
+    },
+    {
+      "name": "mild cold until Thursday",
+      "lang": "en",
+      "input": {"note": "I have a mild cold from today until Thursday. Legs 2 out of 5."},
+      "want": {"legs": 2, "sleep": 0, "mood": 0, "life_event": {"kind": "illness", "start_date": "2026-10-26", "end_date": "2026-10-29", "option": "mild"}}
+    },
+    {
+      "name": "proper flu, out until 2 November",
+      "lang": "en",
+      "input": {"note": "Proper flu, in bed until 2 November, so no training until then."},
+      "want": {"legs": 0, "sleep": 0, "mood": 0, "life_event": {"kind": "illness", "start_date": "2026-10-26", "end_date": "2026-11-02", "option": "proper"}}
+    },
+    {
+      "name": "scores in Dutch",
+      "lang": "nl",
+      "input": {"note": "Benen 4 van 5, slaap 2 van 5, humeur 3 van 5."},
+      "want": {"legs": 4, "sleep": 2, "mood": 3, "life_event": null}
+    },
+    {
+      "name": "niets bijzonders",
+      "lang": "nl",
+      "input": {"note": "Ik voel me prima vandaag, niets bijzonders."},
+      "want": {"legs": 0, "sleep": 0, "mood": 0, "life_event": null}
+    },
+    {
+      "name": "zakenreis zonder fiets",
+      "lang": "nl",
+      "input": {"note": "Van woensdag 28 oktober tot en met vrijdag 30 oktober ben ik op zakenreis, zonder fiets, alleen de hotelsportschool."},
+      "want": {"legs": 0, "sleep": 0, "mood": 0, "life_event": {"kind": "travel", "start_date": "2026-10-28", "end_date": "2026-10-30", "option": "gym"}}
+    },
+    {
+      "name": "slechte benen en slaap",
+      "lang": "nl",
+      "input": {"note": "Benen zijn zwaar, 2 van 5, en ik heb slecht geslapen, slaap 2."},
+      "want": {"legs": 2, "sleep": 2, "mood": 0, "life_event": null}
+    },
+    {
+      "name": "verkouden tot donderdag",
+      "lang": "nl",
+      "input": {"note": "Ik ben verkouden, mild, vanaf vandaag tot donderdag. Benen 3."},
+      "want": {"legs": 3, "sleep": 0, "mood": 0, "life_event": {"kind": "illness", "start_date": "2026-10-26", "end_date": "2026-10-29", "option": "mild"}}
+    },
+    {
+      "name": "zware griep tot 2 november",
+      "lang": "nl",
+      "input": {"note": "Ik heb een zware griep en lig in bed tot 2 november, dus geen training."},
+      "want": {"legs": 0, "sleep": 0, "mood": 0, "life_event": {"kind": "illness", "start_date": "2026-10-26", "end_date": "2026-11-02", "option": "proper"}}
+    }
+  ]
+}

@@ -270,7 +270,7 @@ type LLMConfig struct {
 // LLMJobNames is the set of job names Jobs may switch. internal/llm.Jobs is
 // the same list; a test in that package keeps the two in step. Config cannot
 // import llm, so the names live here too.
-var LLMJobNames = []string{"explain_plan", "propose_profile", "propose_goal", "plan_edits"}
+var LLMJobNames = []string{"explain_plan", "propose_profile", "propose_goal", "plan_edits", "explain_changes", "understand_checkin", "weekly_summary"}
 
 // DefaultDSN is where a database library lives unless configured otherwise.
 const DefaultDSN = "data/domestique.db"

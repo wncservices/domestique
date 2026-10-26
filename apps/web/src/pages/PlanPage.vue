@@ -27,6 +27,7 @@ import type {
   RideTogether,
   RiderProfile,
   TrainingWeek,
+  TrainingNotes,
   WeatherSuggestion,
   WeekFocus,
   Workout,
@@ -690,6 +691,46 @@ function fromRoute() {
 // natural-language proposal) and reloads whatever an apply can change. ---
 
 const lifeEvents = ref<LifeEvent[]>([])
+
+// --- last week: the model's summary of the week just gone. It is written on a
+// Monday and shown all week until the rider dismisses it. The dismissal is
+// remembered per week in this browser only; a failed read or a storage error
+// just leaves the card out. ---
+
+const lastWeek = ref<TrainingNotes['weekly']>(null)
+
+function weeklyDismissedKey(weekStart: string): string {
+  return `domestique:weekly-dismissed:${weekStart}`
+}
+
+function weeklyDismissed(weekStart: string): boolean {
+  try {
+    return localStorage.getItem(weeklyDismissedKey(weekStart)) === '1'
+  } catch {
+    return false
+  }
+}
+
+async function loadNotes() {
+  if (!me.value?.llmJobs.weeklySummary) return
+  try {
+    const notes = await api.trainingNotes()
+    lastWeek.value = notes.weekly && !weeklyDismissed(notes.weekly.weekStart) ? notes.weekly : null
+  } catch {
+    lastWeek.value = null
+  }
+}
+
+function dismissLastWeek() {
+  const shown = lastWeek.value
+  if (!shown) return
+  try {
+    localStorage.setItem(weeklyDismissedKey(shown.weekStart), '1')
+  } catch {
+    // Without storage the card simply comes back on the next visit.
+  }
+  lastWeek.value = null
+}
 const lifeModalOpen = ref(false)
 const lifeModalEvent = ref<LifeEvent | undefined>(undefined)
 const lifeModalEndEarly = ref(false)
@@ -839,7 +880,7 @@ const yesterday = computed(() => {
 })
 
 onMounted(() => {
-  api.me().then((m) => { me.value = m }).catch(() => {})
+  api.me().then((m) => { me.value = m; void loadNotes() }).catch(() => {})
   loadProfile()
   loadGoals()
   loadWorkouts()
@@ -881,6 +922,16 @@ const pageState = computed(() =>
     />
 
     <template v-else>
+      <UCard v-if="lastWeek && me?.llmJobs.weeklySummary" variant="outline" data-testid="plan-last-week">
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between gap-3">
+            <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted">Last week</h2>
+            <UButton color="neutral" variant="ghost" size="xs" icon="i-lucide-x" aria-label="Dismiss last week" @click="dismissLastWeek" />
+          </div>
+          <p class="text-[length:var(--text-body)] text-muted">{{ lastWeek.text }}</p>
+        </div>
+      </UCard>
+
       <PlanGoalHeader
         :focus="effectiveFocus"
         :goals="goals"

@@ -89,7 +89,15 @@ export interface Me {
   narrationEnabled: boolean
   /** Which LLM-backed actions this deployment offers, one flag each. False for
    *  a job switched off in config, and for all of them when no model is set. */
-  llmJobs: { explainPlan: boolean; proposeProfile: boolean; proposeGoal: boolean; planEdits: boolean }
+  llmJobs: {
+    explainPlan: boolean
+    proposeProfile: boolean
+    proposeGoal: boolean
+    planEdits: boolean
+    explainChanges: boolean
+    understandCheckin: boolean
+    weeklySummary: boolean
+  }
 }
 
 /** One MFA factor tied to the signed-in rider's own Auth0 account — gated
@@ -1161,6 +1169,23 @@ export interface CheckIn {
   mood: number
   sleepQuality: number
   note: string
+}
+
+/** GET /api/training/notes — mirrors llmNotesDTO. Each note is null when there
+ *  is none to show: `changes` is today's explanation of the day's adjustments,
+ *  `weekly` last week's summary (on a Monday's read it is the week just gone). */
+export interface TrainingNotes {
+  changes: { day: string; text: string } | null
+  weekly: { weekStart: string; text: string } | null
+}
+
+/** POST /api/training/checkin/understand — mirrors checkInReadingDTO. A score
+ *  of 0 means the note did not say. Nothing is saved server side. */
+export interface CheckInReading {
+  legs: number
+  sleep: number
+  mood: number
+  lifeEvent: { kind: 'travel' | 'illness'; startDate: string; endDate: string; option: LifeEventOption | null } | null
 }
 
 /** How today should go: `push` is a green light (everything at or above the

@@ -1,0 +1,83 @@
+{
+  "today": "2026-10-26",
+  "cases": [
+    {
+      "name": "endurance ride shortened for readiness",
+      "lang": "en",
+      "input": {
+        "changes": [
+          {"title": "Endurance ride", "workout": "Endurance ride, 72 minutes", "date": "2026-10-27", "facts": [
+            {"label": "Readiness", "value": "Caution"},
+            {"label": "Length", "value": "from 90 to 72 minutes"}
+          ]}
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "hard session swapped with an easier day",
+      "lang": "en",
+      "input": {
+        "changes": [
+          {"title": "Threshold intervals", "workout": "Threshold intervals, 4 x 8 min", "date": "2026-10-28", "facts": [
+            {"label": "Swapped with", "value": "endurance ride on 2026-10-30"},
+            {"label": "Readiness", "value": "Caution"}
+          ]}
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "recovery ride on a rest morning",
+      "lang": "en",
+      "input": {
+        "changes": [
+          {"title": "Recovery ride", "workout": "Recovery ride, 45 minutes", "date": "2026-10-26", "facts": [
+            {"label": "Readiness", "value": "Rest"},
+            {"label": "Replaced", "value": "Sweet spot, 60 minutes"}
+          ]}
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "missed load made up",
+      "lang": "en",
+      "input": {
+        "changes": [
+          {"title": "Long ride, with climbing", "workout": "Long ride, 3 hours", "date": "2026-11-01", "facts": [
+            {"label": "Load repaid", "value": "18 TSS from last week"},
+            {"label": "Length", "value": "from 150 to 180 minutes"}
+          ]}
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "gereden als rustdag",
+      "lang": "nl",
+      "input": {
+        "changes": [
+          {"title": "Rustig rijden", "workout": "Duurrit, 75 minuten", "date": "2026-10-27", "facts": [
+            {"label": "Gereedheid", "value": "Voorzichtig"},
+            {"label": "Duur", "value": "van 90 naar 75 minuten"}
+          ]}
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "harde training verplaatst",
+      "lang": "nl",
+      "input": {
+        "changes": [
+          {"title": "Intervallen", "workout": "Drempelintervallen, 3 x 10 min", "date": "2026-10-29", "facts": [
+            {"label": "Verwisseld met", "value": "duurrit op 2026-10-31"},
+            {"label": "Gereedheid", "value": "Voorzichtig"}
+          ]}
+        ]
+      },
+      "want": {}
+    }
+  ]
+}
