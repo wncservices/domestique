@@ -19,6 +19,8 @@ import {
   type ChartPoint,
   type ChartRange,
 } from '@/utils/fitnessMath'
+import { formatDate } from '@/utils/planDates'
+import SegmentedControl, { type SegmentItem } from '@/components/ui/SegmentedControl.vue'
 
 const props = defineProps<{ snapshots: FitnessSnapshot[]; projection?: ProjectionResponse | null }>()
 
@@ -26,12 +28,12 @@ const props = defineProps<{ snapshots: FitnessSnapshot[]; projection?: Projectio
 
 const hasProjection = computed(() => !!props.projection?.available && !!props.projection.goal && props.projection.points.length > 0)
 
-const RANGES = computed<{ key: ChartRange; label: string }[]>(() => [
-  { key: '6w', label: '6w' },
-  { key: '3m', label: '3m' },
-  { key: '6m', label: '6m' },
-  { key: '1y', label: '1y' },
-  ...(hasProjection.value ? [{ key: 'race' as ChartRange, label: 'To race' }] : []),
+const RANGES = computed<SegmentItem<ChartRange>[]>(() => [
+  { value: '6w', label: '6 wk' },
+  { value: '3m', label: '3 mo' },
+  { value: '6m', label: '6 mo' },
+  { value: '1y', label: '1 yr' },
+  ...(hasProjection.value ? [{ value: 'race' as ChartRange, label: 'To race' }] : []),
 ])
 const chosenRange = ref<ChartRange>('3m')
 // "To race" has nothing to show once the projection goes away (a sync
@@ -229,8 +231,7 @@ const crosshairX = computed(() => (crosshairIndex.value === null ? 0 : xFor(cros
 const readoutOnRight = computed(() => crosshairX.value <= WIDTH.value / 2)
 
 function formatReadoutDate(ymd: string): string {
-  const date = parseLocalDate(ymd)
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  return formatDate(ymd)
 }
 
 // --- accessibility summary ---
@@ -252,19 +253,7 @@ const ariaLabel = computed(() => {
   <div class="w-full">
     <div class="flex flex-wrap items-center justify-between mb-3 gap-2">
       <p class="text-[length:var(--text-body)] text-muted">CTL, ATL and TSB over time</p>
-      <UFieldGroup>
-        <UButton
-          v-for="r in RANGES"
-          :key="r.key"
-          size="xs"
-          class="whitespace-nowrap"
-          :color="range === r.key ? 'primary' : 'neutral'"
-          :variant="range === r.key ? 'subtle' : 'outline'"
-          @click="chosenRange = r.key"
-        >
-          {{ r.label }}
-        </UButton>
-      </UFieldGroup>
+      <SegmentedControl v-model="chosenRange" :items="RANGES" label="Chart range" />
     </div>
 
     <p v-if="!hasEnoughHistory" class="text-[length:var(--text-body)] text-muted py-8 text-center">Not enough history in this range yet.</p>
