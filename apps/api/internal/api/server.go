@@ -3805,6 +3805,22 @@ func (s *Server) spaHandler() http.Handler {
 			}
 		}
 
+		// /privacy is the policy's clean address. It is not a file (the build
+		// emits privacy.html), so without this it fell through to the landing
+		// page on the apex. privacy.html keeps working as before.
+		if clean == "privacy" {
+			if _, err := fs.Stat(s.WebFS, "privacy.html"); err == nil {
+				if !s.isLandingHost(r) && s.LandingHost != "" {
+					http.Redirect(w, r, "https://"+s.LandingHost+"/privacy", http.StatusFound)
+					return
+				}
+				r = r.Clone(r.Context())
+				r.URL.Path = "/privacy.html"
+				files.ServeHTTP(w, r)
+				return
+			}
+		}
+
 		// An anonymous visitor to the app host is sent to the front door
 		// instead of the app shell. mode: proxy never had this case —
 		// Traefik's forwardAuth refused the request before it reached this

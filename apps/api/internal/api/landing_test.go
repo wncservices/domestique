@@ -380,3 +380,39 @@ func TestModeNoneNeverRedirectsTheAppHost(t *testing.T) {
 		t.Errorf("status %d body %q, want the app", rec.Code, rec.Body.String())
 	}
 }
+
+// /privacy is the policy's clean address. The build emits privacy.html, so
+// /privacy used to fall through to the landing page: a 200 that was the wrong
+// document. Both spellings serve the policy on the apex; the app host sends
+// the clean one to the apex.
+func TestPrivacyHasACleanAddressOnTheApex(t *testing.T) {
+	web := fstest.MapFS{
+		"index.html":   {Data: []byte("<html>APP</html>")},
+		"landing.html": {Data: []byte("<html>LANDING</html>")},
+		"privacy.html": {Data: []byte("<html>PRIVACY</html>")},
+	}
+	srv := &Server{WebFS: web, LandingHost: "domestique.dev", Auth: oidcAuthenticator(t)}
+	get := func(srv *Server, host, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		srv.spaHandler().ServeHTTP(rec, req)
+		return rec
+	}
+	for _, path := range []string{"/privacy", "/privacy/", "/privacy.html"} {
+		rec := get(srv, "domestique.dev", path)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "PRIVACY") {
+			t.Errorf("%s on the apex: %d %q, want 200 with the policy", path, rec.Code, rec.Body.String())
+		}
+	}
+	rec := get(srv, "app.domestique.dev", "/privacy")
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "https://domestique.dev/privacy" {
+		t.Errorf("/privacy on the app host: %d %q, want 302 to the apex", rec.Code, rec.Header().Get("Location"))
+	}
+
+	// A frontend build without the policy keeps the old behaviour.
+	bare := &Server{WebFS: fstest.MapFS{"landing.html": web["landing.html"]}, LandingHost: "domestique.dev"}
+	if rec := get(bare, "domestique.dev", "/privacy"); !strings.Contains(rec.Body.String(), "LANDING") {
+		t.Errorf("without privacy.html: %q, want the landing page", rec.Body.String())
+	}
+}
