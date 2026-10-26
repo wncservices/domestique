@@ -255,6 +255,18 @@ func (s *Server) inMorningSlot(now time.Time) bool {
 	return morningSlotOf(sched, now)
 }
 
+// beforeFirstSlot is whether no sync slot has yet passed on now's local date.
+// A deployment whose schedule cannot be read is never "before": the hold it
+// gates must not outlive a broken config.
+func (s *Server) beforeFirstSlot(now time.Time) bool {
+	sched, err := s.syncSchedule()
+	if err != nil {
+		return false
+	}
+	now = now.In(sched.Location())
+	return sched.Last(now).In(sched.Location()).Format(dateLayout) != now.Format(dateLayout)
+}
+
 // morningSlotOf is the gate for work that belongs to the day's first sync slot:
 // the latest slot at or before now is the day's first, on the same local date as
 // now, and it is still before 12:00 local. A pass that runs late (the process

@@ -106,6 +106,17 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 	}
 
 	assessment := s.assessReadiness(ctx, rider, sessions, latest)
+	// Before the day's first sync slot readiness changes nothing. The morning
+	// re-optimiser (reoptimise, first slot only) trades a hard session for an
+	// easier one, and it can only trade a session that is still untouched: a
+	// tick at 05:30 that eased today's session in place, on wellness that
+	// arrived with the watch's early sync, would silently take the swap away.
+	// Easing waits for the slot, where the swap goes first and the easing
+	// follows in the same tick. Only the readiness verdict is held; the
+	// struggle and overload rules run as always.
+	if s.beforeFirstSlot(s.now()) {
+		assessment = readiness.Assessment{}
+	}
 
 	// A life event takes days out of the plan. Adaptation must neither make a
 	// session up on one nor read a session removed for one as missed, so it
