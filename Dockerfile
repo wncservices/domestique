@@ -4,7 +4,7 @@
 # than a one-architecture build. That matters now that every merge to main
 # builds an image.
 
-FROM --platform=$BUILDPLATFORM node:24.19.0-alpine AS web
+FROM --platform=$BUILDPLATFORM node:24.22.1-alpine AS web
 WORKDIR /src
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
