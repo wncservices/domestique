@@ -28,15 +28,19 @@ const day = computed(() => (props.why?.day ? weekdayDateShort(props.why.day) : '
 
 <template>
   <UPopover v-if="why || note">
-    <button
-      type="button"
-      class="inline-flex cursor-pointer items-center gap-1 text-left text-[length:var(--text-label)] text-info hover:underline"
+    <!-- A chip like the app's subtle badges, not link-coloured text: the
+         change is information, and the popover is the "why". -->
+    <UButton
+      color="neutral"
+      variant="subtle"
+      size="xs"
+      icon="i-lucide-wand-sparkles"
+      trailing-icon="i-lucide-info"
+      class="max-w-full self-start rounded-full"
       :aria-label="`${title} — why?`"
     >
-      <UIcon name="i-lucide-wand-sparkles" class="shrink-0" />
-      <span>{{ title }}</span>
-      <span class="font-medium underline decoration-dotted">Why?</span>
-    </button>
+      <span class="truncate">{{ title }}</span>
+    </UButton>
 
     <template #content>
       <div class="flex max-w-80 flex-col gap-2 p-3">
