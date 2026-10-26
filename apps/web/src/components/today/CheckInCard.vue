@@ -1,9 +1,12 @@
 <script setup lang="ts">
-// The morning check-in: three 1-5 scores and an optional note. It is the
+// The morning check-in: three quick answers and an optional note. It is the
 // rider's own words about how they feel, which readiness weighs alongside the
-// watch (a Wahoo-only rider has nothing else). Clicking the selected score
-// again clears it to 0, "not answered". Once all three are answered the card
-// folds to one line but stays editable.
+// watch (a Wahoo-only rider has nothing else). Readiness only tells a few
+// answers apart (legs 1 is severe; 2 or below on any row is amber; legs 3 or
+// more is needed to push), so each row offers words, not a 1-5 scale, and
+// stores the score each word stands for. A tap saves at once; tapping the
+// chosen word again clears it to 0, "not answered". Once all three are
+// answered the card folds to one line but stays editable.
 //
 // When the understand_checkin job is on, a saved note is read by the model and
 // the reading is shown under the card. The reading saves nothing by itself:
@@ -29,11 +32,55 @@ const { me } = useLibrary()
 const understandOn = computed(() => !!me.value?.llmJobs.understandCheckin)
 
 type Field = 'legs' | 'mood' | 'sleepQuality'
-const ROWS: { field: Field; label: string; low: string; mid?: string; high: string }[] = [
-  { field: 'legs', label: 'Legs', low: 'Dead', mid: 'Normal', high: 'Fresh' },
-  { field: 'mood', label: 'Mood', low: 'Low', high: 'Great' },
-  { field: 'sleepQuality', label: 'Sleep', low: 'Awful', high: 'Great' },
+type Choice = { label: string; score: number; min: number; max: number }
+// Each word covers a range of stored scores, so a 4 saved by the old 1-5 card
+// still shows as Normal or OK.
+const ROWS: { field: Field; label: string; choices: Choice[] }[] = [
+  {
+    field: 'legs',
+    label: 'Legs',
+    choices: [
+      { label: 'Dead', score: 1, min: 1, max: 1 },
+      { label: 'Heavy', score: 2, min: 2, max: 2 },
+      { label: 'Normal', score: 3, min: 3, max: 4 },
+      { label: 'Fresh', score: 5, min: 5, max: 5 },
+    ],
+  },
+  {
+    field: 'sleepQuality',
+    label: 'Sleep',
+    choices: [
+      { label: 'Bad', score: 2, min: 1, max: 2 },
+      { label: 'OK', score: 3, min: 3, max: 4 },
+      { label: 'Good', score: 5, min: 5, max: 5 },
+    ],
+  },
+  {
+    field: 'mood',
+    label: 'Mood',
+    choices: [
+      { label: 'Low', score: 2, min: 1, max: 2 },
+      { label: 'OK', score: 3, min: 3, max: 4 },
+      { label: 'Good', score: 5, min: 5, max: 5 },
+    ],
+  },
 ]
+
+function chosen(field: Field, c: Choice): boolean {
+  const v = scores.value[field]
+  return v >= c.min && v <= c.max
+}
+
+// summary is the folded card's one line: "Legs heavy · Sleep good · Mood OK".
+const summary = computed(() =>
+  ROWS.map((row) => {
+    const c = row.choices.find((ch) => chosen(row.field, ch))
+    return c ? `${row.label} ${c.label === 'OK' ? 'OK' : c.label.toLowerCase()}` : ''
+  })
+    .filter(Boolean)
+    .join(' · '),
+)
+
 // The reading names its scores by its own keys; these map them to the fields.
 const READING_KEY: Record<Field, keyof Pick<CheckInReading, 'legs' | 'mood' | 'sleep'>> = {
   legs: 'legs',
@@ -61,8 +108,12 @@ watch(
   { immediate: true },
 )
 
-function pick(field: Field, n: number) {
-  scores.value = { ...scores.value, [field]: scores.value[field] === n ? 0 : n }
+const noteOpen = ref(false)
+
+// pick sets a row and saves at once; the chosen word again clears it.
+function pick(field: Field, c: Choice) {
+  scores.value = { ...scores.value, [field]: chosen(field, c) ? 0 : c.score }
+  void persist(false, false)
 }
 
 // The scores the reading found that the rider has not answered yet.
@@ -106,13 +157,18 @@ async function readNote() {
 }
 
 // persist saves the card's scores and note. A save of the note reads it again
-// when the understand job is on; filling the scores does not, since the reading
-// on screen is still the right one.
-async function persist(reread: boolean) {
+// when the understand job is on; a tap or filling the scores does not, since
+// the reading on screen is still the right one. Taps can overlap, so only the
+// newest save's answer is passed up: an older one arriving late would put the
+// previous scores back on screen.
+let saveSeq = 0
+async function persist(reread: boolean, fold = true) {
+  const seq = ++saveSeq
   saving.value = true
   try {
     const saved = await api.saveCheckIn({ ...scores.value, note: note.value })
-    editing.value = false
+    if (seq !== saveSeq) return
+    if (fold) editing.value = false
     emit('saved', saved)
     if (!reread) return
     if (understandOn.value && saved.note.trim() !== '') {
@@ -125,11 +181,12 @@ async function persist(reread: boolean) {
   } catch (e) {
     toast.add({ title: 'Could not save your check-in', description: describeError(e), color: 'error' })
   } finally {
-    saving.value = false
+    if (seq === saveSeq) saving.value = false
   }
 }
 
-function save() {
+function saveNote() {
+  noteOpen.value = false
   return persist(true)
 }
 
@@ -183,46 +240,48 @@ async function planLifeEvent() {
   <div class="flex flex-col gap-3">
     <UCard v-if="checkInComplete(checkIn) && !editing" variant="outline" data-testid="checkin-card">
       <div class="flex items-center justify-between gap-3">
-        <span class="flex items-center gap-2 text-[length:var(--text-body)] text-muted">
-          <UIcon name="i-lucide-circle-check" class="size-4" />
-          Checked in this morning
+        <span class="flex min-w-0 items-center gap-2 text-[length:var(--text-body)] text-muted">
+          <UIcon name="i-lucide-circle-check" class="size-4 shrink-0 text-success" />
+          <span class="truncate" data-testid="checkin-summary">{{ summary }}</span>
         </span>
         <UButton color="neutral" variant="ghost" size="sm" @click="editing = true">Edit</UButton>
       </div>
     </UCard>
 
     <UCard v-else variant="outline" data-testid="checkin-card">
-      <div class="flex flex-col gap-4">
-        <h2 class="text-[length:var(--text-label)] font-medium text-muted">How do you feel this morning?</h2>
-
-        <div v-for="row in ROWS" :key="row.field" class="flex flex-col gap-1.5">
-          <div class="flex items-center justify-between gap-2 text-[length:var(--text-label)]">
-            <span class="font-medium text-highlighted">{{ row.label }}</span>
-            <span class="text-muted">
-              1 {{ row.low }}<template v-if="row.mid"> · 3 {{ row.mid }}</template> · 5 {{ row.high }}
-            </span>
-          </div>
-          <div class="flex gap-1.5" role="group" :aria-label="row.label">
+      <div class="flex flex-col gap-2.5">
+        <h2 class="sr-only">Morning check-in</h2>
+        <div v-for="row in ROWS" :key="row.field" class="flex items-center gap-3" role="group" :aria-label="row.label">
+          <span class="w-12 shrink-0 text-[length:var(--text-label)] text-muted">{{ row.label }}</span>
+          <div class="flex flex-wrap gap-1.5">
             <UButton
-              v-for="n in 5"
-              :key="n"
-              class="flex-1 justify-center"
+              v-for="c in row.choices"
+              :key="c.label"
               size="sm"
-              :color="scores[row.field] === n ? 'primary' : 'neutral'"
-              :variant="scores[row.field] === n ? 'solid' : 'outline'"
-              :aria-pressed="scores[row.field] === n"
-              :data-testid="`checkin-${row.field}-${n}`"
-              @click="pick(row.field, n)"
+              class="rounded-full"
+              :color="chosen(row.field, c) ? 'primary' : 'neutral'"
+              :variant="chosen(row.field, c) ? 'soft' : 'outline'"
+              :aria-pressed="chosen(row.field, c)"
+              :data-testid="`checkin-${row.field}-${c.label.toLowerCase()}`"
+              @click="pick(row.field, c)"
             >
-              {{ n }}
+              {{ c.label }}
             </UButton>
           </div>
         </div>
 
-        <UTextarea v-model="note" :maxlength="NOTE_MAX" :rows="2" class="w-full" placeholder="Anything else? (optional)" aria-label="Note" />
-
-        <div class="flex justify-end">
-          <UButton :loading="saving" icon="i-lucide-check" data-testid="checkin-save" @click="save">Save</UButton>
+        <div v-if="noteOpen" class="flex flex-col gap-2 pt-1">
+          <UTextarea v-model="note" :maxlength="NOTE_MAX" :rows="2" autoresize class="w-full" placeholder="Anything else? Travel, a cold, how the legs feel" aria-label="Note" />
+          <div class="flex justify-end gap-2">
+            <UButton color="neutral" variant="ghost" size="sm" @click="noteOpen = false">Cancel</UButton>
+            <UButton size="sm" :loading="saving" data-testid="checkin-save" @click="saveNote">Save note</UButton>
+          </div>
+        </div>
+        <div v-else class="flex items-center justify-between gap-2 pt-1">
+          <UButton color="neutral" variant="link" size="sm" class="px-0" :icon="note ? 'i-lucide-pencil' : 'i-lucide-plus'" @click="noteOpen = true">
+            {{ note ? 'Edit note' : 'Add a note' }}
+          </UButton>
+          <UButton v-if="editing" color="neutral" variant="ghost" size="sm" @click="editing = false">Done</UButton>
         </div>
       </div>
     </UCard>
