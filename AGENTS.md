@@ -1166,7 +1166,7 @@ cluster already does observability (see `lab/AGENTS.md`'s Observability wiring):
   for its own follow-up if it matters.
 - **Outbound HTTP calls carry spans too**, on the same principle: every one of this app's outbound
   HTTP clients — `oidcflow`, `komoot`, `garmin`, `wahoo`, `auth0mgmt`, `elevation`, `weather`,
-  `routing`, `geocoding`, `narration`, and `basemap`'s pmtiles/job/preview code — wraps its `http.Client`'s
+  `routing`, `geocoding`, `llm`, and `basemap`'s pmtiles/job/preview code — wraps its `http.Client`'s
   `Transport` in `telemetry.OutboundTransport`, and (`oidcflow` aside, which already threaded
   `context.Context` everywhere) each needed the same context-threading treatment as the DB before
   that Transport had a real parent to attach to. `garmin.Client`'s threading runs through
@@ -1299,7 +1299,7 @@ in `elevation.Client`, per their own comments:
   and nesting, refuses non-finite or off-Earth coordinates, and holds one of two process-wide
   parse slots; `UploadLimiter` is per rider; `CrewSyncLimiter` is per crew; crews are 5 per
   creator, `GET /api/crews` is paginated, and a ride-together poll refreshes at most 10 crews;
-  the proposal notes sent to the narration model are 500 characters. Stored routes are read with
+  the proposal notes sent to the model are 500 characters. Stored routes are read with
   `gpx.ParsePoints`, which is deliberately looser, so tightening a cap never makes a saved route
   unreadable. Panics: the metrics sync scores each ride behind a `recover` (`guardedAnalyze`),
   because a background goroutine's panic ends the process.
@@ -1578,6 +1578,53 @@ personal location and health data, so:
   and `Finish`/`Update` only touch a still-running row. Detection reads the
   profile fresh just before it runs, through `inferFromHistory`, the tail shared
   with the metrics sync.
+
+## Local LLM
+
+`internal/llm` is the one client for the AI-assisted features: the plan explanation, the profile,
+goal and plan-edit proposals. It makes one POST to an OpenAI-compatible `/chat/completions` at
+`llm.base_url`, which is the agentgateway service in the cluster
+(`http://agentgateway.agentgateway.svc.cluster.local:4000/v1`), with `llm.model: qwen3.5-9b`.
+An empty `base_url` turns every job off. `llm.jobs` switches single jobs by name, and every job
+defaults to on; a switched-off job answers 412 with a Warn, and `/api/me` reports each job's flag
+so the UI hides only that button. The optional key comes from `DOMESTIQUE_LLM_API_KEY`.
+`ANTHROPIC_API_KEY` is no longer read anywhere.
+
+Every answer is constrained by a JSON schema sent as `response_format`, decoded strictly (unknown
+fields and trailing text refused), and checked by the job's own validate hook. One bad answer earns
+one retry; a second is `llm.ErrInvalid` and a 502, so a half-parsed proposal never reaches a rider.
+A single 120 s budget covers both attempts, so a cold model load fits without ever running past it.
+A transport failure or a refused request is a 502 with no body echoed. Prompts, answers and the
+rider's own note are never logged or put in a span; the span carries only `llm.job`. The metric is
+`domestique_llm_requests_total{job,result}` with no rider label.
+
+Quality is gated by the evaluation set in `apps/api/internal/llm/testdata/eval`: synthetic notes in
+English and Dutch, run through the real job functions by `just llm-eval` against a live endpoint
+(`DOMESTIQUE_LLM_EVAL_URL`). It is never part of CI, and a job is switched on only when it passes.
+On `qwen3.5-9b` (2026-10-25) profile proposals scored 10/10 and goal proposals 9/10; plan edits
+scored 6/10 (moves put the target date in the wrong field, "until Wednesday" landed a week late), so
+deployments run it with `llm.jobs.plan_edits: false`. One schema shape per intent type (`anyOf`) was
+tried and scored worse (3/10, with timeouts), so the flat schema stays. The 6b jobs on the same model
+(2026-10-26): `explain_changes` 6/6 and `weekly_summary` 6/6 ship on; `understand_checkin` scored 9/12
+(every score reading passed; the misses were Dutch life events, one of them "tot donderdag" landing a
+week late), so deployments run it with `llm.jobs.understand_checkin: false`.
+
+Three more jobs sit on the same client (sub-project 6b): `explain_changes` (one to three sentences on
+why the morning's changes were made, from the Why facts), `weekly_summary` (at most five sentences on
+a plan week, from its own figures) and `understand_checkin` (reads a morning check-in note into scores
+and a life event). The first two write `llm_notes(rider, kind, day, text, created_at)`, registered in
+`riderTables`, read as absent while claimed and pruned after 60 days. A background step runs after
+`AutoScheduleTick` releases its lock, under the advisory lock `domestique:llm-notes`, only in the
+morning slot and only with auto-schedule on, and covers riders with a goal. Text jobs are checked by
+`checkProse`: every number in the reply must appear in the input, so a reply that paraphrases a figure
+is refused. The check-in reading only suggests: it fills empty scores and previews a life event, and
+nothing is saved without the rider's tap; a failed reading leaves the saved check-in alone. The notes
+are app-only (`/api/training/notes`, `/api/training/checkin/understand`), so the morning email is
+unchanged, and neither the note, the prompt nor the reply is logged. The weekly summary's
+forgiven figure is passed only once the following week is open. The weekly note is written on Monday for the
+previous week; each note is one attempt per claim, so a failed or interrupted call is not retried that day.
+The changes note falls back to the rule titles when the model fails or the job is off, and only workout
+adjustments count (level rows and untitled rules are left out).
 
 ## Conventions
 

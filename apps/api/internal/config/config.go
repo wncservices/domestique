@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -247,7 +248,29 @@ type Config struct {
 	Elevation ElevationConfig `yaml:"elevation"`
 	Routing   RoutingConfig   `yaml:"routing"`
 	Weather   WeatherConfig   `yaml:"weather"`
+
+	// LLM is the self-hosted model behind the AI-assisted features; see
+	// internal/llm. Empty base_url means every job is off.
+	LLM LLMConfig `yaml:"llm,omitempty"`
 }
+
+// LLMConfig points the AI-assisted features at a self-hosted OpenAI-compatible
+// endpoint. The API key is not here: DOMESTIQUE_LLM_API_KEY in the environment,
+// and optional, since a local server often needs none.
+type LLMConfig struct {
+	// BaseURL is the endpoint root, e.g. http://llm.internal:8000/v1. Empty
+	// turns every job off.
+	BaseURL string `yaml:"base_url,omitempty"`
+	// Model is the name the server knows the model by. Required with BaseURL.
+	Model string `yaml:"model,omitempty"`
+	// Jobs switches single jobs off by name; every job defaults to on.
+	Jobs map[string]bool `yaml:"jobs,omitempty"`
+}
+
+// LLMJobNames is the set of job names Jobs may switch. internal/llm.Jobs is
+// the same list; a test in that package keeps the two in step. Config cannot
+// import llm, so the names live here too.
+var LLMJobNames = []string{"explain_plan", "propose_profile", "propose_goal", "plan_edits", "explain_changes", "understand_checkin", "weekly_summary"}
 
 // DefaultDSN is where a database library lives unless configured otherwise.
 const DefaultDSN = "data/domestique.db"
@@ -426,6 +449,23 @@ func (c *Config) Validate() error {
 		u, err := url.Parse(c.Routing.URL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return fmt.Errorf("routing.url %q is not a valid absolute URL", c.Routing.URL)
+		}
+	}
+
+	// A bad llm block would otherwise degrade every AI feature to "off" with
+	// nothing pointing at the cause.
+	if c.LLM.BaseURL != "" {
+		u, err := url.Parse(c.LLM.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("llm.base_url %q is not an absolute http(s) URL", c.LLM.BaseURL)
+		}
+		if strings.TrimSpace(c.LLM.Model) == "" {
+			return fmt.Errorf("llm.model is required when llm.base_url is set")
+		}
+	}
+	for name := range c.LLM.Jobs {
+		if !slices.Contains(LLMJobNames, name) {
+			return fmt.Errorf("llm.jobs: %q is not a job (one of %s)", name, strings.Join(LLMJobNames, ", "))
 		}
 	}
 

@@ -95,7 +95,7 @@ function printSeason() {
 const { canSyncGarmin } = useLibrary()
 const { replanAction, announceRecalibration } = useRecalibration()
 
-// --- me: only fetched here for narrationEnabled, so the free-text
+// --- me: only fetched here for llmJobs.proposeProfile, so the free-text
 // suggestion box can avoid offering a button that would 412 — see meDTO's
 // own doc comment on the server for why this is the established shape for
 // every optional feature flag, not just auth. ---
@@ -243,7 +243,7 @@ async function loadThresholdSuggestions() {
 const lastDetected = ref<DetectedThreshold[]>([])
 
 // --- free-text profile suggestion: Phase E's other half — see
-// internal/narration.ProposeProfileChange. Deliberately never saved on its
+// the profile proposal job (internal/llm). Deliberately never saved on its
 // own: the response only fills the form fields above, and the rider still
 // has to press Save profile themselves, same as an FTP estimate never
 // applying itself. ---
@@ -633,7 +633,7 @@ onMounted(() => {
             v-model:note="profileNote"
             :profile="profile"
             :detected="lastDetected"
-            :narration-enabled="!!me?.narrationEnabled"
+            :propose-profile-enabled="!!me?.llmJobs.proposeProfile"
             :can-sync-garmin="canSyncGarmin"
             :proposing="proposingProfileChange"
             :explanation="proposalExplanation"

@@ -287,6 +287,19 @@ CREATE TABLE IF NOT EXISTS daily_checkins (
     PRIMARY KEY (rider, date)
 );
 
+-- llm_notes is a model-written note about one of the rider's days. kind is
+-- 'changes' (why the plan moved that day) or 'weekly' (the week's summary,
+-- keyed by its Monday). A claimed row has empty text and reads as absent: it
+-- records that the model was already asked, so two replicas make one call.
+CREATE TABLE IF NOT EXISTS llm_notes (
+    rider      TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    day        TEXT NOT NULL,
+    text       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (rider, kind, day)
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_weeks (
     goal_id    TEXT NOT NULL,
     week_start TEXT NOT NULL,
@@ -314,6 +327,7 @@ CREATE TABLE IF NOT EXISTS adjustments (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS adjustments_subject_day_rule_idx ON adjustments (rider, subject_kind, subject_id, day, rule);
 CREATE INDEX IF NOT EXISTS adjustments_rider_subject_idx ON adjustments (rider, subject_kind, subject_id);
+CREATE INDEX IF NOT EXISTS adjustments_rider_day_idx ON adjustments (rider, day);
 
 -- life_events are stretches of days a rider is away from training (travel,
 -- illness, busy). Dates are inclusive YYYY-MM-DD text. The rules that turn one
@@ -401,6 +415,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM level_decay_runs WHERE rider = ?`,
 		`DELETE FROM daily_wellness WHERE rider = ?`,
 		`DELETE FROM daily_checkins WHERE rider = ?`,
+		`DELETE FROM llm_notes WHERE rider = ?`,
 		`DELETE FROM progression_history WHERE rider = ?`,
 		`DELETE FROM progression_levels WHERE rider = ?`,
 		`DELETE FROM threshold_suggestions WHERE rider = ?`,

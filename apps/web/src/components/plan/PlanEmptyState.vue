@@ -6,7 +6,7 @@
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 defineProps<{
-  narrationEnabled: boolean
+  proposeGoalEnabled: boolean
   starting: boolean
 }>()
 
@@ -27,7 +27,7 @@ const emit = defineEmits<{
     <template #actions>
       <div class="grid w-full gap-3 sm:grid-cols-3">
         <!-- Always offered: a goal needs an event date, not a route. With
-             narration on, the same form also takes a one-sentence
+             the goal proposal on, the same form also takes a one-sentence
              description; without it, this card used to be hidden, leaving a
              route or a generic plan as the only ways in. -->
         <button
@@ -38,7 +38,7 @@ const emit = defineEmits<{
           <UIcon name="i-lucide-flag" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Set a goal</span>
           <span class="text-[length:var(--text-label)] text-muted">
-            {{ narrationEnabled ? 'Describe it in a sentence, or pick an event date, distance and climbing.' : 'Pick an event date, distance and climbing. No route needed.' }}
+            {{ proposeGoalEnabled ? 'Describe it in a sentence, or pick an event date, distance and climbing.' : 'Pick an event date, distance and climbing. No route needed.' }}
           </span>
         </button>
 

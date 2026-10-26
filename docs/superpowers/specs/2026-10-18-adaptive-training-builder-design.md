@@ -262,16 +262,17 @@ server-side validation. This is the rule `narration` already follows.
 
 - **No external LLM.** The Anthropic client in `internal/narration` is removed;
   `ANTHROPIC_API_KEY` is no longer read.
-- **Serving**: `llama-server` (llama.cpp, official image) in the cluster with
-  **Qwen3.5-4B Q4_K_M** (≈ 3 GB file on a PVC, ≈ 4 GB RAM, 4 threads, CPU limit
-  4). The chart lives in `wncservices/Domestique-chart`; that repo's change is a
-  separate PR. Single node (8 cores, 32 GB, no GPU): jobs run after the 06:30
+- **Serving**: the lab's existing agentgateway `llm:` listener in front of a
+  llama.cpp server running **Qwen3.5-9B** (alias `qwen3.5-9b`). Domestique reaches it
+  at `llm.base_url`. The model was first planned as Qwen3.5-4B; the 9B choice and its
+  memory case are in `2026-10-25-local-llm-design.md`, which is the 6a spec. The lab
+  changes are a separate PR. Single node (8 cores, 32 GB, no GPU): jobs run after the 06:30
   sync and re-optimiser so they don't compete with them for CPU.
 - **Client**: `internal/llm`, hand-rolled (one POST to the OpenAI-compatible
   `/v1/chat/completions`, JSON parse), within the dependency budget. It uses
-  JSON-schema-constrained output, `telemetry.OutboundTransport`, and a per-job
-  timeout (90 s). Config: `llm.base_url` and `llm.model`; no URL means the
-  features are off. A span carries only job and provider.
+  JSON-schema-constrained output, `telemetry.OutboundTransport`, and a 120 s budget per call,
+  covering one retry. Config: `llm.base_url` and `llm.model`; no URL means the
+  features are off. The caller's span carries only `llm.job`.
 - **Jobs**:
 
   | Job | Input | Fallback |

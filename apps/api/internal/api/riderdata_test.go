@@ -342,6 +342,9 @@ func riderSeeds() []seed {
 		{"daily_checkins", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO daily_checkins (rider, date, legs, note, created_at, updated_at) VALUES (?, '2026-01-02', 2, 'n', ?, ?)`, rider, ts, ts)
 		}, "rider", byRider},
+		{"llm_notes", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO llm_notes (rider, kind, day, text, created_at) VALUES (?, 'changes', '2026-01-02', 'n', ?)`, rider, ts)
+		}, "rider", byRider},
 		{"daily_wellness", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO daily_wellness (rider, date, hrv_last_night, sleep_seconds, resting_hr, updated_at) VALUES (?, '2026-01-02', 61, 27000, 48, ?)`, rider, ts)
 		}, "rider", byRider},

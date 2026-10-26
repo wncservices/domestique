@@ -83,10 +83,21 @@ export interface Me {
    *  (email+password) connection rather than a social one like Google,
    *  which has no password here to reset. */
   canChangePassword: boolean
-  /** Whether the training page may offer plan explanations and free-text
-   *  profile suggestions — false whenever the deployment has no
-   *  ANTHROPIC_API_KEY configured (see internal/narration). */
+  /** Whether any LLM-backed training action is on — false when the deployment
+   *  has no model configured (see internal/llm). Each action reads its own
+   *  llmJobs flag. */
   narrationEnabled: boolean
+  /** Which LLM-backed actions this deployment offers, one flag each. False for
+   *  a job switched off in config, and for all of them when no model is set. */
+  llmJobs: {
+    explainPlan: boolean
+    proposeProfile: boolean
+    proposeGoal: boolean
+    planEdits: boolean
+    explainChanges: boolean
+    understandCheckin: boolean
+    weeklySummary: boolean
+  }
 }
 
 /** One MFA factor tied to the signed-in rider's own Auth0 account — gated
@@ -1160,6 +1171,23 @@ export interface CheckIn {
   note: string
 }
 
+/** GET /api/training/notes — mirrors llmNotesDTO. Each note is null when there
+ *  is none to show: `changes` is today's explanation of the day's adjustments,
+ *  `weekly` last week's summary (on a Monday's read it is the week just gone). */
+export interface TrainingNotes {
+  changes: { day: string; text: string } | null
+  weekly: { weekStart: string; text: string } | null
+}
+
+/** POST /api/training/checkin/understand — mirrors checkInReadingDTO. A score
+ *  of 0 means the note did not say. Nothing is saved server side. */
+export interface CheckInReading {
+  legs: number
+  sleep: number
+  mood: number
+  lifeEvent: { kind: 'travel' | 'illness'; startDate: string; endDate: string; option: LifeEventOption | null } | null
+}
+
 /** How today should go: `push` is a green light (everything at or above the
  *  rider's own usual), `ready` changes nothing, `caution` and `rest` ease the
  *  day. Mirrors internal/readiness.Verdict. See
@@ -1747,15 +1775,15 @@ export interface PacingAvailable {
 export type PacingPlan = PacingAvailable | PacingUnavailable
 
 /** GET /api/training/goals/{id}/explain's response — see
- *  internal/narration.ExplainPlan. A plain-language summary of the same
+ *  the plan explanation job (internal/llm). A plain-language summary of the same
  *  reconciled plan the periodization table already shows; 412 instead of
- *  this shape when the deployment has no ANTHROPIC_API_KEY configured. */
+ *  this shape when that job is switched off or no model is configured. */
 export interface PlanExplanation {
   text: string
 }
 
 /** POST /api/training/profile/propose's response — see
- *  internal/narration.ProposeProfileChange. A *suggestion* only: nothing
+ *  the profile proposal job (internal/llm). A *suggestion* only: nothing
  *  server-side is written by this call. The frontend fills these values
  *  into the profile form for the rider to review and Save themselves,
  *  same as an FTP estimate never applying itself. */

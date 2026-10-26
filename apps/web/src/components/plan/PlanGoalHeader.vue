@@ -13,7 +13,7 @@ const props = defineProps<{
   focus?: WeekFocus
   goals: Goal[]
   projection?: ProjectionResponse | null
-  narrationEnabled: boolean
+  explainEnabled: boolean
   explaining: boolean
   explanation: string
 }>()
@@ -35,7 +35,7 @@ function capitalize(phase: PeriodizationPhase): string {
 // PlanPage.vue built locally (the goal picker's override, or its
 // pickFallbackGoal fallback when the browsed week has no real focus at
 // all), so it gets its own, plainer meta line and no "Explain" button —
-// there's no periodized plan for *this* week to ask narration about.
+// there's no periodized plan for *this* week to ask the model about.
 const isRealFocus = computed(() => props.focus?.weekNumber !== undefined)
 
 // Real focus: "{daysToEvent} days to go · {Phase} · week {n} of {m}",
@@ -107,7 +107,7 @@ const newMenuItems = computed(() => [
 
       <div class="flex shrink-0 items-center gap-2">
         <UButton
-          v-if="narrationEnabled && isRealFocus"
+          v-if="explainEnabled && isRealFocus"
           color="neutral"
           variant="soft"
           icon="i-lucide-sparkles"
@@ -122,6 +122,7 @@ const newMenuItems = computed(() => [
       </div>
     </div>
 
+    <p v-if="explaining" class="mt-2 text-[length:var(--text-label)] text-muted">This can take up to a minute.</p>
     <UAlert
       v-if="explanation"
       color="neutral"

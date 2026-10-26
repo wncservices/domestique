@@ -15,7 +15,7 @@ const note = defineModel<string>('note', { required: true })
 const props = defineProps<{
   editing: boolean
   form: GoalForm
-  narrationEnabled: boolean
+  proposeGoalEnabled: boolean
   saving: boolean
   proposing: boolean
   explanation: string
@@ -68,7 +68,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
   <USlideover v-model:open="open" side="right" :title="editing ? 'Edit goal' : 'Add a goal'" :ui="{ content: 'max-w-lg' }">
     <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="emit('save')">
-        <div v-if="narrationEnabled && !editing" class="rounded-md border border-default p-3">
+        <div v-if="proposeGoalEnabled && !editing" class="rounded-md border border-default p-3">
           <p class="text-[length:var(--text-body)] font-medium mb-1">Describe it</p>
           <p class="text-[length:var(--text-label)] text-muted mb-2">
             e.g. "gran fondo, 180 km, 2400 m of climbing, mid June" — fills in the fields below for you to review.
@@ -86,6 +86,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
               Fill in
             </UButton>
           </div>
+          <p v-if="proposing" class="mt-2 text-[length:var(--text-label)] text-muted">This can take up to a minute.</p>
           <p v-if="explanation" class="mt-2 text-[length:var(--text-body)] text-muted italic">{{ explanation }}</p>
         </div>
         <UFormField label="Name">

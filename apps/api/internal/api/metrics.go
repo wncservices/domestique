@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 )
 
@@ -101,6 +102,15 @@ var (
 	pushErrorsTotal = must(meter.Int64Counter(
 		"domestique_push_errors_total",
 		metric.WithDescription("Failed push attempts per account."),
+	))
+
+	// llmRequestsTotal counts the self-hosted model's answers by job and by
+	// outcome (ok, invalid, error, timeout). An invalid or erroring endpoint
+	// shows here before a rider reports a feature that quietly stopped. No
+	// rider label: who asked is a log line, not something to scrape.
+	llmRequestsTotal = must(meter.Int64Counter(
+		"domestique_llm_requests_total",
+		metric.WithDescription("Calls to the self-hosted LLM, by job and result (ok, invalid, error, timeout)."),
 	))
 
 	// routeBuilderErrorsTotal is the same "an operator should see this in a
@@ -277,6 +287,16 @@ func (r *statusRecorder) WriteHeader(status int) {
 // metric/attribute into server.go just for this one call site.
 func recordTrackPreviewSize(ctx context.Context, format string, bytes int) {
 	trackPreviewResponseBytes.Record(ctx, float64(bytes), metric.WithAttributes(attribute.String("format", format)))
+}
+
+// recordLLMResult is llm.Client's result hook, wired by UseLLM. It is called
+// once per call with the job and an outcome word, never with a prompt or an
+// answer.
+func (s *Server) recordLLMResult(job llm.Job, result string) {
+	llmRequestsTotal.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("job", string(job)),
+		attribute.String("result", result),
+	))
 }
 
 // recordRouteBuilderError is handleRouteBuilderPreview/Suggest's own

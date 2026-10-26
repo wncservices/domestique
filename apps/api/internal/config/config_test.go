@@ -361,3 +361,35 @@ func TestTrainingSyncRejectsBadValues(t *testing.T) {
 		})
 	}
 }
+
+// llm.base_url switches the LLM features on; the model is then required, and a
+// job name the code does not know would silently do nothing, so it is refused.
+func TestValidateLLM(t *testing.T) {
+	base := func(l LLMConfig) *Config {
+		return &Config{Source: SourceConfig{DSN: "data/domestique.db"}, LLM: l}
+	}
+
+	if err := base(LLMConfig{}).Validate(); err != nil {
+		t.Errorf("an empty llm block was rejected: %v", err)
+	}
+	full := LLMConfig{
+		BaseURL: "https://llm.example.com/v1",
+		Model:   "qwen-test",
+		Jobs:    map[string]bool{"explain_plan": true, "plan_edits": false},
+	}
+	if err := base(full).Validate(); err != nil {
+		t.Errorf("a full llm block was rejected: %v", err)
+	}
+
+	cases := map[string]LLMConfig{
+		"ftp scheme":       {BaseURL: "ftp://x/v1", Model: "m"},
+		"no host":          {BaseURL: "https:///v1", Model: "m"},
+		"missing model":    {BaseURL: "https://llm.example.com/v1"},
+		"unknown job name": {BaseURL: "https://llm.example.com/v1", Model: "m", Jobs: map[string]bool{"bogus": true}},
+	}
+	for name, l := range cases {
+		if err := base(l).Validate(); err == nil {
+			t.Errorf("%s: expected an error, got none", name)
+		}
+	}
+}

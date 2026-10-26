@@ -248,3 +248,42 @@ func TestAdjustmentsTableIsCreatedOnADatabaseThatPredatesIt(t *testing.T) {
 		t.Fatalf("recording after the migration: %v", err)
 	}
 }
+
+// TestAdjustmentsOnDay returns one rider's reasons for one day, oldest first,
+// and nothing from another day or another rider.
+func TestAdjustmentsOnDay(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *DB) {
+		ctx := t.Context()
+		clock := time.Date(2026, time.October, 20, 6, 0, 0, 0, time.UTC)
+		db.Clock = func() time.Time { return clock }
+		rec := func(text string) why.Record {
+			return recordOf(why.MissedMoved, text, why.MissedMovedInputs{From: "2026-10-19", To: "2026-10-20"})
+		}
+		write := func(rider, subject, day, text string) {
+			t.Helper()
+			if err := db.RecordAdjustment(ctx, rider, SubjectWorkout, subject, rec(text), day); err != nil {
+				t.Fatal(err)
+			}
+			clock = clock.Add(time.Minute)
+		}
+		write("wilant", "w1", "2026-10-20", "first")
+		write("wilant", "w2", "2026-10-20", "second")
+		write("wilant", "w3", "2026-10-19", "other day")
+		write("other", "w4", "2026-10-20", "other rider")
+
+		got, err := db.AdjustmentsOnDay(ctx, "Wilant", "2026-10-20")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 2 || got[0].Text != "first" || got[1].Text != "second" {
+			t.Fatalf("AdjustmentsOnDay = %+v; want first then second", got)
+		}
+		if got[0].Rider != "wilant" || got[0].Rule != why.MissedMoved || got[0].Inputs["to"] != "2026-10-20" {
+			t.Errorf("row = %+v", got[0])
+		}
+		none, err := db.AdjustmentsOnDay(ctx, "wilant", "2026-10-21")
+		if err != nil || len(none) != 0 {
+			t.Fatalf("empty day = %+v, %v", none, err)
+		}
+	})
+}
