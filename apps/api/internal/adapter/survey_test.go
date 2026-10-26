@@ -37,7 +37,7 @@ func TestAnAllOutNailedRideStepsTheNextSameZoneSessionDown(t *testing.T) {
 		if len(got) != 1 || got[0].WorkoutID != "thu-threshold" || got[0].Why.Rule != why.StruggleStepDown {
 			t.Fatalf("changes = %+v, want the next threshold session stepped down", got)
 		}
-		if !strings.Contains(got[0].Reason, "Tuesday's threshold session felt all-out to you (5 of 5)") {
+		if !strings.Contains(got[0].Why.Text, "Tuesday's threshold session felt all-out to you (5 of 5)") {
 			t.Errorf("reason = %q, want it to say whose word it is", got[0].Reason)
 		}
 		in := inputsAs[why.StruggleStepDownInputs](t, got[0])
@@ -69,7 +69,7 @@ func TestAnAllOutRideCountsTowardTheTwoStruggleSwap(t *testing.T) {
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade || got[0].Why.Rule != why.FatigueStruggles {
 		t.Fatalf("changes = %+v, want today's intervals swapped: one struggle plus one all-out ride", got)
 	}
-	if !strings.Contains(got[0].Reason, "Wednesday's interval session felt all-out to you (5 of 5)") {
+	if !strings.Contains(got[0].Why.Text, "Wednesday's interval session felt all-out to you (5 of 5)") {
 		t.Errorf("reason = %q", got[0].Reason)
 	}
 	if strings.Contains(got[0].Reason, "under target") {
