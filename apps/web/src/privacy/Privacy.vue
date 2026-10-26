@@ -18,7 +18,7 @@ const updated = '2026-10-26'
         >
           Privacy
         </h1>
-        <p class="!mt-2 !text-dimmed">Last updated {{ updated }}</p>
+        <p class="meta">Last updated {{ updated }}</p>
 
         <p>
           Domestique is
@@ -123,7 +123,8 @@ const updated = '2026-10-26'
 
         <h2>Morning email</h2>
         <p>
-          Optional, off by default, and sent only to a verified address. A short plain-text note
+          Optional and off by default. If you turn it on, and only where the operator has set up
+          email, it is sent to a verified address. A short plain-text note
           with the day's session, a one-word readiness verdict and a weather line. It carries no
           sleep, HRV or heart rate figures. We keep the opt-in and the address it goes to.
         </p>
@@ -131,7 +132,7 @@ const updated = '2026-10-26'
         <h2>Who else receives data</h2>
         <ul>
           <li><strong>Auth0</strong>: sign-in, password reset, two-step verification and the invitation email.</li>
-          <li><strong>An email relay (SMTP2GO)</strong>: delivers the morning email and account emails.</li>
+          <li><strong>SMTP2GO</strong>: delivers the sign-in emails Auth0 sends (invitations, password resets). The morning email goes through an email relay only where the operator has set one up.</li>
           <li><strong>Garmin, Wahoo and Komoot</strong>: only for accounts you link, to read or write your own data.</li>
           <li><strong>Open-Meteo</strong>: receives the rounded position of your weather town to return a forecast, only if you chose one.</li>
           <li>
@@ -223,7 +224,7 @@ const updated = '2026-10-26'
 }
 .policy p,
 .policy li {
-  color: var(--ui-text-muted);
+  color: var(--ui-text);
   line-height: 1.65;
 }
 .policy p {
@@ -245,5 +246,9 @@ const updated = '2026-10-26'
   color: var(--ui-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.policy .meta {
+  margin-top: 0.5rem;
+  color: var(--ui-text-muted);
 }
 </style>
