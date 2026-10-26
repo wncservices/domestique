@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -217,7 +216,7 @@ func TestExportLogsRiderIDAndOutcomeButNoWatts(t *testing.T) {
 	h := newTrainingHarness(t)
 	h.setFTP("wilant", 250)
 	var logs bytes.Buffer
-	h.srv.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	h.srv.Log = scanLogger(&logs)
 	id := h.seedExport(exportRide("Over unders", "2026-03-04"))
 
 	h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts/"+id+"/export?format=mrc", "")

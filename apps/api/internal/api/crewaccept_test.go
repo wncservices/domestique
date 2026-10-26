@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -252,7 +251,7 @@ func TestNoRideTogetherEndpointWritesAnotherRidersWorkouts(t *testing.T) {
 func TestAnsweringLogsNoHealthValuesNextToARider(t *testing.T) {
 	h := newCrewPlanHarness(t)
 	var logs bytes.Buffer
-	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h.srv.Log = scanLogger(&logs)
 	ts := h.togetherSetup()
 	if _, err := h.training.SaveProfile(context.Background(), workout.RiderProfile{
 		Rider: "wilant", FTPWatts: 2718, MaxHR: 1893, HoursPerAvailableDay: 2, AvailableDays: []string{"sat", "sun"},

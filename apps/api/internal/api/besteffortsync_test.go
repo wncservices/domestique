@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -49,7 +48,7 @@ func newEffortHarnessAt(t *testing.T, acts []garmin.Activity, fits map[string][]
 	h.srv.Clock = func() time.Time { return now }
 	followServerClock(h.srv, h.training)
 	logs := &bytes.Buffer{}
-	h.srv.Log = slog.New(slog.NewTextHandler(logs, nil))
+	h.srv.Log = scanLogger(logs)
 
 	for i, date := range []string{"2026-03-01", "2026-04-01", "2026-05-01"} {
 		w := float64(250 + 5*i) // 250, 255, 260

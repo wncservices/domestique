@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -180,7 +179,7 @@ func TestDurabilityMoveRecordsItsWhy(t *testing.T) {
 func TestDurabilityLogsCarryNoValues(t *testing.T) {
 	h, _ := syncLongRide(t, 6000, 6000, 130, 133)
 	var logs bytes.Buffer
-	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h.srv.Log = scanLogger(&logs)
 	h.syncOK()
 
 	for _, bad := range []string{"3.3", "decoupling", "durationRatio", "2.3", "endurance"} {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -327,7 +326,7 @@ func TestBestEffortReadsLogNoValueAndNoRiderNameBesideOne(t *testing.T) {
 	h := newMetricsSyncHarness(t, &fakeGarmin{})
 	h.fixClock()
 	logs := &bytes.Buffer{}
-	h.srv.Log = slog.New(slog.NewTextHandler(logs, nil))
+	h.srv.Log = scanLogger(logs)
 	seedEfforts(t, h)
 	h.efforts("wilant", "")
 	h.as("wilant", "cyclists", http.MethodGet, "/api/training/season?year=2026", "")

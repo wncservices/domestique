@@ -3,7 +3,6 @@ package api_test
 import (
 	"bytes"
 	"context"
-	"log/slog"
 	"strings"
 	"testing"
 
@@ -148,7 +147,7 @@ func TestDecayRecordsItsWhy(t *testing.T) {
 	h.rideInZone(t, workout.ZoneVO2Max, "2026-09-01", "stale")
 
 	var logs bytes.Buffer
-	h.srv.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h.srv.Log = scanLogger(&logs)
 	h.at(7, 7, 0)
 	h.tick()
 
