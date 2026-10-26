@@ -39,7 +39,7 @@ func (s *Server) repayLoad(ctx context.Context) {
 		return
 	}
 	seen := map[string]bool{}
-	skipped, pushes := 0, 0
+	skipped, pushes, repaid := 0, 0, 0
 	for _, g := range goals {
 		if seen[g.Rider] || ctx.Err() != nil {
 			continue
@@ -52,9 +52,17 @@ func (s *Server) repayLoad(ctx context.Context) {
 			skipped++
 			continue
 		}
-		if s.repayRider(ctx, g.Rider) {
+		pushed, applied := s.repayRider(ctx, g.Rider)
+		if pushed {
 			pushes++
 		}
+		repaid += applied
+	}
+	// Counts only: a TSS next to a rider's name is a fitness value, a green
+	// push beside a name would reveal the day's readiness verdict, and a rider
+	// repaid on a given morning is one who is behind plan.
+	if repaid > 0 {
+		s.logger().Info("load repaid", "sessions", repaid)
 	}
 	if pushes > 0 {
 		s.logger().Info("load ledger: green-day pushes", "riders", pushes)
@@ -107,9 +115,9 @@ func (s *Server) ledgerPlanWeek(ctx context.Context, rider, weekStart string) (p
 	return plan, week, "", false, nil
 }
 
-// repayRider reports whether a green-day push was applied, so the pass can
-// count them without naming the riders.
-func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool) {
+// repayRider reports whether a green-day push was applied and how many
+// sessions were repaid, so the pass can count them without naming the riders.
+func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool, repaid int) {
 	now := s.localNow()
 	today := now.Format(dateLayout)
 	monday := periodization.MondayOf(now)
@@ -244,10 +252,7 @@ func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool) {
 			}
 		}
 	}
-	// Counts only: a TSS next to a rider's name is a fitness value, and a green
-	// push beside a name would reveal the day's readiness verdict.
-	s.logger().Info("load repaid", "rider", rider, "sessions", applied)
-	return pushed
+	return pushed, applied
 }
 
 // greenPush raises today's session when readiness says push and the week owes
@@ -278,7 +283,7 @@ func (s *Server) greenPush(ctx context.Context, rider, today string, in ledger.R
 	}
 	gain, err := s.applyRepayment(ctx, rider, byID[a.WorkoutID], profile, *a, in.Debt)
 	if err != nil {
-		s.logger().Warn("green push: could not raise the session", "rider", rider)
+		s.logger().Warn("green push: could not raise the session")
 		return 0
 	}
 	return gain
@@ -334,7 +339,7 @@ func (s *Server) openLedgerWeek(ctx context.Context, rider string, monday time.T
 		if err := s.Training.SetLedgerForgiven(ctx, rider, lastStart, forgiven); err != nil {
 			return workout.LedgerWeek{}, err
 		}
-		s.logger().Info("load ledger settled last week", "rider", rider, "rolled", rolled > 0, "forgiven", forgiven > 0)
+		s.logger().Info("load ledger settled last week", "rolled", rolled > 0, "forgiven", forgiven > 0)
 	}
 	row, _, err := s.Training.GetLedgerWeek(ctx, rider, weekStart)
 	return row, err
@@ -393,7 +398,7 @@ func (s *Server) applyRepayment(ctx context.Context, rider string, wk workout.Wo
 	req.Description = &withReason
 
 	if _, err := s.Training.UpdateWorkout(ctx, wk.ID, req); err != nil {
-		s.logger().Warn("load ledger: could not update a workout", "workout", wk.ID, "rider", rider, "err", err)
+		s.logger().Warn("load ledger: could not update a workout", "workout", wk.ID, "err", err)
 		return 0, err
 	}
 	var rec why.Record

@@ -223,33 +223,30 @@ func consecutiveHardDays(workouts []workout.Workout, sessions []workout.Complete
 	return n
 }
 
-// logTomorrowAdvisory is the sync tick's own look at tomorrow: it logs at
-// Info, rider and verdict word only, when the forecast is rest or caution.
-// It observes and changes nothing — a rider's own click is the only thing
-// that eases tomorrow. Health-adjacent numbers (form, load, ratio) never
-// appear next to the rider name.
+// logTomorrowAdvisory is the sync tick's own look at tomorrow: it reports
+// whether the forecast is rest or caution, and AdaptWorkouts logs a count of
+// such riders. It observes and changes nothing — a rider's own click is the
+// only thing that eases tomorrow. Nothing here is logged beside the rider's
+// name: form, load, ratio and the verdict word all stay out of the line.
 //
-// "Tomorrow" here is the server's UTC tomorrow: the tick has no browser to
-// ask, and being a few hours off around local midnight costs nothing on an
-// observational line. Workouts are re-read because this runs after the
-// pass's own changes, which may have just eased today's session.
-func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, profile workout.RiderProfile) {
+// "Today" is the training zone's today, the day the wellness rows and the
+// rest of the pass are keyed by. Workouts are re-read because this runs after
+// the pass's own changes, which may have just eased today's session.
+func (s *Server) logTomorrowAdvisory(ctx context.Context, rider string, sessions []workout.CompletedSession, latest *workout.FitnessSnapshot, profile workout.RiderProfile) bool {
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
 		s.logger().Warn("adapt: listing workouts for the tomorrow forecast failed", "rider", rider, "err", err)
-		return
+		return false
 	}
-	// One UTC-anchored "now" for both today's verdict and the forecast, so
-	// they describe the same day whatever zone the process runs in.
-	today := calendarDay(s.now().UTC())
+	// One local "now" for both today's verdict and the forecast, so they
+	// describe the same day whatever zone the process runs in.
+	today := calendarDay(s.localNow())
 	todayAssessment := s.assessReadinessForForecast(ctx, rider, sessions, latest, today)
 	forecast, _, ok := forecastTomorrow(today, workouts, sessions, latest, todayAssessment, profile)
 	// Nothing to advise on a day the rider is away. A failure reading events
-	// only costs a log line, so it falls through to the usual advisory.
+	// only costs the advisory, so it falls through to the usual one.
 	if blackout, err := s.blackoutFor(ctx, rider); err == nil && blackout[today.AddDate(0, 0, 1).Format(dateLayout)] {
 		ok = false
 	}
-	if ok && readinessEases(forecast.Verdict) {
-		s.logger().Info("tomorrow's session may need easing", "rider", rider, "risk", string(forecast.Verdict))
-	}
+	return ok && readinessEases(forecast.Verdict)
 }

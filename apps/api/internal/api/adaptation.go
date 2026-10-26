@@ -45,16 +45,26 @@ func (s *Server) AdaptWorkouts(ctx context.Context) {
 		return
 	}
 	seen := map[string]bool{}
+	advised := 0
 	for _, g := range goals {
 		if seen[g.Rider] || ctx.Err() != nil {
 			continue
 		}
 		seen[g.Rider] = true
-		s.adaptRider(ctx, g.Rider)
+		if s.adaptRider(ctx, g.Rider) {
+			advised++
+		}
+	}
+	// A count only: naming the riders whose tomorrow looks heavy would pair each
+	// with a readiness verdict.
+	if advised > 0 {
+		s.logger().Info("tomorrow's session may need easing", "riders", advised)
 	}
 }
 
-func (s *Server) adaptRider(ctx context.Context, rider string) {
+// adaptRider reports whether tomorrow's forecast advises easing, so the pass can
+// count riders without naming them.
+func (s *Server) adaptRider(ctx context.Context, rider string) (advise bool) {
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
 		s.logger().Warn("adapt: listing workouts failed", "rider", rider, "err", err)
@@ -147,11 +157,12 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 			// applyChange has already logged which step failed.
 			continue
 		}
-		// The rule id, never the reason: a reason quotes sleep scores, HRV and
-		// form, and a health value does not belong in a log line beside a
-		// rider's name. The stored adjustment (see recordAdjustment) is where
-		// the explanation lives, and it is only ever shown to its owner.
-		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", what, "rule", string(c.Why.Rule))
+		// The rule id, never the reason, and never the rider: a reason quotes
+		// sleep scores, HRV and form, and a rule such as readiness_rest beside
+		// a name is the day's verdict. The stored adjustment (see
+		// recordAdjustment) is where the explanation lives, and it is only ever
+		// shown to its owner.
+		s.logger().Info("workout adapted automatically", "workout", wk.ID, "change", what, "rule", string(c.Why.Rule))
 	}
 
 	// The return ramp for weeks filled after an event was made, after the
@@ -167,7 +178,7 @@ func (s *Server) adaptRider(ctx context.Context, rider string) {
 
 	s.easeBeforeFTPTests(ctx, rider, workouts, profile, appliedFor)
 	s.easeAroundCrewRides(ctx, rider, workouts, profile, appliedFor)
-	s.logTomorrowAdvisory(ctx, rider, sessions, latest, profile)
+	return s.logTomorrowAdvisory(ctx, rider, sessions, latest, profile)
 }
 
 // recoveryRideHours and recoveryRideName are what rest turns today's endurance
@@ -195,7 +206,7 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 	if c.StepDown {
 		down, err := s.applyStepDown(ctx, wk, profile, c)
 		if err != nil {
-			s.logger().Warn("adapt: could not step a workout down", "workout", wk.ID, "rider", rider, "err", err)
+			s.logger().Warn("adapt: could not step a workout down", "workout", wk.ID, "err", err)
 			return "", err
 		}
 		if c.Why.Rule == why.StruggleStepDown {
@@ -259,7 +270,7 @@ func (s *Server) applyChange(ctx context.Context, rider string, wk workout.Worko
 		}
 	}
 	if _, err := s.Training.UpdateWorkout(ctx, wk.ID, req); err != nil {
-		s.logger().Warn("adapt: could not update a workout", "workout", wk.ID, "rider", rider, "err", err)
+		s.logger().Warn("adapt: could not update a workout", "workout", wk.ID, "err", err)
 		return "", err
 	}
 	// Recorded only now that the change has landed, so a change that failed
@@ -308,12 +319,13 @@ func (s *Server) recordAdjustment(ctx context.Context, rider, workoutID string, 
 
 // recordSubjectAdjustment is the one place an adjustment is written and its
 // failure handled: a Warn naming the rule (never the inputs, which are health
-// or fitness values) and nothing else, because the change it explains has
+// or fitness values, and never the rider, since the rule says what the day was)
+// and nothing else, because the change it explains has
 // already landed and stands.
 func (s *Server) recordSubjectAdjustment(ctx context.Context, rider, kind, subjectID string, rec why.Record) {
 	day := s.localToday()
 	if err := s.Training.RecordAdjustment(ctx, rider, kind, subjectID, rec, day); err != nil {
-		s.logger().Warn("could not record why a change was made", "kind", kind, "subject", subjectID, "rider", rider, "rule", string(rec.Rule), "err", err)
+		s.logger().Warn("could not record why a change was made", "kind", kind, "subject", subjectID, "rule", string(rec.Rule), "err", err)
 	}
 }
 
