@@ -24,15 +24,26 @@ const CONFIG: Record<ReadinessVerdict, ChipConfig> = {
   rest: { label: 'Rest', color: 'neutral', icon: 'i-lucide-battery-low' },
 }
 
+// A badge that opens a popover: pointer, hover and a visible keyboard focus.
+const TRIGGER_CLASS = 'cursor-pointer hover:bg-accented focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
+
 const config = computed(() => CONFIG[props.verdict])
 const ariaLabel = computed(() => `Readiness: ${config.value.label} — show reasons`)
 </script>
 
 <template>
   <UPopover>
-    <button type="button" class="inline-flex cursor-pointer items-center" :aria-label="ariaLabel">
-      <UBadge :color="config.color" variant="subtle" :icon="config.icon" :class="config.class">{{ config.label }}</UBadge>
-    </button>
+    <UBadge
+      as="button"
+      type="button"
+      :color="config.color"
+      variant="subtle"
+      :icon="config.icon"
+      :class="[TRIGGER_CLASS, config.class]"
+      :aria-label="ariaLabel"
+    >
+      {{ config.label }}
+    </UBadge>
 
     <template #content>
       <div class="max-w-64 p-3">

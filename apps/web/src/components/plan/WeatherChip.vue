@@ -32,9 +32,18 @@ const summary = computed(() => {
 
 <template>
   <UPopover>
-    <button type="button" class="inline-flex cursor-pointer items-center self-start" :aria-label="ariaLabel">
-      <UBadge :color="kind.color" variant="subtle" :size="compact ? 'sm' : 'md'" :icon="kind.icon">{{ kind.label }}</UBadge>
-    </button>
+    <UBadge
+      as="button"
+      type="button"
+      :color="kind.color"
+      variant="subtle"
+      :size="compact ? 'sm' : 'md'"
+      :icon="kind.icon"
+      class="cursor-pointer self-start hover:bg-accented focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      :aria-label="ariaLabel"
+    >
+      {{ kind.label }}
+    </UBadge>
 
     <template #content>
       <div class="flex max-w-64 flex-col gap-2 p-3 text-[length:var(--text-body)]">

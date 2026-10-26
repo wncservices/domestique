@@ -30,38 +30,42 @@ const emit = defineEmits<{
              the goal proposal on, the same form also takes a one-sentence
              description; without it, this card used to be hidden, leaving a
              route or a generic plan as the only ways in. -->
-        <button
-          type="button"
-          class="flex flex-col items-start gap-2 rounded-lg border border-default p-4 text-left hover:bg-elevated"
+        <UButton
+          color="neutral"
+          variant="outline"
+          :icon="'i-lucide-flag'"
+          class="h-auto flex-col items-start gap-2 p-4 text-left whitespace-normal"
+          :ui="{ leadingIcon: 'size-5 text-muted' }"
           @click="emit('goal')"
         >
-          <UIcon name="i-lucide-flag" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Set a goal</span>
-          <span class="text-[length:var(--text-label)] text-muted">
-            {{ proposeGoalEnabled ? 'Describe it in a sentence, or pick an event date, distance and climbing.' : 'Pick an event date, distance and climbing. No route needed.' }}
-          </span>
-        </button>
+          <span class="text-[length:var(--text-label)] font-normal text-muted">{{ proposeGoalEnabled ? 'Describe it in a sentence, or pick an event date, distance and climbing.' : 'Pick an event date, distance and climbing. No route needed.' }}</span>
+        </UButton>
 
-        <button
-          type="button"
-          class="flex flex-col items-start gap-2 rounded-lg border border-default p-4 text-left hover:bg-elevated"
+        <UButton
+          color="neutral"
+          variant="outline"
+          :icon="'i-lucide-route'"
+          class="h-auto flex-col items-start gap-2 p-4 text-left whitespace-normal"
+          :ui="{ leadingIcon: 'size-5 text-muted' }"
           @click="emit('fromRoute')"
         >
-          <UIcon name="i-lucide-route" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Start from a route</span>
-          <span class="text-[length:var(--text-label)] text-muted">Pick a route in your library and press Train for this route.</span>
-        </button>
+          <span class="text-[length:var(--text-label)] font-normal text-muted">Pick a route in your library and press Train for this route.</span>
+        </UButton>
 
-        <button
-          type="button"
-          class="flex flex-col items-start gap-2 rounded-lg border border-default p-4 text-left hover:bg-elevated disabled:opacity-60"
-          :disabled="starting"
+        <UButton
+          color="neutral"
+          variant="outline"
+          :icon="'i-lucide-wand-sparkles'"
+          :loading="starting"
+          class="h-auto flex-col items-start gap-2 p-4 text-left whitespace-normal"
+          :ui="{ leadingIcon: 'size-5 text-muted' }"
           @click="emit('general')"
         >
-          <UIcon :name="starting ? 'i-lucide-loader-circle' : 'i-lucide-wand-sparkles'" class="size-5 text-muted" :class="{ 'animate-spin': starting }" />
           <span class="font-medium text-highlighted">Keep training</span>
-          <span class="text-[length:var(--text-label)] text-muted">Twelve rolling weeks of steady base, no event needed.</span>
-        </button>
+          <span class="text-[length:var(--text-label)] font-normal text-muted">Twelve rolling weeks of steady base, no event needed.</span>
+        </UButton>
       </div>
     </template>
   </EmptyState>

@@ -76,23 +76,33 @@ const newMenuItems = computed(() => [
   <div v-if="focus || goals.length > 0" class="flex flex-col gap-3">
     <div class="flex items-start justify-between gap-4">
       <div class="flex min-w-0 items-start gap-3">
-        <span
-          class="flex size-9 shrink-0 items-center justify-center rounded-lg"
-          :style="{ backgroundColor: 'var(--app-accent-primary-soft)', color: 'var(--app-accent-primary)' }"
-          aria-hidden="true"
-        >
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
           <UIcon name="i-lucide-flag" class="size-5" />
         </span>
         <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <UDropdownMenu v-if="focus && goals.length > 1" :items="goalMenuItems">
-              <button type="button" class="flex items-center gap-1 text-[length:var(--text-title)] font-semibold text-highlighted">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <!-- Name and priority never separate: the badge stays on the title's line. -->
+            <div class="flex min-w-0 items-center gap-2">
+              <UDropdownMenu v-if="focus && goals.length > 1" :items="goalMenuItems">
+                <UButton
+                  color="neutral"
+                  variant="ghost"
+                  trailing-icon="i-lucide-chevron-down"
+                  class="-ml-2 min-w-0 px-2 text-[length:var(--text-lead)] font-semibold text-highlighted sm:text-[length:var(--text-title)]"
+                  :ui="{ label: 'truncate' }"
+                  :label="focus.name"
+                />
+              </UDropdownMenu>
+              <span
+                v-else-if="focus"
+                class="min-w-0 truncate text-[length:var(--text-lead)] font-semibold text-highlighted sm:text-[length:var(--text-title)]"
+              >
                 {{ focus.name }}
-                <UIcon name="i-lucide-chevron-down" class="size-4 text-muted" />
-              </button>
-            </UDropdownMenu>
-            <span v-else-if="focus" class="text-[length:var(--text-title)] font-semibold text-highlighted">{{ focus.name }}</span>
-            <UBadge v-if="focus" color="neutral" variant="subtle" size="sm">{{ focus.priority }}</UBadge>
+              </span>
+              <UBadge v-if="focus" color="neutral" variant="subtle" size="sm" class="shrink-0" :aria-label="`Priority ${focus.priority}`">
+                {{ focus.priority }}
+              </UBadge>
+            </div>
             <RaceDayChip v-if="focus" :projection="projection ?? null" :goal-id="focus.goalId" />
           </div>
           <!-- Each segment is unbreakable so a wrap falls at a separator, never inside "week 1 of 13". -->

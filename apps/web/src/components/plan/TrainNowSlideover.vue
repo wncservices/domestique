@@ -140,7 +140,7 @@ function tssLabel(s: TrainNowSuggestion): string {
   <USlideover
     v-model:open="open"
     side="right"
-    title="I have ... minutes today"
+    title="Short on time today?"
     description="Say how long you have and pick a session that fits."
     :ui="{ content: 'max-w-lg' }"
   >

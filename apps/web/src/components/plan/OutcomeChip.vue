@@ -17,19 +17,24 @@ const props = withDefaults(
     size?: 'xs' | 'sm' | 'md'
     /** The rider's 1-5 effort rating for the ride, when there is one. */
     feel?: number
+    /** Render as a button that opens the ride's results. */
+    interactive?: boolean
+    ariaLabel?: string
   }>(),
-  { size: 'sm' },
+  { size: 'sm', interactive: false },
 )
+
+const emit = defineEmits<{ open: [] }>()
 
 // Primary is on target; ember is behind (the badge has no ember colour, so
 // those are neutral with an ember class).
 const EMBER = 'text-ember'
-const OUTCOME_META: Record<Outcome, { label: string; icon: string; color: 'primary' | 'neutral' | 'info'; class?: string }> = {
+const OUTCOME_META: Record<Outcome, { label: string; icon: string; color: 'primary' | 'neutral'; class?: string }> = {
   nailed: { label: 'Nailed it', icon: 'i-lucide-circle-check', color: 'primary' },
   completed: { label: 'Completed', icon: 'i-lucide-check', color: 'neutral' },
   struggled: { label: 'Struggled', icon: 'i-lucide-trending-down', color: 'neutral', class: EMBER },
   incomplete: { label: 'Incomplete', icon: 'i-lucide-circle-x', color: 'neutral', class: EMBER },
-  unplanned: { label: 'Unplanned', icon: 'i-lucide-circle-plus', color: 'info' },
+  unplanned: { label: 'Unplanned', icon: 'i-lucide-circle-plus', color: 'neutral' },
 }
 
 const meta = computed(() => OUTCOME_META[props.outcome])
@@ -40,7 +45,21 @@ const allOut = computed(() => props.feel === 5 && (props.outcome === 'nailed' ||
 
 <template>
   <span class="inline-flex max-w-full items-center gap-1.5">
-    <UBadge :color="meta.color" variant="subtle" :icon="meta.icon" :size="size" class="max-w-full truncate" :class="meta.class">
+    <UBadge
+      :as="interactive ? 'button' : 'span'"
+      :type="interactive ? 'button' : undefined"
+      :color="meta.color"
+      variant="subtle"
+      :icon="meta.icon"
+      :size="size"
+      class="max-w-full truncate"
+      :class="[
+        meta.class,
+        interactive && 'cursor-pointer hover:bg-accented focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary',
+      ]"
+      :aria-label="interactive ? ariaLabel : undefined"
+      @click="interactive && emit('open')"
+    >
       {{ meta.label }}
     </UBadge>
     <span v-if="allOut" class="text-[length:var(--text-label)] text-muted">felt all-out</span>

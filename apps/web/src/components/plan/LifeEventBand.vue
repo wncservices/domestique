@@ -16,14 +16,16 @@ const label = computed(() => (props.compact ? meta.value.label : eventLabel(prop
 </script>
 
 <template>
-  <div
-    class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[length:var(--text-label)] font-medium"
+  <UBadge
+    color="neutral"
+    variant="soft"
+    size="sm"
+    :icon="meta.icon"
+    class="flex w-full justify-start"
     :class="meta.band"
     role="note"
     :aria-label="eventLabel(event)"
-    :title="eventLabel(event)"
   >
-    <UIcon :name="meta.icon" class="size-3 shrink-0" />
     <span class="truncate">{{ label }}</span>
-  </div>
+  </UBadge>
 </template>

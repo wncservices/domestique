@@ -3,11 +3,11 @@
 // another day (or use its own overflow menu) to move it, click one to show
 // it in the day card above. The one place a rider sees the whole week at once instead of just
 // today (TodayCard) or the flat goals/workouts lists below it.
-import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { AnalysisStep, CompletedSession, RiderProfile, SessionAnalysis, TrainingWeek, WeatherDay, WeekDay, Workout } from '@/api/types'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useExportItems } from '@/composables/useExportItems'
-import { hasGaps, planActions, type PlanActionId } from '@/utils/planActions'
+import { hasGaps, planActions, type PlanAction, type PlanActionId } from '@/utils/planActions'
 import { dayNumber, shortDate, weekdayShort } from '@/utils/planDates'
 import { weekLedgerNote, weekLoadLabel, workoutLoad } from '@/utils/today'
 import { adjustmentNote, formatDuration, pickAnalysedSession } from '@/utils/workoutMath'
@@ -110,14 +110,19 @@ function run(id: PlanActionId) {
 
 // Export keeps its week options as a nested menu. A week with nothing planned
 // has nothing to export, so the entry is shown disabled rather than hidden.
-const overflowItems = computed<DropdownMenuItem[]>(() =>
-  actions.value.overflow.map((a): DropdownMenuItem => {
-    if (a.id !== 'export') return { label: a.label, icon: a.icon, onSelect: () => run(a.id) }
-    const children = weekItems(props.week)
-    return children.length
-      ? { label: a.label, icon: a.icon, children }
-      : { label: a.label, icon: a.icon, disabled: true }
-  }),
+function menuItem(a: PlanAction): DropdownMenuItem {
+  if (a.id !== 'export') return { label: a.label, icon: a.icon, onSelect: () => run(a.id) }
+  const children = weekItems(props.week)
+  return children.length ? { label: a.label, icon: a.icon, children } : { label: a.label, icon: a.icon, disabled: true }
+}
+
+// From sm up the common actions are buttons you can see; the rest (and, on a
+// phone, all of them) sit in one menu so the toolbar stays on a single row.
+const VISIBLE_ON_DESKTOP: PlanActionId[] = ['replan', 'train-now', 'life-event']
+const secondaryActions = computed(() => actions.value.overflow.filter((a) => VISIBLE_ON_DESKTOP.includes(a.id)))
+const overflowItems = computed<DropdownMenuItem[]>(() => actions.value.overflow.map(menuItem))
+const desktopMenuItems = computed<DropdownMenuItem[]>(() =>
+  actions.value.overflow.filter((a) => !VISIBLE_ON_DESKTOP.includes(a.id)).map(menuItem),
 )
 
 function loadOf(w: Workout): string | null {
@@ -257,68 +262,69 @@ function rideLinkNote(c: CompletedSession): string {
 
 // The Fill button below the strip is offered on the same signal as Replan
 // leading the toolbar: see hasGaps in utils/planActions.ts.
-
-// Mobile's horizontally-scrolling strip (the sm:grid breakpoint replaces it
-// with a grid on desktop, where this is a no-op — nothing to scroll) starts
-// scrolled to Monday, so a rider opening the page mid-week has to swipe past
-// however many days already passed just to see today. A querySelector against
-// a data attribute, rather than a per-tile template ref, sidesteps the v-for
-// ref-array staleness problem: when today drops out of the displayed week
-// (browsing to a different week) the selector simply finds nothing instead of
-// scrolling to a stale element left over from a previous week.
-const stripEl = useTemplateRef<HTMLElement>('stripEl')
-
-watch(
-  () => props.week.start,
-  async () => {
-    await nextTick()
-    const tile = stripEl.value?.querySelector<HTMLElement>(`[data-date="${props.week.today}"]`)
-    tile?.scrollIntoView({ inline: 'center', block: 'nearest' })
-  },
-  { immediate: true },
-)
 </script>
 
 <template>
   <UCard variant="outline">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-1">
+    <div class="flex flex-col gap-3">
+      <div class="flex flex-wrap items-center gap-1">
         <UButton color="neutral" variant="ghost" icon="i-lucide-chevron-left" aria-label="Previous week" @click="emit('prev')" />
         <h2 class="text-[length:var(--text-body)] font-semibold text-highlighted tabular-nums">{{ title }}</h2>
         <UButton color="neutral" variant="ghost" icon="i-lucide-chevron-right" aria-label="Next week" @click="emit('next')" />
         <UButton v-if="!isCurrentWeek" color="neutral" variant="ghost" size="sm" @click="emit('thisWeek')">Today</UButton>
-        <span
+        <UBadge
           v-if="phaseChip"
-          class="rounded-full px-2 py-0.5 text-[length:var(--text-label)] font-medium"
+          color="neutral"
+          variant="soft"
+          size="md"
+          class="ml-1"
           :class="phaseChip.class"
           :style="phaseChip.style"
         >
           {{ phaseChip.label }}
-        </span>
+        </UBadge>
       </div>
 
-      <div class="flex flex-wrap items-center gap-3">
-        <UButton color="primary" size="sm" :icon="actions.primary.icon" class="shrink-0 whitespace-nowrap" @click="run(actions.primary.id)">
-          {{ actions.primary.label }}
-        </UButton>
-        <UDropdownMenu :items="overflowItems" :content="{ align: 'end' }">
-          <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-ellipsis" aria-label="More actions" />
-        </UDropdownMenu>
-        <div class="flex min-w-[10rem] flex-col items-end gap-1">
-          <span class="tabular-nums text-[length:var(--text-body)] text-muted">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <UButton color="primary" size="sm" :icon="actions.primary.icon" class="shrink-0 whitespace-nowrap" @click="run(actions.primary.id)">
+            {{ actions.primary.label }}
+          </UButton>
+          <UButton
+            v-for="a in secondaryActions"
+            :key="a.id"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            :icon="a.icon"
+            class="hidden whitespace-nowrap sm:inline-flex"
+            @click="run(a.id)"
+          >
+            {{ a.label }}
+          </UButton>
+          <UDropdownMenu :items="overflowItems" :content="{ align: 'end' }" class="sm:hidden">
+            <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-ellipsis" aria-label="More actions" class="sm:hidden" />
+          </UDropdownMenu>
+          <UDropdownMenu v-if="desktopMenuItems.length > 0" :items="desktopMenuItems" :content="{ align: 'end' }">
+            <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-ellipsis" aria-label="More actions" class="hidden sm:inline-flex" />
+          </UDropdownMenu>
+        </div>
+        <div class="flex min-w-0 flex-1 flex-col items-end gap-1 sm:flex-none">
+          <span class="tabular-nums text-[length:var(--text-label)] text-muted sm:text-[length:var(--text-body)]">
             {{ loadLabel }}<template v-if="ledgerNote"> &middot; {{ ledgerNote }}</template>
           </span>
-          <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-32" />
+          <UProgress :model-value="week.totals.completedSeconds" :max="Math.max(targetSeconds, 1)" size="sm" class="w-full max-w-32" />
         </div>
       </div>
     </div>
 
-    <div ref="stripEl" class="mt-4 flex gap-2 overflow-x-auto pb-1 snap-x xl:grid xl:grid-cols-7 xl:overflow-visible">
+    <!-- One column of days until there is room for all seven side by side: never a sideways scroller. -->
+    <div class="mt-4 grid grid-cols-1 gap-2 xl:grid-cols-7">
       <div
         v-for="day in week.days"
         :key="day.date"
         :data-date="day.date"
-        class="flex min-h-28 min-w-[9.5rem] snap-start flex-col gap-1 rounded-[var(--radius-card)] border p-2 xl:min-w-0"
+        class="flex min-w-0 flex-col gap-1 rounded-[var(--radius-card)] border p-2 xl:min-h-28"
         :class="[tileClass(day), { 'bg-elevated': dragOverDate === day.date }]"
         @dragover="onDragOver($event, day.date)"
         @dragleave="dragOverDate === day.date && (dragOverDate = null)"
@@ -336,25 +342,28 @@ watch(
         <UTooltip v-for="w in day.planned" :key="w.id" :delay-duration="400" :content="{ side: 'bottom' }">
           <!-- Flat on purpose: padding and a menu beside the name left it ~60px. -->
           <div
-            class="flex w-full flex-col gap-0.5 rounded-sm border-l-4 pl-1.5 cursor-pointer"
+            class="flex w-full cursor-pointer flex-col gap-0.5 rounded-sm border-l-4 pl-1.5"
             :class="w.id === selectedWorkoutId ? 'bg-elevated ring-1 ring-primary' : 'hover:bg-elevated'"
             :style="{ borderLeftColor: w.zone ? zoneColorVar(w.zone) : 'var(--ui-border-accented)' }"
-            role="button"
-            tabindex="0"
-            :aria-pressed="w.id === selectedWorkoutId"
-            :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}${adjustmentNote(w.description) ? `. ${adjustmentNote(w.description)}` : ''}`"
             :draggable="canDrag(day.date, w)"
             @dragstart="onDragStart($event, w)"
             @click="emit('select', w, day.date)"
-            @keydown.enter.prevent="emit('select', w, day.date)"
-            @keydown.space.prevent="emit('select', w, day.date)"
           >
-            <!-- Three lines, never one; the tooltip carries the rest of a very long name. -->
-            <span class="line-clamp-3 break-words text-[length:var(--text-label)] font-medium text-highlighted">{{ w.name }}</span>
-            <div class="flex items-center justify-between gap-1">
-              <span class="tabular-nums text-[length:var(--text-label)] text-muted">
-                {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template>
-              </span>
+            <!-- The select control is a real button beside (not around) the move menu, so no control nests in another. -->
+            <div class="flex items-start justify-between gap-1">
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                :aria-pressed="w.id === selectedWorkoutId"
+                :aria-label="`Show ${w.name}${w.indoor ? ' (indoor)' : ''}${w.crewRide ? ' (crew ride)' : ''} on ${weekdayShort(day.date)} ${dayNumber(day.date)}${adjustmentNote(w.description) ? `. ${adjustmentNote(w.description)}` : ''}`"
+                @click.stop="emit('select', w, day.date)"
+              >
+                <!-- Three lines, never one; the tooltip carries the rest of a very long name. -->
+                <span class="line-clamp-3 break-words text-[length:var(--text-label)] font-medium text-highlighted">{{ w.name }}</span>
+                <span class="tabular-nums text-[length:var(--text-label)] text-muted">
+                  {{ formatDuration(w.plannedSeconds) }}<template v-if="loadOf(w)"> · {{ loadOf(w) }}</template>
+                </span>
+              </button>
               <UDropdownMenu v-if="!w.crewRide" :items="moveMenuItems(w, day.date)">
                 <UButton
                   color="neutral"
@@ -405,22 +414,21 @@ watch(
           </UTooltip>
         </div>
 
-        <button
+        <OutcomeChip
           v-if="analysedSession(day)"
-          type="button"
           class="self-start"
-          :class="{ 'cursor-default': !canOpenResults(day) }"
-          :disabled="!canOpenResults(day)"
+          :outcome="analysedSession(day)!.analysis!.outcome"
+          :feel="analysedSession(day)!.analysis!.feel"
+          size="xs"
+          :interactive="canOpenResults(day)"
           :aria-label="`View ride results for ${weekdayShort(day.date)} ${dayNumber(day.date)}`"
-          @click.stop="openResults(day)"
-        >
-          <OutcomeChip :outcome="analysedSession(day)!.analysis!.outcome" :feel="analysedSession(day)!.analysis!.feel" size="xs" />
-        </button>
+          @open="openResults(day)"
+        />
       </div>
     </div>
 
     <div v-if="gaps" class="mt-4 flex items-center gap-3">
-      <UButton color="primary" variant="soft" icon="i-lucide-calendar-plus" :loading="filling" @click="emit('fill')">
+      <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-calendar-plus" :loading="filling" @click="emit('fill')">
         Fill this week
       </UButton>
       <p class="text-[length:var(--text-label)] text-muted">Builds this week's sessions from your plan.</p>
