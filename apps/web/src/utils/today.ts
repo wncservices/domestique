@@ -173,11 +173,9 @@ export interface WeekTile {
   aria: string
 }
 
-// "1h 6m" is five characters, too wide for a day tile at 375px; "1:06" fits.
+// The same "1h 13m" as everywhere else; "1:13" read as minutes and seconds.
 function compactDuration(seconds: number): string {
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  const m = Math.round(seconds / 60)
-  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`
+  return formatDuration(seconds)
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)

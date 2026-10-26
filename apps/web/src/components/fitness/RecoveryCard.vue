@@ -7,20 +7,11 @@
 // Garmin yet, sees nothing here rather than an empty table.
 import { computed } from 'vue'
 import type { DailyWellnessDTO } from '@/api/types'
-import { parseLocalDate } from '@/utils/fitnessMath'
+import { formatDate } from '@/utils/planDates'
 
 const props = defineProps<{ days: DailyWellnessDTO[] }>()
 
 const sorted = computed(() => [...props.days].sort((a, b) => b.date.localeCompare(a.date)))
-
-// "Mon 28 Sep" — matches RecentRides' own local-date format so the two
-// cards read consistently, just without the comma this card's spec omits.
-function formatDate(ymd: string): string {
-  const date = parseLocalDate(ymd)
-  const weekday = date.toLocaleDateString('en-GB', { weekday: 'short' })
-  const month = date.toLocaleDateString('en-GB', { month: 'short' })
-  return `${weekday} ${date.getDate()} ${month}`
-}
 
 // Garmin's own statuses/levels arrive upper-cased ("BALANCED", "MODERATE" —
 // see garmin.Wellness's own doc comment); this is the one place that turns

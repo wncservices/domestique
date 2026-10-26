@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatInstant } from '@/utils/planDates'
 import { computed } from 'vue'
 import type { Account, SyncStatus } from '@/api/types'
 
@@ -51,7 +52,7 @@ const appearance = computed(() => {
 const tooltip = computed(() =>
   props.statuses
     .map((status) => {
-      const when = status.updatedAt ? ` (last push ${new Date(status.updatedAt).toLocaleDateString()})` : ''
+      const when = status.updatedAt ? ` (last push ${formatInstant(status.updatedAt)})` : ''
       const verb =
         status.status === 'synced' ? 'synced' : status.status === 'stale' ? 'changed' : 'not pushed yet'
       return `${labelFor(status)}: ${verb}${when}`

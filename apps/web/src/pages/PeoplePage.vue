@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatInstant } from '@/utils/planDates'
 import { nextTick, onMounted, ref, watch, computed } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import type { DropdownMenuItem } from '@nuxt/ui'
@@ -144,7 +145,7 @@ async function changeRole(person: Person, role: AssignableRole) {
 
 function lastSeen(person: Person): string {
   if (!person.lastLogin) return 'never signed in'
-  return new Date(person.lastLogin).toLocaleDateString()
+  return formatInstant(person.lastLogin)
 }
 
 // --- block / unblock ---

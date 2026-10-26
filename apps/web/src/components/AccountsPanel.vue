@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatInstant } from '@/utils/planDates'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
@@ -62,7 +63,7 @@ watch(() => props.garmin.connected, loadDevices)
 
 function lastSync(device: GarminDevice): string {
   if (!device.lastSync) return 'never synced'
-  return `last synced ${new Date(device.lastSync).toLocaleDateString()}`
+  return `last synced ${formatInstant(device.lastSync)}`
 }
 
 const unlinking = ref('')
@@ -184,8 +185,7 @@ async function unlink(account: Account) {
           <UTooltip
             v-if="linkableWahoo && !wahoo.canConnect"
             :text="
-              wahoo.unavailable ||
-              'This deployment has no encryption key, so a connection could not be kept safely.'
+              'Wahoo is not available yet. Ask an administrator to finish setting it up.'
             "
           >
             <UButton icon="i-lucide-gauge" color="neutral" variant="subtle" disabled>

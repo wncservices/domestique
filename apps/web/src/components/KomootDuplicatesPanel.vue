@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatInstant } from '@/utils/planDates'
 import { computed, onMounted, ref } from 'vue'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
@@ -168,7 +169,7 @@ onMounted(async () => {
             <span class="flex-1 text-[length:var(--text-body)] text-muted">
               {{ (tour.distanceM / 1000).toFixed(1) }} km
               · {{ Math.round(tour.ascentM) }} m
-              <span v-if="tour.changedAt">· {{ new Date(tour.changedAt).toLocaleDateString() }}</span>
+              <span v-if="tour.changedAt">· {{ formatInstant(tour.changedAt) }}</span>
             </span>
             <UBadge v-if="!toDelete.has(tour.id)" color="success" variant="subtle" size="sm">keep</UBadge>
           </label>
