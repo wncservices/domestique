@@ -4,7 +4,7 @@
 import { computed, nextTick, ref } from 'vue'
 import type { CompletedSession } from '@/api/types'
 import { formatDuration } from '@/utils/workoutMath'
-import { parseLocalDate } from '@/utils/fitnessMath'
+import { formatDate } from '@/utils/planDates'
 import { awardChipText } from '@/utils/bestEfforts'
 
 const props = defineProps<{ sessions: CompletedSession[] }>()
@@ -45,13 +45,6 @@ function sportIcon(sport: CompletedSession['sport']): string {
   return sport === 'running' ? 'i-lucide-footprints' : 'i-lucide-bike'
 }
 
-function formatLocalDate(ymd: string): string {
-  const date = parseLocalDate(ymd)
-  const weekday = date.toLocaleDateString('en-GB', { weekday: 'short' })
-  const month = date.toLocaleDateString('en-GB', { month: 'short' })
-  return `${weekday} ${date.getDate()} ${month}`
-}
-
 function formatDistance(meters: number | undefined): string | null {
   if (!meters) return null
   return `${(meters / 1000).toFixed(1)} km`
@@ -73,7 +66,7 @@ function awardsText(session: CompletedSession): string {
     >
       <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0">
         <UIcon :name="sportIcon(session.sport)" class="size-4 text-muted shrink-0" />
-        <span class="text-muted shrink-0">{{ formatLocalDate(session.date) }}</span>
+        <span class="text-muted shrink-0">{{ formatDate(session.date) }}</span>
         <UBadge
           v-if="session.analysis?.awards?.length"
           color="success"

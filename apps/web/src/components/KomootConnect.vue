@@ -3,7 +3,9 @@ import { ref } from 'vue'
 import { api } from '@/api/client'
 import type { KomootConnection } from '@/api/types'
 import { describeError } from '@/utils/errorMessage'
+import { useLibrary } from '@/composables/useLibrary'
 
+const { canManageSettings } = useLibrary()
 const props = defineProps<{ connection: KomootConnection }>()
 const emit = defineEmits<{ changed: [KomootConnection] }>()
 
@@ -97,7 +99,7 @@ async function disconnect() {
       variant="subtle"
       icon="i-lucide-key-round"
       title="Komoot sign-in is unavailable"
-      description="This deployment has no encryption key, so a sign-in could not be kept safely. An administrator can set DOMESTIQUE_ENCRYPTION_KEY — `domestique keygen` generates one."
+      :description="canManageSettings ? 'This deployment has no encryption key, so a sign-in could not be kept safely. Set DOMESTIQUE_ENCRYPTION_KEY (`domestique keygen` generates one).' : 'Komoot sign-in is not available yet. Ask an administrator to finish setting it up.'"
     />
 
     <form

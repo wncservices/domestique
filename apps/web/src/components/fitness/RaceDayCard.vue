@@ -6,7 +6,8 @@
 // (a goal edit, a replan).
 import { computed } from 'vue'
 import type { ProjectionResponse } from '@/api/types'
-import { formatBand, formatSigned, parseLocalDate, projectionTone } from '@/utils/fitnessMath'
+import { formatBand, formatSigned, projectionTone } from '@/utils/fitnessMath'
+import { formatDate } from '@/utils/planDates'
 
 const props = defineProps<{ projection: ProjectionResponse | null }>()
 
@@ -29,7 +30,7 @@ const TONE_ICON: Record<ReturnType<typeof projectionTone>, string> = {
 }
 
 function formatDay(ymd: string): string {
-  return parseLocalDate(ymd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  return formatDate(ymd)
 }
 
 // B and C events carry no verdict, only the projected form.

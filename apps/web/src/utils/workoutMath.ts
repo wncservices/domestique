@@ -80,6 +80,15 @@ export function formatDuration(seconds: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`
 }
 
+/** The tightest readable form, for a day tile a seventh of a phone wide: "47m", "2h", "1h13". */
+export function formatDurationCompact(seconds: number): string {
+  const totalMinutes = Math.round(seconds / 60)
+  if (totalMinutes < 60) return `${totalMinutes}m`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return minutes === 0 ? `${hours}h` : `${hours}h${String(minutes).padStart(2, '0')}`
+}
+
 /** A stopwatch-style clock for editing: "1:30", "1:02:05". */
 export function formatClock(seconds: number): string {
   const total = Math.max(0, Math.round(seconds))

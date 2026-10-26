@@ -251,6 +251,7 @@ function addCooldown() {
             <UInput
               :model-value="step.name"
               placeholder="Step name"
+              :aria-label="`Step ${index + 1} name`"
               class="w-full sm:w-48"
               @update:model-value="(v: string | number) => update(index, { name: String(v) })"
             />
@@ -259,6 +260,7 @@ function addCooldown() {
               <UInput
                 type="number"
                 min="2"
+                :aria-label="`Step ${index + 1} repeat count`"
                 :model-value="step.repeat"
                 class="w-20"
                 @update:model-value="(v: string | number) => update(index, { repeat: Number(v) })"
@@ -271,6 +273,7 @@ function addCooldown() {
                 :items="intensities"
                 value-key="value"
                 placeholder="Intensity"
+                :aria-label="`Step ${index + 1} intensity`"
                 class="w-full sm:w-36"
                 @update:model-value="(v: string) => update(index, { intensity: v as StepIntensity })"
               />
@@ -278,6 +281,7 @@ function addCooldown() {
                 :model-value="step.duration"
                 :items="durations"
                 value-key="value"
+                :aria-label="`Step ${index + 1} duration type`"
                 class="w-full sm:w-40"
                 @update:model-value="(v: string) => update(index, { duration: v as StepDuration })"
               />
@@ -285,6 +289,7 @@ function addCooldown() {
                 v-if="step.duration === 'time'"
                 :model-value="durationText(index, step)"
                 placeholder="mm:ss"
+                :aria-label="`Step ${index + 1} duration (mm:ss)`"
                 :color="durationInvalid[index] ? 'error' : undefined"
                 :highlight="durationInvalid[index]"
                 class="w-full sm:w-24 tabular-nums"
@@ -298,6 +303,7 @@ function addCooldown() {
                 min="1"
                 :model-value="step.meters"
                 placeholder="meters"
+                :aria-label="`Step ${index + 1} distance in meters`"
                 class="w-full sm:w-28"
                 @update:model-value="(v: string | number) => update(index, { meters: Number(v) })"
               />
@@ -305,6 +311,7 @@ function addCooldown() {
                 :model-value="step.target"
                 :items="targets"
                 value-key="value"
+                :aria-label="`Step ${index + 1} target type`"
                 class="w-full sm:w-44"
                 @update:model-value="(v: string) => update(index, { target: v as StepTarget })"
               />
@@ -331,6 +338,7 @@ function addCooldown() {
                   type="number"
                   :model-value="displayTarget(index, step, 'targetLow', thresholdFor(step.target, profile ?? {}))"
                   :placeholder="thresholdFor(step.target, profile ?? {}) && isPercent(index) ? 'low (%)' : `low (${unitFor(step.target)})`"
+                  :aria-label="`Step ${index + 1} low target`"
                   class="w-full sm:w-24"
                   @update:model-value="(v: string | number) => setTarget(index, step, 'targetLow', v, thresholdFor(step.target, profile ?? {}))"
                 />
@@ -338,6 +346,7 @@ function addCooldown() {
                   type="number"
                   :model-value="displayTarget(index, step, 'targetHigh', thresholdFor(step.target, profile ?? {}))"
                   :placeholder="thresholdFor(step.target, profile ?? {}) && isPercent(index) ? 'high (%)' : `high (${unitFor(step.target)})`"
+                  :aria-label="`Step ${index + 1} high target`"
                   class="w-full sm:w-24"
                   @update:model-value="(v: string | number) => setTarget(index, step, 'targetHigh', v, thresholdFor(step.target, profile ?? {}))"
                 />

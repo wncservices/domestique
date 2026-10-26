@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatInstant } from '@/utils/planDates'
 /**
  * Share one route with someone outside every crew — not an anonymous
  * public link: whoever holds it still signs in through this app's own
@@ -168,8 +169,8 @@ const sortedShares = computed(() =>
               </UBadge>
               <div class="min-w-0 flex-1 text-[length:var(--text-label)] text-dimmed">
                 <p>
-                  Created {{ new Date(share.createdAt).toLocaleDateString() }} · expires
-                  {{ new Date(share.expiresAt).toLocaleDateString() }}
+                  Created {{ formatInstant(share.createdAt) }} · expires
+                  {{ formatInstant(share.expiresAt) }}
                 </p>
                 <p v-if="share.redeemedBy.length">
                   Seen by {{ share.redeemedBy.map((r) => r.rider).join(', ') }}

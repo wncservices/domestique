@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import SettingsNavLink from '@/components/SettingsNavLink.vue'
+import InlineLink from '@/components/ui/InlineLink.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
@@ -495,31 +497,17 @@ onMounted(async () => {
     <div class="flex flex-col gap-6 lg:grid lg:grid-cols-[12rem_minmax(0,1fr)] lg:items-start lg:gap-10">
       <!-- One nav for both widths: a horizontal scrolling row on a phone, a
            sticky column from lg up, so the landmark is announced once. -->
-      <nav aria-label="Settings" class="flex gap-4 overflow-x-auto lg:sticky lg:top-20 lg:flex-col lg:gap-3 lg:overflow-visible">
+      <nav aria-label="Settings" class="flex gap-4 overflow-x-auto [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_88%,transparent)] lg:[mask-image:none] lg:sticky lg:top-20 lg:flex-col lg:gap-3 lg:overflow-visible">
         <ul class="flex gap-1 lg:flex-col">
           <li v-for="section in generalSections" :key="section.id" class="shrink-0">
-            <a
-              :href="`#${section.id}`"
-              class="block rounded-md px-3 py-1.5 text-[length:var(--text-body)] text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
-              :aria-current="current === section.id ? 'location' : undefined"
-              @click.prevent="goTo(section.id)"
-            >
-              {{ section.label }}
-            </a>
+            <SettingsNavLink :id="section.id" :label="section.label" :active="current === section.id" @go="goTo" />
           </li>
         </ul>
         <div v-if="adminSections.length" class="flex items-center gap-1 lg:flex-col lg:items-stretch">
           <p class="shrink-0 px-3 text-[length:var(--text-label)] text-dimmed" aria-hidden="true">Admin</p>
           <ul aria-label="Admin" class="flex gap-1 lg:flex-col">
             <li v-for="section in adminSections" :key="section.id" class="shrink-0">
-              <a
-              :href="`#${section.id}`"
-              class="block rounded-md px-3 py-1.5 text-[length:var(--text-body)] text-muted hover:bg-elevated hover:text-highlighted focus-visible:outline-2 focus-visible:outline-primary aria-[current=location]:bg-primary/10 aria-[current=location]:font-medium aria-[current=location]:text-primary"
-              :aria-current="current === section.id ? 'location' : undefined"
-              @click.prevent="goTo(section.id)"
-            >
-              {{ section.label }}
-            </a>
+              <SettingsNavLink :id="section.id" :label="section.label" :active="current === section.id" @go="goTo" />
             </li>
           </ul>
         </div>
@@ -726,7 +714,7 @@ onMounted(async () => {
           <div v-if="canManageTraining" class="flex flex-col gap-4">
             <p class="text-[length:var(--text-body)] text-muted">
               Your FTP and the rest of your training profile live on
-              <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Fitness</RouterLink>.
+              <InlineLink to="/fitness#profile">Fitness</InlineLink>.
             </p>
 
             <RideStartCard :routing-configured="routingConfigured" />

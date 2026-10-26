@@ -19,8 +19,10 @@ import {
   type ProgressionRange,
   RANGE_DAYS,
 } from '@/utils/progressionSeries'
+import { formatDate } from '@/utils/planDates'
 import { formatLevel, zoneColorVar, zoneLabel } from '@/utils/zones'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
+import SegmentedControl, { type SegmentItem } from '@/components/ui/SegmentedControl.vue'
 
 const props = defineProps<{
   levels: ProgressionLevel[]
@@ -29,10 +31,14 @@ const props = defineProps<{
 
 const SPORT_LABEL: Record<Sport, string> = { cycling: 'Cycling', running: 'Running' }
 
-const RANGES: { key: ProgressionRange; label: string }[] = [
-  { key: '1m', label: '1m' },
-  { key: '3m', label: '3m' },
-  { key: '1y', label: '1y' },
+const RANGES: SegmentItem<ProgressionRange>[] = [
+  { value: '1m', label: '1 mo' },
+  { value: '3m', label: '3 mo' },
+  { value: '1y', label: '1 yr' },
+]
+const VIEWS: SegmentItem<'trend' | 'changes'>[] = [
+  { value: 'trend', label: 'Trend', icon: 'i-lucide-chart-line' },
+  { value: 'changes', label: 'Changes', icon: 'i-lucide-list' },
 ]
 const range = ref<ProgressionRange>('3m')
 const view = ref<'trend' | 'changes'>('trend')
@@ -52,7 +58,7 @@ const groups = computed(() => {
 })
 
 const windowStart = computed(() =>
-  new Date(now - RANGE_DAYS[range.value] * 86_400_000).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+  formatDate(new Date(now - RANGE_DAYS[range.value] * 86_400_000)),
 )
 
 function deltaMeta(d: number) {
@@ -73,7 +79,7 @@ function accent(zone: string): string {
 }
 
 function dateLabel(t: number): string {
-  return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return formatDate(new Date(t))
 }
 
 const showAll = ref(false)
@@ -86,39 +92,9 @@ const sportCount = computed(() => new Set(props.levels.map((l) => l.sport)).size
     <template #header>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="text-[length:var(--text-title)] font-semibold">Progression</h2>
-        <div class="flex items-center gap-2">
-          <UFieldGroup>
-            <UButton
-              size="xs"
-              :color="view === 'trend' ? 'primary' : 'neutral'"
-              :variant="view === 'trend' ? 'subtle' : 'outline'"
-              icon="i-lucide-chart-line"
-              @click="view = 'trend'"
-            >
-              Trend
-            </UButton>
-            <UButton
-              size="xs"
-              :color="view === 'changes' ? 'primary' : 'neutral'"
-              :variant="view === 'changes' ? 'subtle' : 'outline'"
-              icon="i-lucide-list"
-              @click="view = 'changes'"
-            >
-              Changes
-            </UButton>
-          </UFieldGroup>
-          <UFieldGroup>
-            <UButton
-              v-for="r in RANGES"
-              :key="r.key"
-              size="xs"
-              :color="range === r.key ? 'primary' : 'neutral'"
-              :variant="range === r.key ? 'subtle' : 'outline'"
-              @click="range = r.key"
-            >
-              {{ r.label }}
-            </UButton>
-          </UFieldGroup>
+        <div class="flex flex-wrap items-center gap-2">
+          <SegmentedControl v-model="view" :items="VIEWS" label="Progression view" />
+          <SegmentedControl v-model="range" :items="RANGES" label="Time range" />
         </div>
       </div>
     </template>

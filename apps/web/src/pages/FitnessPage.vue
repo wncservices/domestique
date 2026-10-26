@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatDateRange } from '@/utils/planDates'
 // Half of what was one training page, split so a rider can jump straight
 // to "what's my fitness / what should I enter" without scrolling past goals
 // and workouts first. See docs/training-plan.md for the phase history; this half owns the
@@ -548,7 +549,7 @@ onMounted(() => {
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
           <h2 class="text-[length:var(--text-title)] font-semibold">{{ season?.period.label ?? 'Season review' }}</h2>
-          <p v-if="season" class="text-[length:var(--text-body)] text-muted">{{ season.period.from }} to {{ season.period.to }}</p>
+          <p v-if="season" class="text-[length:var(--text-body)] text-muted">{{ formatDateRange(season.period.from, season.period.to) }}</p>
         </div>
         <div class="flex items-center gap-2" data-no-print>
           <SeasonPicker v-if="seasonPeriod" :available="seasonChoices" :model-value="seasonPeriod" @update:model-value="pickSeason" />

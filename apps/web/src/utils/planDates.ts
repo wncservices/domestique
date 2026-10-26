@@ -39,3 +39,33 @@ export function weekdayDateShort(ymd: string): string {
 export function weekdayLong(ymd: string): string {
   return localDate(ymd).toLocaleDateString(undefined, { weekday: 'long' })
 }
+
+// One date format family for the app: "Mon 26 Oct", ranges "Thu 29 Oct – Sun 1 Nov",
+// and the year only when it is not the current one. Built from parts rather than
+// a locale pattern so the order never flips with the browser's language.
+function dateParts(d: Date, withYear: boolean): string {
+  const weekday = d.toLocaleDateString('en-GB', { weekday: 'short' })
+  const month = d.toLocaleDateString('en-GB', { month: 'short' })
+  return `${weekday} ${d.getDate()} ${month}${withYear ? ` ${d.getFullYear()}` : ''}`
+}
+
+/** "Mon 26 Oct", or "Mon 26 Oct 2025" when the year is not this one. Takes a
+ *  YYYY-MM-DD calendar date or a Date. */
+export function formatDate(value: string | Date, now: Date = new Date()): string {
+  const d = typeof value === 'string' ? localDate(value) : value
+  return dateParts(d, d.getFullYear() !== now.getFullYear())
+}
+
+/** The same for an API timestamp (RFC 3339 instant), read in the browser's zone. */
+export function formatInstant(iso: string, now: Date = new Date()): string {
+  return formatDate(new Date(iso), now)
+}
+
+/** "Thu 29 Oct – Sun 1 Nov". The year appears on both ends when either is not
+ *  this year, so a range never reads half-dated. */
+export function formatDateRange(from: string, to: string, now: Date = new Date()): string {
+  const a = localDate(from)
+  const b = localDate(to)
+  const withYear = a.getFullYear() !== now.getFullYear() || b.getFullYear() !== now.getFullYear()
+  return `${dateParts(a, withYear)} – ${dateParts(b, withYear)}`
+}

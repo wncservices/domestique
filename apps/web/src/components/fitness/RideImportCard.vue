@@ -68,9 +68,9 @@ const historyLine = computed(() => {
 const phaseLine = computed(() => {
   const s = status.value
   if (!s) return ''
-  if (s.phase === 'recomputing') return 'Updating your fitness history...'
-  if (s.phase === 'analysing') return `Analysing rides... ${plural(s.added, 'ride')} added so far`
-  return 'Reading your export...'
+  if (s.phase === 'recomputing') return 'Updating your fitness history…'
+  if (s.phase === 'analysing') return `Analysing rides… ${plural(s.added, 'ride')} added so far`
+  return 'Reading your export…'
 })
 
 // What a failed job means for the rider, by the server's short class. The
@@ -214,7 +214,7 @@ onBeforeUnmount(stopPolling)
     <div v-if="uploading" class="mt-4">
       <UProgress :model-value="Math.round(progress * 100)" :max="100" size="sm" />
       <p class="mt-1 text-[length:var(--text-body)] text-muted" role="status">
-        {{ progress >= 1 ? 'Upload received, starting...' : `Uploading... ${Math.round(progress * 100)}%` }}
+        {{ progress >= 1 ? 'Upload received, starting…' : `Uploading… ${Math.round(progress * 100)}%` }}
       </p>
     </div>
 

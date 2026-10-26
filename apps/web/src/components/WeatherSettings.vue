@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InlineLink from '@/components/ui/InlineLink.vue'
 // Opt in to weather: pick a town, say which hours you usually ride, or stop.
 // Lives on the Settings page: it is set once, not looked at with the fitness
 // numbers it used to sit under.
@@ -222,24 +223,9 @@ onMounted(load)
         <UButton color="error" variant="ghost" icon="i-lucide-cloud-off" :loading="saving" @click="stop">
           Stop using weather
         </UButton>
-        <a
-          href="https://open-meteo.com/"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-[length:var(--text-label)] text-primary underline underline-offset-2"
-        >
-          {{ prefs?.attribution }}
-        </a>
+        <InlineLink to="https://open-meteo.com/" external class="text-[length:var(--text-label)]">{{ prefs?.attribution }}</InlineLink>
       </div>
-      <a
-        v-else
-        href="https://open-meteo.com/"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="text-[length:var(--text-label)] text-primary underline underline-offset-2"
-      >
-        {{ prefs?.attribution }}
-      </a>
+      <InlineLink v-else to="https://open-meteo.com/" external class="text-[length:var(--text-label)]">{{ prefs?.attribution }}</InlineLink>
     </div>
   </UCard>
 </template>

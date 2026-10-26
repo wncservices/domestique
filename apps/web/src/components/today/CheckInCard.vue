@@ -240,9 +240,9 @@ async function planLifeEvent() {
   <div class="flex flex-col gap-3">
     <UCard v-if="checkInComplete(checkIn) && !editing" variant="outline" data-testid="checkin-card">
       <div class="flex items-center justify-between gap-3">
-        <span class="flex min-w-0 items-center gap-2 text-[length:var(--text-body)] text-muted">
-          <UIcon name="i-lucide-circle-check" class="size-4 shrink-0 text-success" />
-          <span class="truncate" data-testid="checkin-summary">{{ summary }}</span>
+        <span class="flex min-w-0 items-start gap-2 text-[length:var(--text-body)] text-muted">
+          <UIcon name="i-lucide-circle-check" class="mt-0.5 size-4 shrink-0 text-success" />
+          <span class="min-w-0 break-words" data-testid="checkin-summary">{{ summary }}</span>
         </span>
         <UButton color="neutral" variant="ghost" size="sm" @click="editing = true">Edit</UButton>
       </div>
@@ -260,7 +260,7 @@ async function planLifeEvent() {
               size="sm"
               class="rounded-full"
               :color="chosen(row.field, c) ? 'primary' : 'neutral'"
-              :variant="chosen(row.field, c) ? 'soft' : 'outline'"
+              :variant="chosen(row.field, c) ? 'solid' : 'outline'"
               :aria-pressed="chosen(row.field, c)"
               :data-testid="`checkin-${row.field}-${c.label.toLowerCase()}`"
               @click="pick(row.field, c)"
@@ -271,7 +271,7 @@ async function planLifeEvent() {
         </div>
 
         <div v-if="noteOpen" class="flex flex-col gap-2 pt-1">
-          <UTextarea v-model="note" :maxlength="NOTE_MAX" :rows="2" autoresize class="w-full" placeholder="Anything else? Travel, a cold, how the legs feel" aria-label="Note" />
+          <UTextarea v-model="note" autofocus :maxlength="NOTE_MAX" :rows="2" autoresize class="w-full" placeholder="Anything else? Travel, a cold, how the legs feel" aria-label="Note" />
           <div class="flex justify-end gap-2">
             <UButton color="neutral" variant="ghost" size="sm" @click="noteOpen = false">Cancel</UButton>
             <UButton size="sm" :loading="saving" data-testid="checkin-save" @click="saveNote">Save note</UButton>

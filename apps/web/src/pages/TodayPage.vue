@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InlineLink from '@/components/ui/InlineLink.vue'
 // The rider's home: one greeting, one primary card, two numbers, the week and
 // at most one suggestion. It reads the same endpoints the Plan and Fitness
 // pages do (no new ones) and leaves editing, goals and the long tail to them.
@@ -355,7 +356,7 @@ async function dismissSuggestion() {
                 </div>
               </div>
               <p class="text-[length:var(--text-body)] text-muted">{{ headline }}</p>
-              <p v-if="extraCount > 0" class="text-[length:var(--text-label)] text-muted"><RouterLink to="/plan" class="underline underline-offset-2 hover:text-highlighted">+{{ extraCount }} more today</RouterLink>, see the Plan page.</p>
+              <p v-if="extraCount > 0" class="text-[length:var(--text-label)] text-muted"><InlineLink to="/plan">+{{ extraCount }} more today</InlineLink>, see the Plan page.</p>
 
               <div v-if="!ridden" class="flex flex-wrap items-center gap-2">
                 <UButton v-if="canSyncGarmin" color="primary" icon="i-lucide-watch" :loading="pushing" @click="pushToGarmin">
@@ -380,7 +381,7 @@ async function dismissSuggestion() {
 
               <p v-if="promptProfile" class="text-[length:var(--text-label)] text-muted">
                 Power targets need your FTP.
-                <RouterLink to="/fitness#profile" class="text-primary underline underline-offset-2">Finish your profile</RouterLink>.
+                <InlineLink to="/fitness#profile">Finish your profile</InlineLink>.
               </p>
             </template>
           </div>
