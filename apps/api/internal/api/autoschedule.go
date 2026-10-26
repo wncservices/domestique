@@ -162,6 +162,12 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		// are useful before anyone has set a goal.
 		s.runMetricsPass(ctx, false)
 
+		// Once a week, in the morning slot: a zone left untrained slips. After
+		// the metrics pass, so its skip rule knows whose rides could not be
+		// read, and before the season pass, so a week filled or refreshed in
+		// this tick is built from the lowered level.
+		s.decayLevels(ctx)
+
 		goals, err := s.Training.ListAllGoals(ctx)
 		if err != nil {
 			s.logger().Error("auto-schedule: listing goals failed", "err", err)

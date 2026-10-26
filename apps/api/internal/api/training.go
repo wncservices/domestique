@@ -16,6 +16,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
+	"github.com/wncservices/domestique/apps/api/internal/intensity"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/progression"
@@ -656,7 +657,8 @@ func (s *Server) handleGoalSchedule(w http.ResponseWriter, r *http.Request) {
 // progression.Initial(profile.ExperienceLevel, sport), and persisted via
 // SaveLevel, so a rider's levels start somewhere sensible and stay there
 // across every subsequent schedule call rather than being recomputed (and
-// silently drifting) each time.
+// silently drifting) each time. A zone Initial later gained is seeded the
+// same way for a rider who already has rows.
 func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.RiderProfile, sport model.Sport) (map[string]float64, error) {
 	existing, err := s.Training.ListLevels(ctx, rider)
 	if err != nil {
@@ -664,29 +666,45 @@ func (s *Server) levelsFor(ctx context.Context, rider string, profile workout.Ri
 	}
 
 	levels := make(map[string]float64)
-	found := false
 	for _, l := range existing {
 		if l.Sport != sport {
 			continue
 		}
 		levels[string(l.Zone)] = l.Level
-		found = true
-	}
-	if found {
-		return levels, nil
 	}
 
+	// Seed every Initial zone the rider has no row for, not only a sport with
+	// no rows at all: a rider seeded before a zone existed (cycling's
+	// endurance) would otherwise never get it.
 	for _, l := range progression.Initial(profile.ExperienceLevel, sport) {
-		if err := s.Training.SaveLevel(ctx, workout.ProgressionLevel{
+		if _, ok := levels[l.Zone]; ok {
+			continue
+		}
+		// Insert-if-absent: a move that landed between the read above and
+		// here (a durability move, a concurrent request) must not be
+		// overwritten by the starting value.
+		inserted, err := s.Training.SaveLevelIfAbsent(ctx, workout.ProgressionLevel{
 			Rider:  rider,
 			Sport:  sport,
 			Zone:   workout.Zone(l.Zone),
 			Level:  l.Value,
 			Reason: "Starting level from your experience",
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, err
 		}
 		levels[l.Zone] = l.Value
+		if !inserted {
+			cur, err := s.Training.ListLevels(ctx, rider)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range cur {
+				if c.Sport == sport && string(c.Zone) == l.Zone {
+					levels[l.Zone] = c.Level
+				}
+			}
+		}
 	}
 	return levels, nil
 }
@@ -754,6 +772,11 @@ type seasonContext struct {
 	// computed the first time a week is about to be filled or refreshed, and
 	// once per context: a pass over a settled season never reads the route.
 	demand *lazyDemand
+	// mix is the rider's intensity split over the last 28 days, loaded once with
+	// the context so fill, refresh, previews, Train now and life-event refills
+	// choose a week's zones from the same numbers. nil is "no mix": too little
+	// power-scored riding, or the analyses could not be read.
+	mix *intensity.Mix
 }
 
 // lazyDemand computes a goal's route demand on first use and remembers the
@@ -793,7 +816,43 @@ func (sc seasonContext) weekOptions(week periodization.Week) []scheduler.Option 
 	if week.LoadCapped {
 		opts = append(opts, scheduler.WithTargetTSS(week.TargetTSS))
 	}
-	return opts
+	return append(opts, sc.mixOptions()...)
+}
+
+// mixOptions is the zone-mix option, or nothing when the rider has no mix.
+func (sc seasonContext) mixOptions() []scheduler.Option {
+	if sc.mix == nil {
+		return nil
+	}
+	return []scheduler.Option{scheduler.WithZoneMix(*sc.mix)}
+}
+
+// mixWindowDays is how far back the intensity mix looks, today included.
+const mixWindowDays = 28
+
+// zoneMixFor is the rider's intensity mix as of today, or nil when there is
+// none to speak of. A read error is not fatal: planning goes on from today's
+// table, and the log carries the rider and the stage only.
+func (s *Server) zoneMixFor(ctx context.Context, rider string, today time.Time) *intensity.Mix {
+	since := today.AddDate(0, 0, -(mixWindowDays - 1)).Format(dateLayout)
+	analyses, err := s.Training.ListAnalyses(ctx, rider, since)
+	if err != nil {
+		s.logger().Warn("zone mix: analyses unreadable, planning without it", "rider", rider, "stage", "list analyses")
+		return nil
+	}
+	// Running power is scored against the cycling FTP, so it would read as
+	// cycling intensity.
+	cycling := analyses[:0:0]
+	for _, a := range analyses {
+		if a.Sport == "" || model.Sport(a.Sport) == model.SportCycling {
+			cycling = append(cycling, a)
+		}
+	}
+	mix, ok := intensity.FromAnalyses(cycling)
+	if !ok {
+		return nil
+	}
+	return &mix
 }
 
 // demandUnreadable reports whether the route demand could not be computed
@@ -814,7 +873,8 @@ func (s *Server) seasonContext(ctx context.Context, g workout.Goal) (seasonConte
 	if err != nil {
 		return seasonContext{}, err
 	}
-	return seasonContext{plan: plan, profile: profile, levels: levels, demand: &lazyDemand{fn: func() (*scheduler.RouteDemand, error) { return s.routeDemandFor(ctx, g, profile) }}}, nil
+	mix := s.zoneMixFor(ctx, g.Rider, s.localNow())
+	return seasonContext{plan: plan, profile: profile, levels: levels, mix: mix, demand: &lazyDemand{fn: func() (*scheduler.RouteDemand, error) { return s.routeDemandFor(ctx, g, profile) }}}, nil
 }
 
 func (sc seasonContext) week(startStr string) (periodization.Week, bool) {

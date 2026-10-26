@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/adapter"
 	"github.com/wncservices/domestique/apps/api/internal/alternates"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/intensity"
 	"github.com/wncservices/domestique/apps/api/internal/lifeevents"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
@@ -175,7 +176,7 @@ func (s *Server) trainNowFor(ctx context.Context, rider string, minutes int, tod
 	}
 
 	if plan != nil && goal != nil {
-		in.WeekZones = weekZones(plan, weekStart, profile, levels, rider, goal, workouts)
+		in.WeekZones = weekZones(plan, weekStart, profile, levels, rider, goal, workouts, s.zoneMixFor(ctx, rider, today))
 	}
 	in.DoneZones, in.HardDaysLast7 = doneAndHard(workouts, sessions, todayStr, weekStart.Format(dateLayout), today.AddDate(0, 0, -trainNowLookbackDays).Format(dateLayout))
 
@@ -216,11 +217,11 @@ func (s *Server) levelMapReadOnly(ctx context.Context, rider string, profile wor
 
 // weekZones is the structured zones the plan puts in the week starting on
 // weekStart, in plan (date) order: what scheduler.WeekWorkouts would build.
-func weekZones(plan *periodization.Plan, weekStart time.Time, profile workout.RiderProfile, levels map[string]float64, rider string, goal *workout.Goal, workouts []workout.Workout) []string {
+func weekZones(plan *periodization.Plan, weekStart time.Time, profile workout.RiderProfile, levels map[string]float64, rider string, goal *workout.Goal, workouts []workout.Workout, mix *intensity.Mix) []string {
 	start := weekStart.Format(dateLayout)
 	// The same option gate as the filled week (no route demand: it moves rungs,
 	// not zones), so the zones cannot drift from what fillWeek built.
-	sc := seasonContext{plan: *plan, profile: profile, levels: levels}
+	sc := seasonContext{plan: *plan, profile: profile, levels: levels, mix: mix}
 	for _, week := range plan.Weeks {
 		if week.StartDate != start {
 			continue
