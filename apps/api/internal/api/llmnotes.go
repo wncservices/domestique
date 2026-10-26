@@ -457,7 +457,9 @@ func (s *Server) handleUnderstandCheckIn(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	reading, err := s.LLM.UnderstandCheckIn(r.Context(), today, c.Note)
+	ctx, cancel := llmRequestContext(r)
+	defer cancel()
+	reading, err := s.LLM.UnderstandCheckIn(ctx, today, c.Note)
 	if err != nil {
 		// Contained: the saved check-in stands, and the card shows one quiet line.
 		s.logger().Warn("check-in reading failed", "err", err)

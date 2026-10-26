@@ -1593,7 +1593,10 @@ so the UI hides only that button. The optional key comes from `DOMESTIQUE_LLM_AP
 Every answer is constrained by a JSON schema sent as `response_format`, decoded strictly (unknown
 fields and trailing text refused), and checked by the job's own validate hook. One bad answer earns
 one retry; a second is `llm.ErrInvalid` and a 502, so a half-parsed proposal never reaches a rider.
-A single 120 s budget covers both attempts, so a cold model load fits without ever running past it.
+A single 120 s budget covers both attempts, so a cold model load fits without ever running past it. A call made while a rider waits on the response
+(the four narration endpoints and the check-in reading) is cut to 90 s (`llmRequestContext`): the app is
+served through Cloudflare, which answers 524 after 100 s, and the rider should get the app's own 502
+message instead. The background notes pass has no proxy in front of it and keeps the full 120 s.
 A transport failure or a refused request is a 502 with no body echoed. Prompts, answers and the
 rider's own note are never logged or put in a span; the span carries only `llm.job`. The metric is
 `domestique_llm_requests_total{job,result}` with no rider label.

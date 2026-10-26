@@ -129,7 +129,9 @@ func (s *Server) handleProposePlanEdit(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	edits, err := s.LLM.ProposePlanEdits(ctx, text, view.view)
+	llmCtx, cancel := llmRequestContext(r)
+	defer cancel()
+	edits, err := s.LLM.ProposePlanEdits(llmCtx, text, view.view)
 	if err != nil {
 		// A refusal and an answer that is not the schema both read as "could
 		// not understand", the same message the form fallback has always had.

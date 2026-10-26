@@ -1055,7 +1055,9 @@ func (s *Server) handleExplainPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	text, err := s.LLM.ExplainPlan(r.Context(), g, plan)
+	ctx, cancel := llmRequestContext(r)
+	defer cancel()
+	text, err := s.LLM.ExplainPlan(ctx, g, plan)
 	if err != nil {
 		// Contained the same way Komoot's own undocumented-API failures are
 		// (see AGENTS.md's Komoot section): a third-party outage degrades
@@ -1269,7 +1271,9 @@ func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	proposal, err := s.LLM.ProposeProfileChange(r.Context(), body.Note, profile)
+	ctx, cancel := llmRequestContext(r)
+	defer cancel()
+	proposal, err := s.LLM.ProposeProfileChange(ctx, body.Note, profile)
 	if err != nil {
 		s.logger().Warn("profile change proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not reach the narration service"})
@@ -1320,7 +1324,9 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proposal, err := s.LLM.ProposeGoal(r.Context(), body.Note, s.now())
+	ctx, cancel := llmRequestContext(r)
+	defer cancel()
+	proposal, err := s.LLM.ProposeGoal(ctx, body.Note, s.now())
 	if err != nil {
 		s.logger().Warn("goal proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not turn that into a goal — try rephrasing it, or fill the form in by hand"})

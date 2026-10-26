@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/config"
@@ -258,5 +259,25 @@ func TestNoPromptOrNoteInLogs(t *testing.T) {
 				t.Errorf("%s contain %q:\n%s", name, secret, out)
 			}
 		}
+	}
+}
+
+// A model call made while the rider waits gives up before Cloudflare's 100 s
+// limit, so the rider gets the app's own answer, not a 524 page.
+func TestARequestModelCallStopsAtTheRequestBudget(t *testing.T) {
+	h := newOnceHarness(t)
+	t.Cleanup(api.SetLLMRequestBudgetForTest(300 * time.Millisecond))
+	withLLM(t, h.srv, func(string, []byte) string {
+		time.Sleep(2 * time.Second)
+		return `{"text":"too late"}`
+	})
+
+	start := time.Now()
+	status := h.explainStatus(t)
+	if status != http.StatusBadGateway {
+		t.Errorf("explain past the budget: status %d, want 502", status)
+	}
+	if took := time.Since(start); took > 1500*time.Millisecond {
+		t.Errorf("explain took %v, want it to stop at the 300ms budget", took)
 	}
 }
