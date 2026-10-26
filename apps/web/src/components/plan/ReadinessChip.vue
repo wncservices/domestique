@@ -20,7 +20,7 @@ type ChipConfig = { label: string; color: 'primary' | 'neutral' | 'success'; ico
 const CONFIG: Record<ReadinessVerdict, ChipConfig> = {
   ready: { label: 'Ready', color: 'primary', icon: 'i-lucide-battery-full' },
   push: { label: 'Good to push', color: 'success', icon: 'i-lucide-battery-charging' },
-  caution: { label: 'Take care', color: 'neutral', icon: 'i-lucide-battery-medium', class: 'text-[var(--app-accent-ember)]' },
+  caution: { label: 'Take care', color: 'neutral', icon: 'i-lucide-battery-medium', class: 'text-ember' },
   rest: { label: 'Rest', color: 'neutral', icon: 'i-lucide-battery-low' },
 }
 

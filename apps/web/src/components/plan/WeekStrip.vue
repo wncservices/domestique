@@ -133,9 +133,9 @@ const statusIcon: Record<string, string> = {
 }
 const statusColor: Record<string, string> = {
   done: 'text-primary',
-  partial: 'text-[var(--app-accent-ember)]',
-  missed: 'text-[var(--app-accent-ember)]',
-  unplanned: 'text-info',
+  partial: 'text-ember',
+  missed: 'text-ember',
+  unplanned: 'text-muted',
 }
 
 function tileClass(day: WeekDay): string {
@@ -375,7 +375,7 @@ watch(
               {{ w.testResultWatts ? `Test · ${Math.round(w.testResultWatts)} W` : w.testUnreadable ? 'Test unread' : 'FTP test' }}
             </UBadge>
             <WorkoutProfile :steps="w.steps" :profile="profile" :height="16" />
-            <UIcon v-if="adjustmentNote(w.description)" name="i-lucide-wand-sparkles" aria-hidden="true" class="size-3 text-info" />
+            <UIcon v-if="adjustmentNote(w.description)" name="i-lucide-wand-sparkles" aria-hidden="true" class="size-3 text-muted" />
           </div>
           <!-- Hover shows the whole session; a tap selects it into the day card above, which is the full detail. -->
           <template #content>

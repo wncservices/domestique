@@ -15,7 +15,7 @@ interface KindMeta {
 }
 
 export const KIND_META: Record<LifeEventKind, KindMeta> = {
-  travel: { label: 'Travel', icon: 'i-lucide-plane', band: 'bg-info/10 text-info', fill: 'var(--ui-info)' },
+  travel: { label: 'Travel', icon: 'i-lucide-plane', band: 'bg-primary/10 text-primary', fill: 'var(--ui-primary)' },
   illness: { label: 'Illness', icon: 'i-lucide-thermometer', band: 'bg-error/10 text-error', fill: 'var(--ui-error)' },
   busy: { label: 'Busy', icon: 'i-lucide-briefcase', band: 'bg-warning/10 text-warning', fill: 'var(--ui-warning)' },
   other: { label: 'Other', icon: 'i-lucide-calendar-off', band: 'bg-elevated text-muted', fill: 'var(--ui-border-accented)' },

@@ -23,7 +23,7 @@ const props = withDefaults(
 
 // Primary is on target; ember is behind (the badge has no ember colour, so
 // those are neutral with an ember class).
-const EMBER = 'text-[var(--app-accent-ember)]'
+const EMBER = 'text-ember'
 const OUTCOME_META: Record<Outcome, { label: string; icon: string; color: 'primary' | 'neutral' | 'info'; class?: string }> = {
   nailed: { label: 'Nailed it', icon: 'i-lucide-circle-check', color: 'primary' },
   completed: { label: 'Completed', icon: 'i-lucide-check', color: 'neutral' },

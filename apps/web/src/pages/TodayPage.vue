@@ -435,8 +435,8 @@ async function dismissSuggestion() {
                   <UIcon v-if="d.done" name="i-lucide-check" aria-hidden="true" class="size-3 shrink-0 text-primary" />
                   <!-- On a phone the icon would push the time out of the tile, so a
                        missed day is struck through instead. -->
-                  <UIcon v-else-if="d.missed" name="i-lucide-circle-x" aria-hidden="true" class="hidden size-3 shrink-0 text-[var(--app-accent-ember)] sm:block" />
-                  <span class="truncate sm:hidden" :class="d.missed ? 'text-[var(--app-accent-ember)] line-through' : ''">{{ d.short }}</span>
+                  <UIcon v-else-if="d.missed" name="i-lucide-circle-x" aria-hidden="true" class="hidden size-3 shrink-0 text-ember sm:block" />
+                  <span class="truncate sm:hidden" :class="d.missed ? 'text-ember line-through' : ''">{{ d.short }}</span>
                   <span class="hidden truncate sm:inline">{{ d.text }}</span>
                 </div>
               </div>

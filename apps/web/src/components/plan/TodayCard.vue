@@ -123,7 +123,7 @@ const ridden = computed(() => {
     case 'done':
       return { label: 'Done', icon: 'i-lucide-circle-check', color: 'text-primary' }
     case 'partial':
-      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-[var(--app-accent-ember)]' }
+      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-ember' }
     default:
       return undefined
   }
@@ -311,13 +311,13 @@ const efforts = computed(() => summariseEfforts(analysedSession.value?.analysis?
 
 // Primary is on target, ember is behind. Going over is not behind, so it stays
 // neutral and the arrow icon carries the direction.
-const TONE_CLASS = { good: 'text-primary', behind: 'text-[var(--app-accent-ember)]', neutral: 'text-muted' } as const
+const TONE_CLASS = { good: 'text-primary', behind: 'text-ember', neutral: 'text-muted' } as const
 // The dot repeats what the words already say, so colour is never the only cue.
 const GRADE_DOT: Record<EffortGrade, string> = {
   on: 'bg-primary',
-  justUnder: 'bg-[var(--app-accent-ember)]',
+  justUnder: 'bg-ember',
   justOver: 'bg-[var(--ui-text-muted)]',
-  under: 'bg-[var(--app-accent-ember)]',
+  under: 'bg-ember',
   over: 'bg-[var(--ui-text-muted)]',
 }
 
@@ -346,7 +346,7 @@ function onRated(analysis: SessionAnalysis) {
       color="neutral"
       variant="subtle"
       icon="i-lucide-circle-x"
-      :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
+      :ui="{ icon: 'text-ember' }"
       :title="`Yesterday's ${yesterdayWorkout.name} was missed. Move it to later this week?`"
     >
       <!-- A missed session is behind plan, which is ember; warning is for system state. -->
@@ -493,7 +493,7 @@ function onRated(analysis: SessionAnalysis) {
               color="neutral"
               variant="subtle"
               icon="i-lucide-heart-pulse"
-              :ui="{ icon: crewAdviceHere.severity === 'rest' ? 'text-[var(--app-accent-ember)]' : '' }"
+              :ui="{ icon: crewAdviceHere.severity === 'rest' ? 'text-ember' : '' }"
               :description="crewAdviceHere.advice"
             />
             <UAlert
@@ -530,7 +530,7 @@ function onRated(analysis: SessionAnalysis) {
             color="neutral"
             variant="subtle"
             icon="i-lucide-battery-medium"
-            :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
+            :ui="{ icon: 'text-ember' }"
             title="Testing tired under-reads your FTP"
             description="Your readiness is low today. A test on fresher legs gives a number you can trust."
           />
@@ -608,7 +608,7 @@ function onRated(analysis: SessionAnalysis) {
 
         <!-- Unplanned but something logged -->
         <div v-else-if="day.completed.length > 0" class="mt-2 flex flex-wrap items-center gap-2">
-          <UIcon name="i-lucide-info" class="size-5 text-info" />
+          <UIcon name="i-lucide-info" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Unplanned ride</span>
           <span class="tabular-nums text-[length:var(--text-body)] text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
           <button

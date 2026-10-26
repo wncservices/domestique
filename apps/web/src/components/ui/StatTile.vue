@@ -7,7 +7,7 @@ withDefaults(
 // Tone is meaning, in the brand's roles: good is the primary accent, behind is
 // ember (coral). The status colours (success, warning, error) are for system
 // state, not for how a rider is doing.
-const toneClass = { default: 'text-highlighted', good: 'text-primary', behind: 'text-[var(--app-accent-ember)]' }
+const toneClass = { default: 'text-highlighted', good: 'text-primary', behind: 'text-ember' }
 </script>
 
 <template>

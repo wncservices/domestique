@@ -26,7 +26,7 @@ const emit = defineEmits<{ 'update:open': [boolean]; rated: [analysis: SessionAn
 // The same five grades as the day card's effort summary (effortSummary.ts),
 // so "Just under" means the same thing in both places. Primary is on target,
 // ember is behind; over is not behind, so it is neutral and the arrow says which way.
-const EMBER = 'text-[var(--app-accent-ember)]'
+const EMBER = 'text-ember'
 const GRADE_META: Record<EffortGrade, { icon: string; color: 'primary' | 'neutral'; class?: string }> = {
   on: { icon: 'i-lucide-check', color: 'primary' },
   justUnder: { icon: 'i-lucide-arrow-down-right', color: 'neutral', class: EMBER },
