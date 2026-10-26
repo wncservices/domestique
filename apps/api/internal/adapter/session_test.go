@@ -345,8 +345,13 @@ func TestLastTwoStruggledKeySessionsSwapTodaysHardSessionEvenWithMildTSB(t *test
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy: two struggled key sessions in a row is fatigue even without TSB", got)
 	}
-	if !strings.Contains(got[0].Reason, "Wednesday's interval session were under target (2 of 4)") {
-		t.Errorf("reason %q must name the most recent struggled ride and its hit count", got[0].Reason)
+	// The description reaches the calendar feed: no hit counts in it. The
+	// detail lives in the Why record.
+	if strings.ContainsAny(got[0].Reason, "0123456789") || strings.Contains(got[0].Reason, "struggled") {
+		t.Errorf("reason %q is written into the description and must carry no figures", got[0].Reason)
+	}
+	if !strings.Contains(got[0].Why.Text, "Wednesday's interval session were under target (2 of 4)") {
+		t.Errorf("why text %q must name the most recent struggled ride and its hit count", got[0].Why.Text)
 	}
 }
 
@@ -368,11 +373,11 @@ func TestStruggleReasonOmitsHitCountWithNoHardSteps(t *testing.T) {
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy", got)
 	}
-	if !strings.Contains(got[0].Reason, "Wednesday's long ride was cut short") {
-		t.Errorf("reason %q must name the most recent struggled ride without a bogus hit count", got[0].Reason)
+	if !strings.Contains(got[0].Why.Text, "Wednesday's long ride was cut short") {
+		t.Errorf("why text %q must name the most recent struggled ride without a bogus hit count", got[0].Why.Text)
 	}
-	if strings.Contains(got[0].Reason, "of 0") {
-		t.Errorf("reason %q must never print a (0 of 0) clause", got[0].Reason)
+	if strings.Contains(got[0].Why.Text, "of 0") {
+		t.Errorf("why text %q must never print a (0 of 0) clause", got[0].Why.Text)
 	}
 }
 
@@ -397,6 +402,12 @@ func TestSevenDayOverloadedTSSSwapsTodaysHardSession(t *testing.T) {
 	got := AdaptSessions(ws, nil, profile, thursday, analyses, readiness.Assessment{})
 	if len(got) != 1 || got[0].WorkoutID != "today" || !got[0].Downgrade {
 		t.Fatalf("changes = %+v, want today's intervals swapped for easy: the last 7 days carried far more load than planned", got)
+	}
+	if strings.ContainsAny(got[0].Reason, "0123456789") || strings.Contains(got[0].Reason, "TSS") {
+		t.Errorf("reason %q is written into the description and must carry no load figures", got[0].Reason)
+	}
+	if !strings.Contains(got[0].Why.Text, "TSS against a planned") {
+		t.Errorf("why text %q lost the load detail", got[0].Why.Text)
 	}
 }
 
@@ -487,7 +498,7 @@ func TestAStruggledKeySessionStepsDownTheNextSameZoneWorkout(t *testing.T) {
 	if len(stepDowns) != 1 || stepDowns[0].WorkoutID != "thu-threshold" {
 		t.Fatalf("changes = %+v, want exactly one step-down of thu-threshold", got)
 	}
-	if !strings.Contains(stepDowns[0].Reason, "Tuesday") || !strings.Contains(stepDowns[0].Reason, "threshold") {
+	if !strings.Contains(stepDowns[0].Why.Text, "Tuesday") || !strings.Contains(stepDowns[0].Why.Text, "threshold") {
 		t.Errorf("reason = %q, want it to name Tuesday and threshold", stepDowns[0].Reason)
 	}
 }

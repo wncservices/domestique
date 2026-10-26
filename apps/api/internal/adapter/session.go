@@ -121,12 +121,13 @@ func change(c Change, rule why.Rule, inputs any) Change {
 	return c
 }
 
-// readinessChange is change for a readiness verdict. The reasons name sleep,
-// HRV, heart rate, form and how the rider said they felt; they belong to the
-// Why record (shown to the rider alone), never to Change.Reason, which is
-// written into the workout description and so reaches the calendar feed a
-// third-party calendar server keeps and the head unit. what is the plain
-// wording that goes in the description, and carries no health text.
+// readinessChange is change for a rule whose reasons are health or load data:
+// sleep, HRV, heart rate, form, how the rider said a ride felt, TSS. They
+// belong to the Why record (shown to the rider alone), never to Change.Reason,
+// which is written into the workout description and so reaches the calendar
+// feed a third-party calendar server keeps and the head unit. what is the
+// plain wording that goes in the description, and carries no such text.
+// Readiness, fatigue and struggle changes all come through here.
 func readinessChange(c Change, what, detailed string, rule why.Rule, inputs any) Change {
 	c.Reason = what
 	c.Why = why.NewRecord(rule, detailed, inputs)
@@ -256,10 +257,11 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 		// analyses themselves say (see detectFatigue).
 		case fatigue.active && scheduler.IsHardSession(w) && (w.Date == todayStr || w.Date == day(today.AddDate(0, 0, 1))):
 			claimed[w.ID] = true
-			changes = append(changes, change(Change{
+			// The description gets plain wording; the load figures and how a
+			// ride felt are in the Why record only (see readinessChange).
+			changes = append(changes, readinessChange(Change{
 				WorkoutID: w.ID, Downgrade: true,
-				Reason: fatigue.reason,
-			}, fatigue.rule, fatigue.inputs))
+			}, "Swapped for an easy session (fatigue).", fatigue.reason, fatigue.rule, fatigue.inputs))
 		}
 	}
 
@@ -312,10 +314,9 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 	}
 
 	if src, target, ok := stepDownTarget(ordered, analyses, today, claimed, blackout); ok {
-		changes = append(changes, change(Change{
+		changes = append(changes, readinessChange(Change{
 			WorkoutID: target.ID, StepDown: true, StepDownSourceID: src.ID,
-			Reason: stepDownReason(src, feltAllOut(analyses[src.ID])),
-		}, why.StruggleStepDown, why.StruggleStepDownInputs{SourceDate: src.Date, SourceZone: string(src.Zone), FeltAllOut: feltAllOut(analyses[src.ID])}))
+		}, "Stepped down one level.", stepDownReason(src, feltAllOut(analyses[src.ID])), why.StruggleStepDown, why.StruggleStepDownInputs{SourceDate: src.Date, SourceZone: string(src.Zone), FeltAllOut: feltAllOut(analyses[src.ID])}))
 	}
 	return changes
 }
