@@ -19,13 +19,13 @@ func TestWeekZonesKnowsTheWeekIsBuiltAroundACrewRide(t *testing.T) {
 	goal := &workout.Goal{ID: "g", Sport: model.SportCycling}
 	start := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 
-	if zones := weekZones(plan, start, profile, nil, "wilant", goal, nil); len(zones) == 0 {
+	if zones := weekZones(plan, start, profile, nil, "wilant", goal, nil, nil); len(zones) == 0 {
 		t.Fatal("setup: the plain week holds no structured session to squeeze out")
 	}
 	ride := workout.Workout{CrewRideID: "r", Date: "2026-10-07", Steps: []workout.WorkoutStep{
 		{Name: "Crew ride", Duration: workout.DurationTime, Seconds: 1800, Target: workout.TargetOpen},
 	}}
-	if zones := weekZones(plan, start, profile, nil, "wilant", goal, []workout.Workout{ride}); len(zones) != 0 {
+	if zones := weekZones(plan, start, profile, nil, "wilant", goal, []workout.Workout{ride}, nil); len(zones) != 0 {
 		t.Errorf("zones = %v, want none: the ride sits on the structured day", zones)
 	}
 }
@@ -40,7 +40,7 @@ func TestWeekZonesBuildsALoadCappedWeekThroughTheSeasonOptions(t *testing.T) {
 	goal := &workout.Goal{ID: "g", Sport: model.SportCycling}
 	start := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 
-	got := weekZones(plan, start, profile, nil, "wilant", goal, nil)
+	got := weekZones(plan, start, profile, nil, "wilant", goal, nil, nil)
 	sc := seasonContext{plan: *plan, profile: profile}
 	reqs, err := scheduler.WeekWorkouts(week, profile, nil, "wilant", goal.ID, goal.Sport, append(sc.weekOptions(week), fixedOption(nil, week))...)
 	if err != nil {

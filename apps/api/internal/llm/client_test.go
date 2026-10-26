@@ -512,7 +512,7 @@ func TestCompleteTagsTheCallersSpan(t *testing.T) {
 			job = kv.Value.AsString()
 		}
 		for _, secret := range []string{systemText, userText} {
-			if strings.Contains(kv.Value.Emit(), secret) {
+			if strings.Contains(kv.Value.String(), secret) {
 				t.Errorf("span attribute %s carries the prompt text", kv.Key)
 			}
 		}

@@ -310,7 +310,11 @@ func (s *Server) applySurvey(ctx context.Context, analysis workout.SessionAnalys
 		if err != nil && !errors.Is(err, workout.ErrWorkoutNotFound) {
 			return analysis, err
 		}
-		if err == nil && workout.IsStructuredZone(wk.Zone) && wk.Level > 0 {
+		// A long ride's move is its durability (applyDurability), which has no
+		// outcome or feel to recompute from, so a survey leaves it alone.
+		if err == nil && isLongRide(wk) {
+			newDelta = analysis.LevelDelta
+		} else if err == nil && workout.IsStructuredZone(wk.Zone) && wk.Level > 0 {
 			profile, _, err := s.Training.GetProfile(ctx, analysis.Rider)
 			if err != nil {
 				return analysis, err

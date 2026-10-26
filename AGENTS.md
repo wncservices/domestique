@@ -629,6 +629,24 @@ does not lock the session: readiness can still ease it, and `ReshuffleReadiness`
 `AdaptedRules` is what stops a second swap. Replan rebuilds the week and may undo a swap;
 that is accepted. Logs carry a rider count only, never who swapped or the verdict.
 
+**A cycling week's structured zones follow the rider's own intensity mix.** `internal/intensity`
+buckets the last 28 days (`mixWindowDays`) of Coggan zone seconds into low (zones 1-2), high (3-4) and
+anaerobic (5-7), counting only power-scored rides (`LoadSource == "fit_power"`, normalised power > 0);
+heart-rate-scored, estimated and imported-without-power rides do not count, and under 3 hours counted
+there is no mix. `ChooseZones` takes the phase's target split (base 80/18/2, build 75/20/5, peak
+75/15/10) and gives each slot a zone from the bucket with the largest shortfall, drawn only from
+`intensity.AllowedZones(phase)`; when the gaps sit within a point of each other, there is no mix, the phase is taper, or the sport
+is running, today's table stands. Only cycling sessions count towards the mix (`SessionAnalysis.Sport`,
+filled by `ListAnalyses` alone: running power is scored against the cycling FTP). Build and peak weeks
+of 6 or more available days with `PlannedCTL` of 60 or more get a cycling-only third structured session, only when
+`placeStructuredDays` can place it with no two structured days adjacent, else two. A recovery week
+holds one structured session, the phase's first zone at the rider's level minus one, at most 60
+minutes, on the first available day; `WithTargetTSS` never boosts it. `seasonContext` computes the
+mix once (`zoneMixFor`) and `weekOptions`/`mixOptions` hand it to every builder: fill, refresh, the
+crew-ride preview, Train now (`weekZones`) and the life-event refill (`refillRequests`), so none
+can disagree. `scheduler.StructuredZones` deliberately stays today's table: the ledger's upgrade
+count reads it, and a mix-dependent answer there would change how many sessions it may upgrade.
+
 ## Only today's session goes to the head unit
 
 `pushWorkoutsForRider` (`internal/api/workoutpush.go`) is the one automatic
@@ -699,6 +717,39 @@ x the higher 8-minute power. Do not write a second copy of a formula. Design:
 - The day before a scheduled test, a generated, unadjusted hard session is eased
   by `easeBeforeFTPTests`, inside `adaptRider`, so it follows every replan.
 - No watts (FTP, test result) in log lines next to a rider name.
+
+**Progression levels also measure durability, slip when a zone is left alone, and follow FTP both
+ways.** `rideanalysis.Decoupling` is computed for a cycling ride of at least 5400 s whose samples carry
+power and heart rate on 90% of them and whose IF is 0.85 or under: it skips the first 600 s, splits
+the rest into two halves by sample count and reports `(EF1 - EF2) / EF1 x 100` (EF = normalised power
+over average heart rate), to 0.1. Anything else is NULL (`session_analyses.decoupling_pct`, a
+`*float64`); raw samples are not kept, so only **new analyses** have one. `progression.Initial` adds an
+`endurance` level for cycling only, at the same experience-based start as the other zones, and
+`levelsFor` seeds any missing `Initial` zone for a rider who already has rows. It moves only on a
+ride matched to a **generated** cycling long ride (`IsLongRideName`, zone endurance), on that ride's
+**first analysis**, and a re-link undoes it like any other level move (`DurabilityDelta`: duration ratio
+under 0.8 is -0.2; no decoupling is no move; under 5 is +0.3, 5 to 8 is +0.1, over 10 is -0.2, 8 to 10
+is no move; clamped to [1, 10]; rule `durability_move`, subject `cycling:endurance`). An eased or
+shortened long ride is not generated, so it does not move it. The scheduler's long slot weighs
+`1.8 + 0.1 x (endurance level - starting level)`, clamped to 1.8-2.4 (1.8 with no endurance level):
+only the split of the week's rest hours changes, and there is no per-day-hours cap on it, as there
+never was. **Decay** (`decayLevels`, `internal/api/leveldecay.go`) runs from `AutoScheduleTick`, so
+only with auto-schedule on, under the scheduling lock, after the metrics pass and before the season
+pass (a week filled or refreshed in that tick uses the lowered level; sessions already built keep
+theirs until refreshed), in the day's first sync slot (`inMorningSlot`), once per rider per ISO week:
+`level_decay_runs (rider, week_start)` is the claim, registered in `riderTables` and removed by
+`DeleteRider`, and it is written only after every read succeeded. It covers riders with a goal, and
+only **matched** rides count as training a zone (the last analysis linked to a workout of that zone,
+by completed-session date): a zone with none for more than 21 days, or never, loses 0.1 (rule
+`level_decay`), never below the `progression.Initial` start for the rider's experience. A rider whose
+metrics pass failed or whose Garmin session expired is skipped with the week left unclaimed, as for the
+ledger, because rides the app has not seen must not read as a zone left alone. **Recalibration is
+symmetric**: an FTP change of 3-25% either way moves cycling structured-zone levels by
+`-10 x log2(new/old)`, capped at +-2, through the same compare-and-set marker, skip-if-reason-matches
+rule and `level_recalibration` record; a drop therefore raises levels. The endurance level is
+excluded (not FTP-relative). A change under 3% leaves the marker alone in both directions, so drift
+accumulates against the last calibrated FTP; a change over 25% moves only the marker. Logs carry
+counts and a stage, never a level, a decoupling or an FTP beside a rider.
 
 ## Best efforts
 

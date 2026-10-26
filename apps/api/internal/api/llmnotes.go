@@ -46,7 +46,14 @@ func (s *Server) runLLMNotes(ctx context.Context) {
 // startLLMNotes runs the morning notes pass on a goroutine of the server's
 // lifecycle. At most one is in flight per process: a tick that finds one
 // running does nothing, and the next tick of the morning slot tries again.
+//
+// With no model configured nothing starts: every notes block in the UI is
+// hidden then, so a fallback note would be a row nobody sees. The slot is
+// checked here too, so a tick outside it never leaves a goroutine behind.
 func (s *Server) startLLMNotes() {
+	if s.LLM == nil || s.Training == nil || !s.inMorningSlot(s.now()) {
+		return
+	}
 	if !s.llmNotesBusy.CompareAndSwap(false, true) {
 		return
 	}

@@ -12,6 +12,7 @@
 export type Zone = string
 
 const ZONE_LABELS: Record<string, string> = {
+  endurance: 'Endurance',
   tempo: 'Tempo',
   sweet_spot: 'Sweet spot',
   threshold: 'Threshold',

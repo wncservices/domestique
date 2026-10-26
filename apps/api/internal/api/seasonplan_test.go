@@ -252,9 +252,22 @@ func TestARecoveryWeekFarAheadHasRecoveryContent(t *testing.T) {
 	if len(sessions) == 0 {
 		t.Fatalf("recovery week %s is empty", recovery.StartDate)
 	}
+	structured := 0
 	for _, s := range sessions {
-		if workout.IsStructuredZone(s.Zone) || s.Name == "Long ride" {
-			t.Errorf("recovery week %s holds %q (%s), want easy sessions only", recovery.StartDate, s.Name, s.Zone)
+		if workout.IsStructuredZone(s.Zone) {
+			structured++
+		}
+		if s.Name == "Long ride" {
+			t.Errorf("recovery week %s holds %q (%s), want no long ride", recovery.StartDate, s.Name, s.Zone)
+		}
+	}
+	// Four available days: exactly one short session below the default level 3.
+	if structured != 1 {
+		t.Errorf("recovery week %s holds %d structured sessions, want 1", recovery.StartDate, structured)
+	}
+	for _, s := range sessions {
+		if workout.IsStructuredZone(s.Zone) && (s.Level >= 3 || workout.PlannedSeconds(s.Steps) > 3600) {
+			t.Errorf("recovery session %q level %v, %v s: want level below 3 and at most an hour", s.Name, s.Level, workout.PlannedSeconds(s.Steps))
 		}
 	}
 }

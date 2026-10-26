@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     hr_zone_seconds      TEXT NOT NULL DEFAULT '', -- basis (LTHR or max HR) known at analysis time; never re-analysed
     power_curve          TEXT NOT NULL DEFAULT '',
     steps                TEXT NOT NULL DEFAULT '',
+    decoupling_pct       DOUBLE PRECISION, -- NULL: not computed
     analysed_at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider);
@@ -259,6 +260,15 @@ CREATE TABLE IF NOT EXISTS load_ledger (
     last_pass_date TEXT NOT NULL DEFAULT '',
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
+    PRIMARY KEY (rider, week_start)
+);
+
+-- level_decay_runs is the once-a-week claim for the progression-level decay
+-- pass: a row means that Monday's week has already been decayed for the rider.
+CREATE TABLE IF NOT EXISTS level_decay_runs (
+    rider      TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     PRIMARY KEY (rider, week_start)
 );
 
@@ -402,6 +412,7 @@ func (d *DB) DeleteRider(ctx context.Context, rider string) (int, error) {
 		`DELETE FROM completed_sessions WHERE rider = ?`,
 		`DELETE FROM fitness_snapshots WHERE rider = ?`,
 		`DELETE FROM load_ledger WHERE rider = ?`,
+		`DELETE FROM level_decay_runs WHERE rider = ?`,
 		`DELETE FROM daily_wellness WHERE rider = ?`,
 		`DELETE FROM daily_checkins WHERE rider = ?`,
 		`DELETE FROM llm_notes WHERE rider = ?`,
@@ -601,6 +612,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addAnalysisFeelColumns(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
+	if err := store.addDecouplingColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	if err := store.addThresholdColumns(); err != nil {
@@ -1036,6 +1050,20 @@ func (d *DB) addAnalysisFeelColumns() error {
 		return err
 	}
 	return nil
+}
+
+// addDecouplingColumn adds the nullable decoupling_pct to a session_analyses
+// table that predates it. NULL is right for every old row: not computed.
+func (d *DB) addDecouplingColumn() error {
+	_, err := d.db.Exec(`ALTER TABLE session_analyses ADD COLUMN decoupling_pct DOUBLE PRECISION`)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") || strings.Contains(msg, "already exists") {
+		return nil
+	}
+	return err
 }
 
 // addThresholdColumns adds max_hr/best_hr_1200/best_speed_1200/best_speed_1800 to a
