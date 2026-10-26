@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatInstant } from '@/utils/planDates'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
@@ -239,10 +240,10 @@ const mapRoutes = computed(() =>
             color="neutral"
             variant="ghost"
             size="xs"
-            aria-label="Edit name and description"
+            aria-label="Edit route name and description"
             @click="openEditInfo"
           >
-            Edit
+            Edit details
           </UButton>
         </div>
 
@@ -285,12 +286,12 @@ const mapRoutes = computed(() =>
             <dd class="tabular-nums">{{ ascent }}</dd>
           </div>
           <div>
-            <dt class="text-[length:var(--text-label)] text-muted">Points</dt>
+            <dt class="text-[length:var(--text-label)] text-muted">Track points</dt>
             <dd class="tabular-nums">{{ route.pointCount }}</dd>
           </div>
           <div>
             <dt class="text-[length:var(--text-label)] text-muted">Updated</dt>
-            <dd>{{ new Date(route.updatedAt).toLocaleDateString() }}</dd>
+            <dd>{{ formatInstant(route.updatedAt) }}</dd>
           </div>
         </dl>
 
@@ -331,15 +332,15 @@ const mapRoutes = computed(() =>
           <ul class="flex flex-col gap-1 text-[length:var(--text-body)] text-toned">
             <li v-for="row in syncRows" :key="row.label">
               <span class="font-medium">{{ row.label }}</span>: {{ row.verb }}
-              <span v-if="row.updatedAt" class="text-dimmed">(last push {{ new Date(row.updatedAt).toLocaleDateString() }})</span>
+              <span v-if="row.updatedAt" class="text-dimmed">(last push {{ formatInstant(row.updatedAt) }})</span>
             </li>
           </ul>
         </div>
       </div>
     </template>
     <template #footer>
-      <div class="flex w-full justify-between gap-2">
-        <div class="flex gap-2">
+      <div class="flex w-full flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap gap-2 [&>*]:whitespace-nowrap">
           <!-- external: see RouteCard.vue's identical button for why —
                a same-origin path like /api/gpx/... otherwise reads as an
                internal route to vue-router, which intercepts the click
@@ -355,7 +356,7 @@ const mapRoutes = computed(() =>
           >
             Download GPX
           </UButton>
-          <UButton v-if="canSchedule" icon="i-lucide-calendar-plus" color="neutral" variant="subtle" @click="scheduling = true">
+          <UButton v-if="canSchedule" icon="i-lucide-calendar-plus" color="primary" variant="soft" @click="scheduling = true">
             Schedule ride
           </UButton>
           <UButton

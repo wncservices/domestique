@@ -1168,7 +1168,7 @@ function crewActions(crew: Crew): DropdownMenuItem[][] {
                     <button
                       v-if="routeFor(ride.slug)"
                       type="button"
-                      class="truncate text-left hover:underline focus-visible:underline focus:outline-none"
+                      class="truncate text-left hover:underline focus-visible:underline rounded-sm focus-visible:outline-2 focus-visible:outline-primary"
                       :aria-label="`Open ${ride.routeName}`"
                       @click="openRouteSlug = ride.slug"
                     >

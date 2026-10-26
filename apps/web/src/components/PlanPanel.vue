@@ -12,6 +12,8 @@ const props = defineProps<{
   loading?: boolean
 }>()
 
+const noHeadUnits = computed(() => props.accounts.length === 0)
+
 const emit = defineEmits<{ push: [items: { accountId: string; slug: string }[]]; refresh: [] }>()
 
 const UBadge = resolveComponent('UBadge')
@@ -143,15 +145,20 @@ const columns: TableColumn<PlanItem>[] = [
     v-if="!needsAttention"
     class="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-card)] border border-default bg-elevated/50 px-3 py-2"
   >
-    <UIcon v-if="plan" name="i-lucide-circle-check" aria-hidden="true" class="size-5 shrink-0 text-primary" />
+    <UIcon v-if="plan && noHeadUnits" name="i-lucide-link" aria-hidden="true" class="size-5 shrink-0 text-muted" />
+    <UIcon v-else-if="plan" name="i-lucide-circle-check" aria-hidden="true" class="size-5 shrink-0 text-primary" />
     <UIcon v-else name="i-lucide-cloud-off" aria-hidden="true" class="size-5 shrink-0 text-muted" />
     <div class="min-w-0 flex-1 basis-48 text-[length:var(--text-body)]">
-      <span v-if="plan" class="font-medium text-highlighted">Everything is in sync</span>
+      <span v-if="plan && noHeadUnits" class="text-muted">No head unit linked yet, so there is nothing to keep in sync.</span>
+      <span v-else-if="plan" class="font-medium text-highlighted">Everything is in sync</span>
       <!-- No plan means loading or a failed fetch; the page-level error alert
            explains a failure, so this only has to not claim a state. -->
       <span v-else-if="loading" class="text-muted">Checking what is on your devices…</span>
       <span v-else class="text-muted">Sync status is not available right now.</span>
     </div>
+    <UButton v-if="plan && noHeadUnits" to="/settings#devices" icon="i-lucide-link" color="neutral" variant="outline" size="xs">
+      Link a head unit
+    </UButton>
     <UButton icon="i-lucide-refresh-cw" color="neutral" variant="ghost" size="xs" @click="emit('refresh')">
       Refresh
     </UButton>

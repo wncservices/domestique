@@ -265,7 +265,7 @@ async function push(items: { accountId: string; slug: string }[]) {
             <button
               v-if="routes.some((r) => r.slug === ride.slug)"
               type="button"
-              class="font-medium underline-offset-2 hover:underline focus-visible:underline focus:outline-none"
+              class="font-medium underline-offset-2 hover:underline focus-visible:underline rounded-sm focus-visible:outline-2 focus-visible:outline-primary"
               @click="selectedSlug = ride.slug"
             >
               {{ ride.routeName }}
