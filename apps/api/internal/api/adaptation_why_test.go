@@ -239,8 +239,11 @@ func TestAdaptationLogsCarryNoHealthValues(t *testing.T) {
 	h.srv.AdaptWorkouts(context.Background())
 
 	out := logs.String()
-	if !strings.Contains(out, "workout adapted automatically") || !strings.Contains(out, "rule=readiness_caution") || !strings.Contains(out, "rider=wilant") {
+	if !strings.Contains(out, "workout adapted automatically") || !strings.Contains(out, "rule=readiness_caution") {
 		t.Fatalf("the adaptation log line is missing or has no rule id:\n%s", out)
+	}
+	if strings.Contains(out, "wilant") {
+		t.Errorf("the rule id is logged beside the rider's name:\n%s", out)
 	}
 	for _, banned := range []string{"HRV", "unbalanced", "slept", "sleep", "score", "53", "44", "61", "41", "52", "reason=", "Eased one level"} {
 		if strings.Contains(out, banned) {

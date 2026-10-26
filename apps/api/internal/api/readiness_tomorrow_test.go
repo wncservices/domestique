@@ -452,7 +452,7 @@ func (h spyHandler) Handle(_ context.Context, r slog.Record) error {
 func (h spyHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h spyHandler) WithGroup(string) slog.Handler      { return h }
 
-func TestSyncTickLogsATomorrowAdvisoryWithRiderAndVerdictOnly(t *testing.T) {
+func TestSyncTickLogsATomorrowAdvisoryAsACountOnly(t *testing.T) {
 	h := newTomorrowHarness(t)
 	ctx := context.Background()
 	h.hard(tmTomorrow)
@@ -476,8 +476,8 @@ func TestSyncTickLogsATomorrowAdvisoryWithRiderAndVerdictOnly(t *testing.T) {
 	if r.level != slog.LevelInfo {
 		t.Errorf("level = %v, want Info", r.level)
 	}
-	if !reflect.DeepEqual(r.attrs, map[string]string{"rider": "wilant", "risk": "rest"}) {
-		t.Errorf("attrs = %v, want rider and verdict word only — no form, load or ratio", r.attrs)
+	if !reflect.DeepEqual(r.attrs, map[string]string{"riders": "1"}) {
+		t.Errorf("attrs = %v, want a rider count only — no name, verdict, form, load or ratio", r.attrs)
 	}
 	if !reflect.DeepEqual(before, h.workouts()) {
 		t.Error("the advisory pass changed a workout; it must only observe")
