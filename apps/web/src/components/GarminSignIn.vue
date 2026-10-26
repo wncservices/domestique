@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ApiError, api, garminMFABody } from '@/api/client'
 import type { GarminConnection } from '@/api/types'
 import { describeError } from '@/utils/errorMessage'
+import { useLibrary } from '@/composables/useLibrary'
 
 /**
  * Signing in to Garmin, in a dialog off the Head units card.
@@ -15,6 +16,8 @@ import { describeError } from '@/utils/errorMessage'
  * second dialog: the server answers the password with a challenge id, and the
  * code goes back against it. See docs/superpowers/specs/2026-09-28-garmin-mfa-design.md.
  */
+const { canManageSettings } = useLibrary()
+
 const props = defineProps<{ connection: GarminConnection }>()
 const emit = defineEmits<{ changed: [GarminConnection] }>()
 
@@ -195,8 +198,9 @@ function backToCredentials() {
           variant="subtle"
           icon="i-lucide-key-round"
           :description="
-            props.connection.unavailable ||
-            'An administrator has not finished setting this up.'
+            canManageSettings && props.connection.unavailable
+              ? props.connection.unavailable
+              : 'Garmin sign-in is not available yet. Ask an administrator to finish setting it up.'
           "
         />
 

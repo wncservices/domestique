@@ -70,7 +70,6 @@ async function clear() {
       <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0 text-dimmed" />
       <p class="text-muted">
         {{
-          props.consumer.unavailable ||
           'An administrator needs to finish setting up Garmin before you can sign in.'
         }}
       </p>
