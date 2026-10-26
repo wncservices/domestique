@@ -166,7 +166,7 @@ const items = computed(() => {
 
 <template>
   <UDropdownMenu v-if="visible" :items="items" :content="{ align: 'start' }" :ui="{ content: 'min-w-64' }">
-    <UButton color="neutral" variant="outline" icon="i-lucide-shuffle" :loading="busy">{{ label }}</UButton>
+    <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-shuffle" :loading="busy">{{ label }}</UButton>
 
     <template #option-description="{ item }">
       <span class="tabular-nums">{{ item.description }}</span>

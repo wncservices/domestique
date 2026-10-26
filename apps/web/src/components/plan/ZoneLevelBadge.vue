@@ -24,12 +24,8 @@ const style = computed(() => ({
 </script>
 
 <template>
-  <span
-    class="inline-flex items-center gap-1 rounded-full font-medium whitespace-nowrap"
-    :class="compact ? 'px-1.5 py-0.5 text-[0.65rem]' : 'px-2 py-0.5 text-[length:var(--text-label)]'"
-    :style="style"
-  >
+  <UBadge color="neutral" variant="soft" :size="compact ? 'sm' : 'md'" class="max-w-full whitespace-nowrap" :style="style">
     <span class="truncate">{{ label }}</span>
     <span class="tabular-nums">· {{ formatLevel(level) }}</span>
-  </span>
+  </UBadge>
 </template>

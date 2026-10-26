@@ -5,9 +5,10 @@
 // the profile has none, the field for a rough guess appears under the cards
 // (it is used to build the workout and never saved). See
 // docs/superpowers/specs/2026-09-29-ftp-tests-design.md, "Test menu".
+import { computed } from 'vue'
 import type { FtpTestProtocol, FtpTestProtocolId } from '@/api/types'
 
-defineProps<{
+const props = defineProps<{
   protocols: FtpTestProtocol[]
   recommended?: FtpTestProtocolId
   // Whether the rider's profile already has an FTP the ramp can start from.
@@ -16,6 +17,8 @@ defineProps<{
 
 const protocol = defineModel<FtpTestProtocolId>('protocol', { required: true })
 const estimatedFtp = defineModel<number | undefined>('estimatedFtp')
+
+const items = computed(() => props.protocols.map((p) => ({ value: p.id, label: p.name, protocol: p })))
 
 function trainerLabel(mode: FtpTestProtocol['trainerMode']): string {
   return mode === 'erg' ? 'Smart trainer: ERG' : 'Smart trainer: resistance mode'
@@ -28,30 +31,35 @@ function difficultyLabel(difficulty: string): string {
 
 <template>
   <div class="flex flex-col gap-3">
-    <div role="radiogroup" aria-label="FTP test protocol" class="grid gap-2 sm:grid-cols-3">
-      <button
-        v-for="p in protocols"
-        :key="p.id"
-        type="button"
-        role="radio"
-        :aria-checked="protocol === p.id"
-        class="flex min-w-0 cursor-pointer flex-col gap-1 rounded-lg border p-3 text-left"
-        :class="protocol === p.id ? 'border-primary bg-elevated ring-1 ring-primary' : 'border-default hover:bg-elevated'"
-        @click="protocol = p.id"
-      >
+    <URadioGroup
+      v-model="protocol"
+      :items="items"
+      value-key="value"
+      variant="card"
+      indicator="hidden"
+      legend="FTP test protocol"
+      :ui="{ fieldset: 'grid gap-2 sm:grid-cols-3', item: 'min-w-0', label: 'w-full' }"
+    >
+      <template #label="{ item }">
         <span class="flex flex-wrap items-center gap-2">
-          <span class="font-medium text-highlighted">{{ p.name }}</span>
-          <UBadge v-if="p.id === recommended" color="primary" variant="subtle" size="sm">Recommended</UBadge>
+          <span class="font-medium text-highlighted">{{ item.protocol.name }}</span>
+          <UBadge v-if="item.protocol.id === recommended" color="primary" variant="subtle" size="sm">Recommended</UBadge>
         </span>
-        <span class="tabular-nums text-[length:var(--text-label)] text-muted">~{{ p.durationMinutes }} min · {{ difficultyLabel(p.difficulty) }}</span>
-        <span class="text-[length:var(--text-label)] text-toned">FTP = {{ p.formula }}</span>
-        <span class="flex items-center gap-1 text-[length:var(--text-label)] text-muted">
-          <UIcon name="i-lucide-bike" class="size-3.5 shrink-0" />
-          {{ trainerLabel(p.trainerMode) }}
+      </template>
+      <template #description="{ item }">
+        <span class="mt-1 flex flex-col gap-1">
+          <span class="tabular-nums text-[length:var(--text-label)] text-muted">
+            ~{{ item.protocol.durationMinutes }} min · {{ difficultyLabel(item.protocol.difficulty) }}
+          </span>
+          <span class="text-[length:var(--text-label)] text-toned">FTP = {{ item.protocol.formula }}</span>
+          <span class="flex items-center gap-1 text-[length:var(--text-label)] text-muted">
+            <UIcon name="i-lucide-bike" class="size-3.5 shrink-0" />
+            {{ trainerLabel(item.protocol.trainerMode) }}
+          </span>
+          <span class="text-[length:var(--text-label)] text-muted">{{ item.protocol.forWhom }}</span>
         </span>
-        <span class="text-[length:var(--text-label)] text-muted">{{ p.forWhom }}</span>
-      </button>
-    </div>
+      </template>
+    </URadioGroup>
 
     <UFormField
       v-if="protocol === 'ramp' && !hasFtp"

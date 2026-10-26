@@ -63,7 +63,7 @@ const emit = defineEmits<{
     </div>
 
     <p class="mt-4 text-[length:var(--text-label)] text-muted">
-      Workouts you built without a date live in <RouterLink to="/workouts" class="text-primary underline">Workouts</RouterLink>.
+      Workouts you built without a date live in <UButton to="/workouts" variant="link" size="sm" class="p-0 align-baseline">Workouts</UButton>.
     </p>
   </UCard>
 </template>

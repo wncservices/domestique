@@ -123,7 +123,7 @@ const ridden = computed(() => {
     case 'done':
       return { label: 'Done', icon: 'i-lucide-circle-check', color: 'text-primary' }
     case 'partial':
-      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-[var(--app-accent-ember)]' }
+      return { label: 'Partly done', icon: 'i-lucide-circle-dot-dashed', color: 'text-ember' }
     default:
       return undefined
   }
@@ -311,13 +311,13 @@ const efforts = computed(() => summariseEfforts(analysedSession.value?.analysis?
 
 // Primary is on target, ember is behind. Going over is not behind, so it stays
 // neutral and the arrow icon carries the direction.
-const TONE_CLASS = { good: 'text-primary', behind: 'text-[var(--app-accent-ember)]', neutral: 'text-muted' } as const
+const TONE_CLASS = { good: 'text-primary', behind: 'text-ember', neutral: 'text-muted' } as const
 // The dot repeats what the words already say, so colour is never the only cue.
 const GRADE_DOT: Record<EffortGrade, string> = {
   on: 'bg-primary',
-  justUnder: 'bg-[var(--app-accent-ember)]',
+  justUnder: 'bg-ember',
   justOver: 'bg-[var(--ui-text-muted)]',
-  under: 'bg-[var(--app-accent-ember)]',
+  under: 'bg-ember',
   over: 'bg-[var(--ui-text-muted)]',
 }
 
@@ -327,6 +327,8 @@ const resultsTitle = computed(() => {
   const matched = workoutId ? props.day?.planned.find((w) => w.id === workoutId) : undefined
   return matched?.name ?? props.day?.planned[0]?.name ?? 'Today'
 })
+
+const resultsLabel = computed(() => (props.day ? `View ride results for ${weekdayDateShort(props.day.date)}` : 'View ride results'))
 
 function openResults() {
   if (!canOpenResults.value) return
@@ -346,13 +348,13 @@ function onRated(analysis: SessionAnalysis) {
       color="neutral"
       variant="subtle"
       icon="i-lucide-circle-x"
-      :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
+      :ui="{ icon: 'text-ember' }"
       :title="`Yesterday's ${yesterdayWorkout.name} was missed. Move it to later this week?`"
     >
       <!-- A missed session is behind plan, which is ember; warning is for system state. -->
       <template #actions>
         <UDropdownMenu :items="moveMenuItems(yesterdayWorkout, yesterday!.date)">
-          <UButton color="neutral" variant="outline" size="xs">Move</UButton>
+          <UButton color="neutral" variant="outline" size="sm">Move</UButton>
         </UDropdownMenu>
       </template>
     </UAlert>
@@ -376,7 +378,7 @@ function onRated(analysis: SessionAnalysis) {
             v-if="!showingToday"
             color="neutral"
             variant="ghost"
-            size="xs"
+            size="sm"
             icon="i-lucide-undo-2"
             @click="emit('backToToday')"
           >
@@ -392,8 +394,8 @@ function onRated(analysis: SessionAnalysis) {
             <p class="text-[length:var(--text-body)] text-muted">{{ rangeLabel(e) }}</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-pencil" @click="emit('editLifeEvent', e)">Edit</UButton>
-            <UButton v-if="canBeBack(e)" color="primary" variant="soft" size="sm" icon="i-lucide-undo-2" @click="emit('lifeEventBack', e)">
+            <UButton color="neutral" variant="ghost" size="sm" icon="i-lucide-pencil" @click="emit('editLifeEvent', e)">Edit</UButton>
+            <UButton v-if="canBeBack(e)" color="neutral" variant="outline" size="sm" icon="i-lucide-undo-2" @click="emit('lifeEventBack', e)">
               I’m back
             </UButton>
           </div>
@@ -415,16 +417,14 @@ function onRated(analysis: SessionAnalysis) {
             <UBadge v-else-if="testUnreadable" color="warning" variant="subtle" icon="i-lucide-triangle-alert">
               Test couldn't be read
             </UBadge>
-            <button
+            <OutcomeChip
               v-if="analysedSession"
-              type="button"
-              :class="{ 'cursor-default': !canOpenResults }"
-              :disabled="!canOpenResults"
-              aria-label="View ride results"
-              @click="openResults"
-            >
-              <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
-            </button>
+              :outcome="analysedSession.analysis!.outcome"
+              :feel="analysedSession.analysis!.feel"
+              :interactive="canOpenResults"
+              :aria-label="resultsLabel"
+              @open="openResults"
+            />
           </div>
           <p v-if="testUnreadable" class="text-[length:var(--text-label)] text-muted">
             The ride had no usable power for this test, so your FTP is unchanged. You can schedule another.
@@ -493,7 +493,7 @@ function onRated(analysis: SessionAnalysis) {
               color="neutral"
               variant="subtle"
               icon="i-lucide-heart-pulse"
-              :ui="{ icon: crewAdviceHere.severity === 'rest' ? 'text-[var(--app-accent-ember)]' : '' }"
+              :ui="{ icon: crewAdviceHere.severity === 'rest' ? 'text-ember' : '' }"
               :description="crewAdviceHere.advice"
             />
             <UAlert
@@ -530,7 +530,7 @@ function onRated(analysis: SessionAnalysis) {
             color="neutral"
             variant="subtle"
             icon="i-lucide-battery-medium"
-            :ui="{ icon: 'text-[var(--app-accent-ember)]' }"
+            :ui="{ icon: 'text-ember' }"
             title="Testing tired under-reads your FTP"
             description="Your readiness is low today. A test on fresher legs gives a number you can trust."
           />
@@ -546,13 +546,13 @@ function onRated(analysis: SessionAnalysis) {
             </p>
             <p v-if="routeMismatch" class="text-[length:var(--text-label)] text-warning">{{ routeMismatch }}</p>
             <div class="mt-1 flex flex-wrap items-center gap-2">
-              <UButton v-if="canRoute" color="neutral" variant="outline" size="xs" icon="i-lucide-refresh-cw" @click="emit('route', firstWorkout)">
+              <UButton v-if="canRoute" color="neutral" variant="outline" size="sm" icon="i-lucide-refresh-cw" @click="emit('route', firstWorkout)">
                 Change
               </UButton>
               <UButton
                 color="neutral"
                 variant="ghost"
-                size="xs"
+                size="sm"
                 icon="i-lucide-x"
                 @click="activeRoute.generated ? (confirmRemoveRoute = true) : emit('removeRoute', firstWorkout)"
               >
@@ -562,7 +562,7 @@ function onRated(analysis: SessionAnalysis) {
                 v-if="isRideDay && canSyncGarmin"
                 color="neutral"
                 variant="outline"
-                size="xs"
+                size="sm"
                 icon="i-lucide-send"
                 :loading="sendingCourse"
                 @click="emit('sendCourse', firstWorkout)"
@@ -576,6 +576,7 @@ function onRated(analysis: SessionAnalysis) {
             <UButton
               v-if="canSyncGarmin"
               color="primary"
+              size="sm"
               icon="i-lucide-watch"
               :loading="pushing === firstWorkout.id"
               @click="emit('push', firstWorkout)"
@@ -583,7 +584,7 @@ function onRated(analysis: SessionAnalysis) {
               Send to Garmin
             </UButton>
             <UDropdownMenu v-if="!crewRide" :items="moveMenuItems(firstWorkout, day.date)">
-              <UButton color="neutral" variant="outline" icon="i-lucide-calendar-clock">Move</UButton>
+              <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-calendar-clock">Move</UButton>
             </UDropdownMenu>
             <AlternatesMenu
               v-if="canOfferAlternates"
@@ -592,35 +593,33 @@ function onRated(analysis: SessionAnalysis) {
               :can-offer="canOfferAlternates"
               @changed="emit('swapped')"
             />
-            <UButton v-if="canRoute && !activeRoute" color="neutral" variant="outline" icon="i-lucide-route" @click="emit('route', firstWorkout)">
+            <UButton v-if="canRoute && !activeRoute" color="neutral" variant="outline" size="sm" icon="i-lucide-route" @click="emit('route', firstWorkout)">
               Route for this ride
             </UButton>
-            <UButton v-if="canConvertIndoor" color="neutral" variant="outline" icon="i-lucide-house" @click="emit('indoor', firstWorkout)">
+            <UButton v-if="canConvertIndoor" color="neutral" variant="outline" size="sm" icon="i-lucide-house" @click="emit('indoor', firstWorkout)">
               Indoor version
             </UButton>
-            <UButton v-if="canRevertIndoor" color="neutral" variant="outline" icon="i-lucide-undo-2" @click="emit('outdoor', firstWorkout)">
+            <UButton v-if="canRevertIndoor" color="neutral" variant="outline" size="sm" icon="i-lucide-undo-2" @click="emit('outdoor', firstWorkout)">
               Back to outdoor version
             </UButton>
-            <ExportMenu :workout="firstWorkout" label="Export" />
-            <UButton color="neutral" variant="ghost" icon="i-lucide-pencil" @click="emit('edit', firstWorkout)">Edit</UButton>
+            <ExportMenu :workout="firstWorkout" label="Export" size="sm" />
+            <UButton color="neutral" variant="ghost" size="sm" icon="i-lucide-pencil" @click="emit('edit', firstWorkout)">Edit</UButton>
           </div>
         </div>
 
         <!-- Unplanned but something logged -->
         <div v-else-if="day.completed.length > 0" class="mt-2 flex flex-wrap items-center gap-2">
-          <UIcon name="i-lucide-info" class="size-5 text-info" />
+          <UIcon name="i-lucide-info" class="size-5 text-muted" />
           <span class="font-medium text-highlighted">Unplanned ride</span>
           <span class="tabular-nums text-[length:var(--text-body)] text-muted">{{ formatDuration(completedSecondsOf(day)) }}</span>
-          <button
+          <OutcomeChip
             v-if="analysedSession"
-            type="button"
-            :class="{ 'cursor-default': !canOpenResults }"
-            :disabled="!canOpenResults"
-            aria-label="View ride results"
-            @click="openResults"
-          >
-            <OutcomeChip :outcome="analysedSession.analysis!.outcome" :feel="analysedSession.analysis!.feel" />
-          </button>
+            :outcome="analysedSession.analysis!.outcome"
+            :feel="analysedSession.analysis!.feel"
+            :interactive="canOpenResults"
+            :aria-label="resultsLabel"
+            @open="openResults"
+          />
         </div>
 
         <!-- Rest day -->

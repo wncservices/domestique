@@ -1,5 +1,5 @@
 // The Plan page's toolbar: one primary action and an overflow. Which of Replan
-// and "I have … minutes" leads depends on whether the week has gaps; the
+// and "Short on time?" leads depends on whether the week has gaps; the
 // handlers stay on the page, this only decides order and labels.
 import type { TrainingWeek } from '@/api/types'
 
@@ -12,14 +12,14 @@ export interface PlanAction {
 }
 
 export interface PlanActionsState {
-  /** Replan and "I have … minutes" both act on today, so only the current week offers them. */
+  /** Replan and "Short on time?" both act on today, so only the current week offers them. */
   isCurrentWeek: boolean
   hasGaps: boolean
 }
 
 const ACTIONS: Record<PlanActionId, PlanAction> = {
   replan: { id: 'replan', label: 'Replan', icon: 'i-lucide-refresh-ccw' },
-  'train-now': { id: 'train-now', label: 'I have … minutes', icon: 'i-lucide-timer' },
+  'train-now': { id: 'train-now', label: 'Short on time?', icon: 'i-lucide-timer' },
   'life-event': { id: 'life-event', label: 'Life event', icon: 'i-lucide-calendar-off' },
   'ftp-test': { id: 'ftp-test', label: 'FTP test', icon: 'i-lucide-gauge' },
   export: { id: 'export', label: 'Export', icon: 'i-lucide-download' },

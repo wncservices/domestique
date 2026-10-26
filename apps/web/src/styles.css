@@ -57,6 +57,9 @@
    *
    * Ember is a coral, not an amber, for the same reason teal beat orange:
    * amber sits on Nuxt UI's warning hue. */
+  /* Text-safe ember that swaps in dark mode (see --app-accent-ember below),
+   * so `text-ember` / `bg-ember` need no `dark:` variant. */
+  --color-ember: var(--app-accent-ember);
   --color-ember-50: #fff1ec;
   --color-ember-100: #ffe0d2;
   --color-ember-200: #ffc0a8;
