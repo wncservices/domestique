@@ -336,6 +336,9 @@ func riderSeeds() []seed {
 		{"load_ledger", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO load_ledger (rider, week_start, created_at, updated_at) VALUES (?, '2026-01-05', ?, ?)`, rider, ts, ts)
 		}, "rider", byRider},
+		{"level_decay_runs", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO level_decay_runs (rider, week_start, created_at) VALUES (?, '2026-01-05', ?)`, rider, ts)
+		}, "rider", byRider},
 		{"daily_checkins", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO daily_checkins (rider, date, legs, note, created_at, updated_at) VALUES (?, '2026-01-02', 2, 'n', ?, ?)`, rider, ts, ts)
 		}, "rider", byRider},

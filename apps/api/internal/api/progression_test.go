@@ -43,8 +43,8 @@ func TestGetProgressionInitialisesLevelsFromAGoal(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Levels) != 5 {
-		t.Fatalf("levels = %+v, want the 5 cycling structured zones", out.Levels)
+	if len(out.Levels) != 6 {
+		t.Fatalf("levels = %+v, want the 5 cycling structured zones plus endurance", out.Levels)
 	}
 	for _, l := range out.Levels {
 		if l.Sport != "cycling" || l.Level != 6.0 {

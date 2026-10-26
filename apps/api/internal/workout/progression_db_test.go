@@ -270,3 +270,39 @@ VALUES ('old-session', 'wilant', '', 'completed', '', '2026-01-01T00:00:00Z')`);
 		t.Errorf("second UseDB call: %v", err)
 	}
 }
+
+// TestAnalysisDecouplingRoundTripsEachEngine pins the nullable column: nil
+// (not computed) must come back nil, a value must come back as itself, and a
+// re-analysis overwrites it like the zone columns.
+func TestAnalysisDecouplingRoundTripsEachEngine(t *testing.T) {
+	eachEngine(t, func(t *testing.T, db *DB) {
+		ctx := t.Context()
+		get := func(id string) *float64 {
+			t.Helper()
+			a, ok, err := db.GetAnalysis(ctx, id)
+			if err != nil || !ok {
+				t.Fatalf("get analysis %s: %v %v", id, ok, err)
+			}
+			return a.DecouplingPct
+		}
+		if err := db.SaveAnalysis(ctx, SessionAnalysis{SessionID: "a", Rider: "wilant"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := get("a"); got != nil {
+			t.Errorf("nil decoupling came back as %v", *got)
+		}
+		v := 6.3
+		if err := db.SaveAnalysis(ctx, SessionAnalysis{SessionID: "a", Rider: "wilant", DecouplingPct: &v}); err != nil {
+			t.Fatal(err)
+		}
+		if got := get("a"); got == nil || *got != 6.3 {
+			t.Errorf("decoupling = %v, want 6.3", got)
+		}
+		if err := db.SaveAnalysis(ctx, SessionAnalysis{SessionID: "a", Rider: "wilant"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := get("a"); got != nil {
+			t.Errorf("a re-analysis without decoupling kept %v", *got)
+		}
+	})
+}

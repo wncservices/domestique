@@ -524,3 +524,68 @@ func BestSpeeds(s []Sample) (best1200, best1800 float64) {
 	}
 	return best1200, best1800
 }
+
+const (
+	// decouplingMinSamples is the shortest ride (90 minutes) on which the
+	// first and second half differ enough in time for drift to mean anything.
+	decouplingMinSamples = 5400
+	// decouplingWarmup is skipped: heart rate has not settled in it.
+	decouplingWarmup = 600
+	// decouplingMinCoverage is the share of samples that must carry power and
+	// heart rate; a strap that dropped out half the ride has no honest EF.
+	decouplingMinCoverage = 0.9
+	// decouplingMaxIF keeps hard or variable rides out: heart rate drifts from
+	// fatigue and heat there, not from aerobic durability.
+	decouplingMaxIF = 0.85
+)
+
+// Decoupling is the aerobic decoupling of a steady ride: how much the
+// efficiency factor (normalised power over average heart rate) falls from the
+// first half to the second, after skipping the warm-up. ok is false when the
+// ride is too short, lacks power or heart rate on 90% of its samples, has no
+// FTP to judge intensity against, or was harder than IF 0.85.
+func Decoupling(samples []Sample, ftp float64) (pct float64, ok bool) {
+	if len(samples) < decouplingMinSamples || ftp <= 0 {
+		return 0, false
+	}
+	var withPower, withHR int
+	for _, s := range samples {
+		if s.HasPower {
+			withPower++
+		}
+		if s.HasHR {
+			withHR++
+		}
+	}
+	need := decouplingMinCoverage * float64(len(samples))
+	if float64(withPower) < need || float64(withHR) < need {
+		return 0, false
+	}
+	if NormalizedPower(samples)/ftp > decouplingMaxIF {
+		return 0, false
+	}
+
+	rest := samples[decouplingWarmup:]
+	half := len(rest) / 2
+	ef := func(part []Sample) (float64, bool) {
+		var sum float64
+		var n int
+		for _, s := range part {
+			if s.HasHR {
+				sum += s.HeartRate
+				n++
+			}
+		}
+		np := NormalizedPower(part)
+		if n == 0 || sum <= 0 || np <= 0 {
+			return 0, false
+		}
+		return np / (sum / float64(n)), true
+	}
+	ef1, ok1 := ef(rest[:half])
+	ef2, ok2 := ef(rest[half : 2*half])
+	if !ok1 || !ok2 {
+		return 0, false
+	}
+	return math.Round((ef1-ef2)/ef1*1000) / 10, true
+}

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 )
@@ -47,15 +48,23 @@ const (
 
 // cyclingZones and runningZones are the structured zones progression levels
 // apply to, per sport — the spec's "Levels" list. Endurance/easy/long
-// sessions stay volume-sized and carry no level (out of scope). These
-// mirror workout.Zone's string values by hand rather than importing that
+// sessions stay volume-sized and carry no ladder level. Cycling's Initial
+// adds one more, endurance (see enduranceZone), which is not a ladder zone.
+// These mirror workout.Zone's string values by hand rather than importing that
 // package, keeping this package free of the storage layer it lives beside.
 var (
 	cyclingZones = []string{"tempo", "sweet_spot", "threshold", "vo2max", "anaerobic"}
 	runningZones = []string{"tempo", "threshold", "intervals"}
 )
 
+// enduranceZone is the one level that is not a structured zone: it is moved
+// by long-ride durability (DurabilityDelta), sizes the long ride's share of
+// the week, and is not FTP-relative, so recalibration never touches it. It is
+// seeded by Initial for cycling only.
+const enduranceZone = "endurance"
+
 // Initial returns the starting level for every structured zone of sport,
+// plus cycling's endurance level,
 // seeded from the rider's profile experience level: beginner 2.0,
 // intermediate 4.0, advanced 6.0, anything else (unset, unrecognised) 3.0.
 // experience is matched case-insensitively and trimmed.
@@ -73,7 +82,7 @@ func Initial(experience string, sport model.Sport) []Level {
 	var zones []string
 	switch sport {
 	case model.SportCycling:
-		zones = cyclingZones
+		zones = append(append(zones, cyclingZones...), enduranceZone)
 	case model.SportRunning:
 		zones = runningZones
 	}
@@ -132,6 +141,60 @@ func Delta(cur, workoutLevel float64, outcome Outcome, feel int) float64 {
 		// recognise: no zone to move, so no change.
 		return 0
 	}
+}
+
+// DurabilityDelta is how far a generated long ride moves the endurance level:
+// a ride cut short (under 80% of the planned duration) costs 0.2; otherwise
+// the ride's aerobic decoupling decides. Under 5% earns 0.3, 5-8% earns 0.1,
+// over 10% costs 0.2, and 8-10% (or no decoupling) moves nothing. The bool is
+// false when there is no move, so the caller can skip a zero-delta write.
+func DurabilityDelta(decoupling *float64, durationRatio float64) (float64, bool) {
+	// A ratio of 0 or less means the planned length was unknown, not that the
+	// ride was cut short.
+	if durationRatio > 0 && durationRatio < 0.8 {
+		return -0.2, true
+	}
+	if decoupling == nil {
+		return 0, false
+	}
+	switch d := *decoupling; {
+	case d < 5:
+		return 0.3, true
+	case d <= 8:
+		return 0.1, true
+	case d > 10:
+		return -0.2, true
+	}
+	return 0, false
+}
+
+// DecayAfterDays is how long a zone may go without a matched ride before its
+// level starts to slip; DecayStep is how much it slips per weekly pass.
+const (
+	DecayAfterDays = 21
+	DecayStep      = 0.1
+)
+
+// Decay is the weekly slip of a level in a zone the rider has left alone:
+// 0.1 when the last matched ride (a YYYY-MM-DD date; "" for never) is more
+// than 21 days before today, and never below start, the level the rider
+// began on. The bool is false when nothing changes (recently trained, or
+// already at or below start), so the caller can skip the write.
+func Decay(cur, start float64, lastTrained, today string) (float64, bool) {
+	if lastTrained != "" {
+		last, errL := time.Parse("2006-01-02", lastTrained)
+		now, errN := time.Parse("2006-01-02", today)
+		// A date that does not parse is not evidence of neglect.
+		if errL != nil || errN != nil || now.Sub(last) <= DecayAfterDays*24*time.Hour {
+			return cur, false
+		}
+	}
+	if cur <= start {
+		return cur, false
+	}
+	to := math.Max(start, Apply(cur, -DecayStep))
+	to = math.Round(to*10) / 10
+	return to, to < cur
 }
 
 // feelAdjustment is the spec's feel table, applied only to a nailed bump.
@@ -207,6 +270,11 @@ const (
 	// the jump is far likelier a correction or a typo than fitness, and
 	// lowering every level for it would punish the rider for a mistake.
 	RecalibrationMaxFactor = 1.25
+	// RecalibrationDownFactor is the ratio (new/old) a drop must fall
+	// to or below to recalibrate: the mirror of RecalibrationUpFactor, so a 3% rise and a 3%
+	// drop are equally worth acting on. The 25% ceiling is the same
+	// 1/RecalibrationMaxFactor, past which a drop is a correction, not fitness.
+	RecalibrationDownFactor = 1 / 1.03
 	// RecalibrationLevelsPerDoubling is the one tunable: how many levels a
 	// full doubling of FTP would cost. Smaller rises scale logarithmically.
 	RecalibrationLevelsPerDoubling = 10
@@ -215,14 +283,16 @@ const (
 	RecalibrationMaxDrop = 2.0
 )
 
-// RecalibrationDelta is how far to lower a level after FTP moves from oldFTP
-// to newFTP: -RecalibrationLevelsPerDoubling*log2(new/old), capped at
-// -RecalibrationMaxDrop. It is deliberately unconditional — a decrease yields
-// a positive delta — because the caller owns the trigger gate (3-25% rise
-// only), the same split thresholds.Detect has with its caller. The cap is
+// RecalibrationDelta is how far to move a level after FTP goes from oldFTP to
+// newFTP: -RecalibrationLevelsPerDoubling*log2(new/old), clamped to
+// [-RecalibrationMaxDrop, +RecalibrationMaxDrop]. A rise lowers levels (the
+// same rung is now an easier percentage of a bigger FTP) and a drop raises
+// them. It is unconditional about size — the caller owns the 3-25% trigger
+// gate, the same split thresholds.Detect has with its caller. The clamp is
 // part of the delta so no caller can forget it.
 func RecalibrationDelta(oldFTP, newFTP float64) float64 {
-	return math.Max(-RecalibrationMaxDrop, -RecalibrationLevelsPerDoubling*math.Log2(newFTP/oldFTP))
+	d := -RecalibrationLevelsPerDoubling * math.Log2(newFTP/oldFTP)
+	return math.Max(-RecalibrationMaxDrop, math.Min(RecalibrationMaxDrop, d))
 }
 
 // RecalibrationReason builds the text recorded on a recalibrated level, e.g.
