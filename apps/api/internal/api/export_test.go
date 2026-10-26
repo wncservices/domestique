@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/muktihari/fit/profile/filedef"
 
@@ -79,3 +80,11 @@ func (s *Server) ReoptimiseForTest(ctx context.Context) { s.reoptimise(ctx) }
 // RunLLMNotesForTest runs the morning notes pass synchronously, so a test can
 // look at its result. The tick starts the same pass on a goroutine.
 func (s *Server) RunLLMNotesForTest(ctx context.Context) { s.runLLMNotes(ctx) }
+
+// SetLLMRequestBudgetForTest shortens the budget for model calls made while a
+// rider waits, and returns a func that restores it.
+func SetLLMRequestBudgetForTest(d time.Duration) func() {
+	old := llmRequestBudget
+	llmRequestBudget = d
+	return func() { llmRequestBudget = old }
+}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/wncservices/domestique/apps/api/internal/testdb"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -130,7 +129,7 @@ func newWeatherHarness(t *testing.T, mutate ...func(*api.Server)) *weatherHarnes
 		Weather:      weather.New(h.meteo.URL, weatherAPIKey, h.now),
 		Config:       &config.Config{Weather: config.WeatherConfig{BaseURL: h.meteo.URL}},
 		Clock:        h.now,
-		Log:          slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Log:          scanLogger(h.logs),
 	}
 	followServerClock(srv, training)
 	for _, m := range mutate {
