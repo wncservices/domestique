@@ -18,7 +18,7 @@ import { phaseLabel } from '../components/plan/phaseStyle.ts'
 import { formatSigned, formStatus, latestWithDelta } from './fitnessMath.ts'
 import { formWords, weekDelta } from './fitnessSummary.ts'
 import { weekdayLong, weekdayShort } from './planDates.ts'
-import { flattenSteps, formatDuration, isPlanMadeSession } from './workoutMath.ts'
+import { flattenSteps, formatDuration, formatDurationCompact, isPlanMadeSession } from './workoutMath.ts'
 import { zoneColorVar } from './zones.ts'
 
 export function greeting(hour: number, name?: string): string {
@@ -173,9 +173,9 @@ export interface WeekTile {
   aria: string
 }
 
-// The same "1h 13m" as everywhere else; "1:13" read as minutes and seconds.
+// "1h13" fits a day tile where "1h 13m" truncates; "1:13" read as minutes and seconds.
 function compactDuration(seconds: number): string {
-  return formatDuration(seconds)
+  return formatDurationCompact(seconds)
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)

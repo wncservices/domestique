@@ -223,7 +223,7 @@ test('week tiles: a compact duration for narrow screens', () => {
     '2026-10-14',
   )
   assert.equal(tiles[0].text, '1h 6m')
-  assert.equal(tiles[0].short, '1h 6m')
+  assert.equal(tiles[0].short, '1h06')
   assert.equal(tiles[1].short, '41m')
   assert.equal(tiles[2].short, 'Rest')
 })
