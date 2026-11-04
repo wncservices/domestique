@@ -179,6 +179,8 @@ watch(
 
 const name = computed(() => me.value?.name || me.value?.user || '')
 const today = computed<WeekDay | undefined>(() => week.value?.days.find((d) => d.date === week.value!.today))
+// The "About this session" disclosure: its content, and the explanation fetch, mount on first open.
+const aboutOpen = ref(false)
 const workout = computed(() => today.value?.planned[0] ?? null)
 const extraCount = computed(() => Math.max(0, (today.value?.planned.length ?? 0) - 1))
 const ridden = computed(() => (today.value?.completed.length ?? 0) > 0)
@@ -380,8 +382,8 @@ async function dismissSuggestion() {
                 />
               </div>
 
-              <UCollapsible v-if="!ridden && workout.steps.length > 0">
-                <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-down" label="About this session" />
+              <UCollapsible v-if="!ridden && workout.steps.length > 0" v-model:open="aboutOpen">
+                <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-right" :ui="{ trailingIcon: aboutOpen ? 'rotate-90 transition-transform' : 'transition-transform' }" label="About this session" />
                 <template #content>
                   <div class="mt-2">
                     <SessionExplanation :workout-id="workout.id" />

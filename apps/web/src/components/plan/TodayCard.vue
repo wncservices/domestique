@@ -142,6 +142,8 @@ function completedSecondsOf(day: WeekDay): number {
   return day.completed.reduce((sum, c) => sum + c.durationSeconds, 0)
 }
 
+// The "About this session" disclosure: its content, and the explanation fetch, mount on first open.
+const aboutOpen = ref(false)
 const firstWorkout = computed(
   () => props.day?.planned.find((w) => w.id === props.selectedWorkoutId) ?? props.day?.planned[0],
 )
@@ -606,8 +608,8 @@ function onRated(analysis: SessionAnalysis) {
             <ExportMenu :workout="firstWorkout" label="Export" size="sm" />
             <UButton color="neutral" variant="ghost" size="sm" icon="i-lucide-pencil" @click="emit('edit', firstWorkout)">Edit</UButton>
           </div>
-          <UCollapsible v-if="firstWorkout.steps.length > 0">
-            <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-down" label="About this session" />
+          <UCollapsible v-if="firstWorkout.steps.length > 0" v-model:open="aboutOpen">
+            <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-right" :ui="{ trailingIcon: aboutOpen ? 'rotate-90 transition-transform' : 'transition-transform' }" label="About this session" />
             <template #content>
               <div class="mt-2">
                 <SessionExplanation :workout-id="firstWorkout.id" />
