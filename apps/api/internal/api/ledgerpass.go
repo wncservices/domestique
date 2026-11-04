@@ -445,10 +445,13 @@ func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row work
 	sunday := start.AddDate(0, 0, 6).Format(dateLayout)
 	today := s.localNow().Format(dateLayout)
 
-	var completed, remaining float64
+	var completed, remaining, riddenToday float64
 	for _, c := range sessions {
 		if c.Date >= weekStart && c.Date <= today {
 			completed += c.TrainingLoad
+		}
+		if c.Date == today {
+			riddenToday += c.TrainingLoad
 		}
 	}
 	for _, w := range workouts {
@@ -456,7 +459,15 @@ func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row work
 			continue
 		}
 		if w.GoalID != "" && w.Date >= today && !adapter.WorkoutDone(w, sessions) {
-			remaining += workout.PlannedTSSOrHours(w, profile.FTPWatts)
+			planned := workout.PlannedTSSOrHours(w, profile.FTPWatts)
+			// A ride too short to count as the session is already in completed;
+			// only what is left of the session is still ahead.
+			if w.Date == today && riddenToday > 0 {
+				used := math.Min(planned, riddenToday)
+				planned -= used
+				riddenToday -= used
+			}
+			remaining += planned
 		}
 	}
 	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, lifeevents.NoTestDays(events)))
