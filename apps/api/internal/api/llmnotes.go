@@ -121,6 +121,12 @@ func (s *Server) writeChangesNote(ctx context.Context, rider, today string) bool
 	text := changesFallback(adjustments)
 	if s.LLM.Enabled(llm.JobExplainChanges) {
 		said, err := s.LLM.ExplainChanges(ctx, today, s.changesFor(ctx, rider, adjustments))
+		if ctx.Err() != nil {
+			// Shutting down, not a model refusal: give the claim back so the
+			// next pass makes the call instead of the day going without.
+			s.releaseLLMNote(rider, workout.LLMNoteChanges, today)
+			return false
+		}
 		if err != nil {
 			s.logger().Warn("llm notes: explaining the changes failed, saving the rule titles", "rider", rider, "err", err)
 		} else {
@@ -129,6 +135,7 @@ func (s *Server) writeChangesNote(ctx context.Context, rider, today string) bool
 	}
 	if err := s.Training.SaveLLMNote(ctx, rider, workout.LLMNoteChanges, today, text); err != nil {
 		s.logger().Warn("llm notes: could not save the changes note", "rider", rider, "err", err)
+		s.releaseLLMNote(rider, workout.LLMNoteChanges, today)
 		return false
 	}
 	return true
@@ -161,13 +168,30 @@ func (s *Server) writeWeeklyNote(ctx context.Context, rider, today string) bool 
 	text, err := s.LLM.WeeklySummary(ctx, figures)
 	if err != nil {
 		s.logger().Warn("llm notes: summarising last week failed", "rider", rider, "err", err)
+		// A model failure keeps its claim (one call per rider, kind and day);
+		// a cancelled pass was cut short by shutdown, not refused.
+		if ctx.Err() != nil {
+			s.releaseLLMNote(rider, workout.LLMNoteWeekly, lastMonday)
+		}
 		return false
 	}
 	if err := s.Training.SaveLLMNote(ctx, rider, workout.LLMNoteWeekly, lastMonday, text); err != nil {
 		s.logger().Warn("llm notes: could not save the weekly note", "rider", rider, "err", err)
+		s.releaseLLMNote(rider, workout.LLMNoteWeekly, lastMonday)
 		return false
 	}
 	return true
+}
+
+// releaseLLMNote gives back an empty claim so a later tick of the slot can
+// retry. It runs on its own short context: the one that failed may be the
+// cancelled one.
+func (s *Server) releaseLLMNote(rider, kind, day string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.lifecycle()), 5*time.Second)
+	defer cancel()
+	if err := s.Training.ReleaseLLMNote(ctx, rider, kind, day); err != nil {
+		s.logger().Warn("llm notes: could not release a claim", "err", err)
+	}
 }
 
 // workoutChanges keeps the adjustments that changed a session and have a title
