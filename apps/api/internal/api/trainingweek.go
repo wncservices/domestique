@@ -33,6 +33,13 @@ type weekFocusDTO struct {
 	// what it let go of. The debt itself is not sent: the strip never shows it.
 	CarriedTSS  float64 `json:"carriedTss,omitempty"`
 	ForgivenTSS float64 `json:"forgivenTss,omitempty"`
+	// What Today's ring shows: load ridden this week, the target it is measured
+	// against (the plan's, scaled to the days still open) and what is left to
+	// make up. Pointers, so a week with no ledger row omits them rather than
+	// reading 0 of 0.
+	RiddenTSS          *float64 `json:"riddenTss,omitempty"`
+	DebtTSS            *float64 `json:"debtTss,omitempty"`
+	EffectiveTargetTSS *float64 `json:"effectiveTargetTss,omitempty"`
 }
 
 type weekDayDTO struct {
@@ -254,6 +261,12 @@ func (s *Server) fillLedgerFigures(ctx context.Context, rider, weekStart string,
 		return
 	}
 	f.CarriedTSS = math.Round(row.CarriedInTSS)
+	if fig, err := s.weekLedgerFigures(ctx, rider, weekStart, row); err != nil {
+		s.logger().Warn("load ledger: could not work out the week's figures for the strip", "err", err)
+	} else {
+		ridden, debt, target := math.Round(fig.Ridden), math.Round(fig.Debt), math.Round(fig.Target)
+		f.RiddenTSS, f.DebtTSS, f.EffectiveTargetTSS = &ridden, &debt, &target
+	}
 	// Forgiveness is recorded on the week that was settled, when this one opened.
 	if start, err := time.ParseInLocation(dateLayout, weekStart, s.localNow().Location()); err == nil {
 		last, found, err := s.Training.GetLedgerWeek(ctx, rider, start.AddDate(0, 0, -7).Format(dateLayout))

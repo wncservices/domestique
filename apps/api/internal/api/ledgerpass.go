@@ -422,25 +422,37 @@ func (s *Server) applyRepayment(ctx context.Context, rider string, wk workout.Wo
 // A life event added since the week opened takes days away from what it owes,
 // so the session it removed is not debt.
 func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row workout.LedgerWeek) (float64, error) {
+	f, err := s.weekLedgerFigures(ctx, rider, weekStart, row)
+	return f.Debt, err
+}
+
+// ledgerFigures are the numbers behind a week's debt: the target it is measured
+// against (scaled to the open days now), the load ridden so far and what is owed.
+type ledgerFigures struct {
+	Target, Ridden, Debt float64
+}
+
+// weekLedgerFigures is the single computation weekDebt and the week strip share.
+func (s *Server) weekLedgerFigures(ctx context.Context, rider, weekStart string, row workout.LedgerWeek) (ledgerFigures, error) {
 	profile, _, err := s.Training.GetProfile(ctx, rider)
 	if err != nil {
-		return 0, err
+		return ledgerFigures{}, err
 	}
 	events, err := s.lifeEventsFor(ctx, rider)
 	if err != nil {
-		return 0, err
+		return ledgerFigures{}, err
 	}
 	sessions, err := s.Training.ListSessions(ctx, rider)
 	if err != nil {
-		return 0, err
+		return ledgerFigures{}, err
 	}
 	workouts, err := s.Training.ListWorkouts(ctx, rider)
 	if err != nil {
-		return 0, err
+		return ledgerFigures{}, err
 	}
 	start, err := time.ParseInLocation(dateLayout, weekStart, s.localNow().Location())
 	if err != nil {
-		return 0, err
+		return ledgerFigures{}, err
 	}
 	sunday := start.AddDate(0, 0, 6).Format(dateLayout)
 	today := s.localNow().Format(dateLayout)
@@ -470,7 +482,7 @@ func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row work
 		}
 	}
 	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, lifeevents.NoTestDays(events)))
-	return ledger.Debt(target, row.CarriedInTSS, completed, remaining), nil
+	return ledgerFigures{Target: target, Ridden: completed, Debt: ledger.Debt(target, row.CarriedInTSS, completed, remaining)}, nil
 }
 
 // partialRideLoad is, per sport, the load ridden today that belongs to no

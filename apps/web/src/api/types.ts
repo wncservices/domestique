@@ -1479,6 +1479,10 @@ export interface WeekFocus {
   /** Load ledger figures, whole TSS, current week only (mirror weekFocusDTO). */
   carriedTss?: number
   forgivenTss?: number
+  /** Today's ring: ridden load, the target it is measured against, and what is left to make up. */
+  riddenTss?: number
+  debtTss?: number
+  effectiveTargetTss?: number
 }
 
 export interface WeekDay {

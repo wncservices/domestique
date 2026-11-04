@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -555,6 +557,86 @@ func TestWeekFocusShowsCarriedAndForgiven(t *testing.T) {
 	if other := get("/api/training/week?start=2026-10-05"); other.Focus != nil &&
 		(other.Focus.CarriedTSS != 0 || other.Focus.ForgivenTSS != 0) {
 		t.Errorf("a past week shows ledger figures: %+v", other.Focus)
+	}
+}
+
+// Today's ring needs what was ridden this week, the target it is measured
+// against and the debt left. They come from the pass's own computation, only
+// for the current week, and only where a ledger row exists.
+func TestWeekFocusShowsRiddenTargetAndDebt(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx := context.Background()
+	h.at(7, 6, 45)
+	h.tick() // opens the week of 2026-10-05
+	for i, load := range []float64{40, 25} {
+		if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+			Rider: "wilant", Provider: "garmin", ExternalID: fmt.Sprintf("ridden-%d", i), Sport: "cycling",
+			Date: fmt.Sprintf("2026-10-0%d", 5+i), DurationSeconds: 3600, TrainingLoad: load,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	row, ok, _ := h.store.GetLedgerWeek(ctx, "wilant", "2026-10-05")
+	if !ok {
+		t.Fatal("no ledger row")
+	}
+	debt, err := h.srv.WeekDebtForTest(ctx, "wilant", "2026-10-05", row)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type focusOut struct {
+		Focus *struct {
+			RiddenTSS          *float64 `json:"riddenTss"`
+			DebtTSS            *float64 `json:"debtTss"`
+			EffectiveTargetTSS *float64 `json:"effectiveTargetTss"`
+		} `json:"focus"`
+	}
+	raw := func(path string) (focusOut, string) {
+		resp := h.as("wilant", "cyclists", http.MethodGet, path, "")
+		body, _ := io.ReadAll(resp.Body)
+		var out focusOut
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out, string(body)
+	}
+
+	cur, _ := raw("/api/training/week")
+	if cur.Focus == nil || cur.Focus.RiddenTSS == nil || cur.Focus.DebtTSS == nil || cur.Focus.EffectiveTargetTSS == nil {
+		t.Fatalf("current week lacks figures: %+v", cur.Focus)
+	}
+	if *cur.Focus.RiddenTSS != 65 {
+		t.Errorf("riddenTss = %v, want 65", *cur.Focus.RiddenTSS)
+	}
+	if want := math.Round(debt); *cur.Focus.DebtTSS != want {
+		t.Errorf("debtTss = %v, want the pass's %v", *cur.Focus.DebtTSS, want)
+	}
+	if want := math.Round(row.TargetTSS); *cur.Focus.EffectiveTargetTSS > want {
+		t.Errorf("effective target %v above the opened target %v", *cur.Focus.EffectiveTargetTSS, want)
+	}
+
+	for _, path := range []string{"/api/training/week?start=2026-09-28", "/api/training/week?start=2026-10-12"} {
+		out, body := raw(path)
+		if out.Focus != nil && (out.Focus.RiddenTSS != nil || out.Focus.DebtTSS != nil || out.Focus.EffectiveTargetTSS != nil) {
+			t.Errorf("%s shows ledger figures: %s", path, body)
+		}
+		if strings.Contains(body, "riddenTss") || strings.Contains(body, "debtTss") {
+			t.Errorf("%s carries the keys: %s", path, body)
+		}
+	}
+}
+
+// With no ledger row for the week the keys are absent, never zero.
+func TestWeekFocusOmitsLedgerFiguresWithoutARow(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	h.at(7, 6, 45) // no tick: nothing opened the week
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/week", "")
+	body, _ := io.ReadAll(resp.Body)
+	for _, k := range []string{"riddenTss", "debtTss", "effectiveTargetTss"} {
+		if strings.Contains(string(body), k) {
+			t.Errorf("%s present without a ledger row: %s", k, body)
+		}
 	}
 }
 
