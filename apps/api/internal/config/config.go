@@ -231,12 +231,9 @@ func (t TrainingConfig) Schedule() (syncschedule.Schedule, error) {
 type Config struct {
 	// PublicURL is where riders reach this deployment from outside, with no
 	// trailing slash: https://domestique.example.com. Used for the links in
-	// the calendar feed and in email, where the app cannot know its own
+	// the calendar feed, where the app cannot know its own
 	// address (it sits behind a proxy). Empty turns those features off.
 	PublicURL string `yaml:"public_url,omitempty"`
-
-	// Notifications is how mail is sent; see NotificationsConfig.
-	Notifications NotificationsConfig `yaml:"notifications,omitempty"`
 
 	Training  TrainingConfig  `yaml:"training"`
 	Source    SourceConfig    `yaml:"source"`
@@ -310,7 +307,6 @@ func Load(path string) (*Config, error) {
 // container with no config file — precisely the case it is for.
 func (c *Config) applyDefaults() {
 	c.PublicURL = strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
-	c.Notifications.SMTP.applyDefaults()
 
 	// A PostgreSQL DSN carries a password, so a deployment supplies it through
 	// the environment rather than writing it into a config file that wants to
@@ -394,10 +390,6 @@ func (c *Config) Validate() error {
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
 			return fmt.Errorf("public_url %q is not an absolute http(s) URL", c.PublicURL)
 		}
-	}
-
-	if err := c.Notifications.SMTP.validate(c.PublicURL); err != nil {
-		return err
 	}
 
 	// A bad metrics address would otherwise mean a pod that runs with its

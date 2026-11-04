@@ -8,9 +8,8 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 )
 
-// The calendar feed and the morning email both work with no signed-in rider: a
-// calendar app fetches by secret URL, and the morning pass runs at 06:30.
-// That is why neither can lean on "the next sign-in fails" the way everything
+// The calendar feed works with no signed-in rider: a calendar app fetches by
+// secret URL. That is why it cannot lean on "the next sign-in fails" the way everything
 // else does when an admin blocks someone or takes their role away. These are
 // the hooks that make the admin action reach them.
 
@@ -21,7 +20,6 @@ import (
 //
 //   - the rider names in that identity's live sessions (the exact name they
 //     signed in as);
-//   - the riders opted in to the morning summary under that email;
 //   - the name the People page itself guesses for them (likelyRider), found by
 //     looking the person up in the gate-role listing.
 //
@@ -51,7 +49,7 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 	// The binding is the rider this account is, and nothing else about the
 	// profile is. Where there is one, the name-based guess below is not used:
 	// an account bound to "wilant-2" whose profile still reads "Wilant" must not
-	// take the real wilant's calendar feed and morning email with it.
+	// take the real wilant's calendar feed with it.
 	bound := false
 	if s.Identities != nil {
 		names, err := s.Identities.RidersOfSub(ctx, s.authenticator().OIDC().Issuer, id)
@@ -92,16 +90,6 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 		}
 	}
 
-	if s.MorningSummaries != nil && email != "" {
-		names, err := s.MorningSummaries.RidersByEmail(ctx, email)
-		if err != nil {
-			s.logger().Warn("people access: could not look riders up by email", "err", err)
-		}
-		for _, n := range names {
-			add(n)
-		}
-	}
-
 	out := make([]string, 0, len(set))
 	for n := range set {
 		out = append(out, n)
@@ -112,9 +100,8 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 
 // revokeBackgroundAccess takes away the two things that work without a
 // session: the rider's calendar link (revoked, so the old URL is a 404 for
-// good) and their morning summary (switched off, stored address cleared). It
-// never re-enables anything on its own: a rider who is let back in makes a new
-// link and opts in again. Failures are logged and the rest carried on, because
+// good). It never re-enables anything on its own: a rider who is let back in
+// makes a new link. Failures are logged and the rest carried on, because
 // the admin action that triggered this has already been made.
 func (s *Server) revokeBackgroundAccess(ctx context.Context, riders []string, why string) {
 	for _, rider := range riders {
@@ -123,12 +110,7 @@ func (s *Server) revokeBackgroundAccess(ctx context.Context, riders []string, wh
 				s.logger().Error("could not revoke a calendar feed", "rider", rider, "reason", why, "err", err)
 			}
 		}
-		if s.MorningSummaries != nil {
-			if err := s.MorningSummaries.Disable(ctx, rider, s.now()); err != nil {
-				s.logger().Error("could not switch off a morning summary", "rider", rider, "reason", why, "err", err)
-			}
-		}
-		s.logger().Info("calendar feed revoked and morning summary switched off", "rider", rider, "reason", why)
+		s.logger().Info("calendar feed revoked", "rider", rider, "reason", why)
 	}
 }
 

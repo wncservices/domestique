@@ -27,7 +27,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/crew"
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/identities"
-	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
+	"github.com/wncservices/domestique/apps/api/internal/morningmessage"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/ridestart"
@@ -87,7 +87,7 @@ func build() ([]byte, error) {
 		func() error { _, err := blocklist.UseDB(conn, dsn); return err },
 		func() error { _, err := routeshare.UseDB(conn, dsn); return err },
 		func() error { _, err := calendarfeed.UseDB(conn, dsn); return err },
-		func() error { _, err := morningsummary.UseDB(conn, dsn); return err },
+		func() error { return morningmessage.DropLegacyTable(conn) },
 		func() error { _, err := workout.UseDB(conn, dsn); return err },
 		func() error { _, err := pacingpush.UseDB(conn, dsn); return err },
 		func() error { _, err := providerlink.UseDB(conn, dsn, nil); return err },

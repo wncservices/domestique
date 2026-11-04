@@ -25,7 +25,7 @@ import type {
   GarminDuplicateGroup,
   GarminDevice,
   GeocodeResult,
-  MorningSummaryStatus,
+  MorningMessage,
   Goal,
   CreateGoalRequest,
   UpdateGoalRequest,
@@ -1193,19 +1193,6 @@ export const api = {
   /** Generates, or regenerates, the link; the old one stops working at once.
    *  The only call that returns the URL. */
   createCalendarFeed: () => request<CalendarFeedLink>('/api/training/calendar', { method: 'POST' }),
-  /** The morning email: whether it can be used, whether it is on, and the
-   *  address it goes to. */
-  morningSummary: () => request<MorningSummaryStatus>('/api/training/morning-summary'),
-  /** Turns it on or off. The body is only `enabled`: the address comes from
-   *  the account, never from here. A 412 means it cannot be used. */
-  setMorningSummary: (enabled: boolean) =>
-    request<MorningSummaryStatus>('/api/training/morning-summary', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    }),
-  /** Sends one test message to the rider's own address (5 per 15 minutes). */
-  testMorningSummary: () => request<void>('/api/training/morning-summary/test', { method: 'POST' }),
   revokeCalendarFeed: () => request<void>('/api/training/calendar', { method: 'DELETE' }),
   /** One Monday–Sunday week of planned vs completed training — see
    *  internal/api/trainingweek.go. start snaps to its Monday server-side. */
@@ -1292,6 +1279,8 @@ export const api = {
   understandCheckIn: () => request<CheckInReading>('/api/training/checkin/understand', { method: 'POST' }),
   /** Today's changes note and last week's summary, each null when absent. */
   trainingNotes: () => request<TrainingNotes>('/api/training/notes'),
+  /** The Today page's short "good morning" message for the local today. */
+  morningMessage: () => request<MorningMessage>('/api/training/morning-message'),
   saveCheckIn: (c: Pick<CheckIn, 'legs' | 'mood' | 'sleepQuality' | 'note'>) =>
     request<CheckIn>('/api/training/checkin', {
       method: 'PUT',

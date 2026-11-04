@@ -282,7 +282,7 @@ func TestMergeRiderListsWhatItDropsByNameWithTheConsequence(t *testing.T) {
 		for _, r := range []string{a, b} {
 			for _, s := range riderSeeds() {
 				switch s.table {
-				case "provider_links", "calendar_feeds", "morning_summaries", "rider_profiles", "accounts":
+				case "provider_links", "calendar_feeds", "rider_profiles", "accounts":
 					if err := s.insert(env, r, "x"+r); err != nil {
 						t.Fatalf("seeding %s: %v", s.table, err)
 					}
@@ -298,11 +298,10 @@ func TestMergeRiderListsWhatItDropsByNameWithTheConsequence(t *testing.T) {
 			byTable[d.Table] = d
 		}
 		for table, want := range map[string]string{
-			"provider_links":    "reconnect",
-			"calendar_feeds":    "calendar link",
-			"morning_summaries": "morning",
-			"rider_profiles":    "profile",
-			"accounts":          "relink",
+			"provider_links": "reconnect",
+			"calendar_feeds": "calendar link",
+			"rider_profiles": "profile",
+			"accounts":       "relink",
 		} {
 			d, ok := byTable[table]
 			if !ok {

@@ -4,7 +4,7 @@ import "testing"
 
 // Under mode: proxy, Remote-Email comes from Authelia's own user directory,
 // which an administrator controls, so it is trusted as verified. That trust is
-// the whole reason the morning summary may be sent to it; it is documented in
+// what identity binding and the People page rely on; it is documented in
 // AGENTS.md next to the rest of proxy mode's trust model.
 func TestProxyEmailIsTrustedAsVerified(t *testing.T) {
 	a := mustNew(t, Config{Mode: ModeProxy})

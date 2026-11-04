@@ -363,7 +363,7 @@ func (s *Server) bindingViews(ctx context.Context, people []auth0mgmt.Person) ma
 // since a caller has no reasonable use for succeeding at only part of it.
 // emailRef is a short, stable stand-in for an email address in a log line, so
 // two lines about the same person can be matched without the address itself
-// being written anywhere (the mailer package keeps the same policy). The Auth0
+// being written anywhere (the same policy as every other log line here). The Auth0
 // user id is better where there is one; this is for the paths that fail before
 // one exists.
 func emailRef(email string) string {
@@ -505,8 +505,8 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 	// a live session keeps the old role (a demoted admin stays one) until it
 	// expires. Ending it makes the next sign-in pick the new roles up.
 	s.endSessionsOf(r.Context(), id, "role changed")
-	// A calendar link and a morning email work with no session, so a role
-	// that can no longer train has to take them away explicitly.
+	// A calendar link works with no session, so a role that can no
+	// longer train has to take it away explicitly.
 	s.revokeBackgroundAccess(r.Context(), riders, "role changed")
 
 	s.logger().Info("person role changed", "id", id, "role", body.Role, "by", auth.FromContext(r.Context()).User)
@@ -564,9 +564,8 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 
 	if body.Blocked {
 		// Auth0 refuses the next sign-in; a session they already hold, a
-		// calendar link and the morning email would each carry on, so all three
-		// are ended here. Unblocking restores nothing of this: the rider signs in,
-		// makes a new link and opts in again.
+		// calendar link would each carry on, so all are ended here. Unblocking
+		// restores nothing of this: the rider signs in and makes a new link.
 		s.endSessionsOf(r.Context(), id, "person blocked")
 		s.revokeBackgroundAccess(r.Context(), riders, "person blocked")
 	}
