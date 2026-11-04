@@ -47,11 +47,12 @@ const (
 	JobExplainChanges    Job = "explain_changes"
 	JobUnderstandCheckIn Job = "understand_checkin"
 	JobWeeklySummary     Job = "weekly_summary"
+	JobExplainWorkout    Job = "explain_workout"
 )
 
 // Jobs is every job, in config order. A test keeps it equal to
 // config.LLMJobNames.
-var Jobs = []Job{JobExplainPlan, JobProposeProfile, JobProposeGoal, JobPlanEdits, JobExplainChanges, JobUnderstandCheckIn, JobWeeklySummary}
+var Jobs = []Job{JobExplainPlan, JobProposeProfile, JobProposeGoal, JobPlanEdits, JobExplainChanges, JobUnderstandCheckIn, JobWeeklySummary, JobExplainWorkout}
 
 // ErrInvalid means the model answered twice without a usable object.
 var ErrInvalid = errors.New("llm: the model's answer did not pass validation")
