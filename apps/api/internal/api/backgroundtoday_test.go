@@ -7,7 +7,7 @@ import (
 )
 
 // "Today" for the background passes is the deployment's training zone, the same
-// one weather and the morning summary use, not the pod's UTC. At 22:30 UTC on
+// one weather and the morning message use, not the pod's UTC. At 22:30 UTC on
 // Sunday 11 October it is already Monday 12th in Brussels: the tick must build
 // the week that starts on the 12th, and nothing dated before it.
 func TestTheTickBuildsFromTheTrainingZonesToday(t *testing.T) {

@@ -13,8 +13,7 @@ const distanceSecondsPerMeter = 1.0 / 8.0
 // openEffort is what a session with nothing to state about its main set reads.
 const openEffort = "open effort"
 
-// Summary is the main set of a workout in one line, for a calendar entry and
-// the morning email: "3 x 10 min at 250-260 W", "60 min at 180-200 W",
+// Summary is the main set of a workout in one line, for a calendar entry: "3 x 10 min at 250-260 W", "60 min at 180-200 W",
 // "45 min at 140-150 bpm", "open effort".
 //
 // It states what is prescribed, which is a target and not a health value. The

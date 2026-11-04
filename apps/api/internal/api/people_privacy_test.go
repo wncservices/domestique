@@ -12,7 +12,7 @@ import (
 )
 
 // The People admin flows used to log the invitee's address on every outcome
-// (audit N10). The mailer package's policy is the opposite, and a log line is
+// (audit N10). Keeping an address out of the log is the rule, and a log line is
 // kept far longer and read by far more people than the admin page.
 func TestPeopleFlowsDoNotLogEmailAddresses(t *testing.T) {
 	const admin = "domestique-users,domestique-admins"

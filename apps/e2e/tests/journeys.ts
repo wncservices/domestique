@@ -27,8 +27,7 @@ export async function walkRiderPages(page: Page) {
   await navigateTo(page, 'Routes', '/routes')
   await expect(page.getByRole('heading', { level: 2, name: /^\d+ routes?$/ })).toBeVisible()
 
-  // Settings lives in the account menu, not the sidebar. Notifications is
-  // where the morning summary opt-in moved to.
+  // Settings lives in the account menu, not the sidebar.
   await openAccountMenu(page)
   await page.getByRole('menuitem', { name: 'Settings' }).click()
   await expect(page).toHaveURL(/\/settings/)

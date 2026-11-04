@@ -7,8 +7,8 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 )
 
-// Whether the issuer vouched for the address travels with the session, or the
-// morning summary could not tell a verified address from a typed one.
+// Whether the issuer vouched for the address travels with the session, or
+// identity binding could not tell a verified address from a typed one.
 func TestEmailVerifiedSurvivesTheSession(t *testing.T) {
 	s := newStore(t, newBox(t))
 	for _, verified := range []bool{true, false} {

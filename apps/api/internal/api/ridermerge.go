@@ -315,9 +315,6 @@ var dropNotes = map[string]struct {
 	"calendar_feeds": {"", func(from, into string) string {
 		return fmt.Sprintf("the calendar link of %s stops working (%s's own link is kept)", from, into)
 	}},
-	"morning_summaries": {"", func(from, into string) string {
-		return fmt.Sprintf("the morning summary settings of %s are dropped (%s's own are kept)", from, into)
-	}},
 	"rider_profiles": {"", func(from, into string) string {
 		return fmt.Sprintf("the training profile of %s (FTP, test dates) is dropped; %s's own profile is kept", from, into)
 	}},

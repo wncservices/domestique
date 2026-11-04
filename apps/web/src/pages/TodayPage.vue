@@ -17,6 +17,7 @@ import type {
   LifeEvent,
   ProjectionResponse,
   CheckIn,
+  MorningMessage,
   ReadinessResponse,
   RideTogether,
   RiderProfile,
@@ -28,6 +29,7 @@ import AlternatesMenu from '@/components/plan/AlternatesMenu.vue'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
 import CheckInCard from '@/components/today/CheckInCard.vue'
+import MorningMessageCard from '@/components/today/MorningMessageCard.vue'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
 import ReadinessChip from '@/components/plan/ReadinessChip.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
@@ -77,6 +79,8 @@ const rideTogether = ref<RideTogether[]>([])
 const lifeEvents = ref<LifeEvent[]>([])
 // Today's model-written changes note; null when there is none (or the read failed).
 const notes = ref<TrainingNotes | null>(null)
+// Today's short "good morning" message; null until read, or when the read failed.
+const morning = ref<MorningMessage | null>(null)
 // True only once that read has succeeded. Until then (pending or failed) the
 // matching prompt stays hidden, so neither a slow nor a failed read looks like
 // "you have not set this up".
@@ -153,6 +157,7 @@ async function loadAll() {
     me.value?.llmJobs.explainChanges
       ? quietly(api.trainingNotes(), { changes: null, weekly: null }).then((v) => (notes.value = v))
       : Promise.resolve(),
+    quietly(api.morningMessage(), null).then((v) => (morning.value = v)),
     weather.load(),
   ])
 }
@@ -316,6 +321,8 @@ async function dismissSuggestion() {
 
       <template v-else-if="week">
         <UAlert v-if="weekFailed" color="error" variant="subtle" icon="i-lucide-triangle-alert" title="Could not refresh today. Showing what was loaded earlier." />
+
+        <MorningMessageCard v-if="morning" :message="morning" />
 
         <CheckInCard :check-in="checkIn" @saved="onCheckInSaved" @life-changed="onLifeChanged" />
 

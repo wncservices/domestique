@@ -114,7 +114,8 @@ answer without a session. The landing and privacy pages are the apex's and redir
 there from the app host.
 
 `Remote-Email` is treated as a **verified** address under this mode (it comes from Authelia's own
-user directory, which an administrator controls): see **Morning summary**.
+user directory, which an administrator controls). `Identity.EmailVerified` carries the claim; identity
+binding (below) is what reads it.
 
 **Identity binding (`mode: oidc` only).** `handleSSOCallback` resolves the rider
 through `riderForSignIn` (`internal/api/ssobinding.go`), after the token is
@@ -372,45 +373,29 @@ every auth mode (`calendar_test.go`):
   hand-written `VTIMEZONE`). `ETag` is a hash of the deterministic body, so a polling calendar app
   costs a query and a hash.
 
-## Morning summary
+## Morning message
 
-An opted-in rider gets a short plain-text email after the first sync slot of the local day
-(`sendMorningSummaries`, called from `runMetricsPassWith` after the run is recorded, so mail can
-never make a sync look failed). `internal/morningsummary` holds the pure composer and the opt-in
-table; `internal/mailer` sends.
+The Today page opens with a short "good morning" card: `GET /api/training/morning-message`
+(`morningmessage.go`, owner only, `training` required, rider from the session, built for
+`localToday`) returns `{headline, lines}`. It replaces an opt-in email that was removed; the
+`morning_summaries` table (it held riders' addresses) is dropped at start by
+`morningmessage.DropLegacyTable`, and there is no mailer, SMTP config or opt-in any more. Old
+config files that still carry a `notifications` block load fine: unknown keys are ignored.
 
-- **The address is the identity's, never the request's, and it must be verified.** `PUT` takes only
-  `{enabled}`. Under `mode: oidc` the session carries the ID token's `email_verified` claim
-  (`Identity.EmailVerified`; a missing or non-true claim is unverified, and a session from before
-  the claim existed reads as unverified, so that rider signs in again). Under `mode: proxy`,
-  `Remote-Email` is **trusted as verified**: it comes from Authelia's own user directory, which an
-  administrator controls, and is only honoured from a trusted proxy. Under `mode: none` there is no
-  address and the feature reports `no_email`. An unverified address cannot opt in or get a test, and
-  reading the status switches off a summary whose address is no longer verified.
-- **At most one per rider per day, across replicas and restarts**: `Claim` is a compare-and-set
-  made *before* the send, so a crash or a failed send never double-sends. One attempt, no retry;
-  the next day's slot is the next try. Only the day's first slot sends (the 21:00 pass never does),
-  and a late pass still sends until 12:00 local, then skips. "Today" is the schedule's zone.
-- **No readiness reasons, no numbers.** `Compose`'s `Input` carries the verdict as one word and not
-  the reasons, so sleep, HRV, resting heart rate and load cannot reach a mailbox on a relay we do
-  not control. The email points at the Fitness page for the why, and at Settings →
-  Notifications (`/settings#notifications`, where the opt-in card lives) to change or stop it. The weather line is the same rule
-  the Plan page uses. The FTP-test line names the suggested day ("tomorrow" or a
-  weekday) when it falls in the coming six days; the suggester never picks today. A day
-  inside a life event is "a planned break" (never which kind: illness is health data),
-  with no FTP line; a session the rider kept on it is still listed.
-- **The check-in link**: "Answer today's check-in: <AppURL>/today" is the first of three footer
-  links (then "Open the plan", then "Change or turn off this email"), written only when
-  `public_url` is set. The verdict word for Push is "Good to push"; still one word, no reasons.
-- **Logs**: a rider's name, and for a failure the stage and the numeric code. Never the address,
-  the subject, the verdict or a reason. The password is `DOMESTIQUE_SMTP_PASSWORD`, read in `main`
-  and held by the mailer alone. `domestique_morning_summary_total{result="sent|failed"}` is the
-  one thing worth alerting on.
-- **Config**: `public_url` and `notifications.smtp` (host, port, security `starttls`|`tls`|`none`,
-  username, from). No host means the feature is off; a partial block, or smtp without `public_url`,
-  fails `domestique validate`. The mailer fails closed on its own: any security value other than
-  those three is refused before a connection is made, and `none` is only for a loopback host
-  (`mailer.IsLoopbackHost`), in the mailer and in validation alike.
+- `internal/morningmessage` holds the pure composer. The headline is today's longest session with
+  its duration, "Rest day", "Already ridden", or "A planned break" inside a life event (never which
+  kind: illness is health data). Lines: the readiness verdict as one word ("Good to push", "Ready",
+  "Caution", "Rest"), the weather reasons (the Plan page's rule, `weather.Suggest`, only for a rider
+  who chose a town and only when bad), and an FTP-test hint when the suggested day falls in the
+  coming six days. After the ride only the headline remains.
+- **No readiness reasons, no numbers.** `Input` carries the verdict as one word and not the reasons,
+  so sleep, HRV, resting heart rate and load cannot reach the message; the only number is a
+  session's duration. `TestInputHasNoReadinessReasonsField` holds that shape. The Today page's other
+  cards carry the detail.
+- A failed forecast or an unreadable fitness/life-event read leaves that line out; only an
+  unreadable plan fails the request. Logs hold a stage and an error, never the verdict or a reason.
+- The morning-slot helpers other features gate on (`inMorningSlot`, `beforeFirstSlot`,
+  `morningSlotOf`: the day's first sync slot, until 12:00 local) live in `morningslot.go`.
 
 ## Readiness
 
@@ -1219,12 +1204,11 @@ in `elevation.Client`, per their own comments:
    outbound HTTP client in `internal/` (the list in the Observability section above) does this
    today — a new one is the thing to get right on the way in, not fix reactively once a trace
    turns up a mysteriously untraced gap in the middle of it.
-1a. **A new outbound client that is not HTTP** has no `otelhttp` to wrap. `internal/mailer` (SMTP)
-   is the first: it opens one manual span, `smtp send`, from the caller's `ctx`, with `smtp.host`
-   and `smtp.port` as its only attributes (never the recipient, the subject or the body), puts a
-   deadline on the whole conversation, closes the socket when `ctx` is cancelled, and reports a
-   failure as a stage and a numeric code only, because servers echo the recipient in their errors.
-   A new non-HTTP client follows that shape.
+1a. **A new outbound client that is not HTTP** has no `otelhttp` to wrap: open one manual span from
+   the caller's `ctx`, with the host and port as its only attributes (never a recipient, subject or
+   body), put a deadline on the whole conversation, close the socket when `ctx` is cancelled, and
+   report a failure as a stage and a numeric code only, because servers echo what they were sent in
+   their errors.
 2. **A new "this deployment doesn't have X configured" guard** (mirroring `crewAvailable`,
    `peopleAvailable`, `ElevationConfigured`, `Links.CanStore()`, …) must log when it fires, not
    just `writeJSON` the 412/501 and return. A silent one already shipped once — `recalculate
@@ -1622,7 +1606,7 @@ morning slot and only with auto-schedule on, and covers riders with a goal. Text
 `checkProse`: every number in the reply must appear in the input, so a reply that paraphrases a figure
 is refused. The check-in reading only suggests: it fills empty scores and previews a life event, and
 nothing is saved without the rider's tap; a failed reading leaves the saved check-in alone. The notes
-are app-only (`/api/training/notes`, `/api/training/checkin/understand`), so the morning email is
+are app-only (`/api/training/notes`, `/api/training/checkin/understand`), so the morning message is
 unchanged, and neither the note, the prompt nor the reply is logged. The weekly summary's
 forgiven figure is passed only once the following week is open. The weekly note is written on Monday for the
 previous week; each note is one attempt per claim, so a failed or interrupted call is not retried that day.

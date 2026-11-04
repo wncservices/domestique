@@ -24,7 +24,7 @@ func (l listOnly) ListPeople(context.Context, string, ...string) ([]auth0mgmt.Pe
 	return l.people, nil
 }
 
-// Blocking or demoting a person revokes the calendar link and morning email of
+// Blocking or demoting a person revokes the calendar link of
 // the riders they are. An account bound to a suffixed rider whose profile still
 // reads like somebody else's name must revoke its own rider, not that person's.
 func TestRidersOfPersonUsesTheBindingNotTheProfileName(t *testing.T) {

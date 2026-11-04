@@ -265,7 +265,7 @@ both riders have, and you should know both before you run it.
 
 1. **Rows that share a key: the target's wins, the source's is deleted.** Where
    the rider is part of a unique key (a profile, a wellness day, a calendar link,
-   a morning summary, a provider sign-in, a crew ride's fixed session...) the
+   a provider sign-in, a crew ride's fixed session...) the
    target's row stays and the source's is dropped. Which of the two is right is not
    something the merge can know; the target's is the one the person is signed in
    to. The dry run lists what this costs, **by name**:
@@ -274,8 +274,7 @@ both riders have, and you should know both before you run it.
    - an `accounts` (head unit) on a provider both have: the target's is kept and
      the source's is unlinked together with its sync state;
    - `calendar_feeds`: the source's **calendar link stops working**;
-   - `morning_summaries` and `rider_profiles` (FTP and test dates): the source's
-     is gone;
+   - `rider_profiles` (FTP and test dates): the source's is gone;
    - `workouts` with the same crew ride: a rider has one fixed session per crew
      ride, so the source's is dropped (with its push record; a copy already on a
      device stays there).

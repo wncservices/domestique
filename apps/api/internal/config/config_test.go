@@ -18,6 +18,27 @@ func writeConfig(t *testing.T, body string) string {
 	return path
 }
 
+// The morning email is gone, but a deployment's config file may still carry its
+// notifications block (even a now-invalid one). Loading must ignore it rather
+// than refuse to start.
+func TestAnOldNotificationsBlockStillLoadsAndValidates(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+public_url: https://domestique.example.com
+notifications:
+  smtp:
+    host: smtp.example.com
+    port: 587
+    security: none
+    from: not-an-address
+`))
+	if err != nil {
+		t.Fatalf("an old notifications block must not break loading: %v", err)
+	}
+	if cfg.PublicURL != "https://domestique.example.com" {
+		t.Errorf("public_url = %q: the calendar feed still needs it", cfg.PublicURL)
+	}
+}
+
 // A missing config is normal: the defaults are enough to start uploading.
 // The default is the database, so a fresh install has somewhere to put routes
 // without anyone creating a directory first.

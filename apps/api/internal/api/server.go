@@ -41,7 +41,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/loops"
 	"github.com/wncservices/domestique/apps/api/internal/model"
-	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -346,14 +345,6 @@ type Server struct {
 	CalendarLimiter     *ratelimit.Limiter
 	CalendarMissLimiter *ratelimit.Limiter
 
-	// MorningSummaries holds who has opted in to the morning email, and Mailer
-	// is how it leaves; see morningsummary.go. A nil Mailer, or no
-	// notifications.smtp.host in Config, means the feature is off: the endpoints
-	// answer 412 with a Warn and nothing is sent. TestMailLimiter is the budget
-	// for "send me a test".
-	MorningSummaries *morningsummary.Store
-	Mailer           Notifier
-	TestMailLimiter  *ratelimit.Limiter
 	// RideStartHour is the one-method seam to a rider's usual ride hour, which
 	// turns an all-day calendar event into a timed one. Nil means every event
 	// is all-day. Not wired in main: the weather preference's window has a
@@ -668,9 +659,7 @@ func (s *Server) Handler() http.Handler {
 	// Go patterns cannot put a suffix on a wildcard, so the handler checks
 	// the segment itself.
 	mux.HandleFunc("GET /api/calendar/{file}", s.handleCalendarFeed)
-	mux.HandleFunc("GET /api/training/morning-summary", s.handleGetMorningSummary)
-	mux.HandleFunc("PUT /api/training/morning-summary", s.handlePutMorningSummary)
-	mux.HandleFunc("POST /api/training/morning-summary/test", s.handleTestMorningSummary)
+	mux.HandleFunc("GET /api/training/morning-message", s.handleGetMorningMessage)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/best-efforts", s.handleBestEfforts)
 	mux.HandleFunc("POST /api/training/best-efforts/announce", s.handleAnnounceBestEfforts)
