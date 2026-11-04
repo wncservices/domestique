@@ -317,9 +317,7 @@ still follows its own permission or data gate.
 - **Sections** are `<section id>` with a `text-[length:var(--text-title)]` display heading and one line of
   description; the cards inside use `h3`. A section whose cards are all gated out shows
   a one-line "nothing to set here" instead of a blank gap.
-- **Notifications** holds what Domestique sends a rider: the weather card and the
-  morning summary email (`MorningSummaryCard`). The email's own "change or turn off"
-  link lands on `/settings#notifications`.
+- **Notifications** holds what Domestique warns a rider about: the weather card.
 - **One sentence per setting.** Anything longer goes unchanged behind
   `DetailsToggle label="Learn more"`. Do not delete help text to shorten a page.
 

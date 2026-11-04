@@ -107,7 +107,7 @@ func (s Schedule) Missed(lastRun, now time.Time) bool {
 }
 
 // FirstOfDay reports whether slot is the earliest slot of its local date: the
-// pass that follows the night, and so the one that may send a morning summary.
+// pass that follows the night, and so the one that morning-only work (the ledger, the morning message) belongs to.
 // A time that is not a slot at all is not the first of anything. Compared by
 // building the day's first slot the same way around() does, so a slot moved
 // forward out of a daylight-saving gap still matches.

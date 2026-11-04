@@ -2095,16 +2095,15 @@ export interface CalendarFeedLink {
   webcalUrl: string
 }
 
-/** GET/PUT /api/training/morning-summary. The address is the signed-in
- *  identity's (never typed here) and only ever one the sign-in provider
- *  vouches for. `reason` says why it is unavailable: `not_configured` (the
- *  deployment has no SMTP), `no_email` (mode none, or no address on the
- *  account) or `email_unverified`. */
-export interface MorningSummaryStatus {
-  available: boolean
-  reason?: 'not_configured' | 'no_email' | 'email_unverified'
-  enabled: boolean
-  email?: string
+/** GET /api/training/morning-message — mirrors morningMessageDTO. The Today
+ *  page's "good morning" card: a headline for the day and a few short lines
+ *  (bad weather, an FTP-test hint, a planned break, an extra session). No reasons, no
+ *  health numbers. */
+export interface MorningMessage {
+  headline: string
+  lines: string[]
+  /** False on an ordinary day: the card renders nothing. */
+  show: boolean
 }
 
 /** Where a ride-history import is. `interrupted` is what a running job reads

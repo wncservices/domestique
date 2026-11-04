@@ -48,9 +48,8 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/identities"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/llm"
-	"github.com/wncservices/domestique/apps/api/internal/mailer"
 	"github.com/wncservices/domestique/apps/api/internal/model"
-	"github.com/wncservices/domestique/apps/api/internal/morningsummary"
+	"github.com/wncservices/domestique/apps/api/internal/morningmessage"
 	"github.com/wncservices/domestique/apps/api/internal/oidcflow"
 	"github.com/wncservices/domestique/apps/api/internal/pacingpush"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -866,20 +865,10 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
-	// Who has opted in to the morning email. The table is wired
-	// unconditionally; whether anything can be sent is decided by whether
-	// notifications.smtp is configured (below).
-	morningStore, err := morningsummary.UseDB(src.Conn(), src.DSN())
-	if err != nil {
+	// The opt-in table of the retired morning email held riders' addresses:
+	// drop it wherever it still exists.
+	if err := morningmessage.DropLegacyTable(src.Conn()); err != nil {
 		return err
-	}
-	var notifier api.Notifier
-	if smtp := cfg.Notifications.SMTP; smtp.Enabled() {
-		// The password comes from the environment only and is handed to the
-		// mailer, which holds it and logs it nowhere.
-		notifier = mailer.New(mailer.Config{
-			Host: smtp.Host, Port: smtp.Port, Security: smtp.Security, Username: smtp.Username, From: smtp.From,
-		}, os.Getenv(mailer.EnvPassword))
 	}
 
 	// Wired unconditionally, the same as Crew and Schedule — a goal, rider
@@ -909,11 +898,6 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Shares:       sharesStore,
 		// The hashed calendar-feed tokens; see internal/calendarfeed.
 		CalendarFeeds: calendarFeedStore,
-		// The morning email: who opted in, how it is sent, and the budget for
-		// "send me a test" (five per rider per fifteen minutes).
-		MorningSummaries: morningStore,
-		Mailer:           notifier,
-		TestMailLimiter:  api.NewTestMailLimiter(),
 		// A calendar app polls, so a per-token budget; and one global budget
 		// for tokens nothing matches. In memory, per replica, like the rest.
 		CalendarLimiter:     api.NewCalendarLimiter(),
