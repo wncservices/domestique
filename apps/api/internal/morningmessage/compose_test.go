@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -32,7 +31,6 @@ func base() Input {
 	return Input{
 		Today:    "2026-10-03",
 		Workouts: []workout.Workout{session("Threshold 3 x 10", workout.ZoneThreshold)},
-		Verdict:  readiness.Ready,
 	}
 }
 
@@ -52,8 +50,9 @@ func TestRideDayHeadlineHasTheDuration(t *testing.T) {
 	if m.Headline != "Today: Threshold 3 x 10 (45 min)" {
 		t.Errorf("headline = %q", m.Headline)
 	}
-	if !hasLine(m, "Readiness: Ready") {
-		t.Errorf("lines = %q", m.Lines)
+	// An ordinary day adds nothing the session card does not say.
+	if m.Show || len(m.Lines) != 0 {
+		t.Errorf("an ordinary day should be hidden: show %v lines %q", m.Show, m.Lines)
 	}
 }
 
@@ -91,22 +90,41 @@ func TestAlreadyRidden(t *testing.T) {
 	}
 }
 
-func TestVerdictsAreOneWord(t *testing.T) {
-	cases := map[readiness.Verdict]string{
-		readiness.Ready: "Readiness: Ready", readiness.Push: "Readiness: Good to push",
-		readiness.Caution: "Readiness: Caution", readiness.Rest: "Readiness: Rest",
+func TestReadinessIsNotInTheMessage(t *testing.T) {
+	m := Compose(base())
+	if strings.Contains(joined(m), "Readiness") {
+		t.Errorf("readiness is the session card's job: %q", joined(m))
 	}
-	for v, want := range cases {
+}
+
+func TestShownOnlyWhenItAddsSomething(t *testing.T) {
+	cases := map[string]func(*Input){
+		"weather":       func(in *Input) { in.Weather = []string{"Rain likely, 80%, 9 to 12h"} },
+		"ftp hint":      func(in *Input) { in.FTPTest = "2026-10-06" },
+		"planned break": func(in *Input) { in.Workouts, in.Break = nil, true },
+		"extra session": func(in *Input) {
+			run := session("Easy run", workout.ZoneEndurance)
+			run.ID = "w2"
+			in.Workouts = append(in.Workouts, run)
+		},
+	}
+	for name, mutate := range cases {
 		in := base()
-		in.Verdict = v
-		if m := Compose(in); !hasLine(m, want) {
-			t.Errorf("%s: lines %q lack %q", v, m.Lines, want)
+		mutate(&in)
+		if m := Compose(in); !m.Show {
+			t.Errorf("%s: should show: %q / %q", name, m.Headline, m.Lines)
 		}
 	}
-	in := base()
-	in.Verdict = ""
-	if m := Compose(in); strings.Contains(joined(m), "Readiness") {
-		t.Error("an unknown verdict should say nothing")
+	for name, mutate := range map[string]func(*Input){
+		"rest day":       func(in *Input) { in.Workouts = nil },
+		"already ridden": func(in *Input) { in.Ridden = true; in.Weather = []string{"Rain"} },
+		"far FTP test":   func(in *Input) { in.FTPTest = "2026-10-20" },
+	} {
+		in := base()
+		mutate(&in)
+		if m := Compose(in); m.Show {
+			t.Errorf("%s: should be hidden: %q / %q", name, m.Headline, m.Lines)
+		}
 	}
 }
 
@@ -120,8 +138,8 @@ func TestWeatherOnlyWhenBad(t *testing.T) {
 		}
 	}
 	in.Weather = nil
-	if m := Compose(in); len(m.Lines) != 1 {
-		t.Errorf("only the readiness line expected, got %q", m.Lines)
+	if m := Compose(in); len(m.Lines) != 0 {
+		t.Errorf("no lines expected, got %q", m.Lines)
 	}
 }
 
@@ -193,39 +211,14 @@ func TestSeveralSessionsHeadlineIsTheLongest(t *testing.T) {
 // not the signals. Real reasons are generated here and must be unable to reach
 // the message.
 func TestNoReadinessReasonOrNumberReachesTheMessage(t *testing.T) {
-	now := time.Date(2026, 10, 3, 6, 30, 0, 0, time.UTC)
-	today := readiness.Day{
-		Date: "2026-10-03", Present: true, SleepSeconds: 6*3600 + 10*60, SleepScore: 38,
-		HRVStatus: "low", HRVLastNight: 38, HRVWeeklyAvg: 61, RestingHR: 71, ReadinessScore: 31, ReadinessLevel: "low",
-	}
-	a := readiness.Assess(today, nil, nil, "", nil, now)
-	if a.Verdict == readiness.Ready || len(a.Reasons) == 0 {
-		t.Fatalf("setup: want a verdict with reasons, got %v %v", a.Verdict, a.Reasons)
-	}
-
 	in := base()
-	in.Verdict = a.Verdict
-	m := Compose(in)
-	all := joined(m)
-	for _, reason := range a.Reasons {
-		if strings.Contains(all, reason) {
-			t.Errorf("a readiness reason is in the message: %q", reason)
-		}
-	}
-	for _, sig := range a.Signals {
-		for _, banned := range []string{sig.Value, sig.Label} {
-			if banned != "" && strings.Contains(all, banned) {
-				t.Errorf("a readiness signal %q is in the message", banned)
-			}
-		}
-	}
-	for _, banned := range []string{"6h10", "score", "HRV", "resting", "bpm", "sleep"} {
+	in.Weather = []string{"Rain likely, 80%, 9 to 12h"}
+	in.FTPTest = "2026-10-06"
+	all := joined(Compose(in))
+	for _, banned := range []string{"score", "HRV", "resting", "bpm", "sleep", "Readiness"} {
 		if strings.Contains(strings.ToLower(all), strings.ToLower(banned)) {
 			t.Errorf("%q is in the message", banned)
 		}
-	}
-	if !hasLine(m, "Readiness: Rest") && !hasLine(m, "Readiness: Caution") {
-		t.Errorf("the verdict should still be there in words: %q", m.Lines)
 	}
 }
 
@@ -235,7 +228,7 @@ func TestInputHasNoReadinessReasonsField(t *testing.T) {
 	typ := reflect.TypeOf(Input{})
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
-		if f.Type == reflect.TypeOf(readiness.Assessment{}) || f.Type == reflect.TypeOf([]readiness.Signal{}) || strings.Contains(strings.ToLower(f.Name), "reason") {
+		if f.Type == reflect.TypeOf(readiness.Verdict("")) || f.Type == reflect.TypeOf(readiness.Assessment{}) || f.Type == reflect.TypeOf([]readiness.Signal{}) || strings.Contains(strings.ToLower(f.Name), "reason") {
 			t.Errorf("Input.%s could carry readiness reasons into the message", f.Name)
 		}
 	}
@@ -250,9 +243,7 @@ func TestHeadlineCannotCarryALineBreak(t *testing.T) {
 }
 
 func TestLinesIsNeverNil(t *testing.T) {
-	in := base()
-	in.Verdict = ""
-	if m := Compose(in); m.Lines == nil {
+	if m := Compose(base()); m.Lines == nil {
 		t.Error("Lines should be an empty slice so it serialises as []")
 	}
 }

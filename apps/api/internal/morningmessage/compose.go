@@ -1,8 +1,8 @@
 // Package morningmessage composes the short "good morning" message the Today
 // page shows: a headline for the day and a few plain lines under it.
 //
-// Compose is pure and its Input is the whole privacy argument. The readiness
-// verdict arrives as one word; the reasons behind it (sleep, HRV, resting heart
+// Compose is pure and its Input is the whole privacy argument. Readiness is not in it
+// at all (the session card shows the badge), and the reasons behind it (sleep, HRV, resting heart
 // rate, load) are not in Input at all, so they cannot reach the message. The
 // Today page already shows the details beside it. The only number is a
 // session's duration.
@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wncservices/domestique/apps/api/internal/readiness"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
@@ -39,8 +38,6 @@ type Input struct {
 	Workouts []workout.Workout
 	// Ridden is true when today's session has already been ridden.
 	Ridden bool
-	// Verdict is readiness in one word. "" says nothing about readiness.
-	Verdict readiness.Verdict
 	// Weather holds the reasons today's ride window is bad ("Rain likely, 80%,
 	// 9 to 12h"); empty when it is fine, or weather is not set up.
 	Weather []string
@@ -53,10 +50,14 @@ type Input struct {
 	Break bool
 }
 
-// Message is what the Today page shows.
+// Message is what the Today page shows. Show is false on an ordinary day: the
+// session card below already says everything the headline would (and carries
+// the readiness badge), so the message appears only when it adds something: a
+// weather warning, an FTP-test hint, a planned break or an extra session.
 type Message struct {
 	Headline string
 	Lines    []string
+	Show     bool
 }
 
 // Compose returns the headline and the lines under it. Lines is never nil, so
@@ -94,15 +95,13 @@ func Compose(in Input) Message {
 			m.Lines = append(m.Lines, line)
 		}
 	}
-	if word := verdictWord(in.Verdict); word != "" {
-		m.Lines = append(m.Lines, "Readiness: "+word)
-	}
 	for _, r := range in.Weather {
 		m.Lines = append(m.Lines, oneLine(r))
 	}
 	if day := comingDay(in.Today, in.FTPTest); day != "" && !in.Break {
 		m.Lines = append(m.Lines, fmt.Sprintf("An FTP test would help: %s looks right.", day))
 	}
+	m.Show = len(m.Lines) > 0 || in.Break
 	return m
 }
 
@@ -124,20 +123,6 @@ func mainSession(ws []workout.Workout) (workout.Workout, bool) {
 		return workout.Workout{}, false
 	}
 	return ordered(ws)[0], true
-}
-
-func verdictWord(v readiness.Verdict) string {
-	switch v {
-	case readiness.Ready:
-		return "Ready"
-	case readiness.Push:
-		return "Good to push"
-	case readiness.Caution:
-		return "Caution"
-	case readiness.Rest:
-		return "Rest"
-	}
-	return ""
 }
 
 // oneLine flattens a rider-typed or composed string to one line, so a

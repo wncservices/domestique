@@ -375,20 +375,24 @@ every auth mode (`calendar_test.go`):
 
 ## Morning message
 
-The Today page opens with a short "good morning" card: `GET /api/training/morning-message`
+The Today page may open with a short message card: `GET /api/training/morning-message`
 (`morningmessage.go`, owner only, `training` required, rider from the session, built for
-`localToday`) returns `{headline, lines}`. It replaces an opt-in email that was removed; the
+`localToday`) returns `{headline, lines, show}`. It replaces an opt-in email that was removed; the
 `morning_summaries` table (it held riders' addresses) is dropped at start by
 `morningmessage.DropLegacyTable`, and there is no mailer, SMTP config or opt-in any more. Old
 config files that still carry a `notifications` block load fine: unknown keys are ignored.
 
 - `internal/morningmessage` holds the pure composer. The headline is today's longest session with
   its duration, "Rest day", "Already ridden", or "A planned break" inside a life event (never which
-  kind: illness is health data). Lines: the readiness verdict as one word ("Good to push", "Ready",
-  "Caution", "Rest"), the weather reasons (the Plan page's rule, `weather.Suggest`, only for a rider
-  who chose a town and only when bad), and an FTP-test hint when the suggested day falls in the
-  coming six days. After the ride only the headline remains.
-- **No readiness reasons, no numbers.** `Input` carries the verdict as one word and not the reasons,
+  kind: illness is health data). Lines: the weather reasons (the Plan page's rule,
+  `weather.Suggest`, only for a rider who chose a town and only when bad), an FTP-test hint when the
+  suggested day falls in the coming six days, and "Also planned: ..." for extra sessions. After the
+  ride only the headline remains.
+- **The card shows only when it adds something.** `show` is true only with at least one line or a
+  planned break; an ordinary day answers `show: false` and the Today page renders nothing, because
+  the session card below already says the session and carries the readiness badge. Readiness is
+  deliberately not in the message at all.
+- **No readiness reasons, no numbers.** `Input` carries no verdict and no reasons,
   so sleep, HRV, resting heart rate and load cannot reach the message; the only number is a
   session's duration. `TestInputHasNoReadinessReasonsField` holds that shape. The Today page's other
   cards carry the detail.

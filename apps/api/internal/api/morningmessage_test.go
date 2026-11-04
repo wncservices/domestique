@@ -13,6 +13,7 @@ import (
 type morningMessageOut struct {
 	Headline string   `json:"headline"`
 	Lines    []string `json:"lines"`
+	Show     bool     `json:"show"`
 }
 
 func (h *weatherHarness) morningMessage(user, groups string) (int, morningMessageOut, string) {
@@ -52,6 +53,9 @@ func TestMorningMessageShape(t *testing.T) {
 	}
 	if out.Lines == nil || strings.Contains(raw, `"lines":null`) {
 		t.Errorf("lines must be an array: %s", raw)
+	}
+	if out.Show {
+		t.Errorf("an ordinary day should be hidden: %s", raw)
 	}
 }
 
@@ -105,7 +109,7 @@ func TestMorningMessageCarriesBadWeatherForARiderWhoOptedIn(t *testing.T) {
 		t.Fatalf("setting a town = %d", r.StatusCode)
 	}
 	_, out, raw := h.morningMessage("alice", "cyclists")
-	if !strings.Contains(strings.Join(out.Lines, "\n"), "Rain likely") {
+	if !out.Show || !strings.Contains(strings.Join(out.Lines, "\n"), "Rain likely") {
 		t.Errorf("bad weather is not in the message: %s", raw)
 	}
 	for _, banned := range []string{"Ghent", "51.05", "3.71"} {
@@ -149,7 +153,7 @@ func TestMorningMessageOnALifeEventDaySaysBreakWithoutTheKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, out, raw := h.morningMessage("alice", "cyclists")
-	if out.Headline != "A planned break" {
+	if out.Headline != "A planned break" || !out.Show {
 		t.Errorf("headline = %q", out.Headline)
 	}
 	for _, banned := range []string{"illness", "flu", "Rest day"} {

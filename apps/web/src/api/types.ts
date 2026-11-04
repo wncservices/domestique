@@ -2097,11 +2097,13 @@ export interface CalendarFeedLink {
 
 /** GET /api/training/morning-message — mirrors morningMessageDTO. The Today
  *  page's "good morning" card: a headline for the day and a few short lines
- *  (readiness in one word, bad weather, an FTP-test hint). No reasons, no
+ *  (bad weather, an FTP-test hint, a planned break, an extra session). No reasons, no
  *  health numbers. */
 export interface MorningMessage {
   headline: string
   lines: string[]
+  /** False on an ordinary day: the card renders nothing. */
+  show: boolean
 }
 
 /** Where a ride-history import is. `interrupted` is what a running job reads

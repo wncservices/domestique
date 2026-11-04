@@ -322,7 +322,7 @@ async function dismissSuggestion() {
       <template v-else-if="week">
         <UAlert v-if="weekFailed" color="error" variant="subtle" icon="i-lucide-triangle-alert" title="Could not refresh today. Showing what was loaded earlier." />
 
-        <MorningMessageCard v-if="morning" :message="morning" />
+        <MorningMessageCard v-if="morning?.show" :message="morning" />
 
         <CheckInCard :check-in="checkIn" @saved="onCheckInSaved" @life-changed="onLifeChanged" />
 

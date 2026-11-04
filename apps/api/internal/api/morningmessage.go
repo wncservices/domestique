@@ -15,6 +15,8 @@ import (
 type morningMessageDTO struct {
 	Headline string   `json:"headline"`
 	Lines    []string `json:"lines"`
+	// Show is false on an ordinary day; the card renders nothing then.
+	Show bool `json:"show"`
 }
 
 // handleGetMorningMessage is the short "good morning" card on the Today page,
@@ -31,7 +33,7 @@ func (s *Server) handleGetMorningMessage(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	m := morningmessage.Compose(in)
-	writeJSON(w, http.StatusOK, morningMessageDTO{Headline: m.Headline, Lines: m.Lines})
+	writeJSON(w, http.StatusOK, morningMessageDTO{Headline: m.Headline, Lines: m.Lines, Show: m.Show})
 }
 
 // morningMessageInput gathers what one rider's morning message says. Only an unreadable
@@ -63,15 +65,6 @@ func (s *Server) morningMessageInput(ctx context.Context, rider string, now time
 		if !ridden[w.ID] {
 			in.Ridden = false
 		}
-	}
-
-	sessions, err := s.Training.ListSessions(ctx, rider)
-	if err != nil {
-		s.logger().Warn("morning message: could not read recent sessions", "err", err)
-	} else if latest, err := s.latestFitness(ctx, rider); err != nil {
-		s.logger().Warn("morning message: could not read fitness", "err", err)
-	} else {
-		in.Verdict = s.assessReadinessAt(ctx, rider, sessions, latest, now).Verdict
 	}
 
 	if blackout, err := s.blackoutFor(ctx, rider); err != nil {
