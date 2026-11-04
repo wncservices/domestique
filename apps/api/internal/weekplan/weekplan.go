@@ -185,3 +185,19 @@ func PlanSwap(in SwapInput) (Swap, bool) {
 	e := pool[0]
 	return Swap{HardID: h.ID, EasyID: e.ID, HardTo: e.Date, EasyTo: h.Date}, true
 }
+
+// NextFreeDay is the first day from `from` to the end of the week (weekEnd,
+// inclusive) that the rider can train and has nothing planned on. skip rules a
+// day out beyond that (a hard session never lands beside another hard day).
+// The adapter's make-up and the rider's "Not today" share it so they agree on
+// what a free day is.
+func NextFreeDay(from time.Time, weekEnd string, available, taken map[string]bool, skip func(date string) bool) (string, bool) {
+	names := [...]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+	for d := from; d.Format(dateLayout) <= weekEnd; d = d.AddDate(0, 0, 1) {
+		date := d.Format(dateLayout)
+		if available[names[d.Weekday()]] && !taken[date] && !skip(date) {
+			return date, true
+		}
+	}
+	return "", false
+}
