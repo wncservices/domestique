@@ -1,7 +1,8 @@
 // The Plan page's toolbar: one primary action and an overflow. Which of Replan
 // and "Short on time?" leads depends on whether the week has gaps; the
 // handlers stay on the page, this only decides order and labels.
-import type { TrainingWeek } from '@/api/types'
+import type { TrainingWeek, Workout } from '@/api/types'
+import { todayISO } from './rideDates.ts'
 
 export type PlanActionId = 'replan' | 'train-now' | 'life-event' | 'ftp-test' | 'export'
 
@@ -41,4 +42,12 @@ export function hasGaps(
   canFill: boolean,
 ): boolean {
   return canFill && week.end >= week.today && !!week.focus && !week.days.some((d) => d.planned.length > 0)
+}
+
+/** The indoor version can be made or undone until the session is ridden or its
+ *  day has passed (the rule the API enforces with a 409). Running has no
+ *  indoor version, and a crew ride is outdoors with the group. */
+export function canChangeIndoor(w: Workout | undefined, day: { date: string; completed: unknown[] } | undefined): boolean {
+  if (!w || !day || w.sport !== 'cycling' || w.crewRide) return false
+  return day.completed.length === 0 && day.date >= todayISO()
 }

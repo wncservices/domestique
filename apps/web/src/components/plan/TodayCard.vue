@@ -30,6 +30,7 @@ import LifeEventBand from './LifeEventBand.vue'
 import { rangeLabel } from './lifeEvents'
 import FeelRating from './FeelRating.vue'
 import IndoorBadge from './IndoorBadge.vue'
+import { canChangeIndoor } from '@/utils/planActions'
 import ExportMenu from './ExportMenu.vue'
 import OutcomeChip from './OutcomeChip.vue'
 import ReadinessChip from './ReadinessChip.vue'
@@ -195,15 +196,9 @@ function moveMenuItems(w: Workout, fromDate: string) {
 // The indoor version can be made or undone until the session is ridden or its
 // day has passed — the same rule the API enforces with a 409. Running has no
 // indoor version.
-const canChangeIndoor = computed(() => {
-  const w = firstWorkout.value
-  const day = props.day
-  // A crew ride is outdoors with the group: it has no trainer version.
-  if (!w || !day || w.sport !== 'cycling' || w.crewRide) return false
-  return day.completed.length === 0 && day.date >= todayISO()
-})
-const canConvertIndoor = computed(() => canChangeIndoor.value && !firstWorkout.value?.indoor)
-const canRevertIndoor = computed(() => canChangeIndoor.value && !!firstWorkout.value?.canRevertIndoor)
+const canChangeIndoorNow = computed(() => canChangeIndoor(firstWorkout.value, props.day))
+const canConvertIndoor = computed(() => canChangeIndoorNow.value && !firstWorkout.value?.indoor)
+const canRevertIndoor = computed(() => canChangeIndoorNow.value && !!firstWorkout.value?.canRevertIndoor)
 
 // Alternates are offered for a plan-made session that is neither ridden nor
 // past nor an FTP test; the API is the judge (it answers with no options for

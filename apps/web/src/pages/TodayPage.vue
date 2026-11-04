@@ -8,6 +8,7 @@ import InlineLink from '@/components/ui/InlineLink.vue'
 // feed a prompt (profile, goals, fitness) also remember that they failed, so
 // a failure is never mistaken for "you have not set this up".
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type {
@@ -40,10 +41,13 @@ import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import StatTile from '@/components/ui/StatTile.vue'
 import SuggestionRow from '@/components/ui/SuggestionRow.vue'
+import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
+import { useIndoor } from '@/composables/useIndoor'
 import { useLibrary } from '@/composables/useLibrary'
 import { useWeather } from '@/composables/useWeather'
 import { describeError } from '@/utils/errorMessage'
-import { localDate } from '@/utils/planDates'
+import { canChangeIndoor } from '@/utils/planActions'
+import { localDate, weekdayDateShort } from '@/utils/planDates'
 import { pushWorkoutToGarmin } from '@/utils/pushWorkout'
 import { todayISO } from '@/utils/rideDates'
 import {
@@ -64,6 +68,7 @@ import {
 import { formatDuration } from '@/utils/workoutMath'
 
 const toast = useToast()
+const router = useRouter()
 const { me, loading: libraryLoading, canManageTraining, canSyncGarmin } = useLibrary()
 const weather = useWeather()
 
@@ -237,6 +242,65 @@ async function reloadAfterSwap() {
   await Promise.all([loadWeek(), loadReadiness()])
 }
 
+// ---- Indoor version (same machinery as the Plan page) ----
+
+const indoor = useIndoor({
+  toast,
+  errorMessage: describeError,
+  reload: reloadAfterSwap,
+})
+const canIndoor = computed(() => canChangeIndoor(workout.value ?? undefined, today.value))
+const canConvertIndoor = computed(() => canIndoor.value && !workout.value?.indoor)
+const canRevertIndoor = computed(() => canIndoor.value && !!workout.value?.canRevertIndoor)
+
+// ---- Not today ----
+
+const canSkipToday = computed(
+  () => !!workout.value && !ridden.value && !workout.value.crewRide && !workout.value.testProtocol,
+)
+const moving = ref(false)
+
+async function notToday() {
+  const w = workout.value
+  if (!w || moving.value) return
+  moving.value = true
+  try {
+    const result = await api.moveWorkoutNext(w.id)
+    let undone = false
+    toast.add({
+      title: `Moved to ${weekdayDateShort(result.workout.date ?? '')}`,
+      icon: 'i-lucide-calendar-check',
+      actions: [
+        {
+          label: 'Undo',
+          color: 'neutral',
+          variant: 'outline',
+          onClick: async () => {
+            if (undone) return
+            undone = true
+            try {
+              await api.updateWorkout(w.id, { date: result.from })
+              await loadAll()
+            } catch (err) {
+              toast.add({ title: 'Could not undo the move', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+            }
+          },
+        },
+      ],
+    })
+    await reloadAfterSwap()
+  } catch (err) {
+    toast.add({
+      title: describeError(err),
+      icon: 'i-lucide-clock',
+      color: 'warning',
+      actions: [{ label: 'Open the plan', color: 'neutral', variant: 'outline', onClick: () => void router.push('/plan') }],
+    })
+  } finally {
+    moving.value = false
+  }
+}
+
 // ---- Tiles ----
 
 const form = computed(() => formTile(snapshots.value, !fitnessLoaded.value))
@@ -369,7 +433,7 @@ async function dismissSuggestion() {
               <p v-if="extraCount > 0" class="text-[length:var(--text-label)] text-muted"><InlineLink to="/plan">+{{ extraCount }} more today</InlineLink>, see the Plan page.</p>
 
               <div v-if="!ridden" class="flex flex-wrap items-center gap-2">
-                <UButton v-if="canSyncGarmin" color="primary" icon="i-lucide-watch" :loading="pushing" @click="pushToGarmin">
+                <UButton v-if="canSyncGarmin" color="primary" size="sm" icon="i-lucide-watch" :loading="pushing" @click="pushToGarmin">
                   Send to Garmin
                 </UButton>
                 <AlternatesMenu
@@ -380,6 +444,15 @@ async function dismissSuggestion() {
                   label="Swap"
                   @changed="reloadAfterSwap"
                 />
+                <UButton v-if="canConvertIndoor" color="neutral" variant="outline" size="sm" icon="i-lucide-house" @click="indoor.openConvert(workout)">
+                  Indoor version
+                </UButton>
+                <UButton v-if="canRevertIndoor" color="neutral" variant="outline" size="sm" icon="i-lucide-undo-2" @click="indoor.openRevert(workout)">
+                  Back to outdoor
+                </UButton>
+                <UButton v-if="canSkipToday" color="neutral" variant="outline" size="sm" icon="i-lucide-calendar-arrow-down" :loading="moving" @click="notToday">
+                  Not today
+                </UButton>
               </div>
 
               <UCollapsible v-if="!ridden && workout.steps.length > 0" v-model:open="aboutOpen">
@@ -474,5 +547,16 @@ async function dismissSuggestion() {
         </SuggestionRow>
       </template>
     </template>
+
+    <IndoorConvertModal
+      v-model:open="indoor.open.value"
+      :mode="indoor.mode.value"
+      :workout="indoor.target.value"
+      :preview="indoor.preview.value"
+      :loading="indoor.loading.value"
+      :busy="indoor.busy.value"
+      :error="indoor.error.value"
+      @confirm="indoor.confirm"
+    />
   </AppPage>
 </template>
