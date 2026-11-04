@@ -413,8 +413,11 @@ async function dismissSuggestion() {
                 :verdict="readiness!.today.verdict"
                 :reasons="readiness!.today.reasons ?? []"
               >
+                <!-- Plain text, not a nested popover: a second floating layer inside this one can close it. -->
                 <template v-if="todayWhy" #changes>
-                  <WhyPopover :why="todayWhy" />
+                  <p class="text-[length:var(--text-label)] text-muted">
+                    Today: {{ todayWhy.title }}<span v-if="todayWhy.text">. {{ todayWhy.text }}</span>
+                  </p>
                 </template>
               </ReadinessChip>
               <UBadge v-else-if="ridden" color="primary" variant="subtle" icon="i-lucide-circle-check">
