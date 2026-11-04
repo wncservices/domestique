@@ -14,14 +14,15 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
-// Text returns the canonical shape of w. Power targets become a percentage
-// of ftp, rounded to 5 %; with no ftp (0 or less) they read "power" with no
+// Text returns the canonical shape of w. The session name is left out: it is
+// typed by the rider and the explanation cache is shared, so it must not reach
+// the text. Power targets become a percentage of ftp, rounded to 5 %; with no ftp (0 or less) they read "power" with no
 // number. Heart rate, pace and cadence read their name only, and an open
 // target reads "open".
 func Text(w workout.Workout, ftp float64) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "sport %s\n", oneLine(string(w.Sport)))
-	fmt.Fprintf(&b, "session %s\n", oneLine(w.Name))
+	fmt.Fprintf(&b, "sport %s\n", w.Sport)
+	fmt.Fprintf(&b, "zone %s\n", zone(w.Zone))
 	writeSteps(&b, w.Steps, ftp, 0)
 	return b.String()
 }
@@ -103,7 +104,11 @@ func roundTo5(pct float64) int {
 	return int(math.Round(pct/5)) * 5
 }
 
-// oneLine keeps a free-text name from breaking the line structure.
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+// zone is the session's training-load bucket; an unset zone (an unknown or
+// older row) reads "unset" so it still has a stable shape.
+func zone(z workout.Zone) string {
+	if z == "" {
+		return "unset"
+	}
+	return string(z)
 }
