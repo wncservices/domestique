@@ -11,6 +11,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -19,15 +20,30 @@ import (
 // typed by the rider and the explanation cache is shared, so it must not reach
 // the text. Sport and zone are written only from known values, so free text
 // stored in either cannot reach it. Power targets become a percentage of ftp,
-// rounded to 5 %; with no usable ftp (zero, negative, NaN or infinite) they
+// rounded to 5 %; an FTP test adds a `test <protocol>` line (known protocols only); with no usable ftp (zero, negative, NaN or infinite) they
 // read "power" with no number. Heart rate, pace and cadence read their name
 // only, and an open target reads "open".
 func Text(w workout.Workout, ftp float64) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "sport %s\n", sport(w.Sport))
 	fmt.Fprintf(&b, "zone %s\n", zone(w.Zone))
+	if w.TestProtocol != "" {
+		// Test steps are open, so without this a test and a plain session of
+		// the same steps would share one explanation.
+		fmt.Fprintf(&b, "test %s\n", testProtocol(w.TestProtocol))
+	}
 	writeSteps(&b, w.Steps, ftp, 0)
 	return b.String()
+}
+
+// testProtocol writes a protocol only from the known ids; the column is text.
+func testProtocol(p string) string {
+	switch p {
+	case fitnesstest.ProtocolRamp, fitnesstest.ProtocolTwentyMinute, fitnesstest.ProtocolTwoByEight:
+		return p
+	default:
+		return "unknown"
+	}
 }
 
 // Key is the hex sha256 of a shape text, the cache key for its explanation.
@@ -89,11 +105,17 @@ func kind(i workout.Intensity) string {
 func duration(s workout.WorkoutStep) string {
 	switch s.Duration {
 	case workout.DurationTime:
+		if !finite(s.Seconds) {
+			return "open"
+		}
 		if s.Seconds < 120 {
 			return fmt.Sprintf("%ds", int(math.Round(s.Seconds)))
 		}
 		return fmt.Sprintf("%dmin", int(math.Round(s.Seconds/60)))
 	case workout.DurationDistance:
+		if !finite(s.Meters) {
+			return "open"
+		}
 		return fmt.Sprintf("%dm", int(math.Round(s.Meters)))
 	default:
 		return "open"
