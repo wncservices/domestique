@@ -266,9 +266,7 @@ const canRevertIndoor = computed(() => canIndoor.value && !!workout.value?.canRe
 
 // ---- Not today ----
 
-const canSkipToday = computed(
-  () => !!workout.value && !ridden.value && !workout.value.crewRide && !workout.value.testProtocol,
-)
+const canSkipToday = computed(() => !!workout.value && !workout.value.crewRide && !workout.value.testProtocol)
 const moving = ref(false)
 
 async function notToday() {
@@ -278,8 +276,10 @@ async function notToday() {
   try {
     const result = await api.moveWorkoutNext(w.id)
     let undone = false
+    let undoing = false
+    const movedTo = result.workout.date ? `Moved to ${weekdayDateShort(result.workout.date)}` : 'Moved to another day'
     toast.add({
-      title: `Moved to ${weekdayDateShort(result.workout.date ?? '')}`,
+      title: movedTo,
       icon: 'i-lucide-calendar-check',
       actions: [
         {
@@ -287,13 +287,16 @@ async function notToday() {
           color: 'neutral',
           variant: 'outline',
           onClick: async () => {
-            if (undone) return
-            undone = true
+            if (undone || undoing) return
+            undoing = true
             try {
               await api.updateWorkout(w.id, { date: result.from })
+              undone = true
               await loadAll()
             } catch (err) {
               toast.add({ title: 'Could not undo the move', description: describeError(err), icon: 'i-lucide-triangle-alert', color: 'error' })
+            } finally {
+              undoing = false
             }
           },
         },

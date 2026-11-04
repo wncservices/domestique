@@ -30,7 +30,8 @@ type weekFocusDTO struct {
 	TargetTSS   float64 `json:"targetTss,omitempty"`
 	// The load ledger's figures, whole TSS, for the current week only and only
 	// where the ledger runs. CarriedTSS is what last week rolled in, ForgivenTSS
-	// what it let go of. The debt itself is not sent: the strip never shows it.
+	// what it let go of. The ring's debt, ridden and effective target are sent
+	// below, for the current week when there is a ledger row.
 	CarriedTSS  float64 `json:"carriedTss,omitempty"`
 	ForgivenTSS float64 `json:"forgivenTss,omitempty"`
 	// What Today's ring shows: load ridden this week, the target it is measured
