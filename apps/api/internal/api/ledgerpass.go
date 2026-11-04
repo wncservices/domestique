@@ -185,9 +185,11 @@ func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool, rep
 	}
 
 	reduced := planWeek.Recovery || planWeek.Phase == periodization.PhaseTaper
-	// Opened on the target not yet being set, not on the row being new: a crash
-	// between the claim and the open must not skip opening forever.
-	if row.TargetTSS == 0 {
+	// Opened on neither the target nor the open-day count being set, not on the
+	// row being new: a crash between the claim and the open must not skip
+	// opening forever. A week that opens with a target of 0 still records at
+	// least one open day (see openLedgerWeek), so it is not reopened each morning.
+	if row.TargetTSS == 0 && row.OpenDays == 0 {
 		row, err = s.openLedgerWeek(ctx, rider, monday, planWeek, profile, blackout, sessions, workouts, reduced)
 		if err != nil {
 			s.logger().Warn("load ledger: could not open the week", "rider", rider, "err", err)
@@ -312,7 +314,9 @@ func (s *Server) openLedgerWeek(ctx context.Context, rider string, monday time.T
 		}
 	}
 	target = math.Min(target, built)
-	openDays := ledger.OpenDays(profile.AvailableDays, weekStart, blackout)
+	// At least 1, which is what marks the week as opened even when its target is
+	// 0; a target of 0 scales to 0 whatever the day count, so nothing else moves.
+	openDays := max(1, ledger.OpenDays(profile.AvailableDays, weekStart, blackout))
 
 	lastStart := monday.AddDate(0, 0, -7).Format(dateLayout)
 	var rolled, forgiven float64
