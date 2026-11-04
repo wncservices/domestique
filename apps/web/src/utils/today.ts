@@ -371,12 +371,16 @@ export function weekRing(
   focus: Pick<WeekFocus, 'riddenTss' | 'debtTss' | 'effectiveTargetTss' | 'targetTss'> | undefined | null,
 ): WeekRingFigures | null {
   if (!focus || focus.riddenTss === undefined) return null
-  const targetRaw = focus.effectiveTargetTss ?? focus.targetTss ?? 0
+  // A zero effective target is no target: fall back to the plain one.
+  const effective = focus.effectiveTargetTss ?? 0
+  const targetRaw = effective > 0 ? effective : (focus.targetTss ?? 0)
   if (targetRaw <= 0) return null
   const ridden = Math.round(focus.riddenTss)
   const target = Math.round(targetRaw)
-  const debt = Math.round(focus.debtTss ?? 0)
+  // "All made up" is decided on the unrounded debt, so 0.4 owed reads as made up.
+  const debtRaw = Math.max(0, focus.debtTss ?? 0)
+  const debt = Math.round(debtRaw)
   const fraction = Math.min(1, Math.max(0, focus.riddenTss / targetRaw))
-  const tail = debt > 0 ? `${debt} to make up` : 'all made up'
+  const tail = debtRaw > 0.5 ? `${debt} to make up` : 'all made up'
   return { ridden, target, debt, fraction, line: `${ridden} of ${target} TSS \u00b7 ${tail}` }
 }

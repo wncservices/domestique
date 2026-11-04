@@ -388,6 +388,19 @@ test('week ring: falls back to targetTss without an effective target', () => {
   assert.equal(weekRing({ riddenTss: 100, targetTss: 400 }).target, 400)
 })
 
+test('week ring: a zero effective target falls back to the plain target', () => {
+  const ring = weekRing({ riddenTss: 100, effectiveTargetTss: 0, targetTss: 400, debtTss: 0 })
+  assert.equal(ring.target, 400)
+  assert.equal(ring.line, '100 of 400 TSS \u00b7 all made up')
+  assert.equal(weekRing({ riddenTss: 100, effectiveTargetTss: 0 }), null)
+})
+
+test('week ring: "all made up" is decided on the unrounded debt', () => {
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.4 }).line, '65 of 410 TSS \u00b7 all made up')
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.5 }).line, '65 of 410 TSS \u00b7 all made up')
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.6 }).line, '65 of 410 TSS \u00b7 1 to make up')
+})
+
 test('week ring: fraction is clamped to 0..1', () => {
   assert.equal(weekRing({ riddenTss: 500, effectiveTargetTss: 410, debtTss: 0 }).fraction, 1)
   assert.equal(weekRing({ riddenTss: 0, effectiveTargetTss: 410, debtTss: 410 }).fraction, 0)
