@@ -1,6 +1,6 @@
 // Package workoutshape turns a planned session into its canonical shape: the
 // text that says what the session asks for, with no watts, heart-rate
-// figures, paces, dates or rider. Two riders with the same session at
+// figures, paces, dates, names or rider. Two riders with the same session at
 // different FTPs share one shape, so they can share one explanation.
 package workoutshape
 
@@ -11,17 +11,20 @@ import (
 	"math"
 	"strings"
 
+	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // Text returns the canonical shape of w. The session name is left out: it is
 // typed by the rider and the explanation cache is shared, so it must not reach
-// the text. Power targets become a percentage of ftp, rounded to 5 %; with no ftp (0 or less) they read "power" with no
-// number. Heart rate, pace and cadence read their name only, and an open
-// target reads "open".
+// the text. Sport and zone are written only from known values, so free text
+// stored in either cannot reach it. Power targets become a percentage of ftp,
+// rounded to 5 %; with no usable ftp (zero, negative, NaN or infinite) they
+// read "power" with no number. Heart rate, pace and cadence read their name
+// only, and an open target reads "open".
 func Text(w workout.Workout, ftp float64) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "sport %s\n", w.Sport)
+	fmt.Fprintf(&b, "sport %s\n", sport(w.Sport))
 	fmt.Fprintf(&b, "zone %s\n", zone(w.Zone))
 	writeSteps(&b, w.Steps, ftp, 0)
 	return b.String()
@@ -36,13 +39,36 @@ func Key(text string) string {
 func writeSteps(b *strings.Builder, steps []workout.WorkoutStep, ftp float64, depth int) {
 	indent := strings.Repeat("  ", depth)
 	for _, s := range steps {
-		if s.Repeat >= 2 {
-			fmt.Fprintf(b, "%srepeat %dx\n", indent, s.Repeat)
+		if len(s.Steps) > 0 {
+			// A block is any step with children; Repeat below 2 is one pass.
+			fmt.Fprintf(b, "%srepeat %dx\n", indent, max(s.Repeat, 1))
 			writeSteps(b, s.Steps, ftp, depth+1)
 			continue
 		}
 		fmt.Fprintf(b, "%s%s %s %s\n", indent, kind(s.Intensity), duration(s), target(s, ftp))
 	}
+}
+
+// sport writes the sport the workout is stored under. An empty sport is
+// cycling, as the database defaults it; anything else unknown reads "other".
+func sport(s model.Sport) string {
+	switch s {
+	case "", model.SportCycling:
+		return string(model.SportCycling)
+	case model.SportRunning:
+		return string(model.SportRunning)
+	default:
+		return "other"
+	}
+}
+
+// zone writes the training-load bucket when it is one of the known zones, and
+// "unset" for anything else, including the empty zone of an older row.
+func zone(z workout.Zone) string {
+	if z == workout.ZoneEndurance || workout.IsStructuredZone(z) {
+		return string(z)
+	}
+	return "unset"
 }
 
 func kind(i workout.Intensity) string {
@@ -77,7 +103,7 @@ func duration(s workout.WorkoutStep) string {
 func target(s workout.WorkoutStep, ftp float64) string {
 	switch s.Target {
 	case workout.TargetPower:
-		if ftp <= 0 {
+		if !usableFTP(ftp) || !finite(s.TargetLow) || !finite(s.TargetHigh) {
 			return "power"
 		}
 		lo := roundTo5(s.TargetLow / ftp * 100)
@@ -100,15 +126,14 @@ func target(s workout.WorkoutStep, ftp float64) string {
 	}
 }
 
-func roundTo5(pct float64) int {
-	return int(math.Round(pct/5)) * 5
+func usableFTP(ftp float64) bool {
+	return ftp > 0 && finite(ftp)
 }
 
-// zone is the session's training-load bucket; an unset zone (an unknown or
-// older row) reads "unset" so it still has a stable shape.
-func zone(z workout.Zone) string {
-	if z == "" {
-		return "unset"
-	}
-	return string(z)
+func finite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func roundTo5(pct float64) int {
+	return int(math.Round(pct/5)) * 5
 }
