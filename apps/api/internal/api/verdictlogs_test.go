@@ -19,6 +19,8 @@ var verdictLines = []string{
 	"load ledger: could not update a workout",
 	"adapt: could not step a workout down",
 	"adapt: could not update a workout",
+	"adapt: could not apply the return ramp",
+	"load ledger: could not record the upgrade",
 }
 
 // assertNoRiderBesideAVerdict fails when a verdict-bearing line names the

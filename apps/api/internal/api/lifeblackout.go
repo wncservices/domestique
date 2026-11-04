@@ -92,7 +92,7 @@ func (s *Server) applyReturnRamp(ctx context.Context, rider string, workouts []w
 		}
 		wk := byID[c.WorkoutID]
 		if err := s.applyLifeUpdate(ctx, wk, profile, c); err != nil {
-			s.logger().Warn("adapt: could not apply the return ramp to a workout", "workout", wk.ID, "rider", rider, "err", err)
+			s.logger().Warn("adapt: could not apply the return ramp to a workout", "workout", wk.ID, "err", err)
 			continue
 		}
 		applied[c.WorkoutID] = true
@@ -104,6 +104,6 @@ func (s *Server) applyReturnRamp(ctx context.Context, rider string, workouts []w
 			s.recordAdjustment(ctx, rider, wk.ID, rec, wk.Indoor)
 		}
 		// The rule id and the kind of event, never the reason or a date next to a name.
-		s.logger().Info("workout adapted automatically", "workout", wk.ID, "rider", rider, "change", "return ramp", "rule", string(why.IllnessRamp))
+		s.logger().Info("workout adapted automatically", "workout", wk.ID, "change", "return ramp", "rule", string(why.IllnessRamp))
 	}
 }
