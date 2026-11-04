@@ -227,7 +227,7 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 			}
 			// A hard session is not made up beside another hard day.
 			hardMiss := weekplan.Hard(w)
-			if next, ok := nextFreeDay(today, weekEnd, available, taken, func(d string) bool {
+			if next, ok := weekplan.NextFreeDay(today, weekEnd, available, taken, func(d string) bool {
 				return hardMiss && hardBeside(d, w.ID)
 			}); ok {
 				taken[next] = true
@@ -564,20 +564,6 @@ const (
 	outcomeIncomplete outcome = "incomplete"
 	outcomeStruggled  outcome = "struggled"
 )
-
-// nextFreeDay is the first day from today to the end of the week that the
-// rider can train and has nothing planned on. skip rules a day out beyond that
-// (a hard session never lands beside another hard day).
-func nextFreeDay(today time.Time, weekEnd string, available, taken map[string]bool, skip func(date string) bool) (string, bool) {
-	names := [...]string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
-	for d := today; d.Format("2006-01-02") <= weekEnd; d = d.AddDate(0, 0, 1) {
-		date := d.Format("2006-01-02")
-		if available[names[d.Weekday()]] && !taken[date] && !skip(date) {
-			return date, true
-		}
-	}
-	return "", false
-}
 
 // nextEasySlot is the first generated, untouched, easy workout from today to
 // the end of the week that the rider has not already done — the one a missed
