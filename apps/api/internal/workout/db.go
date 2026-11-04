@@ -300,6 +300,16 @@ CREATE TABLE IF NOT EXISTS llm_notes (
     PRIMARY KEY (rider, kind, day)
 );
 
+-- workout_explanations is the shared cache of session explanations, keyed by
+-- the sha256 of a session's shape (internal/workoutshape). It holds no rider,
+-- date, name or watt figure: two riders with the same shape share one row. text
+-- is the JSON of the explanation; an empty text is a claim and reads as absent.
+CREATE TABLE IF NOT EXISTS workout_explanations (
+    key        TEXT PRIMARY KEY,
+    text       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS scheduled_weeks (
     goal_id    TEXT NOT NULL,
     week_start TEXT NOT NULL,

@@ -81,3 +81,48 @@ func TestTemplateBlocksFollowTheShapeSteps(t *testing.T) {
 		t.Errorf("work cue = %q, want the shape's target", got.Blocks[2].Cue)
 	}
 }
+
+func TestTemplateBlocksAreNeverNil(t *testing.T) {
+	got := templateExplanation(workout.Workout{Sport: model.SportCycling, Zone: workout.ZoneEndurance}, "sport cycling\nzone endurance\n")
+	if got.Blocks == nil || len(got.Blocks) != 0 {
+		t.Fatalf("blocks = %#v, want an empty non-nil slice", got.Blocks)
+	}
+}
+
+// Recovery is a name given to an easy ride; a hard session that happens to be
+// called recovery keeps its zone's text.
+func TestRecoveryTextOnlyForEasyZones(t *testing.T) {
+	hard := templateExplanation(workout.Workout{Sport: model.SportCycling, Zone: workout.ZoneThreshold, Name: "Recovery intervals"}, "")
+	if hard.Summary != explainTemplateSummaries[workout.ZoneThreshold] {
+		t.Errorf("threshold session named recovery got %q", hard.Summary)
+	}
+	unset := templateExplanation(workout.Workout{Sport: model.SportCycling, Name: "Recovery spin"}, "")
+	if unset.Summary != explainTemplateRecovery {
+		t.Errorf("unset-zone recovery got %q", unset.Summary)
+	}
+}
+
+func TestTemplateBlocksAreCappedAtEight(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("sport cycling\nzone endurance\n")
+	for i := 0; i < 12; i++ {
+		b.WriteString("work 5min 60% FTP\n")
+	}
+	blocks := templateExplanation(workout.Workout{Zone: workout.ZoneEndurance}, b.String()).Blocks
+	if len(blocks) != 8 {
+		t.Fatalf("blocks = %d, want 8", len(blocks))
+	}
+	if blocks[7].Label != "…and 5 more steps" {
+		t.Errorf("last block = %+v", blocks[7])
+	}
+	// Exactly eight steps are all shown.
+	var e strings.Builder
+	e.WriteString("sport cycling\nzone endurance\n")
+	for i := 0; i < 8; i++ {
+		e.WriteString("work 5min 60% FTP\n")
+	}
+	exact := templateExplanation(workout.Workout{Zone: workout.ZoneEndurance}, e.String()).Blocks
+	if len(exact) != 8 || strings.Contains(exact[7].Label, "more") {
+		t.Errorf("eight steps collapsed: %+v", exact)
+	}
+}

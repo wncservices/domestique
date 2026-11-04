@@ -40,14 +40,15 @@ func templateExplanation(w workout.Workout, shapeText string) llm.WorkoutExplana
 }
 
 // explainTemplateSummary picks the text by the first rule that applies: an FTP
-// test (its TestProtocol is set), then a session named as recovery, then the
-// zone. Recovery is a name, not a zone, because a recovery spin is an
-// endurance ride that the adapter names "Recovery ride".
+// test (its TestProtocol is set), then an easy session named as recovery, then
+// the zone. Recovery is a name, not a zone, because a recovery spin is an
+// endurance ride that the adapter names "Recovery ride"; a hard session with
+// "recovery" in its name keeps its own zone's text.
 func explainTemplateSummary(w workout.Workout) string {
 	switch {
 	case w.TestProtocol != "":
 		return explainTemplateTest
-	case strings.Contains(strings.ToLower(w.Name), "recovery"):
+	case (w.Zone == workout.ZoneEndurance || w.Zone == "") && strings.Contains(strings.ToLower(w.Name), "recovery"):
 		return explainTemplateRecovery
 	}
 	if s, ok := explainTemplateSummaries[w.Zone]; ok {
@@ -61,7 +62,7 @@ func explainTemplateSummary(w workout.Workout) string {
 // shape is our own canonical text, so a line that does not parse is skipped
 // rather than guessed at.
 func explainTemplateBlocks(shapeText string) []llm.ExplanationBlock {
-	var blocks []llm.ExplanationBlock
+	blocks := []llm.ExplanationBlock{}
 	for _, line := range strings.Split(shapeText, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
@@ -88,7 +89,23 @@ func explainTemplateBlocks(shapeText string) []llm.ExplanationBlock {
 		}
 		blocks = append(blocks, llm.ExplanationBlock{Label: label, Cue: cue})
 	}
-	return blocks
+	return capExplainBlocks(blocks)
+}
+
+// maxTemplateBlocks is the most blocks the template shows, the same limit the
+// model's reply keeps. Past it the rest are folded into one closing block.
+const maxTemplateBlocks = 8
+
+func capExplainBlocks(blocks []llm.ExplanationBlock) []llm.ExplanationBlock {
+	if len(blocks) <= maxTemplateBlocks {
+		return blocks
+	}
+	more := len(blocks) - (maxTemplateBlocks - 1)
+	out := append([]llm.ExplanationBlock{}, blocks[:maxTemplateBlocks-1]...)
+	return append(out, llm.ExplanationBlock{
+		Label: fmt.Sprintf("…and %d more steps", more),
+		Cue:   "Keep following the length and target of each remaining step.",
+	})
 }
 
 // explainTemplateStep names a step kind as the shape writes it.

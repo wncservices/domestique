@@ -115,3 +115,26 @@ func TestExplainWorkoutRetryCanSucceed(t *testing.T) {
 		t.Errorf("requests = %d, want 2", n)
 	}
 }
+
+// A unit after a number is a figure the shape cannot hold, even when the same
+// digits are in the shape as a percentage of FTP.
+func TestExplainWorkoutRejectsAUnitAfterAShapeNumber(t *testing.T) {
+	for _, unit := range []string{"90 watts", "90 W", "90W", "90 bpm", "90 watt"} {
+		t.Run(unit, func(t *testing.T) {
+			shape := "sport cycling\nzone threshold\nwork 8min 90% FTP\n"
+			content := `{"summary":"Hold ` + unit + ` for the work.","blocks":[{"label":"Work","cue":"Steady."}]}`
+			f := newFake(t, answer(t, content))
+			c := newClient(t, f.srv.URL, "")
+			if _, err := c.ExplainWorkout(t.Context(), shape); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err = %v, want ErrInvalid", err)
+			}
+		})
+	}
+	// A percentage and a plain number from the shape still pass.
+	shape := "sport cycling\nzone threshold\nwork 8min 90% FTP\n"
+	f := newFake(t, answer(t, `{"summary":"Hold 90% FTP for 8 minutes, with the wind.","blocks":[{"label":"Work","cue":"Steady."}]}`))
+	c := newClient(t, f.srv.URL, "")
+	if _, err := c.ExplainWorkout(t.Context(), shape); err != nil {
+		t.Fatalf("a clean reply was refused: %v", err)
+	}
+}

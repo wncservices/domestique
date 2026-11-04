@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +25,10 @@ import (
 // fake answers each request with reply(job, body), where job is the schema
 // name the request asked for. When code is not 200 it answers with that status
 // and an error body that quotes the request, which the client must never echo.
+// fakeLLMLastMu orders the handler's writes of last when a test makes several
+// model calls at once; tests read last only after their own request returned.
+var fakeLLMLastMu sync.Mutex
+
 type fakeLLM struct {
 	srv   *httptest.Server
 	reply func(job string, req []byte) string
@@ -37,14 +42,26 @@ func withLLM(t *testing.T, s *api.Server, reply func(job string, req []byte) str
 	return withLLMJobs(t, s, nil, reply)
 }
 
-// withLLMJobs is withLLM with some jobs switched off in config.
+// withLLMJobs is withLLM with some jobs switched off in config. explain_workout
+// is off unless jobs says otherwise: the morning pass writes its explanations
+// with model calls of its own, which would change the call counts of every test
+// of the other jobs. Tests of that job use withExplainLLM.
 func withLLMJobs(t *testing.T, s *api.Server, jobs map[string]bool, reply func(job string, req []byte) string) *fakeLLM {
 	t.Helper()
+	if _, set := jobs["explain_workout"]; !set {
+		withDefault := map[string]bool{"explain_workout": false}
+		for k, v := range jobs {
+			withDefault[k] = v
+		}
+		jobs = withDefault
+	}
 	f := &fakeLLM{reply: reply, code: http.StatusOK}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.calls.Add(1)
 		body, _ := io.ReadAll(r.Body)
+		fakeLLMLastMu.Lock()
 		f.last = body
+		fakeLLMLastMu.Unlock()
 		var req struct {
 			ResponseFormat struct {
 				JSONSchema struct {
@@ -66,6 +83,12 @@ func withLLMJobs(t *testing.T, s *api.Server, jobs map[string]bool, reply func(j
 	t.Cleanup(f.srv.Close)
 	s.UseLLM(llm.New(config.LLMConfig{BaseURL: f.srv.URL, Model: "qwen3.5-9b", Jobs: jobs}, ""))
 	return f
+}
+
+// withExplainLLM is withLLM with the session explainer on.
+func withExplainLLM(t *testing.T, s *api.Server, reply func(job string, req []byte) string) *fakeLLM {
+	t.Helper()
+	return withLLMJobs(t, s, map[string]bool{"explain_workout": true}, reply)
 }
 
 // fixed answers every job with the same content.

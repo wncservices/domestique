@@ -97,6 +97,7 @@ export interface Me {
     explainChanges: boolean
     understandCheckin: boolean
     weeklySummary: boolean
+    explainWorkout: boolean
   }
 }
 

@@ -3,8 +3,16 @@ package llm
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 )
+
+// unitAfterNumber matches a figure with a unit the shape never carries. The
+// shape holds only percentages of FTP, so "90 watts" is invented even when
+// "90% FTP" is in the input and the plain number check passes.
+var unitAfterNumber = regexp.MustCompile(`(?i)\d+\s*(?:w|watts?|bpm)\b`)
+
+var errUnitFigure = errors.New("llm: the text states a watt or heart-rate figure")
 
 var errBlockCount = errors.New("llm: the explanation has no blocks or more than 8")
 
@@ -83,6 +91,15 @@ func (c *Client) ExplainWorkout(ctx context.Context, shapeText string) (WorkoutE
 // checkExplanation applies the shared prose checks to every piece of text and
 // the block count limit. A number anywhere in the reply must appear in shape.
 func checkExplanation(e WorkoutExplanation, shape string) error {
+	texts := []string{e.Summary}
+	for _, b := range e.Blocks {
+		texts = append(texts, b.Label, b.Cue)
+	}
+	for _, t := range texts {
+		if unitAfterNumber.MatchString(t) {
+			return errUnitFigure
+		}
+	}
 	if err := checkProse(e.Summary, shape, maxWorkoutSentences, maxWorkoutSummaryRunes); err != nil {
 		return err
 	}

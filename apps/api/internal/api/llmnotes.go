@@ -79,12 +79,14 @@ func (s *Server) writeLLMNotes(ctx context.Context, now time.Time) {
 	}
 
 	seen := map[string]bool{}
+	var goalRiders []string
 	riders, changes, weekly := 0, 0, 0
 	for _, g := range goals {
 		if seen[g.Rider] || ctx.Err() != nil {
 			continue
 		}
 		seen[g.Rider] = true
+		goalRiders = append(goalRiders, g.Rider)
 		riders++
 		if s.writeChangesNote(ctx, g.Rider, today) {
 			changes++
@@ -95,6 +97,9 @@ func (s *Server) writeLLMNotes(ctx context.Context, now time.Time) {
 	}
 	// Counts only: a note's text, or which rider it belongs to, never goes in a log.
 	s.logger().Info("llm notes written", "riders", riders, "changes", changes, "weekly", weekly)
+	// After the notes, which riders read first: a shape's explanation is
+	// written ahead of the first time anyone opens the session.
+	s.prewriteExplanations(ctx, goalRiders, today)
 }
 
 // writeChangesNote explains the day's adjustments for one rider. It reports
