@@ -36,6 +36,7 @@ import ReadinessChip from './ReadinessChip.vue'
 import StepResultsTable from './StepResultsTable.vue'
 import WeatherBanner from './WeatherBanner.vue'
 import WeatherChip from './WeatherChip.vue'
+import SessionExplanation from './SessionExplanation.vue'
 import WhyPopover from './WhyPopover.vue'
 import WorkoutProfile from './WorkoutProfile.vue'
 import ZoneLevelBadge from './ZoneLevelBadge.vue'
@@ -605,6 +606,14 @@ function onRated(analysis: SessionAnalysis) {
             <ExportMenu :workout="firstWorkout" label="Export" size="sm" />
             <UButton color="neutral" variant="ghost" size="sm" icon="i-lucide-pencil" @click="emit('edit', firstWorkout)">Edit</UButton>
           </div>
+          <UCollapsible v-if="firstWorkout.steps.length > 0">
+            <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-down" label="About this session" />
+            <template #content>
+              <div class="mt-2">
+                <SessionExplanation :workout-id="firstWorkout.id" />
+              </div>
+            </template>
+          </UCollapsible>
         </div>
 
         <!-- Unplanned but something logged -->

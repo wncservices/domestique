@@ -12,6 +12,7 @@ import { sports } from '@/components/plan/forms'
 import IndoorBadge from '@/components/plan/IndoorBadge.vue'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
+import SessionExplanation from '@/components/plan/SessionExplanation.vue'
 import ZoneLevelBadge from '@/components/plan/ZoneLevelBadge.vue'
 import { adjustmentNote, flattenSteps, formatDuration } from '@/utils/workoutMath'
 
@@ -27,6 +28,9 @@ const props = defineProps<{
   why?: Why
   /** The route linked to the workout being edited, if any. */
   route?: WorkoutRoute
+  /** The saved workout being edited, if any: its "How to ride it" section needs
+   *  an id, so a new workout shows none. */
+  workoutId?: string
   /** Whether "Route for this ride" applies: routing is on and the ride is an
    *  outdoor cycling ride still ahead. The page decides. */
   canRoute?: boolean
@@ -90,6 +94,11 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
             {{ route ? 'Change route' : 'Route for this ride' }}
           </UButton>
         </div>
+
+        <section v-if="editing && workoutId && form.steps.length > 0" class="flex flex-col gap-2">
+          <h3 class="text-[length:var(--text-label)] font-medium text-muted">How to ride it</h3>
+          <SessionExplanation :workout-id="workoutId" />
+        </section>
 
         <UFormField label="Steps">
           <WorkoutStepEditor :model-value="form.steps" :profile="profile" :sport="form.sport" @update:model-value="(v: WorkoutStep[]) => set('steps', v)" />

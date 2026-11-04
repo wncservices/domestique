@@ -2303,3 +2303,13 @@ export interface SeasonReview {
   goals: SeasonGoal[]
   available: { years: string[]; goals: SeasonGoalPeriod[] }
 }
+
+/** GET /api/training/workouts/{id}/explanation: how to ride one planned session.
+ *  `why` is "" for a session with no goal. `source` is "template" when the fixed
+ *  text was used, which is never stored, so only "model" reads as written by one. */
+export interface WorkoutExplanation {
+  why: string
+  summary: string
+  blocks: { label: string; cue: string }[]
+  source: 'model' | 'template'
+}

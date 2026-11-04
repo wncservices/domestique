@@ -111,6 +111,7 @@ import type {
   WeatherResponse,
   AlternateKind,
   WorkoutAlternates,
+  WorkoutExplanation,
   TrainNowResponse,
   TrainNowSuggestion,
 } from './types'
@@ -1052,6 +1053,12 @@ export const api = {
     request<WorkoutAlternates>(
       `/api/training/workouts/${encodeURIComponent(id)}/alternates${today ? `?today=${encodeURIComponent(today)}` : ''}`,
     ),
+  /** How to ride a planned session: the week's "why", a summary and one cue per
+   *  step. Owner-only (404 otherwise). A cache miss can take up to a minute while
+   *  the model writes it; `source` says whether that happened or the fixed template
+   *  was used. */
+  workoutExplanation: (id: string) =>
+    request<WorkoutExplanation>(`/api/training/workouts/${encodeURIComponent(id)}/explanation`),
   /** Swaps the session in place for one alternate. A 409 means it is ridden,
    *  past, or the option is not offered any more: refetch the options. */
   swapWorkout: (id: string, kind: AlternateKind, today?: string) =>

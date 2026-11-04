@@ -1090,6 +1090,7 @@ const pageState = computed(() =>
     <WorkoutSlideover
       v-model:open="workoutModalOpen"
       :editing="!!editingWorkoutId"
+      :workout-id="editingWorkoutId ?? undefined"
       :form="workoutForm"
       :goal-options="goalOptions"
       :profile="profile"
