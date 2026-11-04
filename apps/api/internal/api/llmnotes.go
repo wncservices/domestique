@@ -248,6 +248,36 @@ func changesFallback(adjustments []workout.Adjustment) string {
 	return strings.Join(sentences, " ")
 }
 
+// pastWeekPhase is the phase of the rider's focus goal in the plan week
+// beginning weekStart, which is already behind us.
+func (s *Server) pastWeekPhase(ctx context.Context, rider, weekStart string) (string, bool) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return "", false
+	}
+	profile, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		return "", false
+	}
+	at, err := time.Parse(dateLayout, weekStart)
+	if err != nil {
+		return "", false
+	}
+	sortGoalsForFocus(goals)
+	for _, g := range goals {
+		plan, err := periodization.Build(g, profile, at)
+		if err != nil {
+			continue
+		}
+		for _, wk := range plan.Weeks {
+			if wk.StartDate == weekStart {
+				return string(wk.Phase), true
+			}
+		}
+	}
+	return "", false
+}
+
 // weekFigures is what the app knows about the plan week starting weekStart.
 // Every figure is a pointer, left nil when the app has no record of it, so the
 // model is never sent a zero it was not given. known is false when the week has
@@ -265,6 +295,12 @@ func (s *Server) weekFigures(ctx context.Context, rider, weekStart string) (llm.
 	}
 	if planned {
 		f.Phase = string(planWeek.Phase)
+		known = true
+	} else if phase, ok := s.pastWeekPhase(ctx, rider, weekStart); ok {
+		// The plan starts at the current Monday, so a week already lived is not
+		// in it. Phases hang off a fixed anchor, so the same goal's plan built
+		// as of that week still knows which phase it was.
+		f.Phase = phase
 		known = true
 	}
 
