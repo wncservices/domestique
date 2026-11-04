@@ -144,6 +144,7 @@ async function push(w: Workout) {
     <WorkoutSlideover
       v-model:open="editor.open.value"
       :editing="!!editor.editingId.value"
+      :workout-id="editor.editingId.value ?? undefined"
       :form="editor.form.value"
       :goal-options="editor.goalOptions.value"
       :profile="profile"

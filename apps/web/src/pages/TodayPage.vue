@@ -30,6 +30,7 @@ import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
 import CheckInCard from '@/components/today/CheckInCard.vue'
 import MorningMessageCard from '@/components/today/MorningMessageCard.vue'
+import SessionExplanation from '@/components/plan/SessionExplanation.vue'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
 import ReadinessChip from '@/components/plan/ReadinessChip.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
@@ -378,6 +379,15 @@ async function dismissSuggestion() {
                   @changed="reloadAfterSwap"
                 />
               </div>
+
+              <UCollapsible v-if="!ridden && workout.steps.length > 0">
+                <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-down" label="About this session" />
+                <template #content>
+                  <div class="mt-2">
+                    <SessionExplanation :workout-id="workout.id" />
+                  </div>
+                </template>
+              </UCollapsible>
 
               <DetailsToggle v-model:open="detailsOpen">
                 <div class="flex flex-col gap-2">
