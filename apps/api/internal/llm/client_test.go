@@ -399,7 +399,7 @@ func TestTransportIsOutbound(t *testing.T) {
 
 // The three text and check-in jobs must be switchable from config like the rest.
 func TestNewJobsAreInTheJobListAndConfig(t *testing.T) {
-	want := []Job{JobExplainChanges, JobUnderstandCheckIn, JobWeeklySummary}
+	want := []Job{JobExplainChanges, JobUnderstandCheckIn, JobWeeklySummary, JobExplainWorkout}
 	for _, j := range want {
 		if !slices.Contains(Jobs, j) || !slices.Contains(config.LLMJobNames, string(j)) {
 			t.Errorf("%q is missing from llm.Jobs or config.LLMJobNames", j)
