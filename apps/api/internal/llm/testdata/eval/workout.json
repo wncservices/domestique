@@ -1,0 +1,68 @@
+{
+  "cases": [
+    {
+      "name": "endurance ride",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone endurance\nwarmup 10min 50-60% FTP\nwork 70min 60-70% FTP\ncooldown 10min 40-50% FTP\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "tempo intervals",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone tempo\nwarmup 10min 50-60% FTP\nrepeat 2x\n  work 15min 80-85% FTP\n  recovery 5min 50-55% FTP\ncooldown 10min 40-50% FTP\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "sweet spot",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone sweet_spot\nwarmup 10min 50-60% FTP\nrepeat 2x\n  work 20min 90-95% FTP\n  recovery 5min 50-55% FTP\ncooldown 10min open\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "threshold",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone threshold\nwarmup 15min 50-65% FTP\nrepeat 4x\n  work 8min 100-105% FTP\n  recovery 5min 50-55% FTP\ncooldown 10min 40-50% FTP\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "vo2max",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone vo2max\nwarmup 15min 50-65% FTP\nrepeat 5x\n  work 3min 115-120% FTP\n  recovery 3min 50-55% FTP\ncooldown 10min 40-50% FTP\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "anaerobic",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone anaerobic\nwarmup 15min 50-65% FTP\nrepeat 6x\n  work 30s 150-160% FTP\n  recovery 5min 45-55% FTP\ncooldown 10min 40-50% FTP\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "easy recovery ride",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone endurance\nwarmup 5min 40-50% FTP\nrecovery 40min 45-55% FTP\ncooldown 5min 40-50% FTP\n"
+      },
+      "want": {}
+    },
+    {
+      "name": "ftp test twenty minute",
+      "lang": "en",
+      "input": {
+        "shape": "sport cycling\nzone unset\nwarmup 15min 50-65% FTP\nwork 20min open\ncooldown 10min 40-50% FTP\n"
+      },
+      "want": {}
+    }
+  ]
+}

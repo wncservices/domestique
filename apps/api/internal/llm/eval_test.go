@@ -88,6 +88,10 @@ type checkInInput struct {
 	Note string `json:"note"`
 }
 
+type workoutInput struct {
+	Shape string `json:"shape"`
+}
+
 type changesInput struct {
 	Changes []struct {
 		Title   string `json:"title"`
@@ -251,6 +255,22 @@ func TestEval(t *testing.T) {
 				Done: in.Done, Partial: in.Partial, Missed: in.Missed,
 				CTLStart: in.CTLStart, CTLEnd: in.CTLEnd,
 			})
+			return err
+		})
+	})
+
+	// explain_workout takes the canonical shape text from workoutshape.Text and
+	// passes when the job returns: its validator holds the reply to the limits
+	// and to the number and unit rules. The cases are one per zone plus an FTP
+	// test structure.
+	t.Run("explain_workout", func(t *testing.T) {
+		f := loadEval(t, "workout.json")
+		runEval(t, "explain_workout", f.Cases, func(ec evalCase) error {
+			var in workoutInput
+			if err := json.Unmarshal(ec.Input, &in); err != nil {
+				return err
+			}
+			_, err := c.ExplainWorkout(t.Context(), in.Shape)
 			return err
 		})
 	})
