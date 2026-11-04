@@ -68,6 +68,18 @@ ON CONFLICT (rider, kind, day) DO NOTHING`),
 	return n == 1, nil
 }
 
+// ReleaseLLMNote deletes a claim that never got its text, so a later pass can
+// claim the note again. A note that has text is left alone.
+func (d *DB) ReleaseLLMNote(ctx context.Context, rider, kind, day string) error {
+	_, err := d.db.ExecContext(ctx, d.query(`
+DELETE FROM llm_notes WHERE rider = ? AND kind = ? AND day = ? AND text = ''`),
+		normalizeRider(rider), kind, day)
+	if err != nil {
+		return fmt.Errorf("workout: release llm note: %w", err)
+	}
+	return nil
+}
+
 // PruneLLMNotes deletes every note dated before day (YYYY-MM-DD), for every
 // rider. Notes are only shown for recent days, so older ones are dropped.
 func (d *DB) PruneLLMNotes(ctx context.Context, before string) error {
