@@ -636,6 +636,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/workouts/{id}", s.handleGetWorkout)
 	mux.HandleFunc("PATCH /api/training/workouts/{id}", s.handleUpdateWorkout)
 	mux.HandleFunc("DELETE /api/training/workouts/{id}", s.handleDeleteWorkout)
+	mux.HandleFunc("GET /api/training/workouts/{id}/explanation", s.handleWorkoutExplanation)
 	mux.HandleFunc("GET /api/training/workouts/{id}/fit", s.handleDownloadWorkoutFIT)
 	mux.HandleFunc("GET /api/training/workouts/{id}/export", s.handleExportWorkout)
 	mux.HandleFunc("POST /api/training/import", s.handleImportUpload)
@@ -1039,11 +1040,14 @@ type llmJobsDTO struct {
 	ExplainChanges    bool `json:"explainChanges"`
 	UnderstandCheckin bool `json:"understandCheckin"`
 	WeeklySummary     bool `json:"weeklySummary"`
+	// ExplainWorkout is the per-session explanation. Off, the endpoint still
+	// answers with the fixed template.
+	ExplainWorkout bool `json:"explainWorkout"`
 }
 
 func (j llmJobsDTO) anyOn() bool {
 	return j.ExplainPlan || j.ProposeProfile || j.ProposeGoal || j.PlanEdits ||
-		j.ExplainChanges || j.UnderstandCheckin || j.WeeklySummary
+		j.ExplainChanges || j.UnderstandCheckin || j.WeeklySummary || j.ExplainWorkout
 }
 
 // UseLLM sets the model client and, when there is one, the hook that counts
@@ -1067,6 +1071,7 @@ func (s *Server) llmJobs() llmJobsDTO {
 		ExplainChanges:    s.LLM.Enabled(llm.JobExplainChanges),
 		UnderstandCheckin: s.LLM.Enabled(llm.JobUnderstandCheckIn),
 		WeeklySummary:     s.LLM.Enabled(llm.JobWeeklySummary),
+		ExplainWorkout:    s.LLM.Enabled(llm.JobExplainWorkout),
 	}
 }
 
