@@ -16,6 +16,7 @@ func sweetSpot(ftp float64) workout.Workout {
 	return workout.Workout{
 		Sport: model.SportCycling,
 		Name:  "Sweet spot",
+		Zone:  workout.ZoneSweetSpot,
 		Steps: []workout.WorkoutStep{
 			{Name: "Warm up", Intensity: workout.IntensityWarmup, Duration: workout.DurationTime,
 				Seconds: 600, Target: workout.TargetPower, TargetLow: 0.5 * ftp, TargetHigh: 0.6 * ftp},
@@ -47,8 +48,8 @@ func TestShapeHasNoWatts(t *testing.T) {
 	if !strings.Contains(text, "%") {
 		t.Errorf("shape text has no %%FTP range:\n%s", text)
 	}
-	if !strings.Contains(text, "Sweet spot") {
-		t.Errorf("shape text lost the session name:\n%s", text)
+	if !strings.Contains(text, "zone sweet_spot") {
+		t.Errorf("shape text lost the zone:\n%s", text)
 	}
 }
 
@@ -149,5 +150,33 @@ func TestDistanceSteps(t *testing.T) {
 	text := Text(w, 0)
 	if !strings.Contains(text, "800m") {
 		t.Errorf("distance step not written in metres:\n%s", text)
+	}
+}
+
+func TestShapeIgnoresTheName(t *testing.T) {
+	a := sweetSpot(250)
+	a.Name = "Sweet spot 3x8"
+	b := sweetSpot(250)
+	b.Name = "Ride to mum's 250W"
+
+	textA, textB := Text(a, 250), Text(b, 250)
+	if textA != textB {
+		t.Errorf("name changed the shape:\n%s\n---\n%s", textA, textB)
+	}
+	if Key(textA) != Key(textB) {
+		t.Errorf("name changed the key")
+	}
+	for _, name := range []string{"Sweet spot 3x8", "Ride to mum's 250W", "mum", "250"} {
+		if strings.Contains(textB, name) {
+			t.Errorf("shape text holds %q:\n%s", name, textB)
+		}
+	}
+}
+
+func TestUnsetZoneReadsUnset(t *testing.T) {
+	w := sweetSpot(250)
+	w.Zone = ""
+	if !strings.Contains(Text(w, 250), "zone unset") {
+		t.Errorf("empty zone not written as unset:\n%s", Text(w, 250))
 	}
 }
