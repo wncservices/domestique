@@ -3,6 +3,7 @@
 // testable without a DOM. Everything here reads the API shapes already used
 // by the Plan and Fitness pages; none of it invents a new one.
 import type {
+  CompletedSession,
   FitnessSnapshot,
   FtpTestSuggestion,
   ProjectionResponse,
@@ -328,4 +329,54 @@ export function buildSuggestionInputs(src: SuggestionSources): SuggestionInputs 
       text: `${src.rideTogether.routeName}, ${day(src.rideTogether.day)}.`,
     },
   }
+}
+
+// ---- Last ride feedback ----
+
+/** `ymd` moved by whole days, as a YYYY-MM-DD string (UTC arithmetic, so no DST skew). */
+function shiftDate(ymd: string, days: number): string {
+  const ms = Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10)) + days)
+  return new Date(ms).toISOString().slice(0, 10)
+}
+
+/** The ride to ask "how did it feel?" about: the latest analysed session dated
+ *  within the last three days (today included) that has no feel rating yet.
+ *  A tie on date goes to the later position in the list. */
+export function lastUnratedRide(sessions: CompletedSession[], today: string): CompletedSession | null {
+  const earliest = shiftDate(today, -2)
+  let best: CompletedSession | null = null
+  for (const s of sessions) {
+    if (!s.analysis || s.analysis.feel != null) continue
+    if (s.date < earliest || s.date > today) continue
+    if (!best || s.date >= best.date) best = s
+  }
+  return best
+}
+
+// ---- Week ring ----
+
+/** The week's ridden load against its effective target, with the line under the
+ *  ring. Null when the ledger gave no ridden figure or there is no target to
+ *  measure against: a "0 of 0" ring would be a lie. */
+export interface WeekRingFigures {
+  ridden: number
+  target: number
+  debt: number
+  /** Ridden over target, clamped to 0..1 for the ring. */
+  fraction: number
+  line: string
+}
+
+export function weekRing(
+  focus: Pick<WeekFocus, 'riddenTss' | 'debtTss' | 'effectiveTargetTss' | 'targetTss'> | undefined | null,
+): WeekRingFigures | null {
+  if (!focus || focus.riddenTss === undefined) return null
+  const targetRaw = focus.effectiveTargetTss ?? focus.targetTss ?? 0
+  if (targetRaw <= 0) return null
+  const ridden = Math.round(focus.riddenTss)
+  const target = Math.round(targetRaw)
+  const debt = Math.round(focus.debtTss ?? 0)
+  const fraction = Math.min(1, Math.max(0, focus.riddenTss / targetRaw))
+  const tail = debt > 0 ? `${debt} to make up` : 'all made up'
+  return { ridden, target, debt, fraction, line: `${ridden} of ${target} TSS \u00b7 ${tail}` }
 }

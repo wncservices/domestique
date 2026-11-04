@@ -19,6 +19,8 @@ import {
   weekLoadLabel,
   weekLedgerNote,
   workoutLoad,
+  lastUnratedRide,
+  weekRing,
 } from '../src/utils/today.ts'
 
 const step = (over) => ({ name: 's', duration: 'time', seconds: 600, target: 'power', ...over })
@@ -310,4 +312,84 @@ test('checkInComplete: all three scores answered', () => {
   assert.equal(checkInComplete({ legs: 3, mood: 0, sleepQuality: 5 }), false)
   assert.equal(checkInComplete({ legs: 0, mood: 0, sleepQuality: 0 }), false)
   assert.equal(checkInComplete(null), false)
+})
+
+// ---- Last ride feedback and the week ring ----
+
+const doneRide = (over = {}) => ({
+  id: 'garmin:1',
+  provider: 'garmin',
+  sport: 'cycling',
+  date: '2026-11-04',
+  durationSeconds: 3900,
+  trainingLoad: 65,
+  analysis: { outcome: 'completed', loadSource: 'fit_power' },
+  ...over,
+})
+const TODAY = '2026-11-04'
+
+test('last ride: picks the most recent unrated analysed ride within 3 days', () => {
+  const older = doneRide({ id: 'a', date: '2026-11-02' })
+  const latest = doneRide({ id: 'b', date: '2026-11-03' })
+  assert.equal(lastUnratedRide([older, latest], TODAY), latest)
+})
+
+test('last ride: a tie on date goes to the later position in the array', () => {
+  const first = doneRide({ id: 'a', date: '2026-11-03' })
+  const second = doneRide({ id: 'b', date: '2026-11-03' })
+  assert.equal(lastUnratedRide([first, second], TODAY), second)
+})
+
+test('last ride: skips a ride already rated', () => {
+  const rated = doneRide({ id: 'a', analysis: { outcome: 'nailed', loadSource: 'fit_power', feel: 3 } })
+  const older = doneRide({ id: 'b', date: '2026-11-02' })
+  assert.equal(lastUnratedRide([rated, older], TODAY), older)
+  assert.equal(lastUnratedRide([rated], TODAY), null)
+})
+
+test('last ride: skips a ride with no analysis', () => {
+  const unanalysed = doneRide({ id: 'a', analysis: undefined })
+  assert.equal(lastUnratedRide([unanalysed], TODAY), null)
+})
+
+test('last ride: skips a ride older than 3 days, today inclusive', () => {
+  const tooOld = doneRide({ id: 'a', date: '2026-11-01' })
+  const edge = doneRide({ id: 'b', date: '2026-11-02' })
+  assert.equal(lastUnratedRide([tooOld], TODAY), null)
+  assert.equal(lastUnratedRide([tooOld, edge], TODAY), edge)
+})
+
+test('last ride: null when there is no session at all', () => {
+  assert.equal(lastUnratedRide([], TODAY), null)
+})
+
+test('week ring: null without riddenTss or without a target', () => {
+  assert.equal(weekRing(undefined), null)
+  assert.equal(weekRing(null), null)
+  assert.equal(weekRing({ targetTss: 410 }), null)
+  assert.equal(weekRing({ riddenTss: 65 }), null)
+  assert.equal(weekRing({ riddenTss: 65, targetTss: 0 }), null)
+})
+
+test('week ring: the line names what is left to make up', () => {
+  const ring = weekRing({ riddenTss: 65.4, effectiveTargetTss: 410, debtTss: 29.7, targetTss: 400 })
+  assert.equal(ring.line, '65 of 410 TSS \u00b7 30 to make up')
+  assert.equal(ring.ridden, 65)
+  assert.equal(ring.target, 410)
+  assert.equal(ring.debt, 30)
+})
+
+test('week ring: all made up when the debt is 0 or absent', () => {
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0 }).line, '65 of 410 TSS \u00b7 all made up')
+  assert.equal(weekRing({ riddenTss: 65, targetTss: 410 }).line, '65 of 410 TSS \u00b7 all made up')
+})
+
+test('week ring: falls back to targetTss without an effective target', () => {
+  assert.equal(weekRing({ riddenTss: 100, targetTss: 400 }).target, 400)
+})
+
+test('week ring: fraction is clamped to 0..1', () => {
+  assert.equal(weekRing({ riddenTss: 500, effectiveTargetTss: 410, debtTss: 0 }).fraction, 1)
+  assert.equal(weekRing({ riddenTss: 0, effectiveTargetTss: 410, debtTss: 410 }).fraction, 0)
+  assert.equal(weekRing({ riddenTss: 205, effectiveTargetTss: 410 }).fraction, 0.5)
 })

@@ -4,9 +4,11 @@
 // readiness-design.md's "API and UI"). The reasons that produced the
 // verdict (the same list internal/adaptation reads to decide today's ease)
 // sit behind a popover rather than a tooltip so they're reachable by
-// keyboard, not just hover.
+// keyboard, not just hover. An optional `changes` slot adds what the morning
+// changed under them, and every popover links to the Fitness page.
 import { computed } from 'vue'
 import type { ReadinessVerdict } from '@/api/types'
+import InlineLink from '@/components/ui/InlineLink.vue'
 
 const props = defineProps<{
   verdict: ReadinessVerdict
@@ -46,11 +48,18 @@ const ariaLabel = computed(() => `Readiness: ${config.value.label} — show reas
     </UBadge>
 
     <template #content>
-      <div class="max-w-64 p-3">
+      <div class="flex max-w-64 flex-col gap-2 p-3">
         <ul v-if="reasons.length > 0" class="flex flex-col gap-1 pl-4 text-[length:var(--text-body)] text-muted list-disc">
           <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
         </ul>
         <p v-else class="text-[length:var(--text-body)] text-muted">No concerns today.</p>
+        <!-- What the morning changed, e.g. today's session's Why chip. -->
+        <div v-if="$slots.changes" class="flex flex-col gap-1 border-t border-default pt-2">
+          <slot name="changes" />
+        </div>
+        <p class="text-[length:var(--text-label)] text-muted">
+          <InlineLink to="/fitness">See your fitness</InlineLink>
+        </p>
       </div>
     </template>
   </UPopover>

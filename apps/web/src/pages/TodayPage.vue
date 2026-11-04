@@ -12,6 +12,7 @@ import { useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import { api } from '@/api/client'
 import type {
+  CompletedSession,
   FitnessSnapshot,
   FtpTests,
   Goal,
@@ -30,6 +31,8 @@ import AlternatesMenu from '@/components/plan/AlternatesMenu.vue'
 import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import { eventLabel, eventsOn, rangeLabel } from '@/components/plan/lifeEvents'
 import CheckInCard from '@/components/today/CheckInCard.vue'
+import LastRideCard from '@/components/today/LastRideCard.vue'
+import WeekRing from '@/components/today/WeekRing.vue'
 import MorningMessageCard from '@/components/today/MorningMessageCard.vue'
 import SessionExplanation from '@/components/plan/SessionExplanation.vue'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
@@ -57,11 +60,13 @@ import {
   eyebrowFor,
   formTile,
   greeting,
+  lastUnratedRide,
   pickSuggestion,
   powerRange,
   swappableWorkout,
   todayHeadline,
   weekLoadLabel,
+  weekRing,
   weekTiles,
   workoutLoad,
 } from '@/utils/today'
@@ -80,6 +85,8 @@ const checkIn = ref<CheckIn | null>(null)
 const goals = ref<Goal[]>([])
 const projection = ref<ProjectionResponse | null>(null)
 const snapshots = ref<FitnessSnapshot[]>([])
+// The completed rides from the same fitness read; the last ride's feel question comes from them.
+const sessions = ref<CompletedSession[]>([])
 const ftpTests = ref<FtpTests | null>(null)
 const rideTogether = ref<RideTogether[]>([])
 const lifeEvents = ref<LifeEvent[]>([])
@@ -154,6 +161,7 @@ async function loadAll() {
       .fitness()
       .then((v) => {
         snapshots.value = v.snapshots
+        sessions.value = v.sessions
         fitnessLoaded.value = true
       })
       .catch(() => {}),
@@ -210,6 +218,9 @@ const detailLine = computed(() => {
 })
 
 const swappable = computed(() => swappableWorkout(today.value, todayISO()))
+const lastRide = computed(() => lastUnratedRide(sessions.value, week.value?.today ?? todayISO()))
+const ring = computed(() => weekRing(week.value?.focus))
+const todayWhy = computed(() => workout.value?.why)
 
 async function pushToGarmin() {
   const w = workout.value
@@ -401,7 +412,11 @@ async function dismissSuggestion() {
                 v-if="showReadiness"
                 :verdict="readiness!.today.verdict"
                 :reasons="readiness!.today.reasons ?? []"
-              />
+              >
+                <template v-if="todayWhy" #changes>
+                  <WhyPopover :why="todayWhy" />
+                </template>
+              </ReadinessChip>
               <UBadge v-else-if="ridden" color="primary" variant="subtle" icon="i-lucide-circle-check">
                 {{ today?.status === 'partial' ? 'Partly done' : 'Done' }}
               </UBadge>
@@ -478,6 +493,10 @@ async function dismissSuggestion() {
             </template>
           </div>
         </UCard>
+
+        <LastRideCard v-if="lastRide" :key="lastRide.id" :session="lastRide" />
+
+        <WeekRing v-if="ring" :ring="ring" />
 
         <UCard v-if="notes?.changes && me?.llmJobs.explainChanges" variant="outline" data-testid="today-changes">
           <div class="flex flex-col gap-2">
