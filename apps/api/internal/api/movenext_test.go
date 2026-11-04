@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -186,6 +187,82 @@ func TestMoveNextRefusals(t *testing.T) {
 			t.Errorf("date = %s, want unchanged", got.Date)
 		}
 	})
+}
+
+func TestMoveNextOnSundayHasNoDayLeft(t *testing.T) {
+	// Today is Sunday 2026-10-04, so nothing after it falls in this week
+	// (weekEnd is today), however many days the rider trains.
+	f := newMoveNextFixture(t, "wed", "thu", "sat")
+	sunday := time.Date(2026, 10, 4, 10, 0, 0, 0, time.UTC)
+	f.h.srv.Clock = func() time.Time { return sunday }
+	today := f.add("Sunday ride", "2026-10-04", workout.Flags{Origin: workout.OriginRider})
+
+	resp := f.move("wilant", today.ID)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Error, "No free day left this week") {
+		t.Errorf("error = %q, want the no-free-day message", body.Error)
+	}
+	got, err := f.h.store.GetWorkout(context.Background(), today.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Date != "2026-10-04" {
+		t.Errorf("a refused move changed the date to %s", got.Date)
+	}
+}
+
+func TestMoveNextRefusesARideHandLinkedToToday(t *testing.T) {
+	f := newMoveNextFixture(t, "thu")
+	ctx := context.Background()
+	sess, err := f.h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "hand-linked", Sport: "cycling",
+		Date: "2026-09-30", DurationSeconds: 1800,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hand-linked to today's workout: the link, not the automatic match
+	// (a 30-minute ride against a 60-minute plan), makes it ridden.
+	if err := f.h.store.SetSessionLink(ctx, "wilant", sess.ID, f.today.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.mustRefuse(f.today.ID, "already ridden")
+}
+
+func TestMoveNextAllowedWhenTheRideIsLinkedAsNotPlanned(t *testing.T) {
+	f := newMoveNextFixture(t, "thu")
+	ctx := context.Background()
+	sess, err := f.h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "not-planned", Sport: "cycling",
+		Date: "2026-09-30", DurationSeconds: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An empty link says "not a planned session": it must not count as
+	// ridden today's workout, even though the duration would match it.
+	if err := f.h.store.SetSessionLink(ctx, "wilant", sess.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	resp := f.move("wilant", f.today.ID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got, err := f.h.store.GetWorkout(ctx, f.today.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Date != "2026-10-01" {
+		t.Errorf("date = %s, want 2026-10-01", got.Date)
+	}
 }
 
 func TestMoveNextIsOwnerOnly(t *testing.T) {

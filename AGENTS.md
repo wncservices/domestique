@@ -387,8 +387,8 @@ The readiness popover adds what readiness changed today (plain text, not a neste
 Fitness. The last ride card asks how the most recent analysed, unrated ride of the last three days felt
 (`lastUnratedRide`) and stays open after a rating until Done, so Legs and Life stress can still be answered.
 The week ring reads `riddenTss`, `debtTss` and `effectiveTargetTss` on the week focus: present only for the
-current week with a CTL ledger row, computed by `weekLedgerFigures`, the same function the ledger pass uses,
-so the ring and repayment cannot disagree. Without them the ring is hidden, never "0 of 0".
+current week with a CTL ledger row. Both the ledger pass (through `weekDebt`) and the week DTO go through
+`weekLedgerFigures`, so the ring and repayment cannot disagree. Without them the ring is hidden, never "0 of 0".
 
 ## Morning message
 

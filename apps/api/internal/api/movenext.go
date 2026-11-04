@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/weekplan"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -111,7 +112,7 @@ func (s *Server) handleMoveNext(w http.ResponseWriter, r *http.Request) {
 	for _, d := range profile.AvailableDays {
 		available[d] = true
 	}
-	weekEnd := mondayOfDate(now).AddDate(0, 0, 6).Format(dateLayout)
+	weekEnd := periodization.MondayOf(now).AddDate(0, 0, 6).Format(dateLayout)
 	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)
 	next, ok := weekplan.NextFreeDay(tomorrow, weekEnd, available, taken, func(string) bool { return false })
 	if !ok {
@@ -136,10 +137,4 @@ func (s *Server) handleMoveNext(w http.ResponseWriter, r *http.Request) {
 		"workout": s.workoutDTOWithWhy(ctx, updated),
 		"from":    today,
 	})
-}
-
-// mondayOfDate is the Monday of t's ISO week, at midnight in t's zone.
-func mondayOfDate(t time.Time) time.Time {
-	t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	return t.AddDate(0, 0, -((int(t.Weekday()) + 6) % 7))
 }
