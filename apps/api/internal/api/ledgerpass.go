@@ -249,7 +249,7 @@ func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool, rep
 			applied++
 			if a.Kind == "upgrade" {
 				if err := s.Training.MarkLedgerUpgraded(ctx, rider, weekStart, today); err != nil {
-					s.logger().Warn("load ledger: could not record the upgrade", "rider", rider, "err", err)
+					s.logger().Warn("load ledger: could not record the upgrade", "err", err)
 				}
 			}
 		}
@@ -445,15 +445,13 @@ func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row work
 	sunday := start.AddDate(0, 0, 6).Format(dateLayout)
 	today := s.localNow().Format(dateLayout)
 
-	var completed, remaining, riddenToday float64
+	var completed, remaining float64
 	for _, c := range sessions {
 		if c.Date >= weekStart && c.Date <= today {
 			completed += c.TrainingLoad
 		}
-		if c.Date == today {
-			riddenToday += c.TrainingLoad
-		}
 	}
+	partial := partialRideLoad(today, sessions, workouts)
 	for _, w := range workouts {
 		if w.Date < weekStart || w.Date > sunday {
 			continue
@@ -461,15 +459,54 @@ func (s *Server) weekDebt(ctx context.Context, rider, weekStart string, row work
 		if w.GoalID != "" && w.Date >= today && !adapter.WorkoutDone(w, sessions) {
 			planned := workout.PlannedTSSOrHours(w, profile.FTPWatts)
 			// A ride too short to count as the session is already in completed;
-			// only what is left of the session is still ahead.
-			if w.Date == today && riddenToday > 0 {
-				used := math.Min(planned, riddenToday)
+			// only what is left of the session is still ahead. Capped per
+			// session, and only the load that no finished session accounts for.
+			if w.Date == today {
+				used := math.Min(planned, partial[string(w.Sport)])
 				planned -= used
-				riddenToday -= used
+				partial[string(w.Sport)] -= used
 			}
 			remaining += planned
 		}
 	}
 	target := ledger.EffectiveTarget(row.TargetTSS, row.OpenDays, ledger.OpenDays(profile.AvailableDays, weekStart, lifeevents.NoTestDays(events)))
 	return ledger.Debt(target, row.CarriedInTSS, completed, remaining), nil
+}
+
+// partialRideLoad is, per sport, the load ridden today that belongs to no
+// session already done. A ride that makes a planned session count as done (the
+// same test adapter.WorkoutDone applies) is that session's own and is set aside,
+// one ride per done session; what is left is a ride too short to count, which
+// is the start of an unfinished session of the same sport. A ride in another
+// sport is nobody's start and nets against nothing.
+func partialRideLoad(today string, sessions []workout.CompletedSession, workouts []workout.Workout) map[string]float64 {
+	var todays []workout.CompletedSession
+	for _, c := range sessions {
+		if c.Date == today {
+			todays = append(todays, c)
+		}
+	}
+	used := make([]bool, len(todays))
+	for _, w := range workouts {
+		if w.Date != today || !adapter.WorkoutDone(w, sessions) {
+			continue
+		}
+		planned := workout.PlannedSeconds(w.Steps)
+		for i, c := range todays {
+			if used[i] || c.Sport != string(w.Sport) {
+				continue
+			}
+			if planned == 0 || c.DurationSeconds >= planned*0.5 {
+				used[i] = true
+				break
+			}
+		}
+	}
+	out := map[string]float64{}
+	for i, c := range todays {
+		if !used[i] {
+			out[c.Sport] += c.TrainingLoad
+		}
+	}
+	return out
 }
