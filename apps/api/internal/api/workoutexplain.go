@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ const maxExplanationsPerPass = 10
 // explanationLookaheadDays is how far ahead the morning pass writes: today and
 // the six days after it.
 const explanationLookaheadDays = 7
+
+// explanationPrewriteTimeout bounds the whole pre-write phase, so a slow model
+// cannot hold the morning pass open indefinitely.
+const explanationPrewriteTimeout = 15 * time.Minute
 
 type workoutExplanationDTO struct {
 	Why     string                 `json:"why"`
@@ -56,18 +61,24 @@ func (s *Server) handleWorkoutExplanation(w http.ResponseWriter, r *http.Request
 
 	out := workoutExplanationDTO{Why: s.workoutWhyLine(r.Context(), wk)}
 	exp, fromModel := llm.WorkoutExplanation{}, false
-	if s.LLM.Enabled(llm.JobExplainWorkout) {
+	switch {
+	case len(wk.Steps) == 0:
+		// Nothing to explain: the shape would be sport and zone alone, and the
+		// model would invent steps that are not there. No call, nothing cached.
+	case s.LLM.Enabled(llm.JobExplainWorkout):
 		exp, fromModel = s.cachedExplanation(r.Context(), key)
 		if !fromModel {
-			if !s.rateLimitNarration(w, wk.Rider) {
-				return
-			}
 			ctx, cancel := llmRequestContext(r)
-			exp, fromModel = s.generateExplanation(ctx, key, shape)
+			// The limiter is charged only once this request holds the claim, and
+			// a refusal serves the template: a rider opening sessions is not
+			// told to wait for something the page can show now.
+			exp, fromModel = s.generateExplanation(ctx, key, shape, func() bool {
+				return s.NarrationLimiter == nil || s.NarrationLimiter.Allow(wk.Rider)
+			})
 			cancel()
 		}
-	} else if s.LLM != nil {
-		s.logger().Info("workout explanation: the explain_workout job is off, serving the template")
+	case s.LLM != nil:
+		s.logger().Debug("workout explanation: the explain_workout job is off, serving the template")
 	}
 	if fromModel {
 		out.Source = "model"
@@ -106,13 +117,20 @@ func (s *Server) cachedExplanation(ctx context.Context, key string) (llm.Workout
 // same shape gets false at once instead of calling the model again. Every
 // failure gives the claim back, so the next request or pass tries again: unlike
 // a day's note there is no "already asked today" to keep.
-func (s *Server) generateExplanation(ctx context.Context, key, shape string) (llm.WorkoutExplanation, bool) {
+//
+// admit, when set, is asked once the claim is won and before the model is
+// called; false gives the claim back and answers false.
+func (s *Server) generateExplanation(ctx context.Context, key, shape string, admit func() bool) (llm.WorkoutExplanation, bool) {
 	claimed, err := s.Training.ClaimExplanation(ctx, key)
 	if err != nil {
 		s.logger().Warn("workout explanation: could not claim", "err", err)
 		return llm.WorkoutExplanation{}, false
 	}
 	if !claimed {
+		return llm.WorkoutExplanation{}, false
+	}
+	if admit != nil && !admit() {
+		s.releaseExplanation(key)
 		return llm.WorkoutExplanation{}, false
 	}
 	exp, err := s.LLM.ExplainWorkout(ctx, shape)
@@ -152,10 +170,11 @@ func (s *Server) prewriteExplanations(ctx context.Context, riders []string, toda
 	if !s.LLM.Enabled(llm.JobExplainWorkout) {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, explanationPrewriteTimeout)
+	defer cancel()
 	last := dayOffset(today, explanationLookaheadDays-1)
-	type pending struct{ key, shape string }
-	var todo []pending
-	seen := map[string]bool{}
+	type pending struct{ date, key, shape string }
+	var all []pending
 	for _, rider := range riders {
 		if ctx.Err() != nil {
 			return
@@ -175,11 +194,19 @@ func (s *Server) prewriteExplanations(ctx context.Context, riders []string, toda
 				continue
 			}
 			shape := workoutshape.Text(wk, profile.FTPWatts)
-			key := workoutshape.Key(shape)
-			if !seen[key] {
-				seen[key] = true
-				todo = append(todo, pending{key, shape})
-			}
+			all = append(all, pending{wk.Date, workoutshape.Key(shape), shape})
+		}
+	}
+	// Earliest date first across riders, so today's shapes are claimed before
+	// the cap is spent on next week's; a shape shared by several keeps its
+	// earliest date.
+	sort.SliceStable(all, func(i, j int) bool { return all[i].date < all[j].date })
+	var todo []pending
+	seen := map[string]bool{}
+	for _, p := range all {
+		if !seen[p.key] {
+			seen[p.key] = true
+			todo = append(todo, p)
 		}
 	}
 
@@ -192,7 +219,7 @@ func (s *Server) prewriteExplanations(ctx context.Context, riders []string, toda
 			continue
 		}
 		attempted++
-		if _, ok := s.generateExplanation(ctx, p.key, p.shape); ok {
+		if _, ok := s.generateExplanation(ctx, p.key, p.shape, nil); ok {
 			written++
 		}
 	}
@@ -201,7 +228,7 @@ func (s *Server) prewriteExplanations(ctx context.Context, riders []string, toda
 
 // workoutWhyLine says where the session sits in the plan, from the plan the
 // Plan page shows and without the model: "Build week 3 of 12 for Spring
-// sportive", followed by " · recovery week next" or " · taper next". A session
+// sportive", followed by " · recovery week" when this week is one, and " · recovery week next" or " · taper next" for the week after. A session
 // with no goal, or one the plan does not cover (a week already behind us, a
 // goal that cannot be planned), has an empty line.
 func (s *Server) workoutWhyLine(ctx context.Context, wk workout.Workout) string {
@@ -232,6 +259,9 @@ func whyLine(plan periodization.Plan, goalName, date string) string {
 		line := strings.ToUpper(phase[:1]) + phase[1:] + " week " + strconv.Itoa(wk.Number) + " of " + strconv.Itoa(plan.TotalWeeks)
 		if goalName != "" {
 			line += " for " + goalName
+		}
+		if wk.Recovery {
+			line += " · recovery week"
 		}
 		if i+1 < len(plan.Weeks) {
 			next := plan.Weeks[i+1]

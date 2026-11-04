@@ -45,3 +45,10 @@ func TestWhyLineIsEmptyOutsideThePlan(t *testing.T) {
 		}
 	}
 }
+
+func TestWhyLineInARecoveryWeekSaysSo(t *testing.T) {
+	got, want := whyLine(explainPlan(), "Spring sportive", "2026-10-21"), "Build week 4 of 12 for Spring sportive · recovery week"
+	if got != want {
+		t.Fatalf("whyLine = %q, want %q", got, want)
+	}
+}

@@ -4,7 +4,7 @@
 // USlideover") with a live interval-profile chart at the top, per the design
 // doc's "Workout builder" section. The page still owns workoutForm/saveWorkout;
 // this only renders it and emits back — see forms.ts for the WorkoutForm shape.
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { RiderProfile, Sport, Why, WorkoutRoute, WorkoutStep } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
@@ -41,6 +41,19 @@ const emit = defineEmits<{ 'update:form': [WorkoutForm]; save: []; route: [] }>(
 function set<K extends keyof WorkoutForm>(field: K, value: WorkoutForm[K]) {
   emit('update:form', { ...props.form, [field]: value })
 }
+
+// The explanation describes the saved session. The steps as they were when the
+// editor opened for it stand in for "saved", so an edit in progress hides the
+// section instead of showing text about steps the form no longer has.
+const openedSteps = ref('')
+watch(
+  [open, () => props.workoutId],
+  () => {
+    if (open.value) openedSteps.value = JSON.stringify(props.form.steps)
+  },
+  { immediate: true, flush: 'post' },
+)
+const stepsEdited = computed(() => JSON.stringify(props.form.steps) !== openedSteps.value)
 
 const flat = computed(() => flattenSteps(props.form.steps, props.profile))
 const totalSeconds = computed(() => flat.value.reduce((sum, s) => sum + s.seconds, 0))
@@ -97,7 +110,10 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
 
         <section v-if="editing && workoutId && form.steps.length > 0" class="flex flex-col gap-2">
           <h3 class="text-[length:var(--text-label)] font-medium text-muted">How to ride it</h3>
-          <SessionExplanation :workout-id="workoutId" />
+          <p v-if="stepsEdited" class="text-[length:var(--text-label)] text-muted">
+            This describes the saved session. Save your changes to refresh it.
+          </p>
+          <SessionExplanation v-else :workout-id="workoutId" />
         </section>
 
         <UFormField label="Steps">

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 )
 
 // The model's reply for a session. It cites no number, so the number rule in
@@ -233,6 +234,54 @@ func TestExplanationWhyLineIsEmptyWithNoGoal(t *testing.T) {
 	}
 }
 
+func TestARateLimitedMissServesTheTemplateAndKeepsNoClaim(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	f := withExplainLLM(t, h.srv, fixed(workoutExplainReply))
+	h.srv.NarrationLimiter = ratelimit.New(1, time.Hour)
+	h.srv.NarrationLimiter.Allow("wilant") // the budget is spent
+	ids := firstWorkoutIDs(t, h, 1)
+
+	code, got := getExplanation(t, h, "wilant", ids[0])
+	if code != http.StatusOK || got.Source != "template" || len(got.Blocks) == 0 {
+		t.Fatalf("limited miss = %d %+v, want the template", code, got)
+	}
+	if f.calls.Load() != 0 || explanationRows(t, h) != 0 {
+		t.Fatalf("calls = %d, rows = %d; want none (claim given back)", f.calls.Load(), explanationRows(t, h))
+	}
+}
+
+func TestACacheHitIsNotChargedToTheLimiter(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	withExplainLLM(t, h.srv, fixed(workoutExplainReply))
+	id := firstWorkoutIDs(t, h, 1)[0]
+	if code, got := getExplanation(t, h, "wilant", id); code != 200 || got.Source != "model" {
+		t.Fatalf("warm-up = %d %+v", code, got)
+	}
+	h.srv.NarrationLimiter = ratelimit.New(1, time.Hour)
+	h.srv.NarrationLimiter.Allow("wilant")
+	if code, got := getExplanation(t, h, "wilant", id); code != 200 || got.Source != "model" {
+		t.Fatalf("hit with a spent limiter = %d %+v", code, got)
+	}
+}
+
+func TestAStepLessWorkoutGetsTheTemplateWithNoCall(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	f := withExplainLLM(t, h.srv, fixed(workoutExplainReply))
+	wk := generated("wilant", h.goal.ID, "Empty", "2026-10-07", 1800)
+	wk.Steps = nil
+	w, err := h.store.CreateWorkout(context.Background(), api.LegacyFlagged(wk))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, got := getExplanation(t, h, "wilant", w.ID)
+	if code != http.StatusOK || got.Source != "template" {
+		t.Fatalf("step-less = %d %+v", code, got)
+	}
+	if f.calls.Load() != 0 || explanationRows(t, h) != 0 {
+		t.Fatalf("calls = %d, rows = %d; want none", f.calls.Load(), explanationRows(t, h))
+	}
+}
+
 // ---- pre-writing in the morning notes pass ----
 
 // clearWorkouts removes the harness's generated week so a test controls which
@@ -273,6 +322,36 @@ func TestPrewritingStopsAtTenShapes(t *testing.T) {
 	h.srv.RunLLMNotesForTest(context.Background())
 	if calls != 13 || explanationRows(t, h) != 13 {
 		t.Fatalf("after the next pass calls = %d, rows = %d; want 13 and 13", calls, explanationRows(t, h))
+	}
+}
+
+func TestPrewritingClaimsTheEarliestDatesFirst(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	clearWorkouts(t, h)
+	// Twelve shapes: the two on the last day are the ones left out.
+	for i := 0; i < 10; i++ {
+		addSession(t, h, "2026-10-06", 30+i*5)
+	}
+	addSession(t, h, "2026-10-12", 200)
+	addSession(t, h, "2026-10-12", 205)
+	var mu sync.Mutex
+	calls := 0
+	var seen []string
+	withExplainLLM(t, h.srv, explainCalls(&calls, &mu, func(job string, req []byte) string {
+		mu.Lock()
+		seen = append(seen, string(req))
+		mu.Unlock()
+		return workoutExplainReply
+	}))
+	h.at(6, 6, 45)
+	h.srv.RunLLMNotesForTest(context.Background())
+	if calls != 10 {
+		t.Fatalf("calls = %d, want 10", calls)
+	}
+	for _, r := range seen {
+		if strings.Contains(r, "200min") || strings.Contains(r, "205min") {
+			t.Fatalf("a later shape was claimed before an earlier one: %s", r)
+		}
 	}
 }
 

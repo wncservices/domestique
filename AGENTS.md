@@ -1619,17 +1619,19 @@ adjustments count (level rows and untitled rules are left out).
 
 The session explainer (`explain_workout`, `GET /api/training/workouts/{id}/explanation`) is keyed by
 the session's shape from `workoutshape.Text`: sport, a whitelisted zone (never the rider's free-text
-name), and each step's kind, duration and target as a %FTP range rounded to 5 %, so it holds no watts,
+name), the test protocol when it is an FTP test (known ids only, else `test unknown`), and each step's kind, duration and target as a %FTP range rounded to 5 %, so it holds no watts,
 name or rider, and two riders on the same session share one key (`sha256` of the text). The reply is
 cached in `workout_explanations(key, text, created_at)`, which is not rider data and is not in
 `riderTables`: an empty text is a claim, taken by `ClaimExplanation` so two racing requests make one
-model call, and released on a failed call; a claim older than 5 minutes is taken over. A miss with no
+model call, and released on a failed call; a claim older than 5 minutes is taken over. A request that loses the claim race (for example while the
+morning pass holds it), or is refused by the narration limiter, shows the template until reopened; a
+session with no steps always does. A miss with no
 model, or a failed call, answers the per-zone template from `explaintemplate.go`, which is never
 stored. The "why" line is built from the plan without the model (phase, week of total, goal name, and
-"recovery week next" or "taper next"). The morning notes pass pre-writes shapes of planned sessions in
+"recovery week" for the session's own week, "recovery week next" or "taper next" for the following one). The morning notes pass pre-writes shapes of planned sessions in
 the next 7 days for riders with a goal, at most 10 model calls per pass, and only with the job on.
 The UI shows it in `SessionExplanation.vue`, on the Today card and page and in the workout slideover.
-The evaluation cases in `testdata/eval/workout.json` (one per zone and an FTP-test structure) pass when
+The evaluation cases in `testdata/eval/workout.json` (one case per zone and an FTP-test structure) pass when
 the job returns without error.
 
 ## Conventions

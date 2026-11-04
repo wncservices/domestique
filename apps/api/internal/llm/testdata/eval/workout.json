@@ -49,10 +49,10 @@
       "want": {}
     },
     {
-      "name": "easy recovery ride",
+      "name": "intervals",
       "lang": "en",
       "input": {
-        "shape": "sport cycling\nzone endurance\nwarmup 5min 40-50% FTP\nrecovery 40min 45-55% FTP\ncooldown 5min 40-50% FTP\n"
+        "shape": "sport cycling\nzone intervals\nwarmup 15min 50-65% FTP\nrepeat 6x\n  work 4min 105-110% FTP\n  recovery 2min 50-55% FTP\ncooldown 10min 40-50% FTP\n"
       },
       "want": {}
     },
