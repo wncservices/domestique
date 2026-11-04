@@ -950,6 +950,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(req),
     }),
+  /** "Not today": moves today's session to the next free day this week. A 409
+   *  carries a rider-facing reason (crew ride, test, ridden, no free day). Undo
+   *  is updateWorkout(id, {date: from}). */
+  moveWorkoutNext: (id: string) =>
+    request<{ workout: Workout; from: string }>(`/api/training/workouts/${encodeURIComponent(id)}/move-next`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }),
   deleteWorkout: (id: string) =>
     request<{ status: string }>(`/api/training/workouts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** What the indoor version of a session would be, converting nothing. */
