@@ -373,6 +373,23 @@ every auth mode (`calendar_test.go`):
   hand-written `VTIMEZONE`). `ETag` is a hash of the deterministic body, so a polling calendar app
   costs a query and a hash.
 
+## The Today page
+
+Today acts on today; Plan stays the place for the week. Today's session card can be sent to Garmin, swapped
+(alternates), converted indoor (`canChangeIndoor` in `utils/planActions.ts`, shared with Plan) or moved with
+**Not today**: `POST /api/training/workouts/{id}/move-next` (`movenext.go`) puts today's session on the first
+available, free, non-blackout day up to Sunday (`weekplan.NextFreeDay`, the same rule the adapter's make-up
+uses), records it as a rider move, and answers `{workout, from}`; Undo is the ordinary date PATCH back to
+`from`. It refuses with 409 a crew ride, an FTP test, a session already ridden (`plannedFor`, hand links
+included), a session not dated today, and a week with no free day left. Owner-only, 404 otherwise.
+
+The readiness popover adds what readiness changed today (plain text, not a nested popover) and a link to
+Fitness. The last ride card asks how the most recent analysed, unrated ride of the last three days felt
+(`lastUnratedRide`) and stays open after a rating until Done, so Legs and Life stress can still be answered.
+The week ring reads `riddenTss`, `debtTss` and `effectiveTargetTss` on the week focus: present only for the
+current week with a CTL ledger row, computed by `weekLedgerFigures`, the same function the ledger pass uses,
+so the ring and repayment cannot disagree. Without them the ring is hidden, never "0 of 0".
+
 ## Morning message
 
 The Today page may open with a short message card: `GET /api/training/morning-message`

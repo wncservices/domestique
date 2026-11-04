@@ -1,6 +1,6 @@
 # Session explainer and an interactive Today page — design
 
-Status: approved 2026-10-26. Part 1 implemented 2026-11-04. There are two parts, shipped as two PRs: the explainer
+Status: approved 2026-10-26. Part 1 implemented 2026-11-04. Part 2 implemented 2026-11-05. There are two parts, shipped as two PRs: the explainer
 first, then Today.
 
 ## Why
