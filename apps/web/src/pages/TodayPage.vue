@@ -281,6 +281,8 @@ async function notToday() {
     toast.add({
       title: movedTo,
       icon: 'i-lucide-calendar-check',
+      // Long enough to reach Undo: the default closed it before a rider could.
+      duration: 10000,
       actions: [
         {
           label: 'Undo',
@@ -308,6 +310,7 @@ async function notToday() {
       title: describeError(err),
       icon: 'i-lucide-clock',
       color: 'warning',
+      duration: 10000,
       actions: [{ label: 'Open the plan', color: 'neutral', variant: 'outline', onClick: () => void router.push('/plan') }],
     })
   } finally {
