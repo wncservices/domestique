@@ -1,6 +1,7 @@
 package workoutshape
 
 import (
+	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -178,5 +179,85 @@ func TestUnsetZoneReadsUnset(t *testing.T) {
 	w.Zone = ""
 	if !strings.Contains(Text(w, 250), "zone unset") {
 		t.Errorf("empty zone not written as unset:\n%s", Text(w, 250))
+	}
+}
+
+func TestUnknownZoneAndSportAreNotWritten(t *testing.T) {
+	clean := sweetSpot(250)
+	clean.Zone = ""
+	clean.Sport = "junk"
+
+	hostile := sweetSpot(250)
+	hostile.Zone = "x 250W\nwarmup 99min open"
+	hostile.Sport = "junk 250\nwork 1min open"
+
+	cleanText, hostileText := Text(clean, 250), Text(hostile, 250)
+	if hostileText != cleanText {
+		t.Errorf("unknown zone or sport changed the shape:\n%s\n---\n%s", hostileText, cleanText)
+	}
+	for _, bad := range []string{"250", "junk", "x ", "99min"} {
+		if strings.Contains(hostileText, bad) {
+			t.Errorf("shape text holds %q:\n%s", bad, hostileText)
+		}
+	}
+}
+
+func TestKnownZoneIsWritten(t *testing.T) {
+	w := sweetSpot(250)
+	w.Zone = workout.ZoneVO2Max
+	if !strings.Contains(Text(w, 250), "zone vo2max") {
+		t.Errorf("known zone not written:\n%s", Text(w, 250))
+	}
+}
+
+func TestStepWithChildrenKeepsThemWithoutRepeat(t *testing.T) {
+	block := func(seconds float64) workout.Workout {
+		return workout.Workout{Sport: model.SportCycling, Steps: []workout.WorkoutStep{
+			{Repeat: 1, Name: "Block", Steps: []workout.WorkoutStep{
+				{Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: seconds,
+					Target: workout.TargetOpen},
+			}},
+		}}
+	}
+	a, b := Text(block(600), 250), Text(block(900), 250)
+	if !strings.Contains(a, "work 10min open") {
+		t.Errorf("children of a Repeat<=1 block are missing:\n%s", a)
+	}
+	if Key(a) == Key(b) {
+		t.Errorf("different children share a key:\n%s\n---\n%s", a, b)
+	}
+}
+
+func TestNonFiniteFTPWritesPowerWithoutNumber(t *testing.T) {
+	for _, ftp := range []float64{math.NaN(), math.Inf(1), -1} {
+		text := Text(sweetSpot(250), ftp)
+		if strings.Contains(text, "%") || strings.Contains(text, "NaN") || strings.Contains(text, "Inf") {
+			t.Errorf("ftp %v writes a number:\n%s", ftp, text)
+		}
+		if !strings.Contains(text, "power") {
+			t.Errorf("ftp %v does not name power:\n%s", ftp, text)
+		}
+	}
+}
+
+// Riders at odd FTPs get whole-watt targets. Their percentages land on the
+// same 5 % bands as at round FTPs, so one explanation is shared.
+func TestIntegerRoundedWattsAtOddFTPs(t *testing.T) {
+	build := func(ftp float64) workout.Workout {
+		w := workout.Workout{Sport: model.SportCycling, Zone: workout.ZoneSweetSpot}
+		for _, pct := range []float64{0.55, 0.75, 0.88, 0.95} {
+			w.Steps = append(w.Steps, workout.WorkoutStep{
+				Intensity: workout.IntensityActive, Duration: workout.DurationTime, Seconds: 300,
+				Target:    workout.TargetPower,
+				TargetLow: math.Round(pct * ftp), TargetHigh: math.Round(pct * ftp),
+			})
+		}
+		return w
+	}
+	ref := Key(Text(build(250), 250))
+	for _, ftp := range []float64{237, 251} {
+		if got := Key(Text(build(ftp), ftp)); got != ref {
+			t.Errorf("FTP %v gives a different shape:\n%s\n---\n%s", ftp, Text(build(ftp), ftp), Text(build(250), 250))
+		}
 	}
 }
