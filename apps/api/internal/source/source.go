@@ -15,6 +15,7 @@ package source
 import (
 	"context"
 	"errors"
+	"unicode/utf8"
 
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -36,6 +37,41 @@ func (e invalidError) Unwrap() error        { return e.err }
 func (e invalidError) Is(target error) bool { return target == ErrInvalid }
 
 func invalid(err error) error { return invalidError{err} }
+
+// Caps on a route's free text. Names count in characters (runes), so a
+// multi-byte name is held to the same length as an ASCII one.
+const (
+	MaxNameChars        = 200
+	MaxDescriptionChars = 5000
+	MaxTags             = 30
+	MaxTagChars         = 50
+)
+
+// ValidateText refuses a name, description or tag list past its cap. An empty
+// string or a nil list passes, so an Update that leaves a field alone can pass
+// that field as its zero value. The error wraps ErrInvalid, so a handler
+// answers it as a 400 with the message, and nothing is written.
+func ValidateText(name, desc string, tags []string) error {
+	if utf8.RuneCountInString(name) > MaxNameChars {
+		return invalidText("Name is too long (max 200 characters).")
+	}
+	if utf8.RuneCountInString(desc) > MaxDescriptionChars {
+		return invalidText("Description is too long (max 5000 characters).")
+	}
+	if len(tags) > MaxTags {
+		return invalidText("Too many tags (max 30).")
+	}
+	for _, tag := range tags {
+		if utf8.RuneCountInString(tag) > MaxTagChars {
+			return invalidText("A tag is too long (max 50 characters).")
+		}
+	}
+	return nil
+}
+
+// invalidText keeps the message a literal at the call site, where a reader
+// sees the rider-facing wording, rather than inside errors.New.
+func invalidText(msg string) error { return invalid(errors.New(msg)) }
 
 // ErrAlreadyOwned is returned for an UpdateRequest with ClaimOwner set
 // against a route that no longer has an empty owner by the time the write
