@@ -120,7 +120,7 @@ func (s *Store) Set(name, value, updatedBy string) error {
 		return errors.New("refusing to store an empty value: delete it instead")
 	}
 
-	sealed, err := s.box.Seal(value)
+	sealed, err := s.box.SealFor(settingContext(name), value)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func (s *Store) Get(name string) (string, error) {
 		return "", err
 	}
 
-	value, err := s.box.Open(sealed)
+	value, err := s.box.OpenFor(settingContext(name), sealed)
 	if err != nil {
 		return "", fmt.Errorf("setting %s: %w — set it again to replace it", name, err)
 	}
@@ -276,4 +276,10 @@ ON CONFLICT (name) DO UPDATE SET
 		return fmt.Errorf("save flag %s: %w", name, err)
 	}
 	return nil
+}
+
+// settingContext binds a sealed value to its name, so copying one setting's
+// blob over another's does not open.
+func settingContext(name string) string {
+	return "domestique/setting/" + strings.TrimSpace(name)
 }

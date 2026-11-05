@@ -300,7 +300,13 @@ func (s *Server) handleSSOLogout(w http.ResponseWriter, r *http.Request) {
 
 	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
 		if err := s.Sessions.Delete(cookie.Value); err != nil {
-			s.logger().Warn("deleting oidc session failed", "err", err)
+			// The row is still valid, so clearing the cookie would report a
+			// sign-out that did not happen. Keep it so the rider can retry.
+			s.logger().Error("deleting oidc session failed", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "could not sign out, try again",
+			})
+			return
 		}
 	}
 	// #nosec G124 -- see the identical note above; Secure is intentionally
@@ -450,13 +456,17 @@ func stringSliceClaim(claims map[string]any, key string) []string {
 	return out
 }
 
+// oidcStateContext keeps a sealed value from another purpose (a Wahoo state
+// cookie, a session identity) from being accepted as a sign-in state.
+const oidcStateContext = "domestique/oidc-state-cookie"
+
 // setStateCookie seals st and sets it as auth.OIDCStateCookie.
 func (s *Server) setStateCookie(w http.ResponseWriter, r *http.Request, st oidcState) error {
 	raw, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}
-	sealed, err := s.Box.Seal(string(raw))
+	sealed, err := s.Box.SealFor(oidcStateContext, string(raw))
 	if err != nil {
 		return err
 	}
@@ -485,7 +495,7 @@ func (s *Server) openStateCookie(r *http.Request) (oidcState, error) {
 	if err != nil {
 		return oidcState{}, err
 	}
-	raw, err := s.Box.Open(sealed)
+	raw, err := s.Box.OpenFor(oidcStateContext, sealed)
 	if err != nil {
 		return oidcState{}, err
 	}

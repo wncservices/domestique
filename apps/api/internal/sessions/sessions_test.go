@@ -266,3 +266,66 @@ func TestPostgres(t *testing.T) {
 		t.Error("deleted session still found on postgres")
 	}
 }
+
+func TestASessionIdentityCopiedToAnotherRowDoesNotResolve(t *testing.T) {
+	s := newStore(t, newBox(t))
+	admin, _, err := s.Create(auth.Identity{User: "admin", Groups: []string{"admins"}}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, _, err := s.Create(auth.Identity{User: "mallory"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sealed []byte
+	if err := s.db.QueryRow(s.dialect.Rebind(`SELECT identity FROM sessions WHERE token = ?`), hashToken(admin)).Scan(&sealed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE sessions SET identity = ? WHERE token = ?`), sealed, hashToken(mine)); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := s.Lookup(mine); ok {
+		t.Errorf("a copied identity resolved: %+v", id)
+	}
+	if _, ok := s.Lookup(admin); !ok {
+		t.Error("the original session stopped resolving")
+	}
+}
+
+func TestALegacyUnboundSessionStillResolves(t *testing.T) {
+	box := newBox(t)
+	s := newStore(t, box)
+	token, _, err := s.Create(auth.Identity{User: "wilant"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := box.Seal(`{"user":"wilant"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE sessions SET identity = ? WHERE token = ?`), legacy, hashToken(token)); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := s.Lookup(token); !ok || id.User != "wilant" {
+		t.Errorf("legacy session = %+v, %v", id, ok)
+	}
+}
+
+func TestLookupRejectsAnIdentityWithNoUser(t *testing.T) {
+	box := newBox(t)
+	s := newStore(t, box)
+	token, _, err := s.Create(auth.Identity{User: "wilant"}, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := box.SealFor(sessionContext(hashToken(token)), `{"user":"","groups":["admins"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(s.dialect.Rebind(`UPDATE sessions SET identity = ? WHERE token = ?`), empty, hashToken(token)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Lookup(token); ok {
+		t.Error("an identity with no user resolved")
+	}
+}

@@ -700,6 +700,29 @@ func TestSSOLogoutEndsTheSessionForReal(t *testing.T) {
 	}
 }
 
+// When the server row cannot be deleted the session is still live, so the
+// answer must not claim success or clear the cookie: the rider retries.
+func TestSSOLogoutThatCannotDeleteTheSessionFailsAndKeepsTheCookie(t *testing.T) {
+	h := newSSOHarness(t)
+	h.login([]string{"cyclists"})
+	if _, err := h.db.Conn().Exec(`CREATE TRIGGER refuse_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT, 'no'); END`); err != nil {
+		t.Skipf("cannot make Delete fail on this engine: %v", err)
+	}
+
+	resp := h.post("/sso/logout")
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("logout status = %d, want 500", resp.StatusCode)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == auth.SessionCookieName {
+			t.Errorf("the session cookie was touched on a failed logout: %+v", c)
+		}
+	}
+	if me := meBody(t, h.get("/api/me")); me["authenticated"] != true {
+		t.Error("the rider was signed out although the row survived")
+	}
+}
+
 // The app host (app.domestique.dev) is where a logout request is made from,
 // but it is not where a now-anonymous visitor belongs — mode: oidc redirects
 // anonymous visitors to LandingHost everywhere else (spaHandler), and

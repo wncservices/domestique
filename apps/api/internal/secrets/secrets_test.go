@@ -118,3 +118,37 @@ func TestNewRejectsNonBase64(t *testing.T) {
 		t.Error("a non-base64 key was accepted")
 	}
 }
+
+func TestSealForBindsABlobToItsContext(t *testing.T) {
+	box := testBox(t)
+	sealed, err := box.SealFor("session/abc", "identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := box.OpenFor("session/abc", sealed); err != nil || got != "identity" {
+		t.Fatalf("OpenFor same context = %q, %v", got, err)
+	}
+	if _, err := box.OpenFor("session/other", sealed); err == nil {
+		t.Error("a bound blob opened under another context")
+	}
+	if _, err := box.Open(sealed); err == nil {
+		t.Error("a bound blob opened with no context")
+	}
+}
+
+func TestOpenForStillOpensALegacyBlob(t *testing.T) {
+	box := testBox(t)
+	legacy, err := box.Seal("old value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := box.OpenFor("anything", legacy); err != nil || got != "old value" {
+		t.Fatalf("legacy blob = %q, %v", got, err)
+	}
+	// A legacy blob whose random nonce happens to start with the prefix.
+	nonce := append([]byte(boundPrefix), make([]byte, box.aead.NonceSize()-len(boundPrefix))...)
+	unlucky := box.aead.Seal(nonce, nonce, []byte("unlucky"), nil)
+	if got, err := box.OpenFor("anything", unlucky); err != nil || got != "unlucky" {
+		t.Fatalf("prefix-colliding legacy blob = %q, %v", got, err)
+	}
+}

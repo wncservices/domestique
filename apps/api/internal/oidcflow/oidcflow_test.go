@@ -196,6 +196,48 @@ func TestVerifyRejectsWrongAudience(t *testing.T) {
 	}
 }
 
+func verifyWith(t *testing.T, mutate func(map[string]any)) error {
+	t.Helper()
+	f := newFakeIssuer(t)
+	claims := f.baseClaims("n")
+	mutate(claims)
+	f.nextClaims = claims
+	flow := newFlow(t, f)
+	raw, err := flow.Exchange(context.Background(), "code", "v", "https://app.example.test/sso/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = flow.VerifyIDToken(context.Background(), raw)
+	return err
+}
+
+func TestVerifyChecksAuthorizedParty(t *testing.T) {
+	multi := []string{testClientID, "other-client"}
+	cases := []struct {
+		name   string
+		mutate func(map[string]any)
+		ok     bool
+	}{
+		{"single aud, no azp", func(c map[string]any) {}, true},
+		{"single aud, own azp", func(c map[string]any) { c["azp"] = testClientID }, true},
+		{"single aud, foreign azp", func(c map[string]any) { c["azp"] = "other-client" }, false},
+		{"multi aud, no azp", func(c map[string]any) { c["aud"] = multi }, false},
+		{"multi aud, foreign azp", func(c map[string]any) { c["aud"] = multi; c["azp"] = "other-client" }, false},
+		{"multi aud, own azp", func(c map[string]any) { c["aud"] = multi; c["azp"] = testClientID }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := verifyWith(t, tc.mutate)
+			if tc.ok && err != nil {
+				t.Errorf("rejected: %v", err)
+			}
+			if !tc.ok && err == nil {
+				t.Error("accepted")
+			}
+		})
+	}
+}
+
 func TestVerifyRejectsExpiredToken(t *testing.T) {
 	f := newFakeIssuer(t)
 	claims := f.baseClaims("n")

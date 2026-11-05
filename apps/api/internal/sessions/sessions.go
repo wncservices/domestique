@@ -191,7 +191,7 @@ func (s *Store) migrate() error {
 
 	for _, u := range pending {
 		var stored storedIdentity
-		raw, err := s.box.Open(u.sealed)
+		raw, err := s.box.OpenFor(sessionContext(u.token), u.sealed)
 		if err == nil {
 			err = json.Unmarshal([]byte(raw), &stored)
 		}
@@ -234,6 +234,10 @@ type storedIdentity struct {
 	Sub           string   `json:"sub,omitempty"`
 }
 
+// sessionContext binds a sealed identity to the row (token hash) it lives in,
+// so copying the blob into another session's row does not resolve.
+func sessionContext(tokenHash string) string { return "domestique/session/" + tokenHash }
+
 // Create issues a session for id and returns the opaque cookie value.
 //
 // Opportunistically deletes expired rows first, so the table self-prunes
@@ -257,12 +261,11 @@ func (s *Store) Create(id auth.Identity, ttl time.Duration) (token string, expir
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sessions: encoding identity: %w", err)
 	}
-	sealed, err := s.box.Seal(string(raw))
+	tok, err := newToken()
 	if err != nil {
 		return "", time.Time{}, err
 	}
-
-	tok, err := newToken()
+	sealed, err := s.box.SealFor(sessionContext(hashToken(tok)), string(raw))
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -314,12 +317,17 @@ func (s *Store) Lookup(token string) (auth.Identity, bool) {
 		return auth.Identity{}, false
 	}
 
-	raw, err := s.box.Open(sealed)
+	raw, err := s.box.OpenFor(sessionContext(hashToken(token)), sealed)
 	if err != nil {
 		return auth.Identity{}, false
 	}
 	var stored storedIdentity
 	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return auth.Identity{}, false
+	}
+	// Create refuses an empty user, so a row that decodes to nobody was not
+	// written by it.
+	if stored.User == "" {
 		return auth.Identity{}, false
 	}
 	return auth.Identity{
@@ -349,7 +357,7 @@ func (s *Store) UpdateName(token, name string) error {
 	if err != nil {
 		return fmt.Errorf("sessions: encoding identity: %w", err)
 	}
-	sealed, err := s.box.Seal(string(raw))
+	sealed, err := s.box.SealFor(sessionContext(hashToken(token)), string(raw))
 	if err != nil {
 		return err
 	}
@@ -433,7 +441,7 @@ func (s *Store) RidersOfSub(ctx context.Context, sub string) ([]string, error) {
 		return nil, nil
 	}
 	// #nosec G701 -- constant statement, bound parameter.
-	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`SELECT identity FROM sessions WHERE sub_key = ?`), key)
+	rows, err := s.db.QueryContext(ctx, s.dialect.Rebind(`SELECT token, identity FROM sessions WHERE sub_key = ?`), key)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: finding an identity's riders: %w", err)
 	}
@@ -441,11 +449,12 @@ func (s *Store) RidersOfSub(ctx context.Context, sub string) ([]string, error) {
 	seen := map[string]bool{}
 	var out []string
 	for rows.Next() {
+		var tokenHash string
 		var sealed []byte
-		if err := rows.Scan(&sealed); err != nil {
+		if err := rows.Scan(&tokenHash, &sealed); err != nil {
 			return nil, fmt.Errorf("sessions: finding an identity's riders: %w", err)
 		}
-		raw, err := s.box.Open(sealed)
+		raw, err := s.box.OpenFor(sessionContext(tokenHash), sealed)
 		if err != nil {
 			continue
 		}
