@@ -520,6 +520,14 @@ opaque to the store: Komoot keeps a token, Garmin keeps a JSON-encoded
 An expired or undecryptable session is not an error to work around: the rider
 reconnects. That is why `Save` is an upsert.
 
+**A sealed value is bound to where it lives** (`secrets.Box.SealFor`/`OpenFor`,
+the context in GCM's associated data): a session identity to its token hash, a
+setting to its name, the OIDC state cookie to its purpose, a provider secret to
+its provider. Not to the rider, because rename and merge move those rows by
+rider. Values sealed before binding still open and are bound when next written.
+An image older than this cannot open a bound value, so rolling back signs every
+rider out and makes provider connections saved since the deploy reconnect.
+
 Rows made before this table existed are copied from `komoot_links` on start,
 sealed bytes and all, and only where nothing is already there — so a
 reconnection is never overwritten by the fossil. The old table is left behind
