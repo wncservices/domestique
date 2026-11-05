@@ -42,6 +42,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/muktihari/fit/decoder"
 	"github.com/muktihari/fit/encoder"
@@ -157,7 +158,7 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	name := opts.Name
+	name := fitString(opts.Name)
 	if name == "" {
 		name = "Route"
 	}
@@ -220,7 +221,7 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 					SetPositionLongDegrees(points[turn.Index].Lon).
 					SetDistanceScaled(distances[turn.Index]).
 					SetType(turn.Type).
-					SetName(turn.Name))
+					SetName(fitString(turn.Name)))
 		}
 	}
 
@@ -233,7 +234,7 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 					SetPositionLongDegrees(points[climb.StartIndex].Lon).
 					SetDistanceScaled(distances[climb.StartIndex]).
 					SetType(climb.Category).
-					SetName(climb.Name),
+					SetName(fitString(climb.Name)),
 				mesgdef.NewCoursePoint(nil).
 					SetTimestamp(timeAt(climb.SummitIndex)).
 					SetPositionLatDegrees(points[climb.SummitIndex].Lat).
@@ -256,7 +257,7 @@ func Encode(points []gpx.Point, opts Options) ([]byte, error) {
 					SetPositionLongDegrees(points[idx].Lon).
 					SetDistanceScaled(distances[idx]).
 					SetType(cp.Type).
-					SetName(cp.Name))
+					SetName(fitString(cp.Name)))
 		}
 	}
 
@@ -690,4 +691,22 @@ func climbName(cat typedef.CoursePoint) string {
 	default:
 		return "Cat 4 climb"
 	}
+}
+
+// maxFITString is the most bytes a FIT string field can hold. The encoder refuses
+// a value over 255 bytes, and the string's terminating zero counts towards that.
+const maxFITString = 254
+
+// fitString clips s to maxFITString bytes. The cut falls on a character boundary,
+// so the result is still valid UTF-8, which the encoder also requires. A name
+// that long is one no device could show anyway.
+func fitString(s string) string {
+	if len(s) <= maxFITString {
+		return s
+	}
+	cut := maxFITString
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

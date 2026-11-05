@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"math"
 	"time"
+	"unicode/utf8"
 
 	"github.com/muktihari/fit/encoder"
 	"github.com/muktihari/fit/profile/filedef"
@@ -141,7 +142,7 @@ func Encode(steps []Step, opts Options) ([]byte, error) {
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	name := opts.Name
+	name := fitString(opts.Name)
 	if name == "" {
 		name = "Workout"
 	}
@@ -236,7 +237,7 @@ func appendSteps(out *[]*mesgdef.WorkoutStep, steps []Step) error {
 			}
 			repeatStep := mesgdef.NewWorkoutStep(nil).
 				SetMessageIndex(typedef.MessageIndex(index)).
-				SetWktStepName(s.Name).
+				SetWktStepName(fitString(s.Name)).
 				SetDurationType(typedef.WktStepDurationRepeatUntilStepsCmplt).
 				SetDurationValue(durationValue).
 				SetTargetType(typedef.WktStepTargetOpen).
@@ -262,7 +263,7 @@ func encodeStep(s Step, index int) (*mesgdef.WorkoutStep, error) {
 	}
 	step := mesgdef.NewWorkoutStep(nil).
 		SetMessageIndex(typedef.MessageIndex(idx)).
-		SetWktStepName(s.Name).
+		SetWktStepName(fitString(s.Name)).
 		SetIntensity(encodeIntensity(s.Intensity))
 
 	if err := encodeDuration(step, s); err != nil {
@@ -423,4 +424,22 @@ func DeviceRange(target Target, low, high float64) (float64, float64) {
 		return low, high
 	}
 	return math.Max(0, low-half), high + half
+}
+
+// maxFITString is the most bytes a FIT string field can hold. The encoder refuses
+// a value over 255 bytes, and the string's terminating zero counts towards that.
+const maxFITString = 254
+
+// fitString clips s to maxFITString bytes. The cut falls on a character boundary,
+// so the result is still valid UTF-8, which the encoder also requires. A name
+// that long is one no device could show anyway.
+func fitString(s string) string {
+	if len(s) <= maxFITString {
+		return s
+	}
+	cut := maxFITString
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

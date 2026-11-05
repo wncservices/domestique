@@ -11,6 +11,8 @@ import (
 	"github.com/muktihari/fit/profile/typedef"
 
 	"github.com/wncservices/domestique/apps/api/internal/gpx"
+	"strings"
+	"unicode/utf8"
 )
 
 // decode reads a FIT course back. The decoder verifies the file header and the
@@ -949,5 +951,30 @@ func TestEncodeSetsTheCourseSport(t *testing.T) {
 	course := decode(t, raw)
 	if course.Course.Sport != typedef.SportRunning {
 		t.Errorf("course sport = %v, want SportRunning", course.Course.Sport)
+	}
+}
+
+// A FIT string holds at most 254 bytes, the encoder refusing a value over 255
+// that counts the terminator. A 200-character emoji name is 800 bytes, and used
+// to fail the whole push. It must encode, cut at a character boundary: 254 bytes
+// is 63 whole emoji, which is 252.
+func TestEncodeClipsALongMultiByteName(t *testing.T) {
+	long := strings.Repeat("\U0001F6B4", 200) // a cyclist, 4 bytes each
+	raw, err := Encode(straightNorth(3, 100), Options{
+		Name:         long,
+		CoursePoints: []CoursePoint{{DistanceM: 50, Name: long, Type: typedef.CoursePointGeneric}},
+	})
+	if err != nil {
+		t.Fatalf("Encode refused a long name: %v", err)
+	}
+	course := decode(t, raw)
+	if name := course.Course.Name; len(name) != 252 || !utf8.ValidString(name) {
+		t.Errorf("course name is %d bytes (valid utf-8: %v), want 252 valid bytes", len(name), utf8.ValidString(name))
+	}
+	if len(course.CoursePoints) != 1 {
+		t.Fatalf("course points = %d, want 1", len(course.CoursePoints))
+	}
+	if name := course.CoursePoints[0].Name; len(name) != 252 || !utf8.ValidString(name) {
+		t.Errorf("course point name is %d bytes (valid utf-8: %v), want 252 valid bytes", len(name), utf8.ValidString(name))
 	}
 }

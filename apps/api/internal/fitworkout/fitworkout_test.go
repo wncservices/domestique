@@ -9,6 +9,8 @@ import (
 	"github.com/muktihari/fit/profile/basetype"
 	"github.com/muktihari/fit/profile/filedef"
 	"github.com/muktihari/fit/profile/typedef"
+	"strings"
+	"unicode/utf8"
 )
 
 func exampleSteps() []Step {
@@ -317,5 +319,26 @@ func TestEncodeRejectsAStepCountThatOverflowsTheFITMessageIndexField(t *testing.
 	}
 	if _, err := Encode(steps, Options{}); err == nil {
 		t.Fatal("expected an error for a step count beyond the FIT format's uint16 range, got nil")
+	}
+}
+
+// The workout and its step names are FIT strings too, held to 254 bytes and cut
+// at a character boundary, so a long multi-byte name cannot fail the whole push.
+func TestEncodeClipsLongMultiByteNames(t *testing.T) {
+	long := strings.Repeat("\U0001F6B4", 200) // a cyclist, 4 bytes each
+	steps := []Step{{Name: long, Intensity: "warmup", Duration: DurationTime, Seconds: 600, Target: TargetOpen}}
+	raw, err := Encode(steps, Options{Name: long})
+	if err != nil {
+		t.Fatalf("Encode refused a long name: %v", err)
+	}
+	wkt := decodeWorkout(t, raw)
+	if name := wkt.Workout.WktName; len(name) != 252 || !utf8.ValidString(name) {
+		t.Errorf("workout name is %d bytes (valid utf-8: %v), want 252 valid bytes", len(name), utf8.ValidString(name))
+	}
+	if len(wkt.WorkoutSteps) != 1 {
+		t.Fatalf("steps = %d, want 1", len(wkt.WorkoutSteps))
+	}
+	if name := wkt.WorkoutSteps[0].WktStepName; len(name) != 252 || !utf8.ValidString(name) {
+		t.Errorf("step name is %d bytes (valid utf-8: %v), want 252 valid bytes", len(name), utf8.ValidString(name))
 	}
 }

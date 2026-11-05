@@ -98,11 +98,46 @@ const runAsNonRootUser = 1000
 // privileges, not this app's, so nothing here needs to.
 const jobTTLSeconds = 24 * 60 * 60
 
-// Trigger creates the update Job and returns its generated name.
+// resourceRequirements parses the configured quantities. A bad one is an
+// error, not a panic: resource.MustParse would take the request down after the
+// caller had already recorded the update as pending. config.Validate refuses
+// such a value at startup, so this is the backstop for a JobConfig built
+// some other way.
+func (c *Client) resourceRequirements() (corev1.ResourceRequirements, error) {
+	cpu, err := resource.ParseQuantity(c.cfg.CPURequest)
+	if err != nil {
+		return corev1.ResourceRequirements{}, fmt.Errorf("basemap cpu_request %q is not a quantity: %w", c.cfg.CPURequest, err)
+	}
+	mem, err := resource.ParseQuantity(c.cfg.MemRequest)
+	if err != nil {
+		return corev1.ResourceRequirements{}, fmt.Errorf("basemap mem_request %q is not a quantity: %w", c.cfg.MemRequest, err)
+	}
+	limit, err := resource.ParseQuantity(c.cfg.MemLimit)
+	if err != nil {
+		return corev1.ResourceRequirements{}, fmt.Errorf("basemap mem_limit %q is not a quantity: %w", c.cfg.MemLimit, err)
+	}
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    cpu,
+			corev1.ResourceMemory: mem,
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: limit,
+		},
+	}, nil
+}
+
+// Trigger creates the update Job and returns its generated name. A bad
+// quantity in the config is returned before anything reaches the cluster.
 func (c *Client) Trigger(ctx context.Context, bbox BBox, maxZoom int, buildDate string) (string, error) {
 	falseVal := false
 	trueVal := true
 	uid := int64(runAsNonRootUser)
+
+	resources, err := c.resourceRequirements()
+	if err != nil {
+		return "", err
+	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -166,15 +201,7 @@ func (c *Client) Trigger(ctx context.Context, bbox BBox, maxZoom int, buildDate 
 									Drop: []corev1.Capability{"ALL"},
 								},
 							},
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse(c.cfg.CPURequest),
-									corev1.ResourceMemory: resource.MustParse(c.cfg.MemRequest),
-								},
-								Limits: corev1.ResourceList{
-									corev1.ResourceMemory: resource.MustParse(c.cfg.MemLimit),
-								},
-							},
+							Resources: resources,
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: basemapVolume, MountPath: basemapMountPath},
 							},

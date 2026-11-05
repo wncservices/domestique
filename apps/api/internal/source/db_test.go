@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/pgtest"
@@ -625,4 +626,94 @@ func TestEachEngine(t *testing.T) {
 			})
 		})
 	}
+}
+
+// An edit reads the route, then writes it back. A claim that lands between the
+// read and the write must survive: the write must not put back the owner the
+// read saw. Each engine gets a deterministic claim in that window: SQLite a
+// trigger that claims the route while the edit's write is starting, PostgreSQL a
+// row lock the edit waits on until the claim commits.
+func TestMetadataEditKeepsAClaimMadeAfterItsRead(t *testing.T) {
+	engines := map[string]func(*testing.T) *DB{
+		"sqlite":   openTestDB,
+		"postgres": openTestPostgres,
+	}
+	for engine, open := range engines {
+		t.Run(engine, func(t *testing.T) {
+			db := open(t)
+			ctx := t.Context()
+
+			// An orphan: nobody owns it yet.
+			route, err := db.Create(ctx, CreateRequest{Filename: "kemmelberg-loop.gpx", GPX: exampleGPX(t)})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if route.Owner != "" {
+				t.Fatalf("setup: owner = %q, want an orphan", route.Owner)
+			}
+			newName := "Kemmelberg Loop, renamed"
+
+			if db.dialect.Name == "sqlite" {
+				// The claim lands as the edit's own write starts: it sets the owner,
+				// then the edit's UPDATE runs against the row.
+				if _, err := db.db.ExecContext(ctx, `CREATE TRIGGER claim_mid_edit BEFORE UPDATE ON routes
+					BEGIN UPDATE routes SET uploaded_by = 'bob' WHERE slug = NEW.slug; END`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Update(ctx, route.Slug, UpdateRequest{Name: &newName}); err != nil {
+					t.Fatalf("update: %v", err)
+				}
+			} else {
+				// Hold the row: the edit reads the orphan, then waits on this claim's lock.
+				tx, err := db.db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.ExecContext(ctx, db.query(`UPDATE routes SET uploaded_by = 'bob' WHERE slug = ?`), route.Slug); err != nil {
+					t.Fatal(err)
+				}
+				done := make(chan error, 1)
+				go func() {
+					_, err := db.Update(ctx, route.Slug, UpdateRequest{Name: &newName})
+					done <- err
+				}()
+				waitForLockWait(t, db)
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+				if err := <-done; err != nil {
+					t.Fatalf("update: %v", err)
+				}
+			}
+
+			got, err := db.get(ctx, route.Slug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Name != newName {
+				t.Fatalf("the rename did not land: name = %q", got.Name)
+			}
+			if got.Owner != "bob" {
+				t.Errorf("owner = %q, want bob: the edit wrote back the owner it read before the claim", got.Owner)
+			}
+		})
+	}
+}
+
+// waitForLockWait returns once an UPDATE of routes is blocked on a lock, so a
+// test can commit the lock holder knowing the edit is parked behind it.
+func waitForLockWait(t *testing.T, db *DB) {
+	t.Helper()
+	for range 500 {
+		var n int
+		if err := db.db.QueryRow(`SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%UPDATE routes%'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the edit never waited on the claim's lock")
 }
