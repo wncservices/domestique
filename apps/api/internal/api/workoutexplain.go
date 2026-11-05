@@ -9,6 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
@@ -180,14 +184,22 @@ func (s *Server) startExplanation(ctx context.Context, key, shape string, admit 
 		s.releaseExplanation(key)
 		return false
 	}
+	// The write outlives the request, so it runs on the lifecycle context, which
+	// carries no span: the model call would start a trace of its own and
+	// llm.job would be tagged on nothing. Keep the request's trace identity and
+	// open a span for the write, so the call is a child in the same trace.
+	parent := trace.SpanContextFromContext(ctx)
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
-		bg, cancel := context.WithTimeout(s.lifecycle(), explanationBackgroundBudget)
+		bg, cancel := context.WithTimeout(trace.ContextWithSpanContext(s.lifecycle(), parent), explanationBackgroundBudget)
 		defer cancel()
+		bg, span := otel.Tracer("domestique/explainer").Start(bg, "explain_workout.write")
+		defer span.End()
 		exp, err := s.LLM.ExplainWorkout(bg, shape)
 		if err != nil {
 			s.logger().Warn("workout explanation: the model call failed", "err", err)
+			span.SetStatus(codes.Error, "model call failed")
 			s.releaseExplanation(key)
 			return
 		}
@@ -197,6 +209,7 @@ func (s *Server) startExplanation(ctx context.Context, key, shape string, admit 
 		}
 		if err != nil {
 			s.logger().Warn("workout explanation: could not save", "err", err)
+			span.SetStatus(codes.Error, "could not save")
 			s.releaseExplanation(key)
 		}
 	}()

@@ -10,6 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 )
@@ -232,6 +237,50 @@ func TestAShutdownDuringTheBackgroundWriteReleasesTheClaim(t *testing.T) {
 	close(release)
 	if n := explanationRows(t, h); n != 0 {
 		t.Fatalf("rows after a shutdown = %d, want 0 (claim released, nothing stored)", n)
+	}
+}
+
+// The background write stays in the request's trace: a span for the write is a
+// child of the request, carries llm.job, and ends after the response. Without
+// this the model call showed up as an unrelated root trace with no job tag.
+func TestTheBackgroundWriteIsInTheRequestsTrace(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	h := newLedgerHarness(t, 250)
+	withExplainLLM(t, h.srv, fixed(workoutExplainReply))
+	id := firstWorkoutIDs(t, h, 1)[0]
+	getExplanation(t, h, "wilant", id)
+	h.srv.WaitForBackground()
+
+	var request, write sdktrace.ReadOnlySpan
+	for _, sp := range rec.Ended() {
+		switch {
+		case sp.Name() == "explain_workout.write":
+			write = sp
+		case strings.HasSuffix(sp.Name(), "/explanation"):
+			request = sp
+		}
+	}
+	if write == nil || request == nil {
+		t.Fatalf("spans: request %v, write %v", request != nil, write != nil)
+	}
+	if write.SpanContext().TraceID() != request.SpanContext().TraceID() {
+		t.Fatal("the background write is in a different trace from the request")
+	}
+	if write.Parent().SpanID() != request.SpanContext().SpanID() {
+		t.Fatal("the background write is not a child of the request span")
+	}
+	var job string
+	for _, kv := range write.Attributes() {
+		if kv.Key == attribute.Key("llm.job") {
+			job = kv.Value.AsString()
+		}
+	}
+	if job != "explain_workout" {
+		t.Fatalf("llm.job on the write span = %q", job)
 	}
 }
 

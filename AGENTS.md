@@ -1655,7 +1655,8 @@ cached in `workout_explanations(key, text, created_at)`, which is not rider data
 model call, and released on a failed call; a claim older than 5 minutes is taken over. A miss answers the template at once with `pending: true` and writes the
 text in a background goroutine on `Server.Lifecycle` (`startExplanation`), not on the request: the rider is behind
 Cloudflare's 100 s limit and a cold model can take longer. `SessionExplanation.vue` asks again every 15 s, up to 9
-times, while `pending`. A request that loses the claim race is pending too; one refused by the narration limiter
+times, while `pending`. The write keeps the request's trace identity and opens an `explain_workout.write` span (a child of the
+request, tagged `llm.job` by `llm.Complete`), so the model call is visible in the request's trace and not a rootless one. A request that loses the claim race is pending too; one refused by the narration limiter
 is not, and shows the template until reopened; a session with no steps always does. A miss with no
 model, or a failed call, answers the per-zone template from `explaintemplate.go`, which is never
 stored. The "why" line is built from the plan without the model (phase, week of total, goal name, and
