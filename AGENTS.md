@@ -73,6 +73,14 @@ crew ride is the other explicit act: it sends that one route to that one
 crew's approved members' devices at once (`pushRideRoute`, the same
 `pushRouteToCrew` Sync now uses), and a failure there never undoes the ride.
 
+**A plan is always built from the whole library.** `BuildPlan` reads a
+recorded route missing from the routes it is given as removed, and plans a
+delete of it. So a caller narrows the *items*, never the routes: `runPush` and
+`handlePlan` drop the items of routes the caller cannot see (`hiddenSlugs`,
+`withoutSlugs`), and a push of one route (`pushRouteToCrew`, today's course)
+selects that route on each account. Handing `applyPush` one route with no
+selection deletes everything else on the device.
+
 ## Authentication and roles
 
 `internal/auth` owns identifying a rider, in one of three modes. `Identity`,
@@ -243,6 +251,10 @@ admin People page needs from Auth0's Management API — list who has access,
 invite a new rider, change roles — plus `FindByEmail`. `internal/api/people.go`
 wires it through `PeopleConnector`, an interface so tests never touch a real
 tenant.
+
+**Deleting a person purges the riders their sessions and binding name**
+(`exactRidersOfPerson`), plus the `?rider=` the page sends, and never the
+name-based guess: two people can share one, and a purge cannot be undone.
 
 **The People page shows which rider each account is.** `boundRider` and
 `bindingStatus` (`bound`, `unbound`, `conflict`, `needs-attention`) come from `rider_identities`
