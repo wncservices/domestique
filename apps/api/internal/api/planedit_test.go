@@ -456,3 +456,28 @@ func TestInputLimitsOwnerOnlyAndTheLimiter(t *testing.T) {
 		t.Errorf("second request: status %d, want 429", status)
 	}
 }
+
+// Two moves onto one empty day: the first is accepted, and the second must be
+// checked against the plan as the first leaves it, so it is refused as a day
+// that already has a session. Each move was valid against the original plan.
+func TestTwoMovesCannotLandOnOneEmptyDay(t *testing.T) {
+	h := newOnceHarness(t)
+	h.tickedWithFreeSaturday(t)
+	thuHandle, _ := h.handleFor(t, "2026-10-08")
+	sunHandle, _ := h.handleFor(t, "2026-10-11")
+	h.withLLMReply(t, intents(
+		intent("move_workout", map[string]string{"workout": thuHandle, "to_date": "2026-10-10"}),
+		intent("move_workout", map[string]string{"workout": sunHandle, "to_date": "2026-10-10"}),
+	))
+
+	status, res := h.propose(t, "wilant", "Thursday and Sunday both on Saturday")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, res.Error)
+	}
+	if len(res.Items) != 1 || len(res.Dropped) != 1 {
+		t.Fatalf("items %d dropped %d, want the first move kept and the second dropped: %+v", len(res.Items), len(res.Dropped), res)
+	}
+	if !strings.Contains(res.Dropped[0].Reason, "already has a session") {
+		t.Errorf("reason %q, want the same refusal a move onto an occupied day gets", res.Dropped[0].Reason)
+	}
+}

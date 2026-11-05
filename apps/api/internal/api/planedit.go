@@ -279,6 +279,11 @@ func (s *Server) validatePlanEdits(ctx context.Context, rider string, today time
 
 	// Events accepted so far in this reply, so two of them cannot overlap.
 	events := append([]lifeevents.Event(nil), pv.events...)
+	// The plan as the accepted moves so far leave it. Each move is checked
+	// against this copy, not the stored plan, so two moves cannot both claim
+	// one empty day or both sit beside the same hard session. pv is a copy,
+	// but its slice shares the caller's array, so the slice is copied here.
+	pv.workouts = append([]workout.Workout(nil), pv.workouts...)
 
 	drop := func(in llm.Intent, reason string) {
 		out.Dropped = append(out.Dropped, planEditDroppedDTO{Type: in.Type, Reason: capitalizeFirst(reason) + "."})
@@ -330,6 +335,9 @@ func (s *Server) validatePlanEdits(ctx context.Context, rider string, today time
 				continue
 			}
 			out.Items = append(out.Items, item)
+			if in.Type == llm.IntentMoveWorkout {
+				moveInPlan(pv.workouts, wk.ID, in.ToDate)
+			}
 		}
 	}
 	return out, nil
@@ -364,9 +372,17 @@ func (s *Server) singleSessionItem(ctx context.Context, rider string, today time
 		if !inRange(in.ToDate) {
 			return item, fmt.Sprintf(planEditOutOfRangeFormat, horizon), nil
 		}
+		// The session as earlier moves in this reply left it, so a second move of
+		// the same session is checked from where it now stands.
+		cur := wk
+		for _, o := range pv.workouts {
+			if o.ID == wk.ID {
+				cur = o
+			}
+		}
 		err := lifeevents.CheckMove(lifeevents.Input{
 			Events: events, Workouts: pv.workouts, Profile: pv.profile, Now: s.now(),
-		}, wk, in.ToDate)
+		}, cur, in.ToDate)
 		if err != nil {
 			return item, err.Error(), nil
 		}
@@ -415,6 +431,16 @@ func (s *Server) singleSessionItem(ctx context.Context, rider string, today time
 
 	item.Diff = lifeDiffDTOFrom(lifeevents.Diff{Changes: []lifeevents.Change{change}})
 	return item, "", nil
+}
+
+// moveInPlan puts the session id on date in the working copy, so the checks
+// that follow see the day it vacated as empty and the day it filled as taken.
+func moveInPlan(workouts []workout.Workout, id, date string) {
+	for i := range workouts {
+		if workouts[i].ID == id {
+			workouts[i].Date = date
+		}
+	}
 }
 
 // dayLabel is "Sat 10 Oct" for a YYYY-MM-DD date.

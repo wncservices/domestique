@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
 	"github.com/wncservices/domestique/apps/api/internal/targets"
@@ -45,16 +46,26 @@ func (s *Server) wahooAccessToken(ctx context.Context, rider string) (string, er
 		return "", errors.New("no Wahoo sign-in to use")
 	}
 
-	_, secret, err := s.Links.Secret(wahooProvider, rider)
+	session, err := s.storedWahooSession(rider)
 	if err != nil {
-		return "", fmt.Errorf("%s has not connected Wahoo: %w", rider, err)
+		return "", err
+	}
+	if !session.Expired() {
+		return session.AccessToken, nil
 	}
 
-	var session wahoo.Session
-	if err := json.Unmarshal([]byte(secret), &session); err != nil {
-		return "", fmt.Errorf("the stored Wahoo sign-in for %s is unreadable: %w", rider, err)
+	// If Wahoo rotates refresh tokens (unconfirmed; the client handles both),
+	// two callers refreshing the same expired session spend one token twice:
+	// the second is refused, and a refresh whose result is not saved takes the
+	// rotated token with it. Per process only: another replica can still race. One refresh
+	// at a time per rider, and the stored session is read again once the lock
+	// is held: if another caller has already refreshed, its token is used.
+	unlock := wahooRefreshLocks.lock(rider)
+	defer unlock()
+	session, err = s.storedWahooSession(rider)
+	if err != nil {
+		return "", err
 	}
-
 	if !session.Expired() {
 		return session.AccessToken, nil
 	}
@@ -86,6 +97,47 @@ func (s *Server) wahooAccessToken(ctx context.Context, rider string) (string, er
 	}
 
 	return refreshed.AccessToken, nil
+}
+
+// storedWahooSession reads one rider's Wahoo session from the sealed store.
+func (s *Server) storedWahooSession(rider string) (wahoo.Session, error) {
+	_, secret, err := s.Links.Secret(wahooProvider, rider)
+	if err != nil {
+		return wahoo.Session{}, fmt.Errorf("%s has not connected Wahoo: %w", rider, err)
+	}
+	var session wahoo.Session
+	if err := json.Unmarshal([]byte(secret), &session); err != nil {
+		return wahoo.Session{}, fmt.Errorf("the stored Wahoo sign-in for %s is unreadable: %w", rider, err)
+	}
+	return session, nil
+}
+
+// wahooRefreshLocks holds one lock per rider for the refresh in
+// wahooAccessToken. It is package-level, not a Server field, because the
+// refresh is the only thing it guards and every caller goes through this
+// package; a rider's key is the only state it keeps, so it stays small.
+var wahooRefreshLocks keyedMutex
+
+// keyedMutex is a set of mutexes, one per key, created on first use.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+// lock takes the mutex for key and returns the function that releases it.
+func (k *keyedMutex) lock(key string) func() {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = map[string]*sync.Mutex{}
+	}
+	m, ok := k.locks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		k.locks[key] = m
+	}
+	k.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 // wahooSessionClient adapts *wahoo.Client (whose route methods take an
