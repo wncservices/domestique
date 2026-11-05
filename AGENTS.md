@@ -1640,16 +1640,21 @@ name), the test protocol when it is an FTP test (known ids only, else `test unkn
 name or rider, and two riders on the same session share one key (`sha256` of the text). The reply is
 cached in `workout_explanations(key, text, created_at)`, which is not rider data and is not in
 `riderTables`: an empty text is a claim, taken by `ClaimExplanation` so two racing requests make one
-model call, and released on a failed call; a claim older than 5 minutes is taken over. A request that loses the claim race (for example while the
-morning pass holds it), or is refused by the narration limiter, shows the template until reopened; a
-session with no steps always does. A miss with no
+model call, and released on a failed call; a claim older than 5 minutes is taken over. A miss answers the template at once with `pending: true` and writes the
+text in a background goroutine on `Server.Lifecycle` (`startExplanation`), not on the request: the rider is behind
+Cloudflare's 100 s limit and a cold model can take longer. `SessionExplanation.vue` asks again every 15 s, up to 9
+times, while `pending`. A request that loses the claim race is pending too; one refused by the narration limiter
+is not, and shows the template until reopened; a session with no steps always does. A miss with no
 model, or a failed call, answers the per-zone template from `explaintemplate.go`, which is never
 stored. The "why" line is built from the plan without the model (phase, week of total, goal name, and
 "recovery week" for the session's own week, "recovery week next" or "taper next" for the following one). The morning notes pass pre-writes shapes of planned sessions in
 the next 7 days for riders with a goal, at most 10 model calls per pass, and only with the job on.
 The UI shows it in `SessionExplanation.vue`, on the Today card and page and in the workout slideover.
 The evaluation cases in `testdata/eval/workout.json` (one case per zone and an FTP-test structure) pass when
-the job returns without error.
+the job returns without error. On `qwen3.5-4b` (2026-11-05) they scored 8/8 at about 30 s a call. The reply is kept short on
+purpose (summary of at most two sentences, one sentence a cue, 300 tokens, no figures: the card already shows every length and
+target), because CPU generation is about 6 tokens/s. A block label is exempt from the invented-number check, since "Warm-up 2"
+is a name, not a figure.
 
 ## Conventions
 

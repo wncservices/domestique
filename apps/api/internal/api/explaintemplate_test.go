@@ -77,8 +77,24 @@ func TestTemplateBlocksFollowTheShapeSteps(t *testing.T) {
 			t.Errorf("block %d label = %q, want %q", i, got.Blocks[i].Label, want)
 		}
 	}
-	if !strings.Contains(got.Blocks[2].Cue, "85-95% FTP") {
-		t.Errorf("work cue = %q, want the shape's target", got.Blocks[2].Cue)
+	for _, b := range got.Blocks {
+		if strings.Contains(b.Cue, "FTP") || strings.Contains(b.Cue, "min") {
+			t.Errorf("%s cue = %q restates the card's figures", b.Label, b.Cue)
+		}
+	}
+}
+
+func TestTemplateMergesConsecutiveLikeSteps(t *testing.T) {
+	shape := "sport cycling\nzone endurance\nwarmup 5min 50-55% FTP\nwarmup 5min 60-65% FTP\nwork 23min 55-75% FTP\ncooldown 10min 45-55% FTP\n"
+	got := templateExplanation(workout.Workout{Zone: workout.ZoneEndurance}, shape).Blocks
+	want := []string{"Warm-up", "Work", "Cool-down"}
+	if len(got) != len(want) {
+		t.Fatalf("blocks = %+v, want %v", got, want)
+	}
+	for i, l := range want {
+		if got[i].Label != l {
+			t.Errorf("block %d = %q, want %q", i, got[i].Label, l)
+		}
 	}
 }
 
@@ -106,7 +122,7 @@ func TestTemplateBlocksAreCappedAtEight(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("sport cycling\nzone endurance\n")
 	for i := 0; i < 12; i++ {
-		b.WriteString("work 5min 60% FTP\n")
+		b.WriteString(alternatingStep(i))
 	}
 	blocks := templateExplanation(workout.Workout{Zone: workout.ZoneEndurance}, b.String()).Blocks
 	if len(blocks) != 8 {
@@ -119,10 +135,19 @@ func TestTemplateBlocksAreCappedAtEight(t *testing.T) {
 	var e strings.Builder
 	e.WriteString("sport cycling\nzone endurance\n")
 	for i := 0; i < 8; i++ {
-		e.WriteString("work 5min 60% FTP\n")
+		e.WriteString(alternatingStep(i))
 	}
 	exact := templateExplanation(workout.Workout{Zone: workout.ZoneEndurance}, e.String()).Blocks
 	if len(exact) != 8 || strings.Contains(exact[7].Label, "more") {
 		t.Errorf("eight steps collapsed: %+v", exact)
 	}
+}
+
+// alternatingStep keeps neighbouring steps of different kinds, so the template
+// does not merge them.
+func alternatingStep(i int) string {
+	if i%2 == 0 {
+		return "work 5min 60% FTP\n"
+	}
+	return "recovery 5min 50% FTP\n"
 }

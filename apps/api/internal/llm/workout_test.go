@@ -25,8 +25,8 @@ func TestExplainWorkoutRequestShape(t *testing.T) {
 	f.mu.Lock()
 	body := f.body
 	f.mu.Unlock()
-	if got := body["max_tokens"]; got != float64(500) {
-		t.Errorf("max_tokens = %v, want 500", got)
+	if got := body["max_tokens"]; got != float64(300) {
+		t.Errorf("max_tokens = %v, want 300", got)
 	}
 	_, user := sentMessages(t, f)
 	if user != testShape {

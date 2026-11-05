@@ -57,12 +57,16 @@ func explainTemplateSummary(w workout.Workout) string {
 	return explainTemplateUnset
 }
 
-// explainTemplateBlocks reads one block per step line of the shape. A repeat
-// line becomes its own block, so the nested steps follow it in order. The
-// shape is our own canonical text, so a line that does not parse is skipped
-// rather than guessed at.
+// explainTemplateBlocks reads one block per run of like steps in the shape. A
+// repeat line becomes its own block, so the nested steps follow it in order.
+// The cue says how to ride the step and never restates its length or target:
+// the session card already lists those, and repeating them was the noise this
+// replaced. Consecutive steps of one kind (two warm-up stages) are one block.
+// The shape is our own canonical text, so a line that does not parse is
+// skipped rather than guessed at.
 func explainTemplateBlocks(shapeText string) []llm.ExplanationBlock {
 	blocks := []llm.ExplanationBlock{}
+	prev := ""
 	for _, line := range strings.Split(shapeText, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
@@ -80,13 +84,14 @@ func explainTemplateBlocks(shapeText string) []llm.ExplanationBlock {
 				Label: label,
 				Cue:   "Ride the steps nested under this repeat, then go round again.",
 			})
+			prev = "repeat"
 			continue
 		}
-		label, generic := explainTemplateStep(fields[0])
-		cue := generic
-		if len(fields) > 1 {
-			cue = fmt.Sprintf("%s Length and target: %s.", generic, strings.Join(fields[1:], " "))
+		if fields[0] == prev {
+			continue
 		}
+		prev = fields[0]
+		label, cue := explainTemplateStep(fields[0])
 		blocks = append(blocks, llm.ExplanationBlock{Label: label, Cue: cue})
 	}
 	return capExplainBlocks(blocks)

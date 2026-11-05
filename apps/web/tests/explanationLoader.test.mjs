@@ -103,3 +103,56 @@ test('explanation loader: an empty id clears the state and drops replies in flig
   assert.equal(last.value, null)
   assert.equal(last.loading, false)
 })
+
+const retry = { retryIf: (v) => v.pending, delayMs: 5, maxRetries: 2 }
+const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+
+test('explanation loader: a pending result is shown, then replaced by the written one', async () => {
+  const { fetchFn, calls } = deferredFetch()
+  const published = []
+  const loader = createExplanationLoader(fetchFn, (s) => published.push({ ...s }), retry)
+
+  loader.show('A')
+  calls[0].resolve({ summary: 'template', pending: true })
+  await wait(20)
+  assert.equal(calls.length, 2, 'a pending result is fetched again')
+  assert.equal(published[published.length - 1].value.summary, 'template')
+
+  calls[1].resolve({ summary: 'model', pending: false })
+  await wait(20)
+  const last = published[published.length - 1]
+  assert.equal(last.value.summary, 'model')
+  assert.equal(last.loading, false)
+  assert.equal(last.failed, false)
+  assert.equal(calls.length, 2, 'no more fetches once it is written')
+})
+
+test('explanation loader: retries stop at the limit and a failed retry keeps the shown value', async () => {
+  const { fetchFn, calls } = deferredFetch()
+  const published = []
+  const loader = createExplanationLoader(fetchFn, (s) => published.push({ ...s }), retry)
+
+  loader.show('A')
+  calls[0].resolve({ summary: 'template', pending: true })
+  await wait(20)
+  calls[1].reject(new Error('offline'))
+  await wait(20)
+  calls[2].resolve({ summary: 'template', pending: true })
+  await wait(40)
+  assert.equal(calls.length, 3, 'maxRetries is 2')
+  const last = published[published.length - 1]
+  assert.equal(last.value.summary, 'template')
+  assert.equal(last.failed, false)
+})
+
+test('explanation loader: changing the id or cancelling stops the retries', async () => {
+  const { fetchFn, calls } = deferredFetch()
+  const loader = createExplanationLoader(fetchFn, () => {}, retry)
+
+  loader.show('A')
+  calls[0].resolve({ summary: 'template', pending: true })
+  await flush()
+  loader.cancel()
+  await wait(30)
+  assert.equal(calls.length, 1, 'cancel stops the pending retry')
+})

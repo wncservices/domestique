@@ -36,13 +36,20 @@ type workoutExplanationDTO struct {
 	// Source is "model" for a stored model-written text and "template" for the
 	// fixed fallback, which is never stored.
 	Source string `json:"source"`
+	// Pending is true while the model is writing this session's explanation in
+	// the background: the template is shown now and the page asks again.
+	Pending bool `json:"pending"`
 }
 
 // handleWorkoutExplanation explains one of the rider's own planned sessions.
 // The explanation is keyed by the session's shape (no rider, name or watts), so
-// it is shared between riders and written at most once. A miss makes one model
-// call within llmRequestContext; the loser of a race, a switched-off job and a
-// failed call all get the template now, and the template is never stored.
+// it is shared between riders and written at most once. A miss answers the
+// template at once and starts the one model call in the background, on the
+// server's lifecycle rather than the request: the rider is behind Cloudflare's
+// 100 s limit but the model may need longer than that to load. `pending` tells
+// the page to ask again. The loser of a race (someone else is writing it) is
+// pending too; a switched-off job, a refused limiter and a failed claim are
+// not. The template is never stored.
 func (s *Server) handleWorkoutExplanation(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -68,14 +75,12 @@ func (s *Server) handleWorkoutExplanation(w http.ResponseWriter, r *http.Request
 	case s.LLM.Enabled(llm.JobExplainWorkout):
 		exp, fromModel = s.cachedExplanation(r.Context(), key)
 		if !fromModel {
-			ctx, cancel := llmRequestContext(r)
 			// The limiter is charged only once this request holds the claim, and
 			// a refusal serves the template: a rider opening sessions is not
 			// told to wait for something the page can show now.
-			exp, fromModel = s.generateExplanation(ctx, key, shape, func() bool {
+			out.Pending = s.startExplanation(r.Context(), key, shape, func() bool {
 				return s.NarrationLimiter == nil || s.NarrationLimiter.Allow(wk.Rider)
 			})
-			cancel()
 		}
 	case s.LLM != nil:
 		s.logger().Debug("workout explanation: the explain_workout job is off, serving the template")
@@ -149,6 +154,53 @@ func (s *Server) generateExplanation(ctx context.Context, key, shape string, adm
 		return llm.WorkoutExplanation{}, false
 	}
 	return exp, true
+}
+
+// explanationBackgroundBudget bounds a background model call. The client keeps
+// its own 120 s budget for both attempts; this is only the backstop.
+const explanationBackgroundBudget = 3 * time.Minute
+
+// startExplanation claims a missing shape and writes it from the model in the
+// background. It answers whether an explanation is now on its way: true when
+// this call started one or another request holds the claim, false when nothing
+// will be written (the limiter refused, or the claim could not be taken). The
+// claim is taken here, before returning, so a second request gets true at once
+// without a second model call. A failed call gives the claim back, so the next
+// view tries again.
+func (s *Server) startExplanation(ctx context.Context, key, shape string, admit func() bool) bool {
+	claimed, err := s.Training.ClaimExplanation(ctx, key)
+	if err != nil {
+		s.logger().Warn("workout explanation: could not claim", "err", err)
+		return false
+	}
+	if !claimed {
+		return true
+	}
+	if admit != nil && !admit() {
+		s.releaseExplanation(key)
+		return false
+	}
+	s.background.Add(1)
+	go func() {
+		defer s.background.Done()
+		bg, cancel := context.WithTimeout(s.lifecycle(), explanationBackgroundBudget)
+		defer cancel()
+		exp, err := s.LLM.ExplainWorkout(bg, shape)
+		if err != nil {
+			s.logger().Warn("workout explanation: the model call failed", "err", err)
+			s.releaseExplanation(key)
+			return
+		}
+		text, err := json.Marshal(exp)
+		if err == nil {
+			err = s.Training.SaveExplanation(bg, key, string(text))
+		}
+		if err != nil {
+			s.logger().Warn("workout explanation: could not save", "err", err)
+			s.releaseExplanation(key)
+		}
+	}()
+	return true
 }
 
 // releaseExplanation gives back an empty claim on its own short context: the
