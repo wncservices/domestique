@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,7 +28,18 @@ type explanationBody struct {
 		Label string `json:"label"`
 		Cue   string `json:"cue"`
 	} `json:"blocks"`
-	Source string `json:"source"`
+	Source  string `json:"source"`
+	Pending bool   `json:"pending"`
+}
+
+// getWrittenExplanation reads a session's explanation, lets the background
+// write finish, and reads it again: the first read answers the template.
+func getWrittenExplanation(t *testing.T, h *ledgerHarness, user, id string) explanationBody {
+	t.Helper()
+	getExplanation(t, h, user, id)
+	h.srv.WaitForBackground()
+	_, got := getExplanation(t, h, user, id)
+	return got
 }
 
 func getExplanation(t *testing.T, h *ledgerHarness, user, id string) (int, explanationBody) {
@@ -69,9 +79,14 @@ func TestExplanationMissCallsOnceThenHitsTheCache(t *testing.T) {
 	f := withExplainLLM(t, h.srv, fixed(workoutExplainReply))
 	id := firstWorkoutIDs(t, h, 1)[0]
 
+	code, first := getExplanation(t, h, "wilant", id)
+	if code != http.StatusOK || first.Source != "template" || !first.Pending {
+		t.Fatalf("first read = %d %+v, want the template, pending", code, first)
+	}
+	h.srv.WaitForBackground()
 	code, got := getExplanation(t, h, "wilant", id)
-	if code != http.StatusOK || got.Source != "model" || got.Summary != workoutExplainText || len(got.Blocks) != 1 {
-		t.Fatalf("first read = %d %+v", code, got)
+	if code != http.StatusOK || got.Source != "model" || got.Pending || got.Summary != workoutExplainText || len(got.Blocks) != 1 {
+		t.Fatalf("written read = %d %+v", code, got)
 	}
 	if n := f.calls.Load(); n != 1 {
 		t.Fatalf("model calls = %d, want 1", n)
@@ -130,8 +145,8 @@ func TestExplanationOfAnotherRidersWorkoutIs404(t *testing.T) {
 	}
 }
 
-// Two requests for the same missing explanation make one model call: the one
-// that lost the claim gets the template at once.
+// Two requests for the same missing explanation make one model call: both get
+// the template at once and both are told it is on its way.
 func TestConcurrentMissMakesOneCall(t *testing.T) {
 	h := newLedgerHarness(t, 250)
 	var mu sync.Mutex
@@ -145,19 +160,19 @@ func TestConcurrentMissMakesOneCall(t *testing.T) {
 	}))
 	id := firstWorkoutIDs(t, h, 1)[0]
 
-	first := make(chan explanationBody, 1)
-	go func() {
-		_, b := getExplanation(t, h, "wilant", id)
-		first <- b
-	}()
+	code, first := getExplanation(t, h, "wilant", id)
+	if code != http.StatusOK || first.Source != "template" || !first.Pending {
+		t.Fatalf("the starter = %d %+v, want the template, pending", code, first)
+	}
 	<-started
-	code, loser := getExplanation(t, h, "wilant", id)
-	if code != http.StatusOK || loser.Source != "template" {
-		t.Fatalf("the loser of the claim = %d %+v, want the template", code, loser)
+	code, second := getExplanation(t, h, "wilant", id)
+	if code != http.StatusOK || second.Source != "template" || !second.Pending {
+		t.Fatalf("the second request = %d %+v, want the template, pending", code, second)
 	}
 	close(release)
-	if winner := <-first; winner.Source != "model" {
-		t.Fatalf("the winner = %+v, want the model's text", winner)
+	h.srv.WaitForBackground()
+	if _, got := getExplanation(t, h, "wilant", id); got.Source != "model" {
+		t.Fatalf("after the write = %+v, want the model's text", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -166,33 +181,29 @@ func TestConcurrentMissMakesOneCall(t *testing.T) {
 	}
 }
 
-// A call that outlives the request budget is cancelled, answers with the
-// template, and gives its claim back so the next view can try again.
-func TestACancelledExplanationReleasesTheClaim(t *testing.T) {
+// A slow model never holds the request: the answer is the template while the
+// call is still running, and the text arrives for the next view.
+func TestASlowModelDoesNotHoldTheRequest(t *testing.T) {
 	h := newLedgerHarness(t, 250)
-	defer api.SetLLMRequestBudgetForTest(100 * time.Millisecond)()
-	var slow atomic.Bool
-	slow.Store(true)
+	release := make(chan struct{})
 	withExplainLLM(t, h.srv, func(string, []byte) string {
-		if slow.Load() {
-			time.Sleep(400 * time.Millisecond)
-		}
+		<-release
 		return workoutExplainReply
 	})
 	id := firstWorkoutIDs(t, h, 1)[0]
 
+	begun := time.Now()
 	code, got := getExplanation(t, h, "wilant", id)
-	if code != http.StatusOK || got.Source != "template" {
-		t.Fatalf("a timed-out call = %d %+v, want the template", code, got)
+	if code != http.StatusOK || got.Source != "template" || !got.Pending {
+		t.Fatalf("read = %d %+v, want the template, pending", code, got)
 	}
-	if n := explanationRows(t, h); n != 0 {
-		t.Fatalf("rows after a cancelled call = %d, want 0 (claim released)", n)
+	if d := time.Since(begun); d > 5*time.Second {
+		t.Fatalf("the request took %s with the model still running", d)
 	}
-
-	slow.Store(false)
-	api.SetLLMRequestBudgetForTest(time.Minute)
-	if code, got = getExplanation(t, h, "wilant", id); code != http.StatusOK || got.Source != "model" {
-		t.Fatalf("the retry = %d %+v, want the model's text", code, got)
+	close(release)
+	h.srv.WaitForBackground()
+	if _, got = getExplanation(t, h, "wilant", id); got.Source != "model" {
+		t.Fatalf("after the write = %+v", got)
 	}
 }
 
@@ -204,6 +215,7 @@ func TestAFailedModelCallIsNotStoredAndNotKept(t *testing.T) {
 	if code, got := getExplanation(t, h, "wilant", id); code != http.StatusOK || got.Source != "template" {
 		t.Fatalf("a failed call = %d %+v, want the template", code, got)
 	}
+	h.srv.WaitForBackground()
 	if n := explanationRows(t, h); n != 0 {
 		t.Fatalf("rows after a failed call = %d, want 0", n)
 	}
@@ -245,6 +257,9 @@ func TestARateLimitedMissServesTheTemplateAndKeepsNoClaim(t *testing.T) {
 	if code != http.StatusOK || got.Source != "template" || len(got.Blocks) == 0 {
 		t.Fatalf("limited miss = %d %+v, want the template", code, got)
 	}
+	if got.Pending {
+		t.Fatal("a refused miss was reported as pending")
+	}
 	if f.calls.Load() != 0 || explanationRows(t, h) != 0 {
 		t.Fatalf("calls = %d, rows = %d; want none (claim given back)", f.calls.Load(), explanationRows(t, h))
 	}
@@ -254,8 +269,8 @@ func TestACacheHitIsNotChargedToTheLimiter(t *testing.T) {
 	h := newLedgerHarness(t, 250)
 	withExplainLLM(t, h.srv, fixed(workoutExplainReply))
 	id := firstWorkoutIDs(t, h, 1)[0]
-	if code, got := getExplanation(t, h, "wilant", id); code != 200 || got.Source != "model" {
-		t.Fatalf("warm-up = %d %+v", code, got)
+	if got := getWrittenExplanation(t, h, "wilant", id); got.Source != "model" {
+		t.Fatalf("warm-up = %+v", got)
 	}
 	h.srv.NarrationLimiter = ratelimit.New(1, time.Hour)
 	h.srv.NarrationLimiter.Allow("wilant")
@@ -401,8 +416,8 @@ func TestPrewritingSkipsAShapeAlreadyStored(t *testing.T) {
 	withExplainLLM(t, h.srv, explainCalls(&calls, &mu, fixed(workoutExplainReply)))
 	w := h.workouts(t)[0]
 
-	if code, got := getExplanation(t, h, "wilant", w.ID); code != http.StatusOK || got.Source != "model" {
-		t.Fatalf("first view = %d %+v", code, got)
+	if got := getWrittenExplanation(t, h, "wilant", w.ID); got.Source != "model" {
+		t.Fatalf("first view = %+v", got)
 	}
 	h.at(6, 6, 45)
 	h.srv.RunLLMNotesForTest(context.Background())
@@ -423,6 +438,7 @@ func TestExplanationsNeverLogTheShapeTheTextOrTheRider(t *testing.T) {
 
 	h.at(6, 6, 45)
 	getExplanation(t, h, "wilant", id)
+	h.srv.WaitForBackground()
 	h.srv.RunLLMNotesForTest(context.Background())
 	f.code = http.StatusInternalServerError
 	clearWorkouts(t, h)

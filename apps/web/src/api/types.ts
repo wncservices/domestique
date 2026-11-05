@@ -2316,4 +2316,6 @@ export interface WorkoutExplanation {
   summary: string
   blocks: { label: string; cue: string }[]
   source: 'model' | 'template'
+  /** The model is writing it in the background; ask again shortly. */
+  pending: boolean
 }
