@@ -399,3 +399,34 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+// Entry names come from the date and the workout name. Two workouts can
+// slug to the same base, and a third can already be called "...-2": every
+// entry must still be distinct, or extracting the zip overwrites one file.
+func TestExportWeekEntryNamesAreUnique(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.setFTP("wilant", 250)
+	h.seedExport(exportRide("Over unders", "2026-03-02"))
+	h.seedExport(exportRide("Over unders", "2026-03-02"))
+	h.seedExport(exportRide("Over unders 2", "2026-03-02"))
+
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/weeks/2026-03-02/export?format=mrc", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d: %s", resp.StatusCode, readAll(t, resp))
+	}
+	body := readAll(t, resp)
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, f := range zr.File {
+		if seen[f.Name] {
+			t.Fatalf("zip has two entries named %q", f.Name)
+		}
+		seen[f.Name] = true
+	}
+	if len(zr.File) != 3 {
+		t.Errorf("entries = %d, want the three workouts", len(zr.File))
+	}
+}

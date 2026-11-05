@@ -213,7 +213,10 @@ func (s *Server) handleExportWeek(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	var skipped []string
-	used := map[string]int{}
+	// Every entry name in the zip, so no name is ever written twice. Counting
+	// per base name is not enough: a workout called "... 2" slugs to the same
+	// name as the second of two identical ones, and the zip would hold both.
+	taken := map[string]bool{}
 	exported := 0
 	for _, wk := range week {
 		base := wk.Date + "-" + source.Slugify(workout.DeviceName(wk.Name, wk.Indoor))
@@ -229,12 +232,7 @@ func (s *Server) handleExportWeek(w http.ResponseWriter, r *http.Request) {
 			skipped = append(skipped, base+": "+refusal.Message)
 			continue
 		}
-		used[base]++
-		entry := base
-		if n := used[base]; n > 1 {
-			entry = fmt.Sprintf("%s-%d", base, n)
-		}
-		if !addZipFile(zw, entry+f.ext, body) {
+		if !addZipFile(zw, uniqueEntryName(taken, base, f.ext), body) {
 			s.logger().Error("week export could not be zipped", "rider", rider, "week", first, "format", f.name)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the zip"})
 			return
@@ -260,6 +258,17 @@ func (s *Server) handleExportWeek(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Domestique-Skipped", "all")
 	}
 	writeExportAttachment(s.logger(), w, fmt.Sprintf("week-%s-%s.zip", first, f.name), "application/zip", buf.Bytes())
+}
+
+// uniqueEntryName is base+ext, or base-2+ext, base-3+ext ... for the first
+// name not already in taken, and records the one it returns.
+func uniqueEntryName(taken map[string]bool, base, ext string) string {
+	name := base + ext
+	for n := 2; taken[name]; n++ {
+		name = fmt.Sprintf("%s-%d%s", base, n, ext)
+	}
+	taken[name] = true
+	return name
 }
 
 func addZipFile(zw *zip.Writer, name string, body []byte) bool {
