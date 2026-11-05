@@ -417,6 +417,7 @@ func TestPostgres(t *testing.T) {
 	for _, stmt := range []string{
 		`DROP TABLE IF EXISTS provider_links`,
 		`DROP TABLE IF EXISTS komoot_links`,
+		`DROP TABLE IF EXISTS provider_link_migrations`,
 	} {
 		if _, err := db.Conn().Exec(stmt); err != nil {
 			t.Fatal(err)
@@ -471,5 +472,63 @@ CREATE TABLE komoot_links (
 	}
 	if secret != "sess-2" {
 		t.Errorf("secret = %q, want sess-2", secret)
+	}
+	// The adoption ran once above, so a disconnect survives a restart here too.
+	if err := store.Delete("komoot", "wilant"); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := UseDB(db.Conn(), db.DSN(), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Get("komoot", "wilant"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("postgres: after restart Get error = %v, want ErrNotFound", err)
+	}
+}
+
+// A rider who disconnected Komoot must stay disconnected across a restart. The
+// adoption ran on every start and copied the legacy row back whenever the new
+// table had none, which is exactly the state a disconnect leaves behind.
+func TestDisconnectedKomootDoesNotComeBackOnRestart(t *testing.T) {
+	box := newBox(t)
+	db, err := source.OpenDB(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	if _, err := db.Conn().Exec(legacyKomootTable); err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := box.Seal("legacy-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Conn().Exec(
+		`INSERT INTO komoot_links (rider, email, display_name, user_id, token, updated_at)
+		 VALUES ('wilant', 'old@example.com', '', 'user-9', ?, '2026-01-01T00:00:00Z')`,
+		sealed); err != nil {
+		t.Fatal(err)
+	}
+
+	// First boot adopts the legacy connection.
+	store, err := UseDB(db.Conn(), db.DSN(), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get("komoot", "wilant"); err != nil {
+		t.Fatalf("the first adoption did not copy: %v", err)
+	}
+
+	// The rider disconnects, then the server restarts.
+	if err := store.Delete("komoot", "wilant"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := UseDB(db.Conn(), db.DSN(), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := again.Get("komoot", "wilant"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("after restart Get error = %v, want ErrNotFound: the disconnected connection came back", err)
 	}
 }
