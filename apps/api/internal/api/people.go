@@ -371,6 +371,14 @@ func emailRef(email string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
+// personRef is the keyed stand-in for an Auth0 user id in a log line that also
+// names a rider: AGENTS.md forbids a sub beside a rider name, and the ref lets
+// two lines about one person still be matched. Empty without a key, which the
+// log line then carries as an empty ref rather than the id.
+func (s *Server) personRef(id string) string {
+	return s.Box.MAC("person-ref", id)
+}
+
 func (s *Server) handlePeopleInvite(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManagePeople) {
 		return
@@ -509,7 +517,7 @@ func (s *Server) handlePeopleSetRole(w http.ResponseWriter, r *http.Request) {
 	// longer train has to take it away explicitly.
 	s.revokeBackgroundAccess(r.Context(), riders, "role changed")
 
-	s.logger().Info("person role changed", "id", id, "role", body.Role, "by", auth.FromContext(r.Context()).User)
+	s.logger().Info("person role changed", "ref", s.personRef(id), "role", body.Role, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
@@ -593,7 +601,7 @@ func (s *Server) handleSetPersonBlocked(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	s.logger().Info("person blocked status changed", "id", id, "blocked", body.Blocked, "by", auth.FromContext(r.Context()).User)
+	s.logger().Info("person blocked status changed", "ref", s.personRef(id), "blocked", body.Blocked, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
@@ -640,7 +648,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 
 	if rider != "" {
 		if _, err := s.purgeRiderData(r.Context(), rider); err != nil {
-			s.logger().Warn("purging local data before deleting a person failed", "id", id, "rider", rider, "err", err)
+			s.logger().Warn("purging local data before deleting a person failed", "ref", s.personRef(id), "rider", rider, "err", err)
 			writeJSON(w, http.StatusBadGateway, map[string]string{
 				"error": "could not remove this rider's local data — nothing was deleted",
 			})
@@ -649,7 +657,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.People.DeleteUser(r.Context(), id); err != nil {
-		s.logger().Warn("deleting a person failed", "id", id, "rider", rider, "err", err)
+		s.logger().Warn("deleting a person failed", "ref", s.personRef(id), "rider", rider, "err", err)
 		s.failUpstream(w, "Auth0", err)
 		return
 	}
@@ -663,7 +671,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.logger().Info("person deleted", "id", id, "rider", rider, "by", auth.FromContext(r.Context()).User)
+	s.logger().Info("person deleted", "ref", s.personRef(id), "rider", rider, "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
