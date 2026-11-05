@@ -1,5 +1,6 @@
 import { getWebInstrumentations, initializeFaro } from '@grafana/faro-web-sdk'
 import { TracingInstrumentation } from '@grafana/faro-web-tracing'
+import { scrubItem } from './utils/redactUrl'
 
 // Shared by both Vite entries (main.ts and landing/main.ts) rather than
 // duplicated inline — they're otherwise deliberately independent bundles
@@ -44,5 +45,8 @@ export function initTelemetry(): void {
       environment: isPreview ? 'preview' : 'production',
     },
     instrumentations: [...getWebInstrumentations(), new TracingInstrumentation()],
+    // Share and calendar tokens live in page URLs and fetch URLs; scrub them
+    // before anything leaves the browser. See utils/redactUrl.ts.
+    beforeSend: (item) => scrubItem(item),
   })
 }
