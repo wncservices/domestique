@@ -406,6 +406,15 @@ func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.
 		claimGuard = " AND uploaded_by = ''"
 	}
 
+	// uploaded_by is written only when this request sets the owner: a claim, or
+	// an owner changed on purpose. Any other edit leaves the column out of the
+	// UPDATE. current was read before this write, so writing its owner would
+	// undo a claim made in between.
+	ownerCol, ownerArgs := "", []any{}
+	if req.Owner != nil {
+		ownerCol, ownerArgs = "uploaded_by=?, ", []any{current.Owner}
+	}
+
 	if req.GPX != nil {
 		points, stats, err := d.analyse(ctx, req.GPX)
 		if err != nil {
@@ -413,15 +422,18 @@ func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.
 		}
 		current.Stats = stats
 		current.ContentHash = gpx.ContentHash(points, current.Name, current.Description)
-		result, err := d.db.ExecContext(ctx, d.query(`
-            UPDATE routes SET name=?, description=?, tags=?, targets=?, enabled=?, sport=?, gpx=?,
-                   distance_m=?, ascent_m=?, start_lat=?, start_lng=?, point_count=?,
-                   content_hash=?, uploaded_by=?, updated_at=?
-            WHERE slug=?`+claimGuard),
+		args := []any{
 			current.Name, current.Description, joinList(current.Tags),
 			nullableList(current.Targets), current.IsEnabled(), string(current.EffectiveSport()), req.GPX,
 			stats.DistanceM, stats.AscentM, stats.StartLat, stats.StartLng, stats.PointCount,
-			current.ContentHash, current.Owner, now, slug)
+			current.ContentHash,
+		}
+		args = append(append(args, ownerArgs...), now, slug)
+		result, err := d.db.ExecContext(ctx, d.query(`
+            UPDATE routes SET name=?, description=?, tags=?, targets=?, enabled=?, sport=?, gpx=?,
+                   distance_m=?, ascent_m=?, start_lat=?, start_lng=?, point_count=?,
+                   content_hash=?, `+ownerCol+`updated_at=?
+            WHERE slug=?`+claimGuard), args...)
 		if err != nil {
 			return model.Route{}, err
 		}
@@ -441,13 +453,16 @@ func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.
 	}
 	current.ContentHash = gpx.ContentHash(points, current.Name, current.Description)
 
-	result, err := d.db.ExecContext(ctx, d.query(`
-        UPDATE routes SET name=?, description=?, tags=?, targets=?, enabled=?, sport=?,
-               content_hash=?, uploaded_by=?, updated_at=?
-        WHERE slug=?`+claimGuard),
+	args := []any{
 		current.Name, current.Description, joinList(current.Tags),
 		nullableList(current.Targets), current.IsEnabled(), string(current.EffectiveSport()),
-		current.ContentHash, current.Owner, now, slug)
+		current.ContentHash,
+	}
+	args = append(append(args, ownerArgs...), now, slug)
+	result, err := d.db.ExecContext(ctx, d.query(`
+        UPDATE routes SET name=?, description=?, tags=?, targets=?, enabled=?, sport=?,
+               content_hash=?, `+ownerCol+`updated_at=?
+        WHERE slug=?`+claimGuard), args...)
 	if err != nil {
 		return model.Route{}, err
 	}

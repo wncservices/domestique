@@ -607,6 +607,55 @@ func TestCrewEachEngine(t *testing.T) {
 				}
 			})
 
+			t.Run("two owners demoting each other in turn leave one owner", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				c, err := store.Create(ctx, "Sunday Club", "wilant")
+				if err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				if _, err := store.AddMember(ctx, c.ID, "tiebe", "wilant"); err != nil {
+					t.Fatalf("add member: %v", err)
+				}
+				if err := store.Confirm(ctx, c.ID, "tiebe"); err != nil {
+					t.Fatalf("confirm: %v", err)
+				}
+				if err := store.SetOwner(ctx, c.ID, "tiebe", true); err != nil {
+					t.Fatalf("promote: %v", err)
+				}
+
+				if err := store.SetOwner(ctx, c.ID, "tiebe", false); err != nil {
+					t.Fatalf("first demotion: %v", err)
+				}
+				if err := store.SetOwner(ctx, c.ID, "wilant", false); !errors.Is(err, ErrLastOwner) {
+					t.Fatalf("second demotion err = %v, want ErrLastOwner", err)
+				}
+				for who, want := range map[string]bool{"wilant": true, "tiebe": false} {
+					if got, err := store.IsOwner(ctx, c.ID, who); err != nil || got != want {
+						t.Errorf("IsOwner(%s) = %v (%v), want %v: exactly one owner must remain", who, got, err, want)
+					}
+				}
+			})
+
+			t.Run("purging a rider frees their crew-creation count", func(t *testing.T) {
+				store := open(t)
+				ctx := t.Context()
+
+				if _, err := store.Create(ctx, "Sunday Club", "wilant"); err != nil {
+					t.Fatalf("create: %v", err)
+				}
+				if n, _ := store.CountCreatedBy(ctx, "wilant"); n != 1 {
+					t.Fatalf("before purge CountCreatedBy = %d, want 1", n)
+				}
+				if _, err := store.RemoveRiderEverywhere(ctx, "wilant"); err != nil {
+					t.Fatalf("remove everywhere: %v", err)
+				}
+				if n, err := store.CountCreatedBy(ctx, "wilant"); err != nil || n != 0 {
+					t.Fatalf("after purge CountCreatedBy = %d (%v), want 0: a reused name would inherit the crews", n, err)
+				}
+			})
+
 			t.Run("backfill owner flag matches the existing owner column", func(t *testing.T) {
 				store := open(t)
 				ctx := t.Context()

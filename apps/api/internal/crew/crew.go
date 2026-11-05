@@ -617,47 +617,72 @@ func (s *Store) IsOwner(ctx context.Context, crewID, rider string) (bool, error)
 	}
 }
 
-// ownerCount reports how many approved members currently hold an owner
-// grant on crewID — what SetOwner checks before revoking one, so the crew
-// never ends up with none left through this call (it can still end up with
-// none if its sole owner is deleted outright — see the API package's
-// purgeRiderData / RemoveRiderEverywhere, an accepted outcome handled by an
-// admin's own override rather than by refusing the deletion).
-func (s *Store) ownerCount(ctx context.Context, crewID string) (int, error) {
-	var count int
-	err := s.db.QueryRowContext(ctx, s.dialect.Rebind(`
-        SELECT COUNT(1) FROM crew_members WHERE crew_id = ? AND status = ? AND is_owner = ?`),
-		crewID, string(StatusApproved), true).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("count crew owners: %w", err)
+// lockOwners reads the approved owners of crewID inside tx and reports how
+// many there are and whether rider is one of them. On PostgreSQL the owner rows
+// are locked (SELECT ... FOR UPDATE), so two transactions that each count the
+// other as an owner cannot both proceed: the second waits, and once the first
+// commits its demotion or removal re-reads as a non-owner and it sees one owner
+// left. Without the lock, both count two under READ COMMITTED and both succeed,
+// leaving the crew with none. SQLite has no row locks and needs none: it admits
+// one writer at a time, so the second transaction waits and then sees the first's
+// change.
+func lockOwners(ctx context.Context, tx *sql.Tx, d dbx.Dialect, crewID, rider string) (owners int, riderIsOwner bool, err error) {
+	lock := ""
+	if d.Name == "postgres" {
+		lock = " FOR UPDATE"
 	}
-	return count, nil
+	rows, err := tx.QueryContext(ctx, d.Rebind(`
+        SELECT rider FROM crew_members
+        WHERE crew_id = ? AND status = ? AND is_owner = ?`+lock),
+		crewID, string(StatusApproved), true)
+	if err != nil {
+		return 0, false, fmt.Errorf("lock crew owners: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var who string
+		if err := rows.Scan(&who); err != nil {
+			return 0, false, err
+		}
+		owners++
+		if who == rider {
+			riderIsOwner = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	return owners, riderIsOwner, nil
 }
 
 // SetOwner grants or revokes rider's owner grant on crewID — approved
 // membership required, the same as IsOwner. Revoking the crew's last
 // remaining owner is refused (ErrLastOwner): every crew keeps at least one
 // owner able to manage it directly, short of an admin's own override.
+//
+// The check and the revoke are one transaction, with the owner rows locked
+// first (see lockOwners). Checking outside it let two owners demoting each other
+// at once both pass the check.
 func (s *Store) SetOwner(ctx context.Context, crewID, rider string, isOwner bool) error {
 	rider = normalizeRider(rider)
 
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("set crew ownership: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	if !isOwner {
-		currentlyOwner, err := s.IsOwner(ctx, crewID, rider)
+		owners, riderIsOwner, err := lockOwners(ctx, tx, s.dialect, crewID, rider)
 		if err != nil {
 			return err
 		}
-		if currentlyOwner {
-			count, err := s.ownerCount(ctx, crewID)
-			if err != nil {
-				return err
-			}
-			if count <= 1 {
-				return ErrLastOwner
-			}
+		if riderIsOwner && owners <= 1 {
+			return ErrLastOwner
 		}
 	}
 
-	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(`
+	result, err := tx.ExecContext(ctx, s.dialect.Rebind(`
         UPDATE crew_members SET is_owner = ? WHERE crew_id = ? AND rider = ? AND status = ?`),
 		isOwner, crewID, rider, string(StatusApproved))
 	if err != nil {
@@ -666,7 +691,7 @@ func (s *Store) SetOwner(ctx context.Context, crewID, rider string, isOwner bool
 	if affected, _ := result.RowsAffected(); affected == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 // RemoveRiderEverywhere takes rider out of every crew's membership, pending
@@ -681,12 +706,27 @@ func (s *Store) RemoveRiderEverywhere(ctx context.Context, rider string) (int, e
 	if rider == "" {
 		return 0, nil
 	}
-	result, err := s.db.ExecContext(ctx, s.dialect.Rebind(
+	// The crews the rider created keep their name in crews.owner, which the
+	// 5-crew limit counts (CountCreatedBy). Blank it in the same transaction, so
+	// a name reused by someone new does not inherit the old one's crews.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("remove rider from all crews: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, s.dialect.Rebind(
 		`DELETE FROM crew_members WHERE rider = ?`), rider)
 	if err != nil {
 		return 0, fmt.Errorf("remove rider from all crews: %w", err)
 	}
 	affected, _ := result.RowsAffected()
+	if _, err := tx.ExecContext(ctx, s.dialect.Rebind(
+		`UPDATE crews SET owner = '' WHERE owner = ?`), rider); err != nil {
+		return 0, fmt.Errorf("forget rider as crew creator: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("remove rider from all crews: %w", err)
+	}
 	return int(affected), nil
 }
 
@@ -882,44 +922,17 @@ func (s *Store) Remove(ctx context.Context, crewID, rider string) error {
 	// otherwise get round that and strand the crew with no owner but an admin.
 	//
 	// Check and delete are one transaction that first locks the crew's owner
-	// rows (SELECT ... FOR UPDATE). Without the lock, two owners leaving at once
-	// each count the other under PostgreSQL's READ COMMITTED snapshot and both
-	// delete. SQLite has no row locks and needs none: it admits one writer at a
-	// time, so the second transaction waits and then sees the first's delete.
+	// rows (see lockOwners).
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	lock := ""
-	if s.dialect.Name == "postgres" {
-		lock = " FOR UPDATE"
-	}
-	rows, err := tx.QueryContext(ctx, s.dialect.Rebind(`
-        SELECT rider FROM crew_members
-        WHERE crew_id = ? AND status = ? AND is_owner = ?`+lock),
-		crewID, string(StatusApproved), true)
+	owners, isOwner, err := lockOwners(ctx, tx, s.dialect, crewID, rider)
 	if err != nil {
-		return fmt.Errorf("lock crew owners: %w", err)
-	}
-	owners, isOwner := 0, false
-	for rows.Next() {
-		var who string
-		if err := rows.Scan(&who); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		owners++
-		if who == rider {
-			isOwner = true
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return err
 	}
-	_ = rows.Close()
 
 	if isOwner && owners <= 1 {
 		return ErrLastOwner

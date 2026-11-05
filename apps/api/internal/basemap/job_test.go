@@ -1,6 +1,11 @@
 package basemap
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"k8s.io/client-go/kubernetes/fake"
+)
 
 func TestParseProgress(t *testing.T) {
 	cases := []struct {
@@ -60,6 +65,33 @@ func TestParseProgress(t *testing.T) {
 			}
 			if ok && percent != tc.wantPercent {
 				t.Errorf("percent = %d, want %d", percent, tc.wantPercent)
+			}
+		})
+	}
+}
+
+// A bad quantity in the config must come back as an error from Trigger, before
+// any Job is created. It used to be a resource.MustParse panic, which took the
+// request down after the caller had already recorded the update as pending, so
+// every later update was refused with 409 until a restart.
+func TestTriggerRefusesABadQuantityWithoutCreatingAJob(t *testing.T) {
+	for name, cfg := range map[string]JobConfig{
+		"memory limit": {MemLimit: "lots", MemRequest: "256Mi", CPURequest: "250m"},
+		"cpu request":  {MemLimit: "1Gi", MemRequest: "256Mi", CPURequest: "250 millicores"},
+		"empty":        {MemLimit: "", MemRequest: "256Mi", CPURequest: "250m"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cs := fake.NewSimpleClientset()
+			c := &Client{clientset: cs, cfg: cfg}
+			job, err := c.Trigger(t.Context(), BBox{West: 1, South: 1, East: 2, North: 2}, 14, "20260101")
+			if err == nil {
+				t.Fatalf("Trigger returned %q with no error for a bad quantity", job)
+			}
+			if !strings.Contains(err.Error(), "basemap") {
+				t.Errorf("error %q does not say which setting is wrong", err)
+			}
+			if n := len(cs.Actions()); n != 0 {
+				t.Errorf("%d cluster call(s) made for a job that cannot be built", n)
 			}
 		})
 	}

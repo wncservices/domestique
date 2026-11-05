@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/crew"
@@ -412,5 +413,44 @@ func TestValidateLLM(t *testing.T) {
 		if err := base(l).Validate(); err == nil {
 			t.Errorf("%s: expected an error, got none", name)
 		}
+	}
+}
+
+// A basemap quantity the cluster cannot parse used to panic inside Trigger, after
+// the update was recorded as pending. Validate must refuse it at startup, where
+// `domestique validate` reports it.
+func TestValidateRejectsABadBasemapQuantity(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Source:  SourceConfig{DSN: "data/domestique.db"},
+			Basemap: BasemapConfig{TilesNamespace: "tiles", TilesPVCName: "basemap", CPURequest: "250m", MemRequest: "256Mi", MemLimit: "1Gi"},
+		}
+	}
+	if err := base().Validate(); err != nil {
+		t.Fatalf("valid quantities rejected: %v", err)
+	}
+
+	for field, set := range map[string]func(*BasemapConfig){
+		"cpu_request": func(b *BasemapConfig) { b.CPURequest = "250 millicores" },
+		"mem_request": func(b *BasemapConfig) { b.MemRequest = "a lot" },
+		"mem_limit":   func(b *BasemapConfig) { b.MemLimit = "1GB please" },
+	} {
+		cfg := base()
+		set(&cfg.Basemap)
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("%s: a bad quantity was accepted", field)
+			continue
+		}
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("%s: error %q does not name the setting", field, err)
+		}
+	}
+
+	// Unset means the default, filled in at load; it is not an error here.
+	cfg := base()
+	cfg.Basemap.MemLimit = ""
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("an unset quantity was refused: %v", err)
 	}
 }

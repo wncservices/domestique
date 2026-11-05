@@ -34,16 +34,22 @@ const (
 )
 
 // Events maps workouts to calendar events: those dated from lookbackDays before
-// today (a date in loc) onward, nearest first, at most maxEvents.
+// today (a date in loc) onward, at most maxEvents, in date order.
+//
+// When there are more than maxEvents, the sessions that matter are kept first:
+// everything from today onward, nearest first, then whatever room is left goes
+// to the most recent past ones. Cutting the list from the front instead would
+// drop a long plan's latest sessions and keep history nobody is looking at.
 //
 // startHour is the one-method seam to the rider's ride window: nil, or
 // (_, false), gives an all-day event; (hour, true) a timed one starting at that
 // wall-clock hour in loc and lasting the workout's planned time. The zone is
 // the deployment's because no per-rider zone exists.
 func Events(ws []workout.Workout, now time.Time, loc *time.Location, startHour func(rider string) (int, bool), appURL string) []ics.Event {
+	today := now.In(loc).Format(dateLayout)
 	cutoff := now.In(loc).AddDate(0, 0, -lookbackDays).Format(dateLayout)
 
-	kept := make([]workout.Workout, 0, len(ws))
+	var upcoming, past []workout.Workout
 	for _, w := range ws {
 		if w.Date == "" || w.Date < cutoff {
 			continue
@@ -51,17 +57,35 @@ func Events(ws []workout.Workout, now time.Time, loc *time.Location, startHour f
 		if _, err := time.Parse(dateLayout, w.Date); err != nil {
 			continue
 		}
-		kept = append(kept, w)
-	}
-	sort.SliceStable(kept, func(i, j int) bool {
-		if kept[i].Date != kept[j].Date {
-			return kept[i].Date < kept[j].Date
+		if w.Date >= today {
+			upcoming = append(upcoming, w)
+		} else {
+			past = append(past, w)
 		}
-		return kept[i].ID < kept[j].ID
-	})
+	}
+	byDate := func(list []workout.Workout) {
+		sort.SliceStable(list, func(i, j int) bool {
+			if list[i].Date != list[j].Date {
+				return list[i].Date < list[j].Date
+			}
+			return list[i].ID < list[j].ID
+		})
+	}
+	byDate(upcoming)
+	byDate(past)
+
+	kept := upcoming
 	if len(kept) > maxEvents {
 		kept = kept[:maxEvents]
 	}
+	if room := maxEvents - len(kept); room > 0 {
+		// past is in date order, so its newest sessions are at the end.
+		if len(past) > room {
+			past = past[len(past)-room:]
+		}
+		kept = append(kept, past...)
+	}
+	byDate(kept)
 
 	out := make([]ics.Event, 0, len(kept))
 	for _, w := range kept {

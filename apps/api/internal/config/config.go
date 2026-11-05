@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
@@ -413,6 +414,23 @@ func (c *Config) Validate() error {
 	// never runs, so it is caught here, where `domestique validate` sees it.
 	if _, err := c.Training.Schedule(); err != nil {
 		return fmt.Errorf("training: %w", err)
+	}
+
+	// The three quantities go to resource.MustParse when an update Job is built.
+	// A bad one panicked there, after the update was recorded as pending, so
+	// refuse it here, where `domestique validate` reports it. An unset one takes
+	// its default at load, so only a value that is set is checked.
+	for _, q := range []struct{ name, value string }{
+		{"cpu_request", c.Basemap.CPURequest},
+		{"mem_request", c.Basemap.MemRequest},
+		{"mem_limit", c.Basemap.MemLimit},
+	} {
+		if q.value == "" {
+			continue
+		}
+		if _, err := resource.ParseQuantity(q.value); err != nil {
+			return fmt.Errorf("basemap.%s %q is not a Kubernetes quantity (for example 250m or 1Gi): %w", q.name, q.value, err)
+		}
 	}
 
 	if c.Basemap.TilesNamespace != "" && c.Basemap.TilesPVCName == "" {

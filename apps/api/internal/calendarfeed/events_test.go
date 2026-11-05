@@ -92,6 +92,69 @@ func TestEventsAreCappedAtFiveHundredNearestFirst(t *testing.T) {
 	}
 }
 
+// Past sessions are the first thing a full feed drops: the 500 kept are the
+// nearest upcoming ones, and only the room left over goes to recent past ones.
+// Before, the cap kept the 500 earliest, so a rider with a long plan lost the
+// latest sessions and kept a fortnight of history instead.
+func TestEventsCapKeepsTheNearestUpcomingNotTheEarliest(t *testing.T) {
+	now := time.Date(2026, 10, 10, 9, 0, 0, 0, brussels)
+	var ws []workout.Workout
+	past := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC) // inside the 14-day window
+	for i := 0; i < 100; i++ {
+		ws = append(ws, wk(fmt.Sprintf("p%03d", i), past.AddDate(0, 0, i%14).Format("2006-01-02")))
+	}
+	start := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 500; i++ {
+		ws = append(ws, wk(fmt.Sprintf("f%03d", i), start.AddDate(0, 0, i).Format("2006-01-02")))
+	}
+
+	got := Events(ws, now, brussels, nil, appURL)
+	if len(got) != 500 {
+		t.Fatalf("len = %d, want 500", len(got))
+	}
+	for _, e := range got {
+		if !strings.HasPrefix(e.UID, "workout-f") {
+			t.Fatalf("a past session %s took room from the upcoming ones", e.UID)
+		}
+	}
+	if got[0].UID != "workout-f000@domestique" || got[499].UID != "workout-f499@domestique" {
+		t.Fatalf("first %s last %s, want the nearest upcoming f000 to f499", got[0].UID, got[499].UID)
+	}
+}
+
+// With few upcoming sessions the room left goes to recent past ones, newest
+// first, and the feed still reads in date order.
+func TestEventsCapFillsWithTheNewestPastSessions(t *testing.T) {
+	now := time.Date(2026, 10, 10, 9, 0, 0, 0, brussels)
+	var ws []workout.Workout
+	past := time.Date(2026, 9, 26, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 600; i++ {
+		// 43 sessions a day over the 14-day window, in date order by i.
+		ws = append(ws, wk(fmt.Sprintf("p%03d", i), past.AddDate(0, 0, i/43).Format("2006-01-02")))
+	}
+	for i := 0; i < 10; i++ {
+		ws = append(ws, wk(fmt.Sprintf("f%03d", i), time.Date(2026, 10, 10+i, 0, 0, 0, 0, time.UTC).Format("2006-01-02")))
+	}
+
+	got := dates(Events(ws, now, brussels, nil, appURL))
+	if len(got) != 500 {
+		t.Fatalf("len = %d, want 500", len(got))
+	}
+	// The newest 490 past sessions are i >= 110, which start on 2026-09-28; the
+	// two days before that must be gone, and the upcoming ten all present.
+	if got[0] < "2026-09-28" {
+		t.Fatalf("the oldest kept session is %s; the newest 490 past ones start 2026-09-28", got[0])
+	}
+	if got[len(got)-1] != "2026-10-19" {
+		t.Fatalf("last kept = %s, want 2026-10-19", got[len(got)-1])
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i] < got[i-1] {
+			t.Fatalf("feed is not in date order at %d: %s after %s", i, got[i], got[i-1])
+		}
+	}
+}
+
 func TestEventUIDIsStableWhenAWorkoutMoves(t *testing.T) {
 	now := time.Date(2026, 10, 10, 9, 0, 0, 0, brussels)
 	before := Events([]workout.Workout{wk("42", "2026-10-12")}, now, brussels, nil, appURL)[0]

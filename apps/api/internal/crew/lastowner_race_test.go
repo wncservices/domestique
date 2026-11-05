@@ -57,3 +57,54 @@ func TestConcurrentOwnersLeavingNeverStrandTheCrew(t *testing.T) {
 		}
 	}
 }
+
+// The same race through SetOwner's demotion: two owners each demoting the
+// other at once must not both succeed. The check and the revoke are one
+// transaction that locks the owner rows, as Remove's is.
+func TestConcurrentOwnerDemotionsNeverStrandTheCrew(t *testing.T) {
+	store := postgresStore(t)
+	ctx := t.Context()
+
+	for round := 0; round < 40; round++ {
+		c, err := store.Create(ctx, fmt.Sprintf("Demote %d", round), "alice")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.RequestJoin(ctx, c.ID, "bob"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Approve(ctx, c.ID, "bob", "alice"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetOwner(ctx, c.ID, "bob", true); err != nil {
+			t.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		start := make(chan struct{})
+		for i, who := range []string{"alice", "bob"} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				errs[i] = store.SetOwner(ctx, c.ID, who, false)
+			}()
+		}
+		close(start)
+		wg.Wait()
+
+		left := 0
+		for _, who := range []string{"alice", "bob"} {
+			if ok, _ := store.IsOwner(ctx, c.ID, who); ok {
+				left++
+			}
+		}
+		if left == 0 {
+			t.Fatalf("round %d: both owners demoted (errors %v, %v), the crew has no owner", round, errs[0], errs[1])
+		}
+		if !errors.Is(errs[0], ErrLastOwner) && !errors.Is(errs[1], ErrLastOwner) {
+			t.Fatalf("round %d: neither demotion was refused: %v, %v", round, errs[0], errs[1])
+		}
+	}
+}
