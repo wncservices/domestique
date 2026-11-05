@@ -73,7 +73,7 @@ func (s *Server) pushWorkoutCourse(ctx context.Context, wk workout.Workout, garm
 		return courseNone, nil
 	}
 
-	res, err := s.applyPush(ctx, []model.Route{*route}, own, crew.Snapshot{}, false, selected)
+	res, err := s.applyPush(ctx, []model.Route{*route}, own, crew.Snapshot{}, false, selected, nil)
 	switch {
 	case err != nil:
 		return courseFailed, err
