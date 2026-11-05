@@ -207,6 +207,34 @@ func TestASlowModelDoesNotHoldTheRequest(t *testing.T) {
 	}
 }
 
+// The background write runs on the server's lifecycle, so a shutdown stops it,
+// and the claim it held is given back: after a restart the next view tries again
+// instead of showing "being written" for the five minutes a stale claim lasts.
+func TestAShutdownDuringTheBackgroundWriteReleasesTheClaim(t *testing.T) {
+	h := newLedgerHarness(t, 250)
+	ctx, stop := context.WithCancel(context.Background())
+	h.srv.Lifecycle = ctx
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	withExplainLLM(t, h.srv, func(string, []byte) string {
+		once.Do(func() { close(started) })
+		<-release
+		return workoutExplainReply
+	})
+	id := firstWorkoutIDs(t, h, 1)[0]
+
+	if _, got := getExplanation(t, h, "wilant", id); !got.Pending {
+		t.Fatalf("first read = %+v, want pending", got)
+	}
+	<-started
+	stop()
+	h.srv.WaitForBackground()
+	close(release)
+	if n := explanationRows(t, h); n != 0 {
+		t.Fatalf("rows after a shutdown = %d, want 0 (claim released, nothing stored)", n)
+	}
+}
+
 func TestAFailedModelCallIsNotStoredAndNotKept(t *testing.T) {
 	h := newLedgerHarness(t, 250)
 	f := withExplainLLM(t, h.srv, fixed(workoutExplainReply))
