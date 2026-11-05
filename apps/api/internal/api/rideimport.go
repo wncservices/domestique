@@ -227,6 +227,15 @@ func (s *Server) handleImportStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
+// maxImportFileParts caps the file parts of one upload. Each part is a spool
+// held open until the job ends, so the count is a count of open files.
+// Anything more is a zip's job.
+const maxImportFileParts = 20
+
+// maxImportFormParts caps the other parts. They are read and dropped, but an
+// unbounded number of them is still work the server does for nothing.
+const maxImportFormParts = 100
+
 // spooled is one uploaded file part, held in a 0600 temp file.
 type spooled struct {
 	f    *os.File
@@ -300,6 +309,7 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var spools []spooled
+	formParts := 0
 	handedOff := false
 	defer func() {
 		if !handedOff {
@@ -319,8 +329,19 @@ func (s *Server) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 		// Only file parts are read; any other field (a stray `rider` among them)
 		// is ignored. A file's own name is never looked at.
 		if part.FormName() != "file" || part.FileName() == "" {
+			formParts++
+			if formParts > maxImportFormParts {
+				s.logger().Info("ride import refused: too many form fields", "rider", rider)
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Too many form fields in one upload."})
+				return
+			}
 			_, _ = io.Copy(io.Discard, io.LimitReader(part, 1<<20))
 			continue
+		}
+		if len(spools) == maxImportFileParts {
+			s.logger().Info("ride import refused: too many files", "rider", rider)
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Too many files in one upload (max 20). Put them in a zip."})
+			return
 		}
 		tmp, err := os.CreateTemp("", "domestique-upload-*")
 		if err != nil {

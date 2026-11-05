@@ -584,3 +584,69 @@ func TestImportNeverStoresOrLogsWhatIsInsideTheUpload(t *testing.T) {
 	}
 	_ = io.Discard
 }
+
+// manyFiles builds n small file parts. Each is a broken FIT, which the job
+// counts as unreadable: the test is about the part stage, not the rides.
+func manyFiles(n int) map[string][]byte {
+	files := make(map[string][]byte, n)
+	for i := 0; i < n; i++ {
+		files[fmt.Sprintf("part-%02d.fit", i)] = []byte("not a fit file at all")
+	}
+	return files
+}
+
+// Each file part is a spool held open until the job ends, so the count is
+// capped. The 21st is refused and the spools already made are removed.
+func TestImportTooManyFileParts413AndLeavesNothing(t *testing.T) {
+	h := newImportHarness(t)
+	resp := h.upload("wilant", "cyclists", manyFiles(21), nil)
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("21 file parts: status = %d, want 413", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Too many files in one upload (max 20). Put them in a zip."; body["error"] != want {
+		t.Errorf("error = %q, want %q", body["error"], want)
+	}
+	h.srv.WaitForBackground()
+	if left := h.leftovers(); len(left) != 0 {
+		t.Errorf("the spools of a refused upload survived: %v", left)
+	}
+	if code, _ := h.status("wilant"); code != http.StatusNoContent {
+		t.Errorf("a refused upload created a job: status %d", code)
+	}
+}
+
+// Twenty is the most a single upload may carry, and that many is accepted.
+func TestImportTwentyFilePartsAreAccepted(t *testing.T) {
+	h := newImportHarness(t)
+	resp := h.upload("wilant", "cyclists", manyFiles(20), nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("20 file parts: status = %d, want 202", resp.StatusCode)
+	}
+	h.srv.WaitForBackground()
+	if left := h.leftovers(); len(left) != 0 {
+		t.Errorf("the spools of an accepted upload survived the job: %v", left)
+	}
+}
+
+// Non-file parts are read and dropped, but an unbounded number of them is
+// still work for the server, so they are capped too.
+func TestImportTooManyFormFields400AndLeavesNothing(t *testing.T) {
+	h := newImportHarness(t)
+	fields := make(map[string]string, 101)
+	for i := 0; i < 101; i++ {
+		fields[fmt.Sprintf("field-%03d", i)] = "x"
+	}
+	fit := map[string][]byte{"a.fit": ride(1, 600, 200).Build(t)}
+	resp := h.upload("wilant", "cyclists", fit, fields)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("101 form fields: status = %d, want 400", resp.StatusCode)
+	}
+	h.srv.WaitForBackground()
+	if left := h.leftovers(); len(left) != 0 {
+		t.Errorf("the spool of a refused upload survived: %v", left)
+	}
+}
