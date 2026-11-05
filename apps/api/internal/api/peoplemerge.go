@@ -140,6 +140,7 @@ func (s *Server) handlePeopleMergeRider(w http.ResponseWriter, r *http.Request) 
 		// held in memory for either rider describe data that has just moved.
 		s.candidateStore().Forget(from)
 		s.candidateStore().Forget(into)
+		s.biometrics.forget(from)
 		s.logger().Warn("riders merged", "from", from, "into", into,
 			"moved", totals.Moved, "keptTarget", totals.KeptTarget, "droppedSource", totals.DroppedSource, "merged", totals.Merged,
 			"sessionsEnded", sum.SessionsEnded, "warnings", len(sum.Warnings), "by", caller)

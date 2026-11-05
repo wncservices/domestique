@@ -28,6 +28,18 @@ import (
 // skipped, never fatal: what is found is revoked, and the morning pass checks
 // the blocklist itself as a backstop.
 func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string {
+	return s.personRiders(ctx, id, email, true)
+}
+
+// exactRidersOfPerson is ridersOfPerson without the name-based guess: only
+// the riders that person's sessions and bindings name. Deleting a person
+// purges what it returns, and a purge cannot be undone, so a guess that two
+// people can share must never choose whose data goes.
+func (s *Server) exactRidersOfPerson(ctx context.Context, id string) []string {
+	return s.personRiders(ctx, id, "", false)
+}
+
+func (s *Server) personRiders(ctx context.Context, id, email string, guess bool) []string {
 	set := map[string]bool{}
 	add := func(name string) {
 		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
@@ -62,7 +74,7 @@ func (s *Server) ridersOfPerson(ctx context.Context, id, email string) []string 
 		}
 	}
 
-	if s.People != nil && s.Auth != nil {
+	if guess && s.People != nil && s.Auth != nil {
 		if gate := s.Auth.RequiredGroup(); gate != "" {
 			adminRole, riderRole := s.permissionRoleNames()
 			var roles []string
