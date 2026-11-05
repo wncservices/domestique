@@ -3178,6 +3178,11 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		// A text cap the rider can fix is a 400 with its message, not a store failure.
+		if errors.Is(err, source.ErrInvalid) {
+			s.failCreate(w, err)
+			return
+		}
 		s.failLookup(w, err)
 		return
 	}

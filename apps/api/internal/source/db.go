@@ -316,6 +316,9 @@ func (d *DB) Create(ctx context.Context, req CreateRequest) (model.Route, error)
 	if name == "" {
 		name = "Untitled route"
 	}
+	if err := ValidateText(name, req.Descript, req.Tags); err != nil {
+		return model.Route{}, err
+	}
 
 	slug, err := d.uniqueSlug(ctx, Slugify(name))
 	if err != nil {
@@ -346,6 +349,23 @@ func (d *DB) Create(ctx context.Context, req CreateRequest) (model.Route, error)
 func (d *DB) Update(ctx context.Context, slug string, req UpdateRequest) (model.Route, error) {
 	current, err := d.get(ctx, slug)
 	if err != nil {
+		return model.Route{}, err
+	}
+
+	// Only the fields this request sets are checked: a legacy route with an
+	// over-long description can still be renamed or re-targeted.
+	var vName, vDesc string
+	var vTags []string
+	if req.Name != nil {
+		vName = strings.TrimSpace(*req.Name)
+	}
+	if req.Descript != nil {
+		vDesc = *req.Descript
+	}
+	if req.Tags != nil {
+		vTags = *req.Tags
+	}
+	if err := ValidateText(vName, vDesc, vTags); err != nil {
 		return model.Route{}, err
 	}
 
