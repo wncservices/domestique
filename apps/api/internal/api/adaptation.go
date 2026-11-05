@@ -51,9 +51,11 @@ func (s *Server) AdaptWorkouts(ctx context.Context) {
 			continue
 		}
 		seen[g.Rider] = true
-		if s.adaptRider(ctx, g.Rider) {
-			advised++
-		}
+		s.runGuarded("adapt rider", func() {
+			if s.adaptRider(ctx, g.Rider) {
+				advised++
+			}
+		})
 	}
 	// A count only: naming the riders whose tomorrow looks heavy would pair each
 	// with a readiness verdict.

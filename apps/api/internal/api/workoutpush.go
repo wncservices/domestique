@@ -242,9 +242,11 @@ func (s *Server) autoPushWorkouts(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if pushed := s.pushWorkoutsForRider(ctx, rider); pushed > 0 {
-			s.logger().Info("auto-pushed workouts to garmin", "rider", rider, "changed", pushed)
-		}
+		s.runGuarded("auto-push rider", func() {
+			if pushed := s.pushWorkoutsForRider(ctx, rider); pushed > 0 {
+				s.logger().Info("auto-pushed workouts to garmin", "rider", rider, "changed", pushed)
+			}
+		})
 	}
 }
 

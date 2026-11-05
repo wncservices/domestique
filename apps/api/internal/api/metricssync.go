@@ -579,21 +579,35 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed in
 		}
 		// A rider one provider's call failed for is still a rider the next
 		// one gets synced for — one bad account never aborts the pass, the
-		// same rule AGENTS.md states for routes.
-		result, err := s.syncRiderMetrics(ctx, rider, false)
-		if err != nil {
-			s.logger().Error("auto-sync metrics failed", "rider", rider, "err", err)
+		// same rule AGENTS.md states for routes. A panic on one rider's data
+		// is the same: it ends that rider's step, and the rest still sync.
+		done := false
+		s.runGuarded("metrics sync rider", func() {
+			if s.BeforeRiderStep != nil {
+				s.BeforeRiderStep("metrics sync rider", rider)
+			}
+			result, err := s.syncRiderMetrics(ctx, rider, false)
+			if err != nil {
+				s.logger().Error("auto-sync metrics failed", "rider", rider, "err", err)
+				s.noteMetricsFailure(rider)
+				failed++
+				done = true
+				return
+			}
+			for _, warning := range result.Warnings {
+				s.logger().Warn("auto-sync metrics warning", "rider", rider, "warning", warning)
+				// A provider's own failure leaves its rides unread; the other notes
+				// (analysis, estimates) do not.
+				if strings.HasPrefix(warning, "garmin:") || strings.HasPrefix(warning, "wahoo:") {
+					s.noteMetricsFailure(rider)
+				}
+			}
+			done = true
+		})
+		if !done {
+			// The step panicked, so this rider's rides were not read.
 			s.noteMetricsFailure(rider)
 			failed++
-			continue
-		}
-		for _, warning := range result.Warnings {
-			s.logger().Warn("auto-sync metrics warning", "rider", rider, "warning", warning)
-			// A provider's own failure leaves its rides unread; the other notes
-			// (analysis, estimates) do not.
-			if strings.HasPrefix(warning, "garmin:") || strings.HasPrefix(warning, "wahoo:") {
-				s.noteMetricsFailure(rider)
-			}
 		}
 	}
 	return len(connected), failed

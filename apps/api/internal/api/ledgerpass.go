@@ -45,18 +45,20 @@ func (s *Server) repayLoad(ctx context.Context) {
 			continue
 		}
 		seen[g.Rider] = true
-		// A rider whose rides cannot be read right now would have them counted
-		// as missed. Leave them untouched; nothing is claimed, so the next
-		// tick of the morning slot tries again.
-		if s.metricsFailedRider(g.Rider) || s.garminSessionExpired(g.Rider) {
-			skipped++
-			continue
-		}
-		pushed, applied := s.repayRider(ctx, g.Rider)
-		if pushed {
-			pushes++
-		}
-		repaid += applied
+		s.runGuarded("ledger pass rider", func() {
+			// A rider whose rides cannot be read right now would have them counted
+			// as missed. Leave them untouched; nothing is claimed, so the next
+			// tick of the morning slot tries again.
+			if s.metricsFailedRider(g.Rider) || s.garminSessionExpired(g.Rider) {
+				skipped++
+				return
+			}
+			pushed, applied := s.repayRider(ctx, g.Rider)
+			if pushed {
+				pushes++
+			}
+			repaid += applied
+		})
 	}
 	// Counts only: a TSS next to a rider's name is a fitness value, a green
 	// push beside a name would reveal the day's readiness verdict, and a rider

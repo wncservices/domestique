@@ -170,6 +170,7 @@ func (s *Server) RebuildBestEfforts(ctx context.Context) error {
 // derived, and the next start completes it.
 func (s *Server) StartAfterBestEffortsRebuild(ctx context.Context, loops ...func(context.Context)) {
 	go func() {
+		defer s.guard("best efforts rebuild")
 		if err := s.RebuildBestEfforts(ctx); err != nil {
 			s.logger().Error("best efforts: the rebuild failed", "err", err)
 		}

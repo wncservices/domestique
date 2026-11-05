@@ -380,6 +380,9 @@ func (s *Server) StartIdentityBootstrap(ctx context.Context, wait func(attempt i
 		return err
 	}
 	go func() {
+		// A panic here ends the bootstrap, so the gate stays closed (fail
+		// closed) and the panic is logged; it is not retried.
+		defer s.guard("identity bootstrap")
 		for n := 0; ; n++ {
 			if n > 0 {
 				select {
