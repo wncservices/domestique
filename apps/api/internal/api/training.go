@@ -56,6 +56,26 @@ func isOwnTraining(identity auth.Identity, rider string) bool {
 	return rider != "" && strings.EqualFold(identity.User, rider)
 }
 
+// goalIsOwn answers 404 unless goalID is empty or names a goal the caller
+// owns. A missing goal and another rider's goal get the same answer, so a
+// probe cannot tell them apart, and there is no admin override: the goal's
+// own endpoints refuse other riders' goals in the same way.
+func (s *Server) goalIsOwn(w http.ResponseWriter, r *http.Request, goalID string) bool {
+	if goalID == "" {
+		return true
+	}
+	g, err := s.Training.GetGoal(r.Context(), goalID)
+	if err != nil && !errors.Is(err, workout.ErrGoalNotFound) {
+		s.fail(w, err)
+		return false
+	}
+	if errors.Is(err, workout.ErrGoalNotFound) || !isOwnTraining(auth.FromContext(r.Context()), g.Rider) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "goal not found"})
+		return false
+	}
+	return true
+}
+
 func (s *Server) forbidTraining(w http.ResponseWriter, r *http.Request) {
 	identity := auth.FromContext(r.Context())
 	s.logger().Info("training ownership denied", "user", identity.User, "role", identity.Role, "path", r.URL.Path)
@@ -1409,6 +1429,10 @@ func (s *Server) handleCreateWorkout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.goalIsOwn(w, r, body.GoalID) {
+		return
+	}
+
 	rider := auth.FromContext(r.Context()).User
 	wk, err := s.Training.CreateWorkout(r.Context(), workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.Sport(body.Sport), Name: body.Name, GoalID: body.GoalID,
@@ -1461,6 +1485,10 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 	// the ride. Name and step edits stay allowed.
 	if wk.CrewRideID != "" && body.Date != nil && *body.Date != wk.Date {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": crewRideMoveMessage})
+		return
+	}
+
+	if body.GoalID != nil && !s.goalIsOwn(w, r, *body.GoalID) {
 		return
 	}
 
