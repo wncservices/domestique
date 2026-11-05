@@ -79,7 +79,10 @@ delete of it. So a caller narrows the *items*, never the routes: `runPush` and
 `handlePlan` drop the items of routes the caller cannot see (`hiddenSlugs`,
 `withoutSlugs`), and a push of one route (`pushRouteToCrew`, today's course)
 selects that route on each account. Handing `applyPush` one route with no
-selection deletes everything else on the device.
+selection deletes everything else on the device. The other way round, a general
+push leaves alone a route a crew push put on a fellow's device while it is still
+in the library and shared with a crew they are in (`crewHeld` in `BuildPlan`): it
+does not send it, and it does not delete it.
 
 ## Authentication and roles
 

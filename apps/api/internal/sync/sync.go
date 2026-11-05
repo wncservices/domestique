@@ -46,6 +46,12 @@ func BuildPlan(ctx context.Context, routes []model.Route, linked []model.Account
 		}
 
 		desired := map[string]model.Route{}
+		// crewHeld is what a crew push may have put on this account that a
+		// general push does not send: still in the library and shared with a
+		// crew this rider is in. Not the general push's to send, and not its to
+		// delete either, or a rider's own Push would take a crew ride's course
+		// off their device.
+		crewHeld := map[string]bool{}
 		for _, route := range routes {
 			wantedBy := config.PushTargetsFor(route, linked)
 			if crewSharing {
@@ -54,6 +60,13 @@ func BuildPlan(ctx context.Context, routes []model.Route, linked []model.Account
 			for _, target := range wantedBy {
 				if target == account.ID {
 					desired[route.Slug] = route
+				}
+			}
+			if !crewSharing {
+				for _, target := range config.TargetsFor(route, linked, crews) {
+					if target == account.ID {
+						crewHeld[route.Slug] = true
+					}
 				}
 			}
 		}
@@ -83,7 +96,7 @@ func BuildPlan(ctx context.Context, routes []model.Route, linked []model.Account
 		}
 
 		for _, slug := range sortedEntryKeys(recorded) {
-			if _, wanted := desired[slug]; wanted {
+			if _, wanted := desired[slug]; wanted || crewHeld[slug] {
 				continue
 			}
 			plan.Items = append(plan.Items, model.PlanItem{
