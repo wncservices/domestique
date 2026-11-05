@@ -390,7 +390,7 @@ func (s *Server) importWahooRoutes(ctx context.Context, uploader, rider, token s
 	// Downloaded a few at a time, same reasoning and the same bound as
 	// Garmin's and Komoot's own imports.
 	const parallel = 4
-	downloads := fetchWahooRoutes(ctx, s.Wahoo, token, byID, toDownload, parallel)
+	downloads := s.fetchWahooRoutes(ctx, s.Wahoo, token, byID, toDownload, parallel)
 
 	for _, id := range wanted {
 		route := byID[id]
@@ -508,7 +508,7 @@ type WahooDownloader interface {
 // source.CreateRequest can use) happens here too, not in the caller's loop,
 // for the same reason it is exactly as slow and exactly as parallel-safe as
 // the download itself.
-func fetchWahooRoutes(ctx context.Context, client WahooDownloader, token string, routesByID map[string]wahoo.Route, ids []string, parallel int) map[string]wahooRouteDownload {
+func (s *Server) fetchWahooRoutes(ctx context.Context, client WahooDownloader, token string, routesByID map[string]wahoo.Route, ids []string, parallel int) map[string]wahooRouteDownload {
 	out := make(map[string]wahooRouteDownload, len(ids))
 	if len(ids) == 0 {
 		return out
@@ -521,6 +521,7 @@ func fetchWahooRoutes(ctx context.Context, client WahooDownloader, token string,
 	for _, id := range ids {
 		wg.Add(1)
 		go func(id string) {
+			defer s.guard("wahoo route download")
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()

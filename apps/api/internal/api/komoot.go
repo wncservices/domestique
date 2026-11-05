@@ -297,7 +297,7 @@ func (s *Server) importKomootTours(ctx context.Context, uploader string, client 
 	// Small on purpose — this is somebody's personal account on an
 	// undocumented API, not a service to saturate.
 	const parallel = 4
-	downloads := fetchTours(ctx, client, wanted, parallel)
+	downloads := s.fetchTours(ctx, client, wanted, parallel)
 
 	for _, id := range wanted {
 		got := downloads[id]
@@ -345,10 +345,15 @@ type tourDownload struct {
 // Order is irrelevant here — the caller walks its own list afterwards — but
 // the results map must be complete, so every id gets an entry even when the
 // fetch failed.
-func fetchTours(ctx context.Context, client KomootImporter, ids []string, parallel int) map[string]tourDownload {
+func (s *Server) fetchTours(ctx context.Context, client KomootImporter, ids []string, parallel int) map[string]tourDownload {
 	out := make(map[string]tourDownload, len(ids))
 	if len(ids) == 0 {
 		return out
+	}
+	// A tour whose download panics never writes its own entry; start every
+	// tour as failed so it reads as a failed download, not an empty success.
+	for _, id := range ids {
+		out[id] = tourDownload{err: errDownloadPanicked}
 	}
 
 	var mu sync.Mutex
@@ -358,6 +363,7 @@ func fetchTours(ctx context.Context, client KomootImporter, ids []string, parall
 	for _, id := range ids {
 		wg.Add(1)
 		go func() {
+			defer s.guard("komoot tour download")
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()

@@ -67,6 +67,11 @@ const maxUploadBytes = 20 << 20 // 20 MiB
 
 // Server holds the request-scoped dependencies.
 type Server struct {
+	// BeforeRiderStep, when set, runs at the start of one rider's step in a
+	// background loop, inside that step's panic guard. Tests use it to make a
+	// rider's step panic; nil in production.
+	BeforeRiderStep func(stage, rider string)
+
 	// biometrics remembers each rider's last Garmin biometrics read between
 	// background sync ticks — see biometricsCache. Zero value is ready to use.
 	biometrics biometricsCache
@@ -2303,6 +2308,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		GPX:        raw,
 		Sport:      sport,
 	}
+	// Create clips imported text; a rider's own over-long text is refused.
+	if refuseRiderText(w, req.Name, req.Descript, req.Tags) {
+		return
+	}
 	if targetsField := r.FormValue("targets"); targetsField != "" {
 		list := splitCSV(targetsField)
 		req.Targets = &list
@@ -3024,6 +3033,9 @@ func (s *Server) handleCreateRouteFromPoints(w http.ResponseWriter, r *http.Requ
 		Sport:      sport,
 		Targets:    body.Targets,
 	}
+	if refuseRiderText(w, req.Name, req.Descript, req.Tags) {
+		return
+	}
 
 	crews, ok := s.crewSnapshot(w, r)
 	if !ok {
@@ -3669,6 +3681,17 @@ func (s *Server) failUpstream(w http.ResponseWriter, upstream string, err error)
 		}
 	}
 	writeJSON(w, http.StatusBadGateway, map[string]string{"error": upstream + " could not complete that request"})
+}
+
+// refuseRiderText answers 400 and reports true when text a rider typed is past
+// a cap. Source.Create clips what importers send, so the handlers that take
+// rider input refuse here, before anything is written.
+func refuseRiderText(w http.ResponseWriter, name, desc string, tags []string) bool {
+	if err := source.ValidateText(strings.TrimSpace(name), desc, tags); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return true
+	}
+	return false
 }
 
 // failCreate answers a failed Source.Create or Update: a GPX the rider can fix

@@ -316,9 +316,10 @@ func (d *DB) Create(ctx context.Context, req CreateRequest) (model.Route, error)
 	if name == "" {
 		name = "Untitled route"
 	}
-	if err := ValidateText(name, req.Descript, req.Tags); err != nil {
-		return model.Route{}, err
-	}
+	// Create clips rather than refuses: importers hand it text they did not
+	// write. The API's upload and route-builder handlers refuse over-long rider
+	// input themselves (ValidateText) before they get here.
+	name, descript, tags := ClipText(name, req.Descript, req.Tags)
 
 	slug, err := d.uniqueSlug(ctx, Slugify(name))
 	if err != nil {
@@ -336,9 +337,9 @@ func (d *DB) Create(ctx context.Context, req CreateRequest) (model.Route, error)
                             distance_m, ascent_m, start_lat, start_lng, point_count,
                             content_hash, uploaded_by, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		slug, name, req.Descript, joinList(req.Tags), nullableList(req.Targets), string(sport), req.GPX,
+		slug, name, descript, joinList(tags), nullableList(req.Targets), string(sport), req.GPX,
 		stats.DistanceM, stats.AscentM, stats.StartLat, stats.StartLng, stats.PointCount,
-		gpx.ContentHash(points, name, req.Descript), normalizeRider(req.UploadedBy), now, now)
+		gpx.ContentHash(points, name, descript), normalizeRider(req.UploadedBy), now, now)
 	if err != nil {
 		return model.Route{}, err
 	}

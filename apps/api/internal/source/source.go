@@ -69,6 +69,35 @@ func ValidateText(name, desc string, tags []string) error {
 	return nil
 }
 
+// ClipText fits imported free text to the same caps ValidateText enforces,
+// instead of refusing it. An importer (a provider's course name, a shared
+// copy, a generated workout route) did not write the text and cannot fix it,
+// so refusing would fail the whole import. Names and descriptions are cut to
+// their character cap, the tag list to its count, and each tag to its length.
+// Cuts are by rune, never mid-character.
+func ClipText(name, desc string, tags []string) (string, string, []string) {
+	name = clipRunes(name, MaxNameChars)
+	desc = clipRunes(desc, MaxDescriptionChars)
+	if len(tags) > MaxTags {
+		tags = tags[:MaxTags]
+	}
+	clipped := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		clipped = append(clipped, clipRunes(tag, MaxTagChars))
+	}
+	if tags == nil {
+		return name, desc, nil
+	}
+	return name, desc, clipped
+}
+
+func clipRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
+}
+
 // invalidText keeps the message a literal at the call site, where a reader
 // sees the rider-facing wording, rather than inside errors.New.
 func invalidText(msg string) error { return invalid(errors.New(msg)) }
