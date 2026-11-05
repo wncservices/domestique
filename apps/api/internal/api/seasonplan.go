@@ -415,6 +415,7 @@ func (s *Server) startSeasonFill(g workout.Goal) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
+		defer s.guard("season fill")
 		if s.BeforeSeasonFill != nil {
 			s.BeforeSeasonFill()
 		}

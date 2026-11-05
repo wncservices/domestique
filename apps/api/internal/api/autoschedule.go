@@ -115,7 +115,7 @@ func (s *Server) handleSetAutoSchedule(w http.ResponseWriter, r *http.Request) {
 func (s *Server) RunAutoScheduleLoop(ctx context.Context) {
 	// Run once immediately rather than waiting a full interval for the
 	// first pass — see RunAutoImportLoop's own reasoning.
-	s.AutoScheduleTick(ctx)
+	s.runGuarded("auto-schedule tick", func() { s.AutoScheduleTick(ctx) })
 
 	ticker := time.NewTicker(autoScheduleInterval)
 	defer ticker.Stop()
@@ -124,7 +124,7 @@ func (s *Server) RunAutoScheduleLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.AutoScheduleTick(ctx)
+			s.runGuarded("auto-schedule tick", func() { s.AutoScheduleTick(ctx) })
 		}
 	}
 }
@@ -175,22 +175,26 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 		}
 
 		for _, g := range goals {
-			// Every week from this one to the event (twelve rolling weeks for
-			// a goal with no date), so a rider paging forward on the Plan page
-			// finds the whole season planned. Each week is filled once (see
-			// planSeason), so this stays idempotent and never undoes a
-			// rider's deleting, moving or rewriting of it, and a week that has
-			// just become next week gets its untouched sessions refreshed.
-			//
-			// One goal failing (a bad row, an event that has passed) is
-			// skipped, no different from AGENTS.md's "one bad route never
-			// aborts a run": every other rider's goal still gets planned.
-			res, err := s.planSeason(ctx, g)
-			if err != nil {
-				s.seasonPlanErr(g, err)
-				continue
-			}
-			s.logSeasonPass(g, res)
+			// Each goal is its own step: a panic on one rider's goal ends that
+			// goal's pass, and the rest of the goals still get planned.
+			s.runGuarded("auto-schedule goal", func() {
+				// Every week from this one to the event (twelve rolling weeks for
+				// a goal with no date), so a rider paging forward on the Plan page
+				// finds the whole season planned. Each week is filled once (see
+				// planSeason), so this stays idempotent and never undoes a
+				// rider's deleting, moving or rewriting of it, and a week that has
+				// just become next week gets its untouched sessions refreshed.
+				//
+				// One goal failing (a bad row, an event that has passed) is
+				// skipped, no different from AGENTS.md's "one bad route never
+				// aborts a run": every other rider's goal still gets planned.
+				res, err := s.planSeason(ctx, g)
+				if err != nil {
+					s.seasonPlanErr(g, err)
+					return
+				}
+				s.logSeasonPass(g, res)
+			})
 		}
 
 		// After scheduling, so this week exists to swap, and before adaptation
