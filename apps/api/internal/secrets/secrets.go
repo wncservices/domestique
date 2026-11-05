@@ -141,3 +141,47 @@ func (b *Box) Open(ciphertext []byte) (string, error) {
 	}
 	return string(plaintext), nil
 }
+
+// boundPrefix marks a blob sealed by SealFor. Legacy blobs (Seal) are
+// nonce||ciphertext with a random 12-byte nonce, so no prefix can be
+// guaranteed absent from them: one in 2^32 starts with these four bytes by
+// chance. OpenFor therefore never trusts the prefix alone. A prefixed blob is
+// tried as bound first and, if that fails, as a legacy blob; an unprefixed
+// one is legacy. Neither path can open a blob under the wrong context: a
+// bound blob stripped or reread as legacy shifts the nonce and fails the
+// GCM tag, and a legacy blob has no context to check at all (it opens
+// anywhere until its next Save re-seals it bound).
+const boundPrefix = "dcb1"
+
+// SealFor is Seal with the blob bound to context as GCM associated data, so
+// a sealed value copied into another row (another session, another rider's
+// connection) does not open there. context is not secret and is not stored:
+// the caller recomputes it from the row it is reading.
+func (b *Box) SealFor(context, plaintext string) ([]byte, error) {
+	if b == nil {
+		return nil, ErrNoKey
+	}
+	nonce := make([]byte, b.aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	out := append([]byte(boundPrefix), nonce...)
+	return b.aead.Seal(out, nonce, []byte(plaintext), []byte(context)), nil
+}
+
+// OpenFor opens what SealFor produced for the same context. A legacy blob
+// sealed before binding existed (no associated data) still opens, so stored
+// values keep working until they are next written.
+func (b *Box) OpenFor(context string, sealed []byte) (string, error) {
+	if b == nil {
+		return "", ErrNoKey
+	}
+	size := b.aead.NonceSize()
+	if len(sealed) >= len(boundPrefix)+size && string(sealed[:len(boundPrefix)]) == boundPrefix {
+		body := sealed[len(boundPrefix):]
+		if pt, err := b.aead.Open(nil, body[:size], body[size:], []byte(context)); err == nil {
+			return string(pt), nil
+		}
+	}
+	return b.Open(sealed)
+}

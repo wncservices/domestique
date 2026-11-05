@@ -247,7 +247,7 @@ func (s *Store) Save(provider, rider string, c Connection) (Link, error) {
 		return Link{}, errors.New("the sign-in returned no session to store")
 	}
 
-	sealed, err := s.box.Seal(c.Secret)
+	sealed, err := s.box.SealFor(secretContext(provider), c.Secret)
 	if err != nil {
 		return Link{}, err
 	}
@@ -328,7 +328,7 @@ func (s *Store) Secret(provider, rider string) (externalID, secret string, err e
 		return "", "", err
 	}
 
-	secret, err = s.box.Open(sealed)
+	secret, err = s.box.OpenFor(secretContext(provider), sealed)
 	if err != nil {
 		return "", "", fmt.Errorf("%s session for %s: %w — reconnect to replace it", provider, rider, err)
 	}
@@ -391,4 +391,13 @@ func (s *Store) Delete(provider, rider string) error {
 	_, err := s.db.Exec(s.dialect.Rebind(
 		`DELETE FROM provider_links WHERE provider = ? AND rider = ?`), provider, rider)
 	return err
+}
+
+// secretContext binds a sealed connection secret to its provider only, not to
+// the rider: rename-rider and merge-rider move rows between riders with a
+// plain UPDATE of the rider column, and a rider-bound blob would stop opening
+// afterwards. The provider still stops a Komoot token being read as a Garmin
+// session.
+func secretContext(provider string) string {
+	return "domestique/provider-link/" + provider
 }

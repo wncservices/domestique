@@ -203,7 +203,23 @@ func (f *Flow) Exchange(ctx context.Context, code, codeVerifier, redirectURI str
 // the returned token's Nonce field against the one sealed in the state
 // cookie before trusting anything else about it.
 func (f *Flow) VerifyIDToken(ctx context.Context, raw string) (*oidc.IDToken, error) {
-	return f.verifier.Verify(oidc.ClientContext(ctx, f.httpClient), raw)
+	tok, err := f.verifier.Verify(oidc.ClientContext(ctx, f.httpClient), raw)
+	if err != nil {
+		return nil, err
+	}
+	// go-oidc only checks that aud contains our client ID. OIDC Core 3.1.3.7
+	// steps 5-6 add: with several audiences azp must be present and be us, and
+	// an azp that is present must always be us.
+	var claims struct {
+		AZP string `json:"azp"`
+	}
+	if err := tok.Claims(&claims); err != nil {
+		return nil, fmt.Errorf("reading id token azp: %w", err)
+	}
+	if claims.AZP != f.cfg.ClientID && (claims.AZP != "" || len(tok.Audience) > 1) {
+		return nil, errors.New("id token authorized party is not this client")
+	}
+	return tok, nil
 }
 
 // EndSessionURL returns the issuer's RP-initiated logout URL, or "" if the
