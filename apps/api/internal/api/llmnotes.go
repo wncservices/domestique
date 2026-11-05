@@ -62,6 +62,7 @@ func (s *Server) startLLMNotes() {
 	go func() {
 		defer s.background.Done()
 		defer s.llmNotesBusy.Store(false)
+		defer s.guard("llm notes")
 		s.runLLMNotes(ctx)
 	}()
 }
@@ -82,18 +83,20 @@ func (s *Server) writeLLMNotes(ctx context.Context, now time.Time) {
 	var goalRiders []string
 	riders, changes, weekly := 0, 0, 0
 	for _, g := range goals {
-		if seen[g.Rider] || ctx.Err() != nil {
-			continue
-		}
-		seen[g.Rider] = true
-		goalRiders = append(goalRiders, g.Rider)
-		riders++
-		if s.writeChangesNote(ctx, g.Rider, today) {
-			changes++
-		}
-		if now.Weekday() == time.Monday && s.writeWeeklyNote(ctx, g.Rider, today) {
-			weekly++
-		}
+		s.runGuarded("llm notes rider", func() {
+			if seen[g.Rider] || ctx.Err() != nil {
+				return
+			}
+			seen[g.Rider] = true
+			goalRiders = append(goalRiders, g.Rider)
+			riders++
+			if s.writeChangesNote(ctx, g.Rider, today) {
+				changes++
+			}
+			if now.Weekday() == time.Monday && s.writeWeeklyNote(ctx, g.Rider, today) {
+				weekly++
+			}
+		})
 	}
 	// Counts only: a note's text, or which rider it belongs to, never goes in a log.
 	s.logger().Info("llm notes written", "riders", riders, "changes", changes, "weekly", weekly)

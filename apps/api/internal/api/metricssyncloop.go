@@ -160,7 +160,7 @@ func (s *Server) RunMetricsSyncLoop(ctx context.Context) {
 		return
 	}
 
-	s.runMissedWith(ctx, sched)
+	s.runGuarded("metrics sync tick", func() { s.runMissedWith(ctx, sched) })
 
 	for {
 		now := s.now()
@@ -182,7 +182,7 @@ func (s *Server) RunMetricsSyncLoop(ctx context.Context) {
 			// Not an unconditional sync: every replica's timer fires at this
 			// slot, and only the one that finds it still unrecorded, under
 			// the lock, runs it.
-			s.runMissedWith(ctx, sched)
+			s.runGuarded("metrics sync tick", func() { s.runMissedWith(ctx, sched) })
 		}
 	}
 }

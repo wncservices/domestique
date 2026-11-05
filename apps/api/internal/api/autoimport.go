@@ -32,7 +32,7 @@ func (s *Server) RunAutoImportLoop(ctx context.Context) {
 	// Run once immediately rather than waiting a full interval for the
 	// first pass — a freshly deployed or restarted server would otherwise
 	// sit for up to autoImportInterval before ever checking.
-	s.AutoImportTick(ctx)
+	s.runGuarded("auto-import tick", func() { s.AutoImportTick(ctx) })
 
 	ticker := time.NewTicker(autoImportInterval)
 	defer ticker.Stop()
@@ -41,7 +41,7 @@ func (s *Server) RunAutoImportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.AutoImportTick(ctx)
+			s.runGuarded("auto-import tick", func() { s.AutoImportTick(ctx) })
 		}
 	}
 }
@@ -129,25 +129,27 @@ func (s *Server) checkGarminExpiry(ctx context.Context) {
 	// recorded even when there is no rider left so it never keeps a stale value.
 	defer func() { recordGarminSessionExpiry(ctx, earliest, expired) }()
 	for _, rider := range riders {
-		link, err := s.Links.Get(garminProvider, rider)
-		if err != nil {
-			continue
-		}
-		expiry := garmin.Session{ObtainedAt: link.UpdatedAt}.TokenExpiry()
-		if now.After(expiry) {
-			// Already expired — the push-time error path already tells the
-			// rider this every time a push to their account is attempted. It is
-			// counted, not folded into "earliest expiry", which would otherwise
-			// sit in the past for as long as anyone's session is dead.
-			expired++
-			continue
-		}
-		if earliest.IsZero() || expiry.Before(earliest) {
-			earliest = expiry
-		}
-		if expiry.Sub(now) < garminExpiryWarnWindow {
-			s.logger().Warn("garmin session expiring soon", "rider", rider, "expires", expiry)
-		}
+		s.runGuarded("auto-import: garmin expiry", func() {
+			link, err := s.Links.Get(garminProvider, rider)
+			if err != nil {
+				return
+			}
+			expiry := garmin.Session{ObtainedAt: link.UpdatedAt}.TokenExpiry()
+			if now.After(expiry) {
+				// Already expired — the push-time error path already tells the
+				// rider this every time a push to their account is attempted. It is
+				// counted, not folded into "earliest expiry", which would otherwise
+				// sit in the past for as long as anyone's session is dead.
+				expired++
+				return
+			}
+			if earliest.IsZero() || expiry.Before(earliest) {
+				earliest = expiry
+			}
+			if expiry.Sub(now) < garminExpiryWarnWindow {
+				s.logger().Warn("garmin session expiring soon", "rider", rider, "expires", expiry)
+			}
+		})
 	}
 }
 
@@ -170,41 +172,43 @@ func (s *Server) autoImportGarmin(ctx context.Context) int {
 
 	imported := 0
 	for _, rider := range riders {
-		session, ok := s.garminSessionForRider(rider)
-		if !ok {
-			continue
-		}
-		consumer, _ := s.garminConsumer()
-		courses, err := s.Garmin.ListCourses(ctx, consumer, session)
-		if err != nil {
-			s.logger().Warn("auto-import: garmin course list failed", "rider", rider, "err", err)
-			continue
-		}
-		courses = s.dropPacingCourses(ctx, rider, courses)
-		routes, _, err := s.Source.List(ctx)
-		if err != nil {
-			s.logger().Warn("auto-import: reading the library failed", "err", err)
-			continue
-		}
-		tracked := s.garminTrackedRemoteIDs(ctx, rider)
-
-		var wanted []string
-		for _, c := range courses {
-			if tracked[c.ID] || possibleDuplicateOf(c, routes) != "" {
-				continue
+		s.runGuarded("auto-import: garmin", func() {
+			session, ok := s.garminSessionForRider(rider)
+			if !ok {
+				return
 			}
-			wanted = append(wanted, c.ID)
-		}
-		if len(wanted) == 0 {
-			continue
-		}
+			consumer, _ := s.garminConsumer()
+			courses, err := s.Garmin.ListCourses(ctx, consumer, session)
+			if err != nil {
+				s.logger().Warn("auto-import: garmin course list failed", "rider", rider, "err", err)
+				return
+			}
+			courses = s.dropPacingCourses(ctx, rider, courses)
+			routes, _, err := s.Source.List(ctx)
+			if err != nil {
+				s.logger().Warn("auto-import: reading the library failed", "err", err)
+				return
+			}
+			tracked := s.garminTrackedRemoteIDs(ctx, rider)
 
-		result, err := s.importGarminCourses(ctx, rider, rider, session, wanted)
-		if err != nil {
-			s.logger().Warn("auto-import: garmin import failed", "rider", rider, "err", err)
-			continue
-		}
-		imported += len(result.Imported)
+			var wanted []string
+			for _, c := range courses {
+				if tracked[c.ID] || possibleDuplicateOf(c, routes) != "" {
+					continue
+				}
+				wanted = append(wanted, c.ID)
+			}
+			if len(wanted) == 0 {
+				return
+			}
+
+			result, err := s.importGarminCourses(ctx, rider, rider, session, wanted)
+			if err != nil {
+				s.logger().Warn("auto-import: garmin import failed", "rider", rider, "err", err)
+				return
+			}
+			imported += len(result.Imported)
+		})
 	}
 	return imported
 }
@@ -223,40 +227,42 @@ func (s *Server) autoImportWahoo(ctx context.Context) int {
 
 	imported := 0
 	for _, rider := range riders {
-		token, err := s.wahooAccessToken(ctx, rider)
-		if err != nil {
-			continue
-		}
-		routes, err := s.Wahoo.ListRoutes(ctx, token)
-		if err != nil {
-			s.logger().Warn("auto-import: wahoo route list failed", "rider", rider, "err", err)
-			continue
-		}
-		routes = s.dropPacingRoutes(ctx, rider, routes)
-		library, _, err := s.Source.List(ctx)
-		if err != nil {
-			s.logger().Warn("auto-import: reading the library failed", "err", err)
-			continue
-		}
-		tracked := s.wahooTrackedRemoteIDs(ctx, rider)
-
-		var wanted []string
-		for _, rt := range routes {
-			if tracked[rt.ID] || possibleWahooDuplicateOf(rt, library) != "" {
-				continue
+		s.runGuarded("auto-import: wahoo", func() {
+			token, err := s.wahooAccessToken(ctx, rider)
+			if err != nil {
+				return
 			}
-			wanted = append(wanted, rt.ID)
-		}
-		if len(wanted) == 0 {
-			continue
-		}
+			routes, err := s.Wahoo.ListRoutes(ctx, token)
+			if err != nil {
+				s.logger().Warn("auto-import: wahoo route list failed", "rider", rider, "err", err)
+				return
+			}
+			routes = s.dropPacingRoutes(ctx, rider, routes)
+			library, _, err := s.Source.List(ctx)
+			if err != nil {
+				s.logger().Warn("auto-import: reading the library failed", "err", err)
+				return
+			}
+			tracked := s.wahooTrackedRemoteIDs(ctx, rider)
 
-		result, err := s.importWahooRoutes(ctx, rider, rider, token, wanted)
-		if err != nil {
-			s.logger().Warn("auto-import: wahoo import failed", "rider", rider, "err", err)
-			continue
-		}
-		imported += len(result.Imported)
+			var wanted []string
+			for _, rt := range routes {
+				if tracked[rt.ID] || possibleWahooDuplicateOf(rt, library) != "" {
+					continue
+				}
+				wanted = append(wanted, rt.ID)
+			}
+			if len(wanted) == 0 {
+				return
+			}
+
+			result, err := s.importWahooRoutes(ctx, rider, rider, token, wanted)
+			if err != nil {
+				s.logger().Warn("auto-import: wahoo import failed", "rider", rider, "err", err)
+				return
+			}
+			imported += len(result.Imported)
+		})
 	}
 	return imported
 }
@@ -280,29 +286,31 @@ func (s *Server) autoImportKomoot(ctx context.Context) int {
 
 	imported := 0
 	for _, rider := range riders {
-		client := s.komootClientForRider(rider)
-		if client == nil {
-			continue
-		}
-		tours, err := client.Tours(ctx, s.Config.Komoot.IncludeRecorded)
-		if err != nil {
-			s.logger().Warn("auto-import: komoot tour list failed", "rider", rider, "err", err)
-			continue
-		}
-		if len(tours) == 0 {
-			continue
-		}
-		ids := make([]string, 0, len(tours))
-		for _, t := range tours {
-			ids = append(ids, t.ID)
-		}
+		s.runGuarded("auto-import: komoot", func() {
+			client := s.komootClientForRider(rider)
+			if client == nil {
+				return
+			}
+			tours, err := client.Tours(ctx, s.Config.Komoot.IncludeRecorded)
+			if err != nil {
+				s.logger().Warn("auto-import: komoot tour list failed", "rider", rider, "err", err)
+				return
+			}
+			if len(tours) == 0 {
+				return
+			}
+			ids := make([]string, 0, len(tours))
+			for _, t := range tours {
+				ids = append(ids, t.ID)
+			}
 
-		result, err := s.importKomootTours(ctx, rider, client, ids)
-		if err != nil {
-			s.logger().Warn("auto-import: komoot import failed", "rider", rider, "err", err)
-			continue
-		}
-		imported += len(result.Imported)
+			result, err := s.importKomootTours(ctx, rider, client, ids)
+			if err != nil {
+				s.logger().Warn("auto-import: komoot import failed", "rider", rider, "err", err)
+				return
+			}
+			imported += len(result.Imported)
+		})
 	}
 	return imported
 }

@@ -112,6 +112,7 @@ func (s *Server) autoSyncIfEnabled(rider string) {
 	}
 
 	go func() {
+		defer s.guard("auto-sync push")
 		// Shares backgroundSyncLockKey with AutoImportTick's own push — see
 		// that key's comment for why the same lock has to cover both paths.
 		withDBLock(context.Background(), s.dbConn(), backgroundSyncLockKey, func() {
