@@ -186,3 +186,51 @@ func TestBuildPlanGeneralPushNeverReachesACrewFellow(t *testing.T) {
 		}
 	}
 }
+
+// A route a crew push put on a fellow's device is not the general push's to
+// send, but not its to take away either: while it is still in the library and
+// shared with a crew that rider is in, a general plan leaves it alone. Only a
+// route that left the library, or stopped being shared with them, is deleted.
+func TestBuildPlanGeneralPushKeepsACrewSharedRouteOnAFellowsDevice(t *testing.T) {
+	routes, linked, store := testRoutes(t), testAccounts(), newStore(t)
+	for _, slug := range []string{"kemmelberg-loop", "gone-from-repo"} {
+		if err := store.Record(t.Context(), state.Entry{
+			AccountID: "wahoo:two", Slug: slug, RemoteID: "remote-" + slug, ContentHash: "hash-v1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	plan, err := BuildPlan(t.Context(), routes, linked, store, testCrews(), false)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	deleted := map[string]bool{}
+	for _, item := range plan.Changes() {
+		if item.Op == model.OpDelete && item.AccountID == "wahoo:two" {
+			deleted[item.Slug] = true
+		}
+	}
+	if deleted["kemmelberg-loop"] {
+		t.Error("a general push deleted the crew-shared route from a fellow's device")
+	}
+	if !deleted["gone-from-repo"] {
+		t.Error("a route that left the library was not deleted from the fellow's device")
+	}
+
+	// Once the fellow is no longer in the crew, the route goes.
+	left := crew.Snapshot{Crews: testCrews().Crews, ApprovedRiders: crew.MemberSet{"crew:test": {"one"}}}
+	plan, err = BuildPlan(t.Context(), routes, linked, store, left, false)
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	var gone bool
+	for _, item := range plan.Changes() {
+		if item.Op == model.OpDelete && item.AccountID == "wahoo:two" && item.Slug == "kemmelberg-loop" {
+			gone = true
+		}
+	}
+	if !gone {
+		t.Error("the route stayed on the device of a rider who left the crew")
+	}
+}
