@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -641,14 +642,23 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 	}
 	rider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("rider")))
 
+	// Found before the sessions are ended below, because the riders those
+	// sessions and the binding name are read from them. A deleted person's
+	// binding is the one thing that ties their account to the rider's data, so
+	// leaving it out would orphan it. No name guess: see exactRidersOfPerson.
+	riders := s.exactRidersOfPerson(r.Context(), id)
+	if rider != "" && !slices.Contains(riders, rider) {
+		riders = append(riders, rider)
+	}
+
 	// The rider name is the UI's guess and may be blank, so the identity
 	// being deleted is ended by its own id as well: removing someone has to
 	// log them out even when no local data is purged.
 	s.endSessionsOf(r.Context(), id, "person deleted")
 
-	if rider != "" {
-		if _, err := s.purgeRiderData(r.Context(), rider); err != nil {
-			s.logger().Warn("purging local data before deleting a person failed", "ref", s.personRef(id), "rider", rider, "err", err)
+	for _, name := range riders {
+		if _, err := s.purgeRiderDataKeepingBindings(r.Context(), name); err != nil {
+			s.logger().Warn("purging local data before deleting a person failed", "ref", s.personRef(id), "rider", name, "err", err)
 			writeJSON(w, http.StatusBadGateway, map[string]string{
 				"error": "could not remove this rider's local data — nothing was deleted",
 			})
@@ -657,7 +667,7 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.People.DeleteUser(r.Context(), id); err != nil {
-		s.logger().Warn("deleting a person failed", "ref", s.personRef(id), "rider", rider, "err", err)
+		s.logger().Warn("deleting a person failed", "ref", s.personRef(id), "riders", len(riders), "err", err)
 		s.failUpstream(w, "Auth0", err)
 		return
 	}
@@ -667,11 +677,18 @@ func (s *Server) handleDeletePerson(w http.ResponseWriter, r *http.Request) {
 	// that can still sign in with no binding, which would give it a new rider.
 	if s.Identities != nil {
 		if _, err := s.Identities.Unbind(r.Context(), s.authenticator().OIDC().Issuer, id); err != nil {
-			s.logger().Error("could not remove the binding of a deleted person", "rider", rider, "err", err)
+			s.logger().Error("could not remove the binding of a deleted person", "riders", len(riders), "err", err)
+		}
+		// The riders' other bindings go with them, as a purge would have done
+		// before the identity was removed. Logged by count only.
+		for _, name := range riders {
+			if _, err := s.Identities.DeleteRider(r.Context(), name); err != nil {
+				s.logger().Error("could not remove the bindings of a deleted rider", "err", err)
+			}
 		}
 	}
 
-	s.logger().Info("person deleted", "ref", s.personRef(id), "rider", rider, "by", auth.FromContext(r.Context()).User)
+	s.logger().Info("person deleted", "ref", s.personRef(id), "riders", len(riders), "by", auth.FromContext(r.Context()).User)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 

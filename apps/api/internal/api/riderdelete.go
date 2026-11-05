@@ -57,14 +57,28 @@ type purgeSummary struct {
 // crew's, with the author blanked), and deployment settings. What goes: see
 // riderTables, which the tests hold this function to.
 func (s *Server) purgeRiderData(ctx context.Context, rider string) (purgeSummary, error) {
-	sum, err := s.purgeRiderSteps(ctx, rider)
+	sum, err := s.purgeRiderSteps(ctx, rider, true)
 	if err != nil {
 		s.logger().Error("purging a rider's data failed part-way; some of it may remain", "rider", rider, "err", err)
 	}
 	return sum, err
 }
 
-func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummary, error) {
+// purgeRiderDataKeepingBindings is purgeRiderData for deleting a person,
+// where the Auth0 identity is removed after the local data. The bindings
+// stay until that identity is gone: if the Auth0 delete fails, the account
+// still signs in as its rider (now empty) instead of being given a new one.
+// The caller removes the bindings with identities.DeleteRider once it has
+// succeeded.
+func (s *Server) purgeRiderDataKeepingBindings(ctx context.Context, rider string) (purgeSummary, error) {
+	sum, err := s.purgeRiderSteps(ctx, rider, false)
+	if err != nil {
+		s.logger().Error("purging a rider's data failed part-way; some of it may remain", "rider", rider, "err", err)
+	}
+	return sum, err
+}
+
+func (s *Server) purgeRiderSteps(ctx context.Context, rider string, unbind bool) (purgeSummary, error) {
 	var sum purgeSummary
 	rider = strings.ToLower(strings.TrimSpace(rider))
 	if rider == "" {
@@ -75,6 +89,7 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 	// location data, which must not outlive them even for the minutes it would
 	// take to expire. Nothing here can fail.
 	s.candidateStore().Forget(rider)
+	s.biometrics.forget(rider)
 
 	// First, so the rider cannot sign in again, or keep a page open that writes
 	// data, while the rest of this is being removed. A removed rider's cookie
@@ -90,7 +105,7 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string) (purgeSummar
 
 	// Also before anything is removed: with the binding gone, an account that
 	// signs in again is a new one and cannot reach what is being deleted.
-	if s.Identities != nil {
+	if s.Identities != nil && unbind {
 		n, err := s.Identities.DeleteRider(ctx, rider)
 		if err != nil {
 			return sum, fmt.Errorf("removing identity bindings: %w", err)

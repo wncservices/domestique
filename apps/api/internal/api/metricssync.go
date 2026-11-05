@@ -140,6 +140,15 @@ func (c *biometricsCache) put(rider string, v cachedBiometrics) {
 	c.m[rider] = v
 }
 
+// forget drops a rider's cached read. Called wherever a rider's data is
+// removed or moved out, because the cache outlives the data by up to a day
+// and a later rider with the same name would otherwise inherit it.
+func (c *biometricsCache) forget(rider string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, rider)
+}
+
 // garminBiometrics returns what Garmin holds about the rider's physiology,
 // from the cache unless it is stale or force is set (a rider's own "Sync
 // now" always asks — they are waiting on the answer).
