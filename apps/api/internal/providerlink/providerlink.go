@@ -126,29 +126,66 @@ func UseDB(db *sql.DB, dsn string, box *secrets.Box) (*Store, error) {
 	if _, err := db.Exec(schema(d)); err != nil {
 		return nil, fmt.Errorf("create provider_links table: %w", err)
 	}
+	if _, err := db.Exec(migrationsSchema); err != nil {
+		return nil, fmt.Errorf("create provider_link_migrations table: %w", err)
+	}
 	if err := store.adoptKomootLinks(); err != nil {
 		return nil, err
 	}
 	return store, nil
 }
 
-// adoptKomootLinks copies connections made before this table existed.
+// adoptKomootMarker names the one-time adoption in provider_link_migrations.
+const adoptKomootMarker = "adopt_komoot_links"
+
+// migrationsSchema is the marker table for one-time moves. It holds no rider,
+// so it is not in the riderTables registry.
+const migrationsSchema = `
+CREATE TABLE IF NOT EXISTS provider_link_migrations (
+    name    TEXT PRIMARY KEY,
+    done_at TEXT NOT NULL
+)`
+
+// adoptKomootLinks copies connections made before this table existed, once.
 //
 // The rows move as they are: the sealed token was encrypted with the same key
 // and is opaque to both tables, so no re-encryption is involved and a rider
 // who connected Komoot yesterday does not have to sign in again.
 //
-// Only rows with nothing already here are copied, so running twice is safe and
-// a fresh connection is never overwritten by the fossil. The old table is left
-// in place rather than dropped: rolling back to the previous image would
-// otherwise lose every Komoot connection, and a spare table costs nothing. A
-// later release can drop it once no deployment runs that image.
+// It runs once, not on every start. A disconnect deletes the provider_links
+// row, and an every-start copy would bring the legacy row straight back on the
+// next restart. The marker row and the copy share one transaction, and the
+// marker insert goes first: two replicas starting together then race on that
+// insert, and only the one that gets the row copies. A deployment that never
+// had the old table still gets its marker, so it never looks again.
+//
+// The old table is left in place rather than dropped: rolling back to the
+// previous image would otherwise lose every Komoot connection, and a spare
+// table costs nothing. A later release can drop it once no deployment runs
+// that image.
 func (s *Store) adoptKomootLinks() error {
-	if !s.tableExists("komoot_links") {
-		return nil
+	// Asked before the transaction opens: a pool that has one connection would
+	// otherwise wait on itself.
+	legacy := s.tableExists("komoot_links")
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("adopt komoot_links: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.Exec(s.dialect.Rebind(
+		`INSERT INTO provider_link_migrations (name, done_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`),
+		adoptKomootMarker, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return fmt.Errorf("adopt komoot_links: recording the adoption: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err // already adopted on an earlier start
 	}
 
-	_, err := s.db.Exec(`
+	if legacy {
+		_, err := tx.Exec(`
 INSERT INTO provider_links (provider, rider, email, display_name, external_id, secret, updated_at)
 SELECT 'komoot', old.rider, old.email, old.display_name, old.user_id, old.token, old.updated_at
 FROM komoot_links AS old
@@ -156,10 +193,11 @@ WHERE NOT EXISTS (
     SELECT 1 FROM provider_links AS new
     WHERE new.provider = 'komoot' AND new.rider = old.rider
 )`)
-	if err != nil {
-		return fmt.Errorf("adopt komoot_links: %w", err)
+		if err != nil {
+			return fmt.Errorf("adopt komoot_links: %w", err)
+		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // tableExists asks the database rather than trying and inspecting the error,
