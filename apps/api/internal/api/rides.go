@@ -723,13 +723,18 @@ func (s *Server) pushRouteToCrew(ctx context.Context, crewID string, route model
 			return pushResponse{}, err
 		}
 	}
+	// Only this route, on each account: the plan is built from this one route,
+	// so every other route recorded on a member's device would otherwise read
+	// as removed from the library and be deleted from it.
 	scoped := make([]model.Account, 0, len(linked))
+	selected := map[model.PlanKey]bool{}
 	for _, a := range linked {
 		if crews.ApprovedRiders.Has(crewID, a.Rider) {
 			scoped = append(scoped, a)
+			selected[model.PlanKey{AccountID: a.ID, Slug: route.Slug}] = true
 		}
 	}
-	return s.applyPush(ctx, []model.Route{route}, scoped, crews, true, nil)
+	return s.applyPush(ctx, []model.Route{route}, scoped, crews, true, selected, nil)
 }
 
 // pushRideRoute is scheduling's own "Sync now": a ride is scheduled so the

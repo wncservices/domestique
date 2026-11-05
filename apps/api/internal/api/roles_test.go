@@ -55,6 +55,16 @@ type authHarness struct {
 
 func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness {
 	t.Helper()
+	return newAuthHarnessWithTargets(t, komootClient, func(model.Account) (targets.Target, error) {
+		return stubTarget{}, nil
+	})
+}
+
+// newAuthHarnessWithTargets is newAuthHarness with the head-unit adapter
+// chosen by the test, for the one case that needs to see which account a
+// push reached (TestAPushNeverReachesAFellowRidersPrivateRoute).
+func newAuthHarnessWithTargets(t *testing.T, komootClient api.KomootImporter, factory func(model.Account) (targets.Target, error)) *authHarness {
+	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {
@@ -122,9 +132,7 @@ func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness 
 		Config: &config.Config{
 			Komoot: config.KomootConfig{Enabled: komootClient != nil},
 		},
-		TargetFactory: func(model.Account) (targets.Target, error) {
-			return stubTarget{}, nil
-		},
+		TargetFactory: factory,
 	}
 
 	server := httptest.NewServer(srv.Handler())

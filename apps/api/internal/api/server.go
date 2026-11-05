@@ -2023,7 +2023,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := auth.FromContext(r.Context())
-	routes = visibleRoutes(routes, identity, crews)
+	hidden := hiddenSlugs(routes, identity, crews)
 	linked = visibleAccounts(identity, linked, crews)
 
 	// crewSharing: false — this is what GET /api/plan promises the Library
@@ -2036,6 +2036,7 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	plan = withoutSlugs(plan, hidden)
 
 	changes := plan.Changes()
 	writeJSON(w, http.StatusOK, planResponse{
@@ -2091,7 +2092,9 @@ func (s *Server) handlePush(w http.ResponseWriter, r *http.Request) {
 // caller may see — see visibleAccounts. nil is the unattended path's own
 // identity: the poller and auto-sync are not any one rider acting, they
 // are the deployment's own settings taking effect, so they need the full
-// account list the same way BuildPlan always has. handlePush always passes
+// account list the same way BuildPlan always has. Plan items for routes the
+// caller cannot see are dropped too (hiddenSlugs), or a crew fellow's private
+// route would reach their device on the caller's click. handlePush always passes
 // the real caller — an HTTP request is a specific rider acting, and
 // selected alone was not enough of a guard: nothing stopped that map from
 // naming another rider's account id, plan or no plan naming it back.
@@ -2112,7 +2115,9 @@ func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, a
 			return pushResponse{}, err
 		}
 	}
+	var hidden map[string]bool
 	if caller != nil {
+		hidden = hiddenSlugs(routes, *caller, crews)
 		linked = visibleAccounts(*caller, linked, crews)
 	}
 	if autoPushOnly {
@@ -2124,7 +2129,7 @@ func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, a
 	// auto-import path). See BuildPlan's own doc comment for the narrower,
 	// crew-fellow-reaching mode reserved for the crew ride scheduler's own
 	// explicit "sync now" action (applyPush is what that calls instead).
-	return s.applyPush(ctx, routes, linked, crews, false, selected)
+	return s.applyPush(ctx, routes, linked, crews, false, selected, hidden)
 }
 
 // applyPush is the shared tail every push actually goes through — runPush
@@ -2138,7 +2143,11 @@ func (s *Server) runPush(ctx context.Context, selected map[model.PlanKey]bool, a
 // already whatever scope the caller decided on — a full library/account
 // list for runPush, a single route and one crew's own accounts for
 // handleSyncRide — this function does not narrow either any further.
-func (s *Server) applyPush(ctx context.Context, routes []model.Route, linked []model.Account, crews crew.Snapshot, crewSharing bool, selected map[model.PlanKey]bool) (pushResponse, error) {
+//
+// hidden names slugs whose plan items are dropped whatever they are. BuildPlan
+// still sees the whole library: leaving a route out of routes instead would
+// make it read as removed, and plan a delete of it from its owner's device.
+func (s *Server) applyPush(ctx context.Context, routes []model.Route, linked []model.Account, crews crew.Snapshot, crewSharing bool, selected map[model.PlanKey]bool, hidden map[string]bool) (pushResponse, error) {
 	s.pushMu.Lock()
 	defer s.pushMu.Unlock()
 
@@ -2160,7 +2169,7 @@ func (s *Server) applyPush(ctx context.Context, routes []model.Route, linked []m
 	if err != nil {
 		return pushResponse{}, err
 	}
-	plan = plan.Select(selected)
+	plan = withoutSlugs(plan, hidden).Select(selected)
 
 	changes := plan.Changes()
 	failures := syncer.Apply(ctx, plan, s.Store, byAccount, s.recordPushResult)
@@ -3990,6 +3999,37 @@ func visibleRoutes(routes []model.Route, identity auth.Identity, crews crew.Snap
 	for _, rt := range routes {
 		if config.VisibleTo(rt, identity.User, crews) {
 			out = append(out, rt)
+		}
+	}
+	return out
+}
+
+// hiddenSlugs is the slugs of library routes identity may not see: nil for
+// someone who may edit any route. A plan drops their items rather than
+// building without them, because a route missing from the library reads as
+// removed and would be planned as a delete from its owner's device.
+func hiddenSlugs(routes []model.Route, identity auth.Identity, crews crew.Snapshot) map[string]bool {
+	if identity.Role.Can(auth.PermEditAny) {
+		return nil
+	}
+	hidden := map[string]bool{}
+	for _, rt := range routes {
+		if !config.VisibleTo(rt, identity.User, crews) {
+			hidden[rt.Slug] = true
+		}
+	}
+	return hidden
+}
+
+// withoutSlugs drops every plan item for the given slugs.
+func withoutSlugs(plan model.Plan, slugs map[string]bool) model.Plan {
+	if len(slugs) == 0 {
+		return plan
+	}
+	out := model.Plan{Items: make([]model.PlanItem, 0, len(plan.Items))}
+	for _, item := range plan.Items {
+		if !slugs[item.Slug] {
+			out.Items = append(out.Items, item)
 		}
 	}
 	return out
