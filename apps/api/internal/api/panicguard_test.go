@@ -46,8 +46,11 @@ func TestGuardRecoversAndLogsTheStage(t *testing.T) {
 	if l["level"] != "ERROR" || l["msg"] != "background step panicked" {
 		t.Fatalf("want ERROR background step panicked, got %v %v", l["level"], l["msg"])
 	}
-	if l["stage"] != "auto-schedule tick" || l["panic"] != "boom" {
-		t.Fatalf("want stage and panic value, got stage=%v panic=%v", l["stage"], l["panic"])
+	if l["stage"] != "auto-schedule tick" || l["panic_type"] != "string" {
+		t.Fatalf("want stage and panic type, got stage=%v panic_type=%v", l["stage"], l["panic_type"])
+	}
+	if _, ok := l["panic"]; ok {
+		t.Fatalf("the panic value must not be logged, got %v", l["panic"])
 	}
 	if stack, _ := l["stack"].(string); stack == "" {
 		t.Fatalf("want a stack attribute, got none")
@@ -109,5 +112,29 @@ func TestRunGuardedLoopSurvivesAPanickingTick(t *testing.T) {
 	}
 	if n := len(decodePanicLog(t, &buf)); n != 1 {
 		t.Fatalf("want exactly one panic logged, got %d", n)
+	}
+}
+
+// A panic value can carry data (a rider id, a slice of readings). The log
+// names its type and the stack, never its contents.
+func TestGuardDoesNotLogThePanicValue(t *testing.T) {
+	var buf bytes.Buffer
+	s := panicLogServer(&buf)
+	type poison struct{ Rider string }
+	func() {
+		defer s.guard("rider step")
+		panic(poison{Rider: "secret-rider-42"})
+	}()
+
+	if strings.Contains(buf.String(), "secret-rider-42") {
+		t.Fatalf("log carries the panic's data: %q", buf.String())
+	}
+	lines := decodePanicLog(t, &buf)
+	if len(lines) != 1 {
+		t.Fatalf("want one log line, got %d", len(lines))
+	}
+	// The package path of a test-local type varies, so match the type name.
+	if got, _ := lines[0]["panic_type"].(string); !strings.HasSuffix(got, "poison") {
+		t.Fatalf("want panic_type naming the type, got %q", got)
 	}
 }

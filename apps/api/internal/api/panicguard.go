@@ -23,7 +23,9 @@ func (s *Server) guard(stage string) {
 	if len(stack) > maxPanicStack {
 		stack = stack[:maxPanicStack]
 	}
-	s.logger().Error("background step panicked", "stage", stage, "panic", fmt.Sprint(r), "stack", stack)
+	// The type and the stack are enough to find the fault. The value itself can
+	// carry data (a slice, a rider id), so it is not logged.
+	s.logger().Error("background step panicked", "stage", stage, "panic_type", fmt.Sprintf("%T", r), "stack", stack)
 }
 
 // runGuarded runs fn behind guard. The tick loops wrap each tick in it, so a

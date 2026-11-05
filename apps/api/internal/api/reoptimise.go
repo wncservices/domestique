@@ -41,9 +41,11 @@ func (s *Server) reoptimise(ctx context.Context) {
 			continue
 		}
 		seen[g.Rider] = true
-		if s.reoptimiseRider(ctx, g.Rider) {
-			swapped++
-		}
+		s.runGuarded("reoptimise rider", func() {
+			if s.reoptimiseRider(ctx, g.Rider) {
+				swapped++
+			}
+		})
 	}
 	// A count only: naming who swapped would reveal whose morning was a bad one.
 	if swapped > 0 {

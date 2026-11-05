@@ -37,18 +37,20 @@ func (s *Server) decayLevels(ctx context.Context) {
 			continue
 		}
 		seen[g.Rider] = true
-		// Rides the app has not seen must not read as zones left alone: same
-		// rule as the load ledger. The week stays unclaimed for a later tick.
-		if s.metricsFailedRider(g.Rider) || s.garminSessionExpired(g.Rider) {
-			unseen++
-			continue
-		}
-		n, err := s.decayRiderLevels(ctx, g.Rider)
-		if err != nil {
-			failed++
-			continue
-		}
-		decayed += n
+		s.runGuarded("level decay rider", func() {
+			// Rides the app has not seen must not read as zones left alone: same
+			// rule as the load ledger. The week stays unclaimed for a later tick.
+			if s.metricsFailedRider(g.Rider) || s.garminSessionExpired(g.Rider) {
+				unseen++
+				return
+			}
+			n, err := s.decayRiderLevels(ctx, g.Rider)
+			if err != nil {
+				failed++
+				return
+			}
+			decayed += n
+		})
 	}
 	if decayed > 0 {
 		s.logger().Info("level decay: levels lowered", "levels", decayed)
