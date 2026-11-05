@@ -140,3 +140,22 @@ func quotedTags(n int, each string) string {
 	}
 	return strings.Join(parts, ",")
 }
+
+// A route saved from the route builder is rider text too: an over-long name is
+// a 400 with nothing stored. Create clips imported text, so this handler must
+// refuse on its own.
+func TestRouteBuilderSaveRefusesOverLongRouteText(t *testing.T) {
+	client, base := newRouteBuilderHarness(t, nil)
+
+	resp := doJSON(t, client, http.MethodPost, base+"/api/routes/from-points", map[string]any{
+		"name": repeatRune("a", 201),
+		"points": []map[string]float64{
+			{"lat": 50.85, "lon": 4.35},
+			{"lat": 50.86, "lon": 4.36},
+		},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a 201-character name", resp.StatusCode)
+	}
+}

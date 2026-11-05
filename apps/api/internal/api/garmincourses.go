@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -419,7 +420,7 @@ func (s *Server) importGarminCourses(ctx context.Context, uploader, rider string
 	// somebody's personal account on an undocumented API, not a service to
 	// saturate.
 	const parallel = 4
-	downloads := fetchGPX(ctx, s.Garmin, consumer, session, toDownload, parallel)
+	downloads := s.fetchGPX(ctx, s.Garmin, consumer, session, toDownload, parallel)
 
 	for _, id := range wanted {
 		course := byID[id]
@@ -527,12 +528,21 @@ type gpxDownload struct {
 	err error
 }
 
+// errDownloadPanicked is what a download that panicked reports; the caller
+// treats it like any other failed download.
+var errDownloadPanicked = errors.New("the download did not finish")
+
 // fetchGPX downloads several courses at once, bounded by parallel — same
 // shape as komoot.go's fetchTours.
-func fetchGPX(ctx context.Context, connector GarminConnector, consumer GarminConsumer, session garmin.Session, ids []string, parallel int) map[string]gpxDownload {
+func (s *Server) fetchGPX(ctx context.Context, connector GarminConnector, consumer GarminConsumer, session garmin.Session, ids []string, parallel int) map[string]gpxDownload {
 	out := make(map[string]gpxDownload, len(ids))
 	if len(ids) == 0 {
 		return out
+	}
+	// Every course starts as a failure, so a download that panics (and so
+	// never writes its own entry) reads as failed, not as an empty success.
+	for _, id := range ids {
+		out[id] = gpxDownload{err: errDownloadPanicked}
 	}
 
 	var mu sync.Mutex
@@ -542,6 +552,7 @@ func fetchGPX(ctx context.Context, connector GarminConnector, consumer GarminCon
 	for _, id := range ids {
 		wg.Add(1)
 		go func(id string) {
+			defer s.guard("garmin course download")
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
