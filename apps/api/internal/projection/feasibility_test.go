@@ -26,8 +26,12 @@ func TestJudgeFeasibility(t *testing.T) {
 			"A stretch: fitness 70 of about 100 by race day. A later date would close it."},
 		{"ratio under 0.70 is unrealistic", FeasibilityInput{TargetCTL: 100, Shortfall: 31, Weeks: 9}, "unrealistic", "error",
 			"Not realistic in 9 weeks: fitness can reach about 69, this event needs about 100."},
-		{"hours cap turns a low ratio into a stretch", FeasibilityInput{TargetCTL: 100, Shortfall: 50, HoursCapped: true, Weeks: 9}, "stretch", "warning",
-			"A stretch: your available hours cap the build at fitness 50 of about 100. More hours a week or a later date would close it."},
+		{"hours cap explains a stretch", FeasibilityInput{TargetCTL: 100, Shortfall: 20, HoursCapped: true, Weeks: 9}, "stretch", "warning",
+			"A stretch: your available hours cap the build at fitness 80 of about 100. More hours a week or a later date would close it."},
+		// The cap changes the advice, never the verdict: half the fitness needed
+		// is not realistic however it came about.
+		{"hours cap does not soften an unrealistic goal", FeasibilityInput{TargetCTL: 100, Shortfall: 50, HoursCapped: true, Weeks: 9}, "unrealistic", "error",
+			"Not realistic with your current hours: fitness can reach about 50, this event needs about 100. More hours a week or a later date would help."},
 		{"hours cap does not demote a close plan", FeasibilityInput{TargetCTL: 100, Shortfall: 10, HoursCapped: true, Weeks: 9}, "achievable", "success",
 			"Achievable, just: fitness 90 of about 100 by race day."},
 		{"figures are rounded before comparing", FeasibilityInput{TargetCTL: 99.6, Shortfall: 14.6, Weeks: 9}, "achievable", "success",
