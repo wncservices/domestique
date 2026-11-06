@@ -88,8 +88,14 @@ func TestTheNightAcrossTheAutumnClockChange(t *testing.T) {
 	if d.SleepSeconds != 4*3600 {
 		t.Fatalf("got %d s, want %d", d.SleepSeconds, 4*3600)
 	}
-	// Both ends of the window sit where wall-clock arithmetic puts them: 18:00+02:00 on the 24th
-	// counts, 17:59+02:00 does not.
+	// Both ends of the window sit where wall-clock arithmetic puts them: time from 18:00+02:00 on
+	// the 24th counts, a sample ending at 17:59+02:00 does not.
+	p = Payload{Sleep: []SleepSample{
+		sleep("2026-10-24T17:00:00+02:00", "2026-10-24T17:59:00+02:00", "Asleep"),
+	}}
+	if got := Days(p, loc, "2026-10-25"); len(got) != 0 {
+		t.Fatalf("a sample ending at 17:59 should not count, got %+v", got)
+	}
 	p = Payload{Sleep: []SleepSample{
 		sleep("2026-10-24T17:00:00+02:00", "2026-10-24T18:30:00+02:00", "Asleep"),
 	}}
@@ -240,5 +246,44 @@ func TestDecodeRefusesTooManySamples(t *testing.T) {
 func TestEmptyPayloadGivesNoDays(t *testing.T) {
 	if got := Days(Payload{}, time.UTC, "2026-11-05"); len(got) != 0 {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestAnOutOfRangeHRVSampleIsDroppedBeforeTheMean(t *testing.T) {
+	p := Payload{HRV: []Sample{
+		{Start: "2026-11-05T02:00:00+01:00", Value: 40},
+		{Start: "2026-11-05T04:00:00+01:00", Value: 60},
+		{Start: "2026-11-05T05:00:00+01:00", Value: 400},
+	}}
+	if d := only(t, Days(p, brussels(t), "2026-11-05")); d.HRV != 50 {
+		t.Fatalf("got %v, want 50", d.HRV)
+	}
+}
+
+func TestAnOutOfRangeRestingHRSampleDoesNotHideAnEarlierOne(t *testing.T) {
+	p := Payload{RestingHR: []Sample{
+		{Start: "2026-11-05T00:00:00+01:00", Value: 52},
+		{Start: "2026-11-05T08:00:00+01:00", Value: 200},
+	}}
+	if d := only(t, Days(p, brussels(t), "2026-11-05")); d.RestingHR != 52 {
+		t.Fatalf("got %d, want 52", d.RestingHR)
+	}
+}
+
+func TestWhichSleepStagesCountAsAsleep(t *testing.T) {
+	cases := map[string]bool{
+		"Asleep": true, "Core": true, "Deep": true, "REM": true, "Unspecified": true,
+		"core": true, "rem": true,
+		"In Bed": false, "Awake": false, "Mystery": false, "": false,
+	}
+	for stage, counts := range cases {
+		p := Payload{Sleep: []SleepSample{sleep("2026-11-05T01:00:00+01:00", "2026-11-05T02:00:00+01:00", stage)}}
+		got := Days(p, brussels(t), "2026-11-05")
+		if counts && (len(got) != 1 || got[0].SleepSeconds != 3600) {
+			t.Errorf("%q should count, got %+v", stage, got)
+		}
+		if !counts && len(got) != 0 {
+			t.Errorf("%q should not count, got %+v", stage, got)
+		}
 	}
 }

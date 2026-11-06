@@ -132,26 +132,24 @@ func Days(p Payload, loc *time.Location, today string) []Day {
 		var sum float64
 		var n int
 		for _, r := range hrv {
-			if !r.at.Before(from) && r.at.Before(to) {
+			if !r.at.Before(from) && r.at.Before(to) && r.value >= minHRV && r.value <= maxHRV {
 				sum += r.value
 				n++
 			}
 		}
 		if n > 0 {
-			if mean := sum / float64(n); mean >= minHRV && mean <= maxHRV {
-				row.HRV = mean
-			}
+			row.HRV = sum / float64(n)
 		}
 
 		var latest *reading
 		for i := range rhr {
 			a := rhr[i].at.In(loc)
 			ay, am, ad := a.Date()
-			if ay == dy && am == dm && ad == dd && (latest == nil || rhr[i].at.After(latest.at)) {
+			if ay == dy && am == dm && ad == dd && rhr[i].value >= minRestingHR && rhr[i].value <= maxRestingHR && (latest == nil || rhr[i].at.After(latest.at)) {
 				latest = &rhr[i]
 			}
 		}
-		if latest != nil && latest.value >= minRestingHR && latest.value <= maxRestingHR {
+		if latest != nil {
 			row.RestingHR = int(latest.value + 0.5)
 		}
 
