@@ -84,6 +84,8 @@ import type {
   PacingPlan,
   FitnessResponse,
   GoalProposal,
+  GoalCheck,
+  GoalCheckRequest,
   LinkSessionRequest,
   SyncMetricsResult,
   BestEffortsResponse,
@@ -918,6 +920,14 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note }),
+    }),
+
+  /** Judges an unsaved goal against the rider's plan. Saves nothing. */
+  checkGoal: (body: GoalCheckRequest) =>
+    request<GoalCheck>('/api/training/goals/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     }),
 
   proposeProfileChange: (note: string) =>

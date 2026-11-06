@@ -8,6 +8,7 @@ import { api } from '@/api/client'
 import type { GoalPriority, Sport } from '@/api/types'
 import type { GoalForm } from '@/components/plan/forms'
 import { NO_ROUTE, sports } from '@/components/plan/forms'
+import GoalFeasibility from '@/components/plan/GoalFeasibility.vue'
 
 const open = defineModel<boolean>('open', { required: true })
 const note = defineModel<string>('note', { required: true })
@@ -127,6 +128,7 @@ const priorities: { value: GoalPriority; label: string }[] = [
             />
           </UFormField>
         </div>
+        <GoalFeasibility :form="form" />
         <UFormField
           v-if="form.sport === 'cycling'"
           label="Route"
