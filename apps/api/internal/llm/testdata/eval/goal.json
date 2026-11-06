@@ -60,6 +60,18 @@
       "lang": "nl",
       "input": {"note": "Een wielerwedstrijd van 100 km op 3 juli 2027, middelmatig belangrijk."},
       "want": {"sport": "cycling", "eventDate": "2027-07-03", "priority": "B", "targetDistanceKm": 100}
+    },
+    {
+      "name": "half marathon, month only",
+      "lang": "en",
+      "input": {"note": "I want to run a half marathon in june"},
+      "want": {"sport": "running", "eventDate": "2027-06-15", "targetDistanceKm": 21.1}
+    },
+    {
+      "name": "marathon, end of the month",
+      "lang": "nl",
+      "input": {"note": "Eind mei 2027 wil ik een marathon lopen."},
+      "want": {"sport": "running", "eventDate": "2027-05-25", "targetDistanceKm": 42.2}
     }
   ]
 }
