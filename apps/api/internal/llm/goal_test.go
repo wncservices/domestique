@@ -137,3 +137,46 @@ func TestEnumsAreInTheSchema(t *testing.T) {
 		t.Errorf("goal sport enum = %v, want exactly cycling, running", got)
 	}
 }
+
+// "In June" names no day, so the model gives the month and the server places
+// it: the 15th of the next June after today, or the 5th / 25th for early / late.
+func TestProposeGoalPlacesAMonthWithoutADay(t *testing.T) {
+	cases := []struct {
+		reply string
+		want  string
+	}{
+		{`"eventDate":"","eventMonth":6,"eventPartOfMonth":""`, "2026-06-15"},
+		{`"eventDate":"","eventMonth":6,"eventPartOfMonth":"early"`, "2026-06-05"},
+		{`"eventDate":"","eventMonth":6,"eventPartOfMonth":"late"`, "2026-06-25"},
+		// A month already behind today means next year's.
+		{`"eventDate":"","eventMonth":2,"eventPartOfMonth":"mid"`, "2027-02-15"},
+		// Mid March is before today (18 March): next year's.
+		{`"eventDate":"","eventMonth":3,"eventPartOfMonth":"mid"`, "2027-03-15"},
+		// A day the model did give wins over the month.
+		{`"eventDate":"2026-06-07","eventMonth":6,"eventPartOfMonth":"mid"`, "2026-06-07"},
+		// A month out of range is nothing.
+		{`"eventDate":"","eventMonth":13,"eventPartOfMonth":""`, ""},
+		{`"eventDate":"","eventMonth":0,"eventPartOfMonth":""`, ""},
+	}
+	for _, c := range cases {
+		f := newFake(t, answer(t, `{"name":"Half marathon","sport":"running",`+c.reply+`,"priority":"B","targetDistanceKm":21.1,"targetElevationM":0,"explanation":"x"}`))
+		cl := newClient(t, f.srv.URL+"/v1", "")
+		p, err := cl.ProposeGoal(t.Context(), "I want to run a half marathon in june", goalToday)
+		if err != nil {
+			t.Fatalf("ProposeGoal: %v", err)
+		}
+		if p.EventDate != c.want {
+			t.Errorf("reply %s: eventDate = %q, want %q", c.reply, p.EventDate, c.want)
+		}
+	}
+}
+
+// The prompt has to let the model place a month and fill in a standard race
+// distance, or "half marathon in June" comes back with neither.
+func TestGoalSystemAllowsMonthsAndStandardDistances(t *testing.T) {
+	for _, want := range []string{"eventMonth", "half marathon", "21.1", "marathon", "42.2"} {
+		if !strings.Contains(goalSystem, want) {
+			t.Errorf("goalSystem does not mention %q", want)
+		}
+	}
+}
