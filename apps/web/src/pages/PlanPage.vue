@@ -1041,11 +1041,6 @@ const pageState = computed(() =>
       />
     </template>
 
-    <p v-if="pageState !== 'loading' && pageState !== 'failed' && goals.length" class="text-[length:var(--text-body)] text-muted">
-      <UButton to="/goals" variant="link" icon="i-lucide-target" class="p-0 align-baseline">All goals</UButton>
-      ({{ goals.length }}): edit, reprioritise or add another.
-    </p>
-
     <GoalSlideover
       v-model:open="goalModalOpen"
       v-model:note="goalNote"
