@@ -604,7 +604,7 @@ function onRated(analysis: SessionAnalysis) {
             <UButton color="neutral" variant="ghost" size="sm" icon="i-lucide-pencil" @click="emit('edit', firstWorkout)">Edit</UButton>
           </div>
           <UCollapsible v-if="firstWorkout.steps.length > 0" v-model:open="aboutOpen">
-            <UButton color="neutral" variant="link" size="sm" class="px-0" trailing-icon="i-lucide-chevron-right" :ui="{ trailingIcon: aboutOpen ? 'rotate-90 transition-transform' : 'transition-transform' }" label="About this session" />
+            <UButton color="neutral" variant="soft" size="sm" icon="i-lucide-sparkles" trailing-icon="i-lucide-chevron-right" :ui="{ trailingIcon: aboutOpen ? 'rotate-90 transition-transform' : 'transition-transform' }" label="About this session" />
             <template #content>
               <div class="mt-2">
                 <SessionExplanation :workout-id="firstWorkout.id" />

@@ -14,41 +14,39 @@
 
 /* Domestique's palette, layered over Nuxt UI's design tokens.
  *
- * Teal rather than the orange this started with: orange sits next to the
- * warning colour, so an accent and an alarm looked alike at a glance. Teal
- * reads outdoors without competing with the amber and red the UI reserves for
- * things going wrong. This is the brighter/v2 tuning of that same teal —
- * lighter ground, more saturated accent — not a hue change. See
+ * Aqua jade (#2ec4a4, primary-500) on midnight abyss (#0e1a2b, neutral-900),
+ * with baby pink (#f6c1cf, blossom-300) as the soft accent. A teal-green
+ * still, not the orange this started with: orange sits next to the warning
+ * colour, so an accent and an alarm looked alike at a glance. See
  * docs/design-system.md for the token reference and the rules for adding to
  * this file. */
 @theme static {
-  --color-primary-50: #eafdf9;
-  --color-primary-100: #c8f7ec;
-  --color-primary-200: #8ff0da;
-  --color-primary-300: #4de3c2;
-  --color-primary-400: #14cfab;
-  --color-primary-500: #04b99e;
-  --color-primary-600: #049483;
-  --color-primary-700: #0a7669;
-  --color-primary-800: #105f56;
-  --color-primary-900: #134e47;
-  --color-primary-950: #04302c;
+  --color-primary-50: #ecfbf7;
+  --color-primary-100: #cff5ec;
+  --color-primary-200: #a0ebd9;
+  --color-primary-300: #66dcc2;
+  --color-primary-400: #3fcfb0;
+  --color-primary-500: #2ec4a4;
+  --color-primary-600: #1fa088;
+  --color-primary-700: #187f6d;
+  --color-primary-800: #156557;
+  --color-primary-900: #134f45;
+  --color-primary-950: #08302a;
 
-  /* Surfaces are a teal-tinted near-white, not cool slate — the old blue-grey
-   * ramp made the whole app read colder than the brand accent sitting on it.
-   * Still neutral enough that the teal (and the three accents below) look
-   * deliberate rather than the page itself being tinted. */
-  --color-neutral-50: #f6faf8;
-  --color-neutral-100: #eef4f1;
-  --color-neutral-200: #dde9e4;
-  --color-neutral-300: #c3d3cc;
-  --color-neutral-400: #8fa39b;
-  --color-neutral-500: #647a72;
-  --color-neutral-600: #495d56;
-  --color-neutral-700: #34443f;
-  --color-neutral-800: #1e2b27;
-  --color-neutral-900: #101917;
-  --color-neutral-950: #050a09;
+  /* Surfaces are a ramp toward midnight abyss: a cool near-white in light,
+   * the abyss itself as the dark ground. Neutral enough that aqua jade (and
+   * the accents below) look deliberate rather than the page being tinted. */
+  --color-neutral-50: #f5f8fa;
+  --color-neutral-100: #edf1f5;
+  --color-neutral-200: #dbe3ea;
+  --color-neutral-300: #c0ccd7;
+  --color-neutral-400: #8d9cad;
+  --color-neutral-500: #637489;
+  --color-neutral-600: #47566a;
+  --color-neutral-700: #324154;
+  --color-neutral-800: #1d2a3b;
+  --color-neutral-900: #0e1a2b;
+  --color-neutral-950: #070f1a;
 
   /* Three categorical accents, purely decorative — see docs/design-system.md
    * for the categorical-vs-semantic rule. Never used for status; that stays
@@ -95,6 +93,22 @@
   --color-violet-800: #492c98;
   --color-violet-900: #3d267c;
   --color-violet-950: #24144a;
+
+  /* Baby pink: the palette's soft accent beside aqua jade on midnight abyss.
+   * Decorative only (the glow, soft chips), never status. 500 is the named
+   * baby pink; 700 is the text-safe step on white. */
+  --color-blossom: var(--app-accent-blossom);
+  --color-blossom-50: #fdf3f6;
+  --color-blossom-100: #fce6ec;
+  --color-blossom-200: #f9d3de;
+  --color-blossom-300: #f6c1cf;
+  --color-blossom-400: #ee9cb2;
+  --color-blossom-500: #e27795;
+  --color-blossom-600: #c9567a;
+  --color-blossom-700: #a63f61;
+  --color-blossom-800: #84334e;
+  --color-blossom-900: #6b2b41;
+  --color-blossom-950: #3e1424;
 
   /* Bricolage for the brand wordmark and page h1s only; Plus Jakarta Sans is
    * the body default (set on body below, not per-element). Numbers use
@@ -158,7 +172,7 @@
   /* Light mode is a tinted page with white cards, rather than white on white
    * — the old flat-white version gave a card no edge of its own, so a dozen
    * routes read as one undifferentiated sheet. This is the same pale tint
-   * the original mockup used (neutral-50, ~#f6faf8): earlier revisions
+   * the original mockup used (neutral-50, ~#f5f8fa): earlier revisions
    * pushed the page ground progressively darker (neutral-100, then
    * neutral-200) chasing more contrast, but the actual missing contrast was
    * `UCard variant="outline"` sharing the page's own background outright
@@ -173,19 +187,19 @@
    * is 2.7:1 on white, and muted (neutral-500) 4.4:1 on the page ground. These
    * clear 4.5:1 on both the ground and a card. */
   --ui-text-muted: var(--color-neutral-600);
-  --ui-text-dimmed: #5f746c;
+  --ui-text-dimmed: #5b6b80;
   --ui-border-accented: var(--color-neutral-300);
 
   --app-card-bg: #ffffff;
-  --app-card-shadow: 0 1px 2px rgb(16 25 23 / 0.05), 0 1px 3px rgb(16 25 23 / 0.07);
-  --app-card-shadow-hover: 0 4px 12px rgb(16 25 23 / 0.09), 0 2px 4px rgb(16 25 23 / 0.05);
-  --app-header-bg: rgb(246 250 248 / 0.8);
-  /* Two lobes rather than one: teal plus a touch of ember reads as morning
-   * light, not a single-hue wash. Consumed globally via body, so both the
+  --app-card-shadow: 0 1px 2px rgb(14 26 43 / 0.05), 0 1px 3px rgb(14 26 43 / 0.07);
+  --app-card-shadow-hover: 0 4px 12px rgb(14 26 43 / 0.09), 0 2px 4px rgb(14 26 43 / 0.05);
+  --app-header-bg: rgb(245 248 250 / 0.8);
+  /* Two lobes rather than one: aqua jade plus a touch of baby pink reads as
+   * morning light, not a single-hue wash. Consumed globally via body, so both the
    * landing bundle and the app shell pick it up from this one place. */
   --app-glow:
-    radial-gradient(46rem 22rem at 18% -10%, rgb(20 207 171 / 0.12), transparent 70%),
-    radial-gradient(38rem 20rem at 96% 8%, rgb(255 107 69 / 0.10), transparent 70%);
+    radial-gradient(46rem 22rem at 18% -10%, rgb(46 196 164 / 0.12), transparent 70%),
+    radial-gradient(38rem 20rem at 96% 8%, rgb(246 193 207 / 0.30), transparent 70%);
 
   /* One pair per categorical accent — a solid step for icons/text, a soft
    * step for the tinted chip behind it. This is the *only* place an accent's
@@ -201,6 +215,8 @@
   --app-accent-sky-soft: var(--color-sky-100);
   --app-accent-violet: var(--color-violet-600);
   --app-accent-violet-soft: var(--color-violet-100);
+  --app-accent-blossom: var(--color-blossom-700);
+  --app-accent-blossom-soft: var(--color-blossom-100);
 }
 
 .dark {
@@ -224,24 +240,24 @@
   --color-phase-peak: var(--color-primary-300);
   --color-phase-taper: #3f9a8c;
 
-  /* Spec: ground #0b1211, cards one step lighter, no shadow. UCard's outline
+  /* Ground is midnight abyss (#0e1a2b), cards one step lighter, no shadow. UCard's outline
    * variant reads bg-elevated, so that token is the card surface in dark. */
-  --ui-bg: #0b1211;
-  --ui-bg-muted: var(--color-neutral-900);
-  --ui-bg-elevated: #15201d;
+  --ui-bg: var(--color-neutral-900);
+  --ui-bg-muted: #132236;
+  --ui-bg-elevated: #16253a;
   /* neutral-800 was 1.1:1 against the card, so a card had no edge at all. */
   --ui-border: var(--color-neutral-700);
   --ui-border-accented: var(--color-neutral-600);
   /* Dimmed text at neutral-500 was 3.6:1 on the card; this clears 4.5:1. */
-  --ui-text-dimmed: #7a8e86;
+  --ui-text-dimmed: #8495a8;
 
-  --app-card-bg: rgb(30 43 39 / 0.5);
+  --app-card-bg: rgb(29 42 59 / 0.5);
   --app-card-shadow: none;
   --app-card-shadow-hover: none;
-  --app-header-bg: rgb(5 10 9 / 0.8);
+  --app-header-bg: rgb(7 15 26 / 0.8);
   --app-glow:
-    radial-gradient(46rem 22rem at 18% -10%, rgb(20 207 171 / 0.16), transparent 70%),
-    radial-gradient(38rem 20rem at 96% 8%, rgb(255 107 69 / 0.12), transparent 70%);
+    radial-gradient(46rem 22rem at 18% -10%, rgb(46 196 164 / 0.16), transparent 70%),
+    radial-gradient(38rem 20rem at 96% 8%, rgb(246 193 207 / 0.10), transparent 70%);
 
   --app-accent-primary: var(--ui-primary);
   --app-accent-primary-soft: var(--color-primary-950);
@@ -251,6 +267,8 @@
   --app-accent-sky-soft: var(--color-sky-950);
   --app-accent-violet: var(--color-violet-400);
   --app-accent-violet-soft: var(--color-violet-950);
+  --app-accent-blossom: var(--color-blossom-300);
+  --app-accent-blossom-soft: var(--color-blossom-950);
 }
 
 body {
