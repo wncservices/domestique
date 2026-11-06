@@ -86,7 +86,8 @@ func (v *Value) UnmarshalJSON(b []byte) error {
 // isUnit is a unit label: letters, with "/" and "%" for rates ("ms", "count/min", "%").
 func isUnit(s string) bool {
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '/' || r == '%' || r == ' ' || r == 'µ' || r == '°') {
+		letter := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		if !letter && !strings.ContainsRune("/% µ°", r) {
 			return false
 		}
 	}
