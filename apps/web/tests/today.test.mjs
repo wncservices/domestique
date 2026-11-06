@@ -371,17 +371,17 @@ test('week ring: null without riddenTss or without a target', () => {
   assert.equal(weekRing({ riddenTss: 65, targetTss: 0 }), null)
 })
 
-test('week ring: the line names what is left to make up', () => {
+test('week ring: the line names what is left to catch up', () => {
   const ring = weekRing({ riddenTss: 65.4, effectiveTargetTss: 410, debtTss: 29.7, targetTss: 400 })
-  assert.equal(ring.line, '65 of 410 TSS \u00b7 30 to make up')
+  assert.equal(ring.line, '65 of 410 TSS \u00b7 30 to catch up')
   assert.equal(ring.ridden, 65)
   assert.equal(ring.target, 410)
   assert.equal(ring.debt, 30)
 })
 
-test('week ring: all made up when the debt is 0 or absent', () => {
-  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0 }).line, '65 of 410 TSS \u00b7 all made up')
-  assert.equal(weekRing({ riddenTss: 65, targetTss: 410 }).line, '65 of 410 TSS \u00b7 all made up')
+test('week ring: all caught up when the debt is 0 or absent', () => {
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0 }).line, '65 of 410 TSS \u00b7 all caught up')
+  assert.equal(weekRing({ riddenTss: 65, targetTss: 410 }).line, '65 of 410 TSS \u00b7 all caught up')
 })
 
 test('week ring: falls back to targetTss without an effective target', () => {
@@ -391,14 +391,14 @@ test('week ring: falls back to targetTss without an effective target', () => {
 test('week ring: a zero effective target falls back to the plain target', () => {
   const ring = weekRing({ riddenTss: 100, effectiveTargetTss: 0, targetTss: 400, debtTss: 0 })
   assert.equal(ring.target, 400)
-  assert.equal(ring.line, '100 of 400 TSS \u00b7 all made up')
+  assert.equal(ring.line, '100 of 400 TSS \u00b7 all caught up')
   assert.equal(weekRing({ riddenTss: 100, effectiveTargetTss: 0 }), null)
 })
 
-test('week ring: "all made up" is decided on the unrounded debt', () => {
-  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.4 }).line, '65 of 410 TSS \u00b7 all made up')
-  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.5 }).line, '65 of 410 TSS \u00b7 all made up')
-  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.6 }).line, '65 of 410 TSS \u00b7 1 to make up')
+test('week ring: "all caught up" is decided on the unrounded debt', () => {
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.4 }).line, '65 of 410 TSS \u00b7 all caught up')
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.5 }).line, '65 of 410 TSS \u00b7 all caught up')
+  assert.equal(weekRing({ riddenTss: 65, effectiveTargetTss: 410, debtTss: 0.6 }).line, '65 of 410 TSS \u00b7 1 to catch up')
 })
 
 test('week ring: fraction is clamped to 0..1', () => {

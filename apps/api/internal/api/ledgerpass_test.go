@@ -136,7 +136,7 @@ func TestMissedSessionIsRepaidOnTheNextMorning(t *testing.T) {
 		if w.Zone == workout.ZoneEndurance && !(secs(w) > secs(was[w.ID])) {
 			t.Errorf("%s was not made longer: %.0fs -> %.0fs", w.Name, secs(was[w.ID]), secs(w))
 		}
-		if !strings.Contains(w.Description, "Load made up") || !strings.Contains(w.Description, scheduler.AdjustedMarker) {
+		if !strings.Contains(w.Description, "to catch up on missed training") || !strings.Contains(w.Description, scheduler.AdjustedMarker) {
 			t.Errorf("description %q carries no repayment note", w.Description)
 		}
 		adj, err := h.store.LatestAdjustments(context.Background(), "wilant", workout.SubjectWorkout, []string{w.ID})
@@ -977,7 +977,7 @@ func TestPushMorningRaisesTodayAndThePushSendsTheRaisedSession(t *testing.T) {
 	if len(got.Flags.EasedBy()) != 0 || !scheduler.IsGenerated(got) {
 		t.Errorf("a green push locked the session: %+v", got.Flags)
 	}
-	if !strings.Contains(got.Description, scheduler.AdjustedMarker) || !strings.Contains(got.Description, "Pushed on a good day") {
+	if !strings.Contains(got.Description, scheduler.AdjustedMarker) || !strings.Contains(got.Description, "you are fresh and behind this week") {
 		t.Errorf("description %q carries no note", got.Description)
 	}
 	adj, err := h.store.LatestAdjustments(ctx, "wilant", workout.SubjectWorkout, []string{got.ID})

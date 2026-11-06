@@ -235,7 +235,7 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				claimed[w.ID] = true
 				changes = append(changes, change(Change{
 					WorkoutID: w.ID, NewDate: next,
-					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s.", w.Date, next),
+					Reason: fmt.Sprintf("moved from %s — that session was missed, so it moves to %s.", w.Date, next),
 				}, why.MissedMoved, why.MissedMovedInputs{From: w.Date, To: next}))
 				continue
 			}
@@ -248,7 +248,7 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				claimed[slot.ID] = true
 				changes = append(changes, change(Change{
 					WorkoutID: w.ID, NewDate: slot.Date, ReplaceWorkoutID: slot.ID,
-					Reason: fmt.Sprintf("moved from %s — that session was missed, so it is made up on %s in place of an easy day.", w.Date, slot.Date),
+					Reason: fmt.Sprintf("moved from %s — that session was missed, so it moves to %s in place of an easy day.", w.Date, slot.Date),
 				}, why.MissedMoved, why.MissedMovedInputs{From: w.Date, To: slot.Date, ReplacedEasy: true}))
 			}
 

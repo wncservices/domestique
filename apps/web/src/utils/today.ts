@@ -377,10 +377,10 @@ export function weekRing(
   if (targetRaw <= 0) return null
   const ridden = Math.round(focus.riddenTss)
   const target = Math.round(targetRaw)
-  // "All made up" is decided on the unrounded debt, so 0.4 owed reads as made up.
+  // "All caught up" is decided on the unrounded debt, so 0.4 owed reads as caught up.
   const debtRaw = Math.max(0, focus.debtTss ?? 0)
   const debt = Math.round(debtRaw)
   const fraction = Math.min(1, Math.max(0, focus.riddenTss / targetRaw))
-  const tail = debtRaw > 0.5 ? `${debt} to make up` : 'all made up'
+  const tail = debtRaw > 0.5 ? `${debt} to catch up` : 'all caught up'
   return { ridden, target, debt, fraction, line: `${ridden} of ${target} TSS \u00b7 ${tail}` }
 }
