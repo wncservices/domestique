@@ -248,6 +248,9 @@
   /* neutral-800 was 1.1:1 against the card, so a card had no edge at all. */
   --ui-border: var(--color-neutral-700);
   --ui-border-accented: var(--color-neutral-600);
+  /* Muted text needs its own dark step: :root's neutral-600 is for a light
+   * ground and was about 2:1 here. neutral-400 clears 4.5:1 on the card. */
+  --ui-text-muted: var(--color-neutral-400);
   /* Dimmed text at neutral-500 was 3.6:1 on the card; this clears 4.5:1. */
   --ui-text-dimmed: #8495a8;
 

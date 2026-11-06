@@ -9,6 +9,7 @@ import { api } from '@/api/client'
 import type { Me } from '@/api/types'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
 import PlanEmptyState from '@/components/plan/PlanEmptyState.vue'
+import { pickFallbackGoal } from '@/components/plan/goalOrdering'
 import AppPage from '@/components/ui/AppPage.vue'
 import SkeletonCard from '@/components/ui/SkeletonCard.vue'
 import { usePlanGoals } from '@/composables/usePlanGoals'
@@ -20,7 +21,6 @@ const route = useRoute()
 const router = useRouter()
 
 const me = ref<Me | null>(null)
-const focusGoalId = ref<string | null>(null)
 
 const {
   goals,
@@ -63,9 +63,11 @@ const {
 const explainEnabled = computed(() => canExplain(me.value?.llmJobs))
 const routeNames = computed(() => new Map(routeOptions.value.map((o) => [o.value, o.label])))
 
-// "Focus" is the goal the Plan header shows; Plan picks it per visit, so here
-// it follows the server's own pick (the first goal) until the rider chooses.
-const focusId = computed(() => focusGoalId.value ?? goals.value[0]?.id)
+// "Focus" is the goal the plan is built toward: the server's own ordering
+// (pickFallbackGoal mirrors weekFocus). Choosing a different one to look at is
+// Plan's header dropdown, a per-visit view, so this page links there instead
+// of offering a choice it could not keep.
+const focusId = computed(() => pickFallbackGoal(goals.value)?.id)
 
 function explain(id: string) {
   const g = goals.value.find((x) => x.id === id)
@@ -115,7 +117,7 @@ onMounted(async () => {
                 <span class="min-w-0 truncate text-[length:var(--text-lead)] font-semibold text-highlighted">{{ g.name }}</span>
                 <UBadge color="neutral" variant="subtle" size="sm" :aria-label="`Priority ${g.priority}`">{{ g.priority }}</UBadge>
                 <UBadge v-if="g.id === focusId" color="primary" variant="subtle" size="sm">Focus</UBadge>
-                <UButton v-else color="neutral" variant="ghost" size="xs" @click="focusGoalId = g.id">Set as focus</UButton>
+                <UButton color="neutral" variant="ghost" size="xs" trailing-icon="i-lucide-arrow-right" :to="{ path: '/plan', query: { goal: g.id } }">View plan</UButton>
               </div>
               <p class="mt-1 text-[length:var(--text-body)] text-muted">
                 <template v-for="(part, i) in goalMetaParts(g, routeNames.get(g.routeSlug ?? ''))" :key="i">

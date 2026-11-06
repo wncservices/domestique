@@ -562,7 +562,8 @@ const fillingWeek = computed(() => !!week.value?.focus && schedulingGoal.value =
 // choice changing which goal actually gets scheduled — so this only swaps
 // what the header displays, built from the plain Goal (no phase/week
 // fields, since periodization is not re-run for it).
-const focusGoalId = ref<string | null>(null)
+// The Goals page's "View plan" lands here with ?goal=<id>.
+const focusGoalId = ref<string | null>(typeof route.query.goal === 'string' ? route.query.goal : null)
 
 function selectGoal(id: string) {
   focusGoalId.value = id
