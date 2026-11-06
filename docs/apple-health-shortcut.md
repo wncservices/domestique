@@ -40,7 +40,8 @@ Open the Shortcuts app and make a new shortcut. Add these actions in this order.
 
 6. **Repeat with Each** over the HRV samples. Inside it, add a **Dictionary** with two items:
    - `start` = Start Date of the repeat item, formatted as ISO 8601;
-   - `value` = Value of the repeat item.
+   - `value` = Value of the repeat item. Either a number or text such as `48 ms` is accepted;
+     the server reads the number and ignores a trailing unit.
 
    Add an **Add to Variable** action after the Dictionary, to the `HRV` variable.
 
@@ -68,7 +69,7 @@ Open the Shortcuts app and make a new shortcut. Add these actions in this order.
    - Method: POST;
    - Headers: `Authorization` = `Bearer ` (with the space after Bearer), followed by the `Token`
      variable from step 1;
-   - Request Body: JSON, with the dictionary from step 8.
+   - Request Body: JSON, with the dictionary from step 9.
 
    The request must have `Content-Type: application/json`. Shortcuts sets it for a JSON body.
 

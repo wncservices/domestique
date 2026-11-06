@@ -82,7 +82,13 @@ func (s *Server) syncRiderWellness(ctx context.Context, rider string, consumer G
 	}
 	// An Apple rider's wellness comes from the Health shortcut; Garmin rows
 	// beside it would feed the same HRV band with a different device's numbers.
-	if s.wellnessSource(ctx, rider) == wellnessSourceApple {
+	// If the link cannot be read the rider is skipped too: a write made without
+	// knowing the source could land Garmin rows beside an Apple link.
+	src, ok := s.wellnessSourceChecked(ctx, rider)
+	if !ok {
+		return
+	}
+	if src == wellnessSourceApple {
 		s.wellnessSkipped.Add(1)
 		return
 	}
@@ -92,11 +98,13 @@ func (s *Server) syncRiderWellness(ctx context.Context, rider string, consumer G
 		s.logger().Warn("wellness sync: reading existing rows failed", "rider", rider, "err", err)
 		return
 	}
-	// Only Garmin rows count: Apple rows left from a revoked link must not
-	// suppress the backfill the rider now needs.
+	// Only recent Garmin rows count: Apple rows left from a revoked link must
+	// not suppress the backfill the rider now needs, and neither may Garmin rows
+	// older than the backfill reaches (a long Apple link, then a disconnect).
+	cutoff := s.now().AddDate(0, 0, -wellnessBackfillDays).Format("2006-01-02")
 	var existing []workout.DailyWellness
 	for _, row := range all {
-		if row.Source == "" || row.Source == wellnessSourceGarmin {
+		if (row.Source == "" || row.Source == wellnessSourceGarmin) && row.Date >= cutoff {
 			existing = append(existing, row)
 		}
 	}

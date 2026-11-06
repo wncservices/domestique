@@ -195,6 +195,9 @@ func TestAppleHealthRateLimit(t *testing.T) {
 			if r.code != http.StatusTooManyRequests {
 				t.Fatalf("13th post = %d, want 429", r.code)
 			}
+			if got := r.header.Get("Retry-After"); got != "3600" {
+				t.Errorf("per-token Retry-After = %q, want 3600", got)
+			}
 			// Another rider's token has its own budget.
 			if r := h.postApple("Bearer "+h.linkApple("bob"), appleNight); r.code != http.StatusOK {
 				t.Errorf("another token was limited: %d", r.code)

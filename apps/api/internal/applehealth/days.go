@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -42,8 +44,53 @@ type Payload struct {
 
 // Sample is one reading at an instant. Start is RFC 3339 with an offset.
 type Sample struct {
-	Start string  `json:"start"`
-	Value float64 `json:"value"`
+	Start string `json:"start"`
+	Value Value  `json:"value"`
+}
+
+// Value is a reading's number. Shortcuts may send a JSON number or text holding one, with an
+// optional trailing unit ("48", "48 ms"), so both decode; anything else is ErrInvalid.
+type Value float64
+
+// UnmarshalJSON accepts a number or a string of a number with an optional unit.
+func (v *Value) UnmarshalJSON(b []byte) error {
+	var f float64
+	if err := json.Unmarshal(b, &f); err == nil {
+		*v = Value(f)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return fmt.Errorf("%w: value is not a number", ErrInvalid)
+	}
+	s = strings.TrimSpace(s)
+	// Only '.' decimals: the leading run of sign, digits and one dot is the number.
+	end := 0
+	for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '.' || end == 0 && (s[end] == '-' || s[end] == '+')) {
+		end++
+	}
+	f, err := strconv.ParseFloat(s[:end], 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return fmt.Errorf("%w: value is not a number", ErrInvalid)
+	}
+	// What follows the number must be a unit, not more number ("1e5", "4 8").
+	rest := strings.TrimSpace(s[end:])
+	exponent := len(rest) > 1 && (rest[0] == 'e' || rest[0] == 'E') && (rest[1] >= '0' && rest[1] <= '9' || rest[1] == '-' || rest[1] == '+')
+	if rest != "" && (exponent || !isUnit(rest)) {
+		return fmt.Errorf("%w: value is not a number", ErrInvalid)
+	}
+	*v = Value(f)
+	return nil
+}
+
+// isUnit is a unit label: letters, with "/" and "%" for rates ("ms", "count/min", "%").
+func isUnit(s string) bool {
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '/' || r == '%' || r == ' ' || r == 'µ' || r == '°') {
+			return false
+		}
+	}
+	return true
 }
 
 // SleepSample is one sleep-analysis interval; Value is the stage name Health reports.
@@ -168,7 +215,7 @@ func readings(in []Sample) []reading {
 	out := make([]reading, 0, len(in))
 	for _, s := range in {
 		if t, err := time.Parse(time.RFC3339, s.Start); err == nil {
-			out = append(out, reading{at: t, value: s.Value})
+			out = append(out, reading{at: t, value: float64(s.Value)})
 		}
 	}
 	return out

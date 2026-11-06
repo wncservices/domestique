@@ -351,7 +351,7 @@ type Server struct {
 	CalendarFeeds *calendarfeed.Store
 
 	// AppleHealth holds each rider's hashed Apple Health shortcut token, see
-	// internal/applehealthlink. Nil means the shortcut endpoints answer 404.
+	// internal/applehealthlink. Nil means the post answers 401 (with a Warn) and the card endpoints 412.
 	AppleHealth *applehealthlink.Store
 	// AppleHealthLimiter is the per-token budget for accepted posts and
 	// AppleHealthMissLimiter the one global budget for tokens nothing matches;
@@ -676,7 +676,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/calendar", s.handleGetCalendar)
 	mux.HandleFunc("POST /api/training/calendar", s.handleCreateCalendar)
 	mux.HandleFunc("DELETE /api/training/calendar", s.handleRevokeCalendar)
-	// The Apple Health card on the Fitness page: the rider's own shortcut link.
+	// The Apple Health card in Settings: the rider's own shortcut link.
 	mux.HandleFunc("GET /api/training/apple-health", s.handleGetAppleHealth)
 	mux.HandleFunc("POST /api/training/apple-health", s.handleCreateAppleHealth)
 	mux.HandleFunc("DELETE /api/training/apple-health", s.handleRevokeAppleHealth)

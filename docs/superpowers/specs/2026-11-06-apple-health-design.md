@@ -89,7 +89,7 @@ All days are in `training.timezone`, like `localToday`.
 
 - **The night of day D** runs from 18:00 on D-1 to 12:00 on D.
 - **Sleep for D** is the length of the union of the asleep intervals (`Asleep`, `Core`, `Deep`,
-  `REM`) that fall in D's night. `In Bed` and `Awake` do not count. Taking the union, not the sum,
+  `REM`, and compound labels such as `Asleep Core`) that fall in D's night. `Awake` and `In Bed` never count, even inside a compound label. Taking the union, not the sum,
   keeps a Watch and an iPhone recording the same night from counting it twice.
 - **HRV for D** is the mean of the SDNN samples (ms) in D's night. The Watch takes them during sleep.
 - **Resting HR for D** is the latest sample whose start falls on D.
@@ -145,7 +145,7 @@ values is a change in the chart repo.
 The server cannot produce a shortcut; it is built once on an iPhone and shared through iCloud.
 `docs/apple-health-shortcut.md` holds the exact steps:
 
-- an import question asks for the token;
+- an import question asks for the token (asked once, when the shared shortcut is installed, and stored in the shortcut's Text action);
 - three "Find Health Samples" actions (HRV, resting heart rate, sleep analysis), each over the last
   14 days;
 - a Repeat for each that builds the sample dictionaries;
@@ -159,7 +159,7 @@ Then the rider adds a personal automation that runs it without asking.
   the token. Every log line that prints request headers is checked so it does not print
   `Authorization`.
 - **Metric:** `domestique_apple_health_posts_total{result}` (`ok`, `unauthorized`, `limited`,
-  `invalid`), with no rider label.
+  `invalid`, `too_large`, `error`), with no rider label.
 - **No new outbound client.**
 - **The calendar feed is unaffected**, since it takes workouts only.
 

@@ -120,8 +120,8 @@ Signed out under this mode, nothing of the app is reachable: every page on the a
 host redirects to `LandingHost` (domestique.dev), carrying the path asked for as
 `return_to` so the landing page's Sign in returns there, a share link above all
 (`landingURLFor`, checked with `safeReturnTo`). Every data API answers 401; only
-`/api/me`, `/api/config`, `/api/health`, the share-link reads and the calendar feed
-answer without a session. The landing and privacy pages are the apex's and redirect
+`/api/me`, `/api/config`, `/api/health`, the share-link reads, the calendar feed and
+`POST /api/wellness/apple` (its bearer token is the credential) answer without a session. The landing and privacy pages are the apex's and redirect
 there from the app host.
 
 `Remote-Email` is treated as a **verified** address under this mode (it comes from Authelia's own

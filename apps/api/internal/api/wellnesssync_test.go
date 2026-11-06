@@ -27,7 +27,7 @@ func TestWellnessSyncFetchesTodayAndYesterday(t *testing.T) {
 	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
 
 	ctx := context.Background()
-	if err := h.srv.Training.SaveWellness(ctx, workout.DailyWellness{Rider: "wilant", Date: "2026-02-01", RestingHR: 49}); err != nil {
+	if err := h.srv.Training.SaveWellness(ctx, workout.DailyWellness{Rider: "wilant", Date: "2026-02-25", RestingHR: 49}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,5 +264,60 @@ func TestWellnessSyncBackfillsForARiderWithOnlyAppleRows(t *testing.T) {
 	}
 	if len(fake.wellnessCalls) != 29 {
 		t.Fatalf("wellness calls = %d, want 29 (the Garmin backfill ran)", len(fake.wellnessCalls))
+	}
+}
+
+// Garmin rows older than the backfill window must not count as history: a
+// rider who disconnects Apple after a long link needs the backfill.
+func TestWellnessSyncBackfillsWhenGarminRowsAreOlderThanTheWindow(t *testing.T) {
+	fake := &fakeGarmin{}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
+	for _, row := range []workout.DailyWellness{
+		{Rider: "wilant", Date: "2025-11-01", RestingHR: 50, Source: "garmin"},
+		{Rider: "wilant", Date: "2026-03-10", RestingHR: 44, Source: "apple"},
+	} {
+		if err := h.srv.Training.SaveWellness(context.Background(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(fake.wellnessCalls) != 29 {
+		t.Fatalf("wellness calls = %d, want 29 (the Garmin backfill ran)", len(fake.wellnessCalls))
+	}
+}
+
+// If the Apple link cannot be read, the Garmin sync writes nothing for that
+// rider rather than guessing the source.
+func TestGarminWellnessSyncSkipsARiderWhoseLinkCannotBeRead(t *testing.T) {
+	fake := &fakeGarmin{}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
+	apple, err := applehealthlink.UseDB(h.db.Conn(), h.db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.srv.AppleHealth = apple
+	if _, err := h.db.Conn().Exec(`DROP TABLE apple_health_links`); err != nil {
+		t.Fatal(err)
+	}
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(fake.wellnessCalls) != 0 {
+		t.Errorf("wellness calls = %v, want none: the link could not be read", fake.wellnessCalls)
+	}
+	rows, err := h.srv.Training.ListWellness(context.Background(), "wilant", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("rows = %d, want 0", len(rows))
 	}
 }

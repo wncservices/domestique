@@ -289,3 +289,27 @@ func TestWhichSleepStagesCountAsAsleep(t *testing.T) {
 		}
 	}
 }
+
+func TestSampleValueAcceptsANumberOrANumberWithAUnit(t *testing.T) {
+	for in, want := range map[string]float64{
+		`40`: 40, `"48"`: 48, `"48 ms"`: 48, `"52 count/min"`: 52, `"48.5ms"`: 48.5,
+	} {
+		p, err := Decode(strings.NewReader(`{"hrv":[{"start":"2026-11-05T03:00:00Z","value":` + in + `}]}`))
+		if err != nil {
+			t.Errorf("value %s: %v", in, err)
+			continue
+		}
+		if float64(p.HRV[0].Value) != want {
+			t.Errorf("value %s = %v, want %v", in, p.HRV[0].Value, want)
+		}
+	}
+}
+
+func TestSampleValueRefusesAnythingElse(t *testing.T) {
+	for _, in := range []string{`"abc"`, `""`, `"ms"`, `"4 8"`, `"1e5"`, `"48,5"`, `true`, `{}`, `"48 ms!"`} {
+		_, err := Decode(strings.NewReader(`{"hrv":[{"start":"2026-11-05T03:00:00Z","value":` + in + `}]}`))
+		if !errors.Is(err, ErrInvalid) {
+			t.Errorf("value %s: err = %v, want ErrInvalid", in, err)
+		}
+	}
+}

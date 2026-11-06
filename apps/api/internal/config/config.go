@@ -252,7 +252,7 @@ type Config struct {
 	LLM LLMConfig `yaml:"llm,omitempty"`
 
 	// AppleHealth holds the link to the iPhone shortcut that posts Health
-	// readings; see the Fitness page's Apple Health card.
+	// readings; see the Apple Health card in Settings.
 	AppleHealth AppleHealthConfig `yaml:"apple_health,omitempty"`
 }
 

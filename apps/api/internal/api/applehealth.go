@@ -57,14 +57,12 @@ func (s *Server) handleAppleHealthPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	reply := func(code int, result, msg string) {
 		recordAppleHealthPost(result)
-		if code == http.StatusTooManyRequests {
-			w.Header().Set("Retry-After", "60")
-		}
 		writeJSON(w, code, map[string]string{"error": msg})
 	}
 	// miss spends the global budget: a probe that matched nothing.
 	miss := func() {
 		if s.AppleHealthMissLimiter != nil && !s.AppleHealthMissLimiter.Allow("miss") {
+			w.Header().Set("Retry-After", "60") // the global budget refills within a minute
 			reply(http.StatusTooManyRequests, "limited", "too many requests")
 			return
 		}
@@ -94,6 +92,7 @@ func (s *Server) handleAppleHealthPost(w http.ResponseWriter, r *http.Request) {
 	// Taken before the body is read: a burst of bad posts from a real token
 	// is as much a loop as a burst of good ones.
 	if s.AppleHealthLimiter != nil && !s.AppleHealthLimiter.Allow(limiterKey(token)) {
+		w.Header().Set("Retry-After", "3600") // the per-token budget is hourly
 		reply(http.StatusTooManyRequests, "limited", "too many requests")
 		return
 	}
