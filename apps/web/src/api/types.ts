@@ -2100,6 +2100,17 @@ export interface CalendarFeedLink {
   webcalUrl: string
 }
 
+/** GET/POST /api/training/apple-health — mirrors appleHealthDTO. `token` is in
+ *  the POST response only (the server keeps its hash). */
+export interface AppleHealthLink {
+  linked: boolean
+  /** YYYY-MM-DD, absent until the first delivery. */
+  lastReceived?: string
+  /** Empty when the deployment does not host the shortcut. */
+  shortcutUrl: string
+  token?: string
+}
+
 /** GET /api/training/morning-message — mirrors morningMessageDTO. The Today
  *  page's "good morning" card: a headline for the day and a few short lines
  *  (bad weather, an FTP-test hint, a planned break, an extra session). No reasons, no
