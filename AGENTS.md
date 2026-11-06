@@ -388,6 +388,35 @@ every auth mode (`calendar_test.go`):
   hand-written `VTIMEZONE`). `ETag` is a hash of the deterministic body, so a polling calendar app
   costs a query and a hash.
 
+## Apple Health
+
+`POST /api/wellness/apple` takes a rider's HRV, resting heart rate and sleep from an Apple Shortcut
+(`internal/applehealth`, pure; `handleAppleHealthPost`; `docs/apple-health-shortcut.md` has the steps).
+A rider with a link gets their wellness from it instead of Garmin. What keeps it safe:
+
+- **One bypass, and it is a write.** `bypassesAuth` exempts exactly POST `/api/wellness/apple`, never a
+  prefix. The token travels in `Authorization: Bearer <token>`, never in the path or query, so no log,
+  span or `url.path` carries it. `Identify` is skipped: the rider is whoever owns the token's hash.
+- **Hashed, shown once.** `apple_health_links` holds `sha256(token)`; regenerating is one upsert and the
+  old token dies at once. Disconnecting deletes the row and hands wellness back to Garmin.
+- **Same 401** for a missing, malformed, unknown or revoked token. Under `mode: none` it still needs a
+  token, because the token is what names the rider.
+- **Limits:** 12 accepted posts an hour per token, one global budget of 60 misses a minute (in memory
+  per replica), 256 KiB body and 2000 samples per kind (413). A non-JSON body is 415 from `csrfGuard`.
+- **One source per rider.** `wellnessSource` reads the link; `readinessWellness` keeps only rows of the
+  rider's current source, so an Apple HRV (SDNN) never shares a band with Garmin's RMSSD. The Garmin
+  wellness sync skips a linked rider, and its backfill counts only `garmin` rows. One row per
+  `(rider, date)`, so a switch may overwrite overlapping nights.
+- **Blocking reaches it.** `revokeBackgroundAccess` deletes the link, as it does the calendar feed,
+  because a post needs no session.
+- **Logs and metrics** carry a rider and a count, or a stage and an error class, never a value, a sample
+  time or the token. `domestique_apple_health_posts_total{result}` has results `ok`, `unauthorized`,
+  `limited`, `invalid`, `too_large` and `error`, and no rider label.
+- **Proxy mode needs an Authelia bypass** for `^/api/wellness/apple$`, as the calendar feed does. A
+  request through the proxy still carries no `Remote-User`, and the handler never reads it.
+- **Timing.** Data posted after the day's first sync slot misses `reoptimise`, the hard-for-easy swap,
+  for that day. Adaptation still picks it up on the next tick.
+
 ## The Today page
 
 Today acts on today; Plan stays the place for the week. Today's session card can be sent to Garmin, swapped
