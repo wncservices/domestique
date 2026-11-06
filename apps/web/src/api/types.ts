@@ -1802,6 +1802,23 @@ export interface GoalProposal {
   explanation?: string
 }
 
+/** POST /api/training/goals/check's body: an unsaved goal's fields. */
+export interface GoalCheckRequest {
+  eventDate: string
+  sport: Sport
+  targetDistanceM: number
+  targetElevationM: number
+  priority: GoalPriority
+}
+
+/** Is the goal realistic for this rider? `key` is what the UI keys off; `none`
+ *  means there is nothing to say. `tone` is a Nuxt UI colour. */
+export interface GoalCheck {
+  key: 'comfortable' | 'achievable' | 'stretch' | 'unrealistic' | 'needs_profile' | 'none'
+  message?: string
+  tone?: string
+}
+
 export interface ProfileChangeProposal {
   availableDays?: string[]
   hoursPerAvailableDay?: number
