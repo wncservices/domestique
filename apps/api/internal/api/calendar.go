@@ -61,12 +61,17 @@ func isCalendarFeedPath(p string) bool {
 	return true
 }
 
-// bypassesAuth is the whole of the authenticate exemption for the feed: a GET
-// or HEAD of exactly the feed path. A forged Remote-User or a cookie on such a
-// request is never looked at. HEAD is the same handler with no body (Go's
-// server drops it), which some calendar apps and link checkers use to see
-// whether the feed changed; it reads nothing a GET does not.
+// bypassesAuth is the whole of the authenticate exemption, and there are two
+// paths in it. The feed: a GET or HEAD of exactly the feed path. HEAD is the
+// same handler with no body (Go's server drops it), which some calendar apps
+// and link checkers use to see whether the feed changed; it reads nothing a
+// GET does not. And the Apple Health post: a POST of exactly appleHealthPath,
+// whose hashed bearer token is its credential. A forged Remote-User or a
+// cookie on either request is never looked at.
 func bypassesAuth(r *http.Request) bool {
+	if r.Method == http.MethodPost && r.URL.Path == appleHealthPath {
+		return true
+	}
 	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && isCalendarFeedPath(r.URL.Path)
 }
 

@@ -353,6 +353,11 @@ type Server struct {
 	// AppleHealth holds each rider's hashed Apple Health shortcut token, see
 	// internal/applehealthlink. Nil means the shortcut endpoints answer 404.
 	AppleHealth *applehealthlink.Store
+	// AppleHealthLimiter is the per-token budget for accepted posts and
+	// AppleHealthMissLimiter the one global budget for tokens nothing matches;
+	// see NewAppleHealthLimiter. Nil means unlimited, which only a test wants.
+	AppleHealthLimiter     *ratelimit.Limiter
+	AppleHealthMissLimiter *ratelimit.Limiter
 	// CalendarLimiter is the per-token fetch budget and CalendarMissLimiter
 	// the one global budget for tokens nothing matches; see NewCalendarLimiter.
 	// Nil means unlimited, which only a test wants.
@@ -675,6 +680,8 @@ func (s *Server) Handler() http.Handler {
 	// Go patterns cannot put a suffix on a wildcard, so the handler checks
 	// the segment itself.
 	mux.HandleFunc("GET /api/calendar/{file}", s.handleCalendarFeed)
+	// The second one: a bearer token, not a session. See handleAppleHealthPost.
+	mux.HandleFunc("POST "+appleHealthPath, s.handleAppleHealthPost)
 	mux.HandleFunc("GET /api/training/morning-message", s.handleGetMorningMessage)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/best-efforts", s.handleBestEfforts)
@@ -784,11 +791,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// The calendar feed is reached by a calendar app with no browser and no
-		// cookie, so it cannot sit behind the session; its secret URL is the
-		// credential. Identify is skipped altogether, so a stray or forged
-		// Remote-User header or session cookie changes nothing on this path.
-		// The predicate is the exact path and GET only: see bypassesAuth.
+		// The calendar feed and the Apple Health post are reached with no
+		// browser and no cookie, so they cannot sit behind the session; the
+		// feed's secret URL and the post's bearer token are the credentials.
+		// Identify is skipped altogether, so a stray or forged Remote-User
+		// header or session cookie changes nothing on these paths. The
+		// predicates are the exact paths and verbs: see bypassesAuth.
 		if bypassesAuth(r) {
 			next.ServeHTTP(w, r)
 			return
