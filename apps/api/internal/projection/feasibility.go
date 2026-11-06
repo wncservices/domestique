@@ -66,13 +66,17 @@ func JudgeFeasibility(in FeasibilityInput) Feasibility {
 	case reached*100 >= target*85:
 		return Feasibility{FeasibleAchievable,
 			fmt.Sprintf("Achievable, just: fitness %.0f of about %.0f by race day.", reached, target), "success"}
-	case reached*100 >= target*70 || in.HoursCapped:
+	case reached*100 >= target*70:
 		if in.HoursCapped {
 			return Feasibility{FeasibleStretch,
 				fmt.Sprintf("A stretch: your available hours cap the build at fitness %.0f of about %.0f. More hours a week or a later date would close it.", reached, target), "warning"}
 		}
 		return Feasibility{FeasibleStretch,
 			fmt.Sprintf("A stretch: fitness %.0f of about %.0f by race day. A later date would close it.", reached, target), "warning"}
+	}
+	if in.HoursCapped {
+		return Feasibility{FeasibleUnrealistic,
+			fmt.Sprintf("Not realistic with your current hours: fitness can reach about %.0f, this event needs about %.0f. More hours a week or a later date would help.", reached, target), "error"}
 	}
 	return Feasibility{FeasibleUnrealistic,
 		fmt.Sprintf("Not realistic in %d weeks: fitness can reach about %.0f, this event needs about %.0f.", in.Weeks, reached, target), "error"}

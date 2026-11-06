@@ -47,7 +47,8 @@ func (s *Server) handleGoalCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	rider := auth.FromContext(r.Context()).User
 	answer := func(d goalCheckDTO) {
-		s.logger().Info("goal feasibility", "rider", rider, "key", d.Key)
+		// Debug, not Info: the panel checks on every pause in typing.
+		s.logger().Debug("goal feasibility", "rider", rider, "key", d.Key)
 		writeJSON(w, http.StatusOK, d)
 	}
 	none := goalCheckDTO{Key: "none"}
