@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -198,5 +199,49 @@ func TestWellnessSyncNeverCalledForAWahooOnlyRider(t *testing.T) {
 	}
 	if len(fake.wellnessCalls) != 0 {
 		t.Errorf("wellness calls = %v, want none — no Garmin connection at all", fake.wellnessCalls)
+	}
+}
+
+// TestGarminWellnessSyncSkipsALinkedRider: a rider whose wellness comes from
+// Apple Health gets no Garmin wellness rows, while an unlinked rider still does.
+func TestGarminWellnessSyncSkipsALinkedRider(t *testing.T) {
+	fake := &fakeGarmin{wellnessByDate: map[string]garmin.Wellness{
+		"2026-03-19": {Date: "2026-03-19", HRVStatus: "BALANCED", SleepScore: 80, RestingHR: 50},
+		"2026-03-18": {Date: "2026-03-18", HRVStatus: "BALANCED", SleepScore: 75, RestingHR: 51},
+	}}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.seedGarminSession("other")
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
+	apple, err := applehealthlink.UseDB(h.db.Conn(), h.db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.srv.AppleHealth = apple
+	ctx := context.Background()
+	if _, err := apple.Regenerate(ctx, "wilant"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rider := range []string{"wilant", "other"} {
+		resp := h.as(rider, "cyclists", http.MethodPost, "/api/training/sync", "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", rider, resp.StatusCode)
+		}
+	}
+
+	linked, err := h.srv.Training.ListWellness(ctx, "wilant", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linked) != 0 {
+		t.Errorf("linked rider has %d Garmin wellness rows, want 0", len(linked))
+	}
+	unlinked, err := h.srv.Training.ListWellness(ctx, "other", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unlinked) == 0 {
+		t.Error("unlinked rider has no wellness rows, want the Garmin sync to write them")
 	}
 }

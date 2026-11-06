@@ -639,6 +639,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addPushOriginColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addWellnessSourceColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.addCrewRideColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}

@@ -127,3 +127,25 @@ func TestDailyWellnessEachEngine(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveWellnessKeepsTheSource(t *testing.T) {
+	for engine, open := range map[string]func(*testing.T) *DB{"sqlite": openTestDB, "postgres": openTestPostgres} {
+		t.Run(engine, func(t *testing.T) {
+			db := open(t)
+			ctx := t.Context()
+			if err := db.SaveWellness(ctx, DailyWellness{Rider: "wilant", Date: "2026-03-01", RestingHR: 50}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.SaveWellness(ctx, DailyWellness{Rider: "wilant", Date: "2026-03-02", RestingHR: 44, Source: "apple"}); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := db.ListWellness(ctx, "wilant", "")
+			if err != nil || len(rows) != 2 {
+				t.Fatalf("rows = %d, err = %v", len(rows), err)
+			}
+			if rows[0].Source != "garmin" || rows[1].Source != "apple" {
+				t.Errorf("sources = %q, %q; want garmin, apple", rows[0].Source, rows[1].Source)
+			}
+		})
+	}
+}

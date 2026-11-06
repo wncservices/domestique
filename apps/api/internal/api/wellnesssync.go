@@ -80,6 +80,12 @@ func (s *Server) syncRiderWellness(ctx context.Context, rider string, consumer G
 	if s.Garmin == nil || s.Training == nil {
 		return
 	}
+	// An Apple rider's wellness comes from the Health shortcut; Garmin rows
+	// beside it would feed the same HRV band with a different device's numbers.
+	if s.wellnessSource(ctx, rider) == wellnessSourceApple {
+		s.noteWellnessSkipped()
+		return
+	}
 
 	existing, err := s.Training.ListWellness(ctx, rider, "")
 	if err != nil {

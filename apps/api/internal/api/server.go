@@ -82,6 +82,10 @@ type Server struct {
 	// own doc comment. Zero value is ready to use.
 	wellnessBackfill wellnessBackfillCache
 
+	// wellnessSkipped counts riders the Garmin wellness sync passed over in the
+	// current metrics pass because their wellness comes from Apple Health.
+	wellnessSkipped atomic.Int64
+
 	// metricsMu serialises metrics-sync passes inside this process (the
 	// advisory lock does nothing on SQLite), and lastMetricsSync is the
 	// fallback "when did one last finish" for a deployment with no settings

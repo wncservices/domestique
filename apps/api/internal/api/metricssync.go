@@ -566,6 +566,7 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed in
 	}
 
 	s.resetMetricsFailures()
+	s.wellnessSkipped.Store(0)
 	seen := map[string]bool{}
 	var connected []string
 	for _, provider := range []string{garminProvider, wahooProvider} {
@@ -618,6 +619,9 @@ func (s *Server) autoSyncTrainingMetrics(ctx context.Context) (riders, failed in
 			s.noteMetricsFailure(rider)
 			failed++
 		}
+	}
+	if n := s.wellnessSkipped.Load(); n > 0 {
+		s.logger().Info("auto-sync metrics: Garmin wellness skipped for riders on Apple Health", "riders", n)
 	}
 	return len(connected), failed
 }

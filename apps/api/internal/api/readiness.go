@@ -113,7 +113,7 @@ func (s *Server) handleGetReadiness(w http.ResponseWriter, r *http.Request) {
 	assessment := s.assessReadiness(r.Context(), rider, sessions, latest)
 
 	sinceDate := s.now().AddDate(0, 0, -(readinessDisplayDays - 1)).Format("2006-01-02")
-	rows, err := s.Training.ListWellness(r.Context(), rider, sinceDate)
+	rows, err := s.readinessWellness(r.Context(), rider, sinceDate)
 	if err != nil {
 		s.fail(w, err)
 		return
