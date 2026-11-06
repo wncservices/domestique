@@ -106,7 +106,7 @@ function addRouteLayers() {
   // (--color-primary-600 light, --color-primary-400 dark) — the same pair
   // apps/api/internal/basemap/renderimage.go's cardImageThemes hardcodes
   // for the card-grid preview, kept in sync by hand across both boundaries.
-  const routeColor = resolved.value === 'dark' ? '#14cfab' : '#049483'
+  const routeColor = resolved.value === 'dark' ? '#3fcfb0' : '#1fa088'
   map.addSource(SOURCE_ID, { type: 'geojson', data: toFeatureCollection(props.routes) })
   map.addLayer({
     id: LINE_LAYER_ID,

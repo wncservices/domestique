@@ -33,8 +33,8 @@ type cardImageColors struct {
 }
 
 var cardImageThemes = map[string]cardImageColors{
-	"light": {earth: "#e2dfda", landuse: "#cfddd5", water: "#80deea", road: "#f6faf8B3", track: "#049483"},
-	"dark":  {earth: "#1f1f1f", landuse: "#1c2421", water: "#31353f", road: "#050a09B3", track: "#14cfab"},
+	"light": {earth: "#e2dfda", landuse: "#cfddd5", water: "#80deea", road: "#f6faf8B3", track: "#1fa088"},
+	"dark":  {earth: "#1f1f1f", landuse: "#1c2421", water: "#31353f", road: "#050a09B3", track: "#3fcfb0"},
 }
 
 // cardRoadOrder is staticBasemap.ts's ROAD_WIDTH, plus a fixed draw order

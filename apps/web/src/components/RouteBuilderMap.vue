@@ -319,7 +319,7 @@ function markerColor(isStart: boolean) {
   }
   // Matches RouteMap.vue's own per-theme route colour, so a regular
   // waypoint reads as "the same kind of thing" as a saved route's line.
-  return resolved.value === 'dark' ? '#14cfab' : '#049483'
+  return resolved.value === 'dark' ? '#3fcfb0' : '#1fa088'
 }
 
 // A third, distinct colour for named waypoint markers — neither the route's
