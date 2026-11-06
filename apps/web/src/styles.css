@@ -166,9 +166,9 @@
    * independent, so it lives once here rather than in both `:root`/`.dark`. */
   --ui-radius: 0.5rem;
 
-  /* Primary actions are pink (blossom), apart from the teal brand scale the
-   * charts and phase colours keep. Blossom 700 is the text-safe step on white. */
-  --ui-primary: var(--color-blossom-700);
+  /* Primary actions are pink, apart from the teal brand scale the charts and
+   * phase colours keep. Pink 700 (#be185d) on white is 6.7:1. */
+  --ui-primary: #be185d;
 
   /* Light mode is a tinted page with white cards, rather than white on white
    * — the old flat-white version gave a card no edge of its own, so a dozen
@@ -225,9 +225,9 @@
   /* A lighter tint of the accent in dark mode: the 600 that reads well on
    * white is close to invisible on a dark surface. Same reasoning applies to
    * every categorical accent below — each swaps to its own 400 step. */
-  --ui-primary: var(--color-blossom-300);
-  /* Text on a primary button: near-black blossom, not the neutral default. */
-  --ui-text-inverted: var(--color-blossom-950);
+  --ui-primary: #f472b6;
+  /* Text on a primary button: near-black pink, not the neutral default. */
+  --ui-text-inverted: #500724;
 
   --color-zone-recovery: #7fa8a1;
   --color-zone-endurance: var(--color-sky-400);
