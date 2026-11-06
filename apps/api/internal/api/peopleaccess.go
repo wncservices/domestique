@@ -110,10 +110,11 @@ func (s *Server) personRiders(ctx context.Context, id, email string, guess bool)
 	return out
 }
 
-// revokeBackgroundAccess takes away the two things that work without a
-// session: the rider's calendar link (revoked, so the old URL is a 404 for
-// good). It never re-enables anything on its own: a rider who is let back in
-// makes a new link. Failures are logged and the rest carried on, because
+// revokeBackgroundAccess takes away what works without a session: the
+// rider's calendar link (revoked, so the old URL is a 404 for good) and Apple
+// Health shortcut token (revoked, so the old token is a 401 for good). It
+// never re-enables anything on its own: a rider who is let back in makes a
+// new link. Failures are logged and the rest carried on, because
 // the admin action that triggered this has already been made.
 func (s *Server) revokeBackgroundAccess(ctx context.Context, riders []string, why string) {
 	for _, rider := range riders {
@@ -123,6 +124,13 @@ func (s *Server) revokeBackgroundAccess(ctx context.Context, riders []string, wh
 			}
 		}
 		s.logger().Info("calendar feed revoked", "rider", rider, "reason", why)
+		if s.AppleHealth != nil {
+			if err := s.AppleHealth.Revoke(ctx, rider); err != nil {
+				s.logger().Error("could not revoke an apple health link", "rider", rider, "reason", why, "err", err)
+			} else {
+				s.logger().Info("apple health link revoked", "rider", rider, "reason", why)
+			}
+		}
 	}
 }
 

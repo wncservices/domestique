@@ -454,3 +454,28 @@ func TestValidateRejectsABadBasemapQuantity(t *testing.T) {
 		t.Errorf("an unset quantity was refused: %v", err)
 	}
 }
+
+// The card hands the shortcut link to riders, so only an iCloud shortcut is
+// accepted; empty means the card has no install link.
+func TestShortcutURLMustBeAnICloudLink(t *testing.T) {
+	for _, tc := range []struct {
+		url string
+		ok  bool
+	}{
+		{"", true},
+		{"https://www.icloud.com/shortcuts/abc", true},
+		{"https://example.com/x", false},
+		{"https://www.icloud.com.evil.example/shortcuts/abc", false},
+		{"http://www.icloud.com/shortcuts/abc", false},
+	} {
+		cfg := &Config{Source: SourceConfig{DSN: "data/domestique.db"}}
+		cfg.AppleHealth.ShortcutURL = tc.url
+		err := cfg.Validate()
+		if tc.ok && err != nil {
+			t.Errorf("shortcut_url %q refused: %v", tc.url, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("shortcut_url %q was accepted", tc.url)
+		}
+	}
+}

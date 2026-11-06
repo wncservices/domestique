@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/blocklist"
 	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
@@ -87,6 +88,7 @@ func build() ([]byte, error) {
 		func() error { _, err := blocklist.UseDB(conn, dsn); return err },
 		func() error { _, err := routeshare.UseDB(conn, dsn); return err },
 		func() error { _, err := calendarfeed.UseDB(conn, dsn); return err },
+		func() error { _, err := applehealthlink.UseDB(conn, dsn); return err },
 		func() error { return morningmessage.DropLegacyTable(conn) },
 		func() error { _, err := workout.UseDB(conn, dsn); return err },
 		func() error { _, err := pacingpush.UseDB(conn, dsn); return err },

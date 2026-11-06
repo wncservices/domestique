@@ -17,6 +17,11 @@
 # the Fitness page). Nothing else under /api/calendar/ is exempt.
 # public_url: https://domestique.example.com
 
+# The iCloud shortcut riders add for Apple Health recovery signals. Empty
+# leaves the card without an install link; it must be an icloud.com shortcut.
+# apple_health:
+#   shortcut_url: https://www.icloud.com/shortcuts/PASTE_ID_HERE
+
 # Where the route library lives.
 #
 # Routes are rows in a database, with the GPX as a blob. The DSN picks the

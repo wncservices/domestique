@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
@@ -80,6 +81,10 @@ type Server struct {
 	// even considered for the 28-day backfill — see wellnessBackfillCache's
 	// own doc comment. Zero value is ready to use.
 	wellnessBackfill wellnessBackfillCache
+
+	// wellnessSkipped counts riders the Garmin wellness sync passed over in the
+	// current metrics pass because their wellness comes from Apple Health.
+	wellnessSkipped atomic.Int64
 
 	// metricsMu serialises metrics-sync passes inside this process (the
 	// advisory lock does nothing on SQLite), and lastMetricsSync is the
@@ -344,6 +349,15 @@ type Server struct {
 	// internal/calendarfeed. Nil in a deployment without a database store,
 	// and the feed endpoints answer 404 / 501 then.
 	CalendarFeeds *calendarfeed.Store
+
+	// AppleHealth holds each rider's hashed Apple Health shortcut token, see
+	// internal/applehealthlink. Nil means the post answers 401 (with a Warn) and the card endpoints 412.
+	AppleHealth *applehealthlink.Store
+	// AppleHealthLimiter is the per-token budget for accepted posts and
+	// AppleHealthMissLimiter the one global budget for tokens nothing matches;
+	// see NewAppleHealthLimiter. Nil means unlimited, which only a test wants.
+	AppleHealthLimiter     *ratelimit.Limiter
+	AppleHealthMissLimiter *ratelimit.Limiter
 	// CalendarLimiter is the per-token fetch budget and CalendarMissLimiter
 	// the one global budget for tokens nothing matches; see NewCalendarLimiter.
 	// Nil means unlimited, which only a test wants.
@@ -662,10 +676,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/calendar", s.handleGetCalendar)
 	mux.HandleFunc("POST /api/training/calendar", s.handleCreateCalendar)
 	mux.HandleFunc("DELETE /api/training/calendar", s.handleRevokeCalendar)
+	// The Apple Health card in Settings: the rider's own shortcut link.
+	mux.HandleFunc("GET /api/training/apple-health", s.handleGetAppleHealth)
+	mux.HandleFunc("POST /api/training/apple-health", s.handleCreateAppleHealth)
+	mux.HandleFunc("DELETE /api/training/apple-health", s.handleRevokeAppleHealth)
 	// The only path that bypasses authentication: see isCalendarFeedPath.
 	// Go patterns cannot put a suffix on a wildcard, so the handler checks
 	// the segment itself.
 	mux.HandleFunc("GET /api/calendar/{file}", s.handleCalendarFeed)
+	// The second one: a bearer token, not a session. See handleAppleHealthPost.
+	mux.HandleFunc("POST "+appleHealthPath, s.handleAppleHealthPost)
 	mux.HandleFunc("GET /api/training/morning-message", s.handleGetMorningMessage)
 	mux.HandleFunc("GET /api/training/fitness", s.handleGetFitness)
 	mux.HandleFunc("GET /api/training/best-efforts", s.handleBestEfforts)
@@ -775,11 +795,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// The calendar feed is reached by a calendar app with no browser and no
-		// cookie, so it cannot sit behind the session; its secret URL is the
-		// credential. Identify is skipped altogether, so a stray or forged
-		// Remote-User header or session cookie changes nothing on this path.
-		// The predicate is the exact path and GET only: see bypassesAuth.
+		// The calendar feed and the Apple Health post are reached with no
+		// browser and no cookie, so they cannot sit behind the session; the
+		// feed's secret URL and the post's bearer token are the credentials.
+		// Identify is skipped altogether, so a stray or forged Remote-User
+		// header or session cookie changes nothing on these paths. The
+		// predicates are the exact paths and verbs: see bypassesAuth.
 		if bypassesAuth(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -868,6 +889,16 @@ func roleLabel(r auth.Role) string {
 }
 
 // ---------- payloads ----------
+
+// appleHealthDTO is the Apple Health card. Token is set only in the response
+// that creates it: only its hash is stored, so it cannot be shown again.
+type appleHealthDTO struct {
+	Linked bool `json:"linked"`
+	// LastReceived is a calendar date (YYYY-MM-DD) in the training zone, never a time.
+	LastReceived string `json:"lastReceived,omitempty"`
+	ShortcutURL  string `json:"shortcutUrl"`
+	Token        string `json:"token,omitempty"`
+}
 
 type configDTO struct {
 	// Source names the database and, for PostgreSQL, its host and port — not

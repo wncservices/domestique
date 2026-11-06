@@ -31,6 +31,7 @@ import (
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
 	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
@@ -865,6 +866,12 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		return err
 	}
 
+	// The hashed token of a rider's Apple Health shortcut, wired the same way.
+	appleHealthStore, err := applehealthlink.UseDB(src.Conn(), src.DSN())
+	if err != nil {
+		return err
+	}
+
 	// The opt-in table of the retired morning email held riders' addresses:
 	// drop it wherever it still exists.
 	if err := morningmessage.DropLegacyTable(src.Conn()); err != nil {
@@ -898,13 +905,19 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 		Shares:       sharesStore,
 		// The hashed calendar-feed tokens; see internal/calendarfeed.
 		CalendarFeeds: calendarFeedStore,
+		// The hashed Apple Health shortcut tokens; see internal/applehealthlink.
+		AppleHealth: appleHealthStore,
 		// A calendar app polls, so a per-token budget; and one global budget
 		// for tokens nothing matches. In memory, per replica, like the rest.
 		CalendarLimiter:     api.NewCalendarLimiter(),
 		CalendarMissLimiter: api.NewCalendarMissLimiter(),
-		Training:            trainingStore,
-		Auth:                authenticator,
-		Log:                 log,
+		// Same shape for the Apple Health post: per token, and one global
+		// budget for tokens nothing matches.
+		AppleHealthLimiter:     api.NewAppleHealthLimiter(),
+		AppleHealthMissLimiter: api.NewAppleHealthMissLimiter(),
+		Training:               trainingStore,
+		Auth:                   authenticator,
+		Log:                    log,
 		// Pure in-memory, no external credential to be missing — wired
 		// unconditionally, the same as Crew. 5 attempts per rider per 15
 		// minutes is enough for someone who mistypes a password twice; see

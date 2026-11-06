@@ -99,6 +99,13 @@ var (
 		metric.WithDescription("1 when sign-in accepts accounts with no identity binding, 0 while the startup bootstrap has not finished."),
 	))
 
+	// appleHealthPostsTotal counts posts to the Apple Health endpoint by
+	// outcome. No rider label: who posted is a log line, not something to scrape.
+	appleHealthPostsTotal = must(meter.Int64Counter(
+		"domestique_apple_health_posts_total",
+		metric.WithDescription("Posts to the Apple Health endpoint, by result (ok, unauthorized, limited, invalid, too_large, error)."),
+	))
+
 	pushErrorsTotal = must(meter.Int64Counter(
 		"domestique_push_errors_total",
 		metric.WithDescription("Failed push attempts per account."),
@@ -382,4 +389,9 @@ func NewMetricsServer(addr string) *http.Server {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+}
+
+// recordAppleHealthPost counts one post by outcome.
+func recordAppleHealthPost(result string) {
+	appleHealthPostsTotal.Add(context.Background(), 1, metric.WithAttributes(attribute.String("result", result)))
 }

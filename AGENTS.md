@@ -120,8 +120,8 @@ Signed out under this mode, nothing of the app is reachable: every page on the a
 host redirects to `LandingHost` (domestique.dev), carrying the path asked for as
 `return_to` so the landing page's Sign in returns there, a share link above all
 (`landingURLFor`, checked with `safeReturnTo`). Every data API answers 401; only
-`/api/me`, `/api/config`, `/api/health`, the share-link reads and the calendar feed
-answer without a session. The landing and privacy pages are the apex's and redirect
+`/api/me`, `/api/config`, `/api/health`, the share-link reads, the calendar feed and
+`POST /api/wellness/apple` (its bearer token is the credential) answer without a session. The landing and privacy pages are the apex's and redirect
 there from the app host.
 
 `Remote-Email` is treated as a **verified** address under this mode (it comes from Authelia's own
@@ -387,6 +387,37 @@ every auth mode (`calendar_test.go`):
   property), all-day `VALUE=DATE` with an exclusive end, UTC instants for timed events (no
   hand-written `VTIMEZONE`). `ETag` is a hash of the deterministic body, so a polling calendar app
   costs a query and a hash.
+
+## Apple Health
+
+`POST /api/wellness/apple` takes a rider's HRV, resting heart rate and sleep from an Apple Shortcut
+(`internal/applehealth`, pure; `handleAppleHealthPost`; `docs/apple-health-shortcut.md` has the steps).
+A rider with a link gets their wellness from it instead of Garmin. What keeps it safe:
+
+- **One bypass, and it is a write.** `bypassesAuth` exempts exactly POST `/api/wellness/apple`, never a
+  prefix. The token travels in `Authorization: Bearer <token>`, never in the path or query, so no log,
+  span or `url.path` carries it. `Identify` is skipped: the rider is whoever owns the token's hash.
+- **Hashed, shown once.** `apple_health_links` holds `sha256(token)`; regenerating is one upsert and the
+  old token dies at once. Disconnecting deletes the row and hands wellness back to Garmin.
+- **Same 401** for a missing, malformed, unknown or revoked token. Under `mode: none` it still needs a
+  token, because the token is what names the rider. Once the global miss budget is spent, a miss
+  answers 429 with `Retry-After` instead.
+- **Limits:** 12 posts an hour per token, counting refused bodies too (the limiter runs before the body
+  is read), one global budget of 60 misses a minute (in memory
+  per replica), 256 KiB body and 2000 samples per kind (413). A non-JSON body is 415 from `csrfGuard`.
+- **One source per rider.** `wellnessSource` reads the link; `readinessWellness` keeps only rows of the
+  rider's current source, so an Apple HRV (SDNN) never shares a band with Garmin's RMSSD. The Garmin
+  wellness sync skips a linked rider, and its backfill counts only `garmin` rows. One row per
+  `(rider, date)`, so a switch may overwrite overlapping nights.
+- **Blocking reaches it.** `revokeBackgroundAccess` deletes the link, as it does the calendar feed,
+  because a post needs no session.
+- **Logs and metrics** carry a rider and a count, or a stage and an error class, never a value, a sample
+  time or the token. `domestique_apple_health_posts_total{result}` has results `ok`, `unauthorized`,
+  `limited`, `invalid`, `too_large` and `error`, and no rider label.
+- **Proxy mode needs an Authelia bypass** for `^/api/wellness/apple$`, as the calendar feed does. A
+  request through the proxy still carries no `Remote-User`, and the handler never reads it.
+- **Timing.** Data posted after the day's first sync slot misses `reoptimise`, the hard-for-easy swap,
+  for that day. Adaptation still picks it up on the next tick.
 
 ## The Today page
 

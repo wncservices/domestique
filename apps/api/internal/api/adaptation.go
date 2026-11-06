@@ -432,7 +432,7 @@ func (s *Server) assessReadinessWith(ctx context.Context, rider string, sessions
 	todayStr := now.Format("2006-01-02")
 	sinceDate := now.AddDate(0, 0, -readinessHistoryDays).Format("2006-01-02")
 
-	rows, err := s.Training.ListWellness(ctx, rider, sinceDate)
+	rows, err := s.readinessWellness(ctx, rider, sinceDate)
 	if err != nil {
 		s.logger().Warn("adapt: reading wellness history failed", "rider", rider, "err", err)
 		rows = nil

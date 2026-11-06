@@ -148,6 +148,11 @@ var riderTables = map[string]riderTable{
 	"calendar_feeds": {Purged: true, Note: "CalendarFeeds.DeleteRider: the rider's calendar link stops working",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
 
+	// internal/applehealthlink: the hashed token of a rider's Apple Health
+	// shortcut. Purging it is what stops a departed rider's posting URL working.
+	"apple_health_links": {Purged: true, Note: "AppleHealth.DeleteRider: the rider's Health shortcut stops working",
+		Rename: renameRule{Columns: []string{"rider"}, Unique: true}},
+
 	// internal/pacingpush
 	"pacing_pushes": {Purged: true, Note: "PacingPushes.DeleteRider: the record of which course each pacing plan became on the rider's own account",
 		Rename: renameRule{Columns: []string{"rider"}, Unique: true, With: []string{"provider", "key"}}},

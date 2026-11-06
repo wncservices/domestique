@@ -18,6 +18,7 @@ import { useLibrary } from '@/composables/useLibrary'
 import AccountsPanel from '@/components/AccountsPanel.vue'
 import BasemapSetup from '@/components/BasemapSetup.vue'
 import GarminSetup from '@/components/GarminSetup.vue'
+import AppleHealthConnect from '@/components/AppleHealthConnect.vue'
 import KomootConnect from '@/components/KomootConnect.vue'
 import WeatherSettings from '@/components/WeatherSettings.vue'
 import RideStartCard from '@/components/plan/RideStartCard.vue'
@@ -702,6 +703,8 @@ onMounted(async () => {
 
             <KomootConnect :connection="connection" @changed="connection = $event" />
           </UCard>
+
+          <AppleHealthConnect v-if="canManageTraining" />
         </section>
 
         <section id="training" class="scroll-mt-20 flex flex-col gap-4" aria-labelledby="training-title">

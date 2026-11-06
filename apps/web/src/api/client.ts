@@ -9,6 +9,7 @@ import type {
   BuildFtpTestRequest,
   BasemapUpdate,
   CalendarFeedLink,
+  AppleHealthLink,
   CalendarFeedStatus,
   Crew,
   CrewRideListItem,
@@ -1210,6 +1211,11 @@ export const api = {
    *  The only call that returns the URL. */
   createCalendarFeed: () => request<CalendarFeedLink>('/api/training/calendar', { method: 'POST' }),
   revokeCalendarFeed: () => request<void>('/api/training/calendar', { method: 'DELETE' }),
+  /** Whether the rider's Apple Health shortcut is linked, and when it last delivered. */
+  appleHealth: () => request<AppleHealthLink>('/api/training/apple-health'),
+  /** Links, or regenerates (the old token dies at once). The only call that returns the token. */
+  connectAppleHealth: () => request<AppleHealthLink>('/api/training/apple-health', { method: 'POST' }),
+  disconnectAppleHealth: () => request<void>('/api/training/apple-health', { method: 'DELETE' }),
   /** One Monday–Sunday week of planned vs completed training — see
    *  internal/api/trainingweek.go. start snaps to its Monday server-side. */
   trainingWeek: (start?: string) =>

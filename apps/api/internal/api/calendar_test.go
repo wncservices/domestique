@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/config"
@@ -60,6 +61,7 @@ type calHarness struct {
 	client   *http.Client
 	srv      *api.Server
 	feeds    *calendarfeed.Store
+	apple    *applehealthlink.Store
 	training *workout.DB
 	sessions *sessions.Store
 	logs     *lockedBuffer
@@ -100,6 +102,10 @@ func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *
 	}
 	t.Cleanup(func() { db.Close() })
 	feeds, err := calendarfeed.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	apple, err := applehealthlink.UseDB(db.Conn(), db.DSN())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +163,14 @@ func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *
 		Clock:               func() time.Time { return calendarNow },
 		CalendarLimiter:     api.NewCalendarLimiter(),
 		CalendarMissLimiter: api.NewCalendarMissLimiter(),
+		AppleHealth:         apple,
+		AppleHealthLimiter:  api.NewAppleHealthLimiter(), AppleHealthMissLimiter: api.NewAppleHealthMissLimiter(),
 	}
 	followServerClock(srv, training)
 	server := httptest.NewServer(srv.Handler())
 	t.Cleanup(server.Close)
 	return &calHarness{t: t, mode: mode, base: server.URL, client: server.Client(), srv: srv,
-		feeds: feeds, training: training, sessions: sess, logs: logs, spans: rec}
+		feeds: feeds, apple: apple, training: training, sessions: sess, logs: logs, spans: rec}
 }
 
 // rider is the name a signed-in user ends up with: mode none has only "local".
