@@ -36,10 +36,10 @@ untouched, and not something this app re-themes.
 
 ### Colour roles
 
-Colour carries one meaning each. Teal means you, an action or good news.
-Coral (`ember`) means behind. As text, use `--app-accent-ember`, the
-text-safe ember (ember-700 on light, 5.35:1 on white; ember-400 on dark): the
-raw ember-600 is only 3.74:1 on white. The zone scale is for effort only, and the
+Colour carries one meaning each. Aqua jade means you, an action or good news.
+Baby pink (the `ember` role) means behind. As text, use `--app-accent-ember`,
+the text-safe step (blossom-700 on light, 6:1 on white; blossom-300 on dark);
+the raw baby pink is too light for text on white. The zone scale is for effort only, and the
 phase scale for training phases only; neither is reused for decoration.
 
 | Role | Token | Means |

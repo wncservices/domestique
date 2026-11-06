@@ -207,10 +207,11 @@
    * a literal shade class, so nothing needs a `dark:` variant of its own. */
   --app-accent-primary: var(--ui-primary);
   --app-accent-primary-soft: var(--color-primary-100);
-  /* ember-700, not 600: this is also the ember used as text, and 600 is
-   * 3.74:1 on white where 700 is 5.35:1. */
-  --app-accent-ember: var(--color-ember-700);
-  --app-accent-ember-soft: var(--color-ember-100);
+  /* The warm accent ("ember" by role: behind, a route's start, unpaved) is
+   * baby pink now. blossom-700 as text is 6:1 on white. The zone scale keeps
+   * the coral ember ramp: effort reads cool to warm. */
+  --app-accent-ember: var(--color-blossom-700);
+  --app-accent-ember-soft: var(--color-blossom-100);
   --app-accent-sky: var(--color-sky-600);
   --app-accent-sky-soft: var(--color-sky-100);
   --app-accent-violet: var(--color-violet-600);
@@ -264,8 +265,8 @@
 
   --app-accent-primary: var(--ui-primary);
   --app-accent-primary-soft: var(--color-primary-950);
-  --app-accent-ember: var(--color-ember-400);
-  --app-accent-ember-soft: var(--color-ember-950);
+  --app-accent-ember: var(--color-blossom-300);
+  --app-accent-ember-soft: var(--color-blossom-950);
   --app-accent-sky: var(--color-sky-400);
   --app-accent-sky-soft: var(--color-sky-950);
   --app-accent-violet: var(--color-violet-400);
