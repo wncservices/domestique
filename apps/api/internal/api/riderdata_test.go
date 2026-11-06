@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/calendarfeed"
 	"github.com/wncservices/domestique/apps/api/internal/crew"
@@ -96,6 +97,9 @@ func openRiderDataEnv(t *testing.T, dsn string) *riderDataEnv {
 		t.Fatal(err)
 	}
 	if srv.CalendarFeeds, err = calendarfeed.UseDB(conn, dsnUsed); err != nil {
+		t.Fatal(err)
+	}
+	if srv.AppleHealth, err = applehealthlink.UseDB(conn, dsnUsed); err != nil {
 		t.Fatal(err)
 	}
 	if srv.WeatherPrefs, err = weather.UseDB(conn, dsnUsed); err != nil {
@@ -280,6 +284,9 @@ func riderSeeds() []seed {
 		}, "rider", byRider},
 		{"calendar_feeds", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO calendar_feeds (rider, token_hash, created_at) VALUES (?, ?, ?)`, rider, "hash-"+id, ts)
+		}, "rider", byRider},
+		{"apple_health_links", func(e *riderDataEnv, rider, id string) error {
+			return exec(e, `INSERT INTO apple_health_links (rider, token_hash, created_at) VALUES (?, ?, ?)`, rider, "hash-"+id, ts)
 		}, "rider", byRider},
 		{"pacing_pushes", func(e *riderDataEnv, rider, id string) error {
 			return exec(e, `INSERT INTO pacing_pushes (rider, provider, key, remote_id, pushed_at) VALUES (?, 'garmin', 'pacing:fondo', 'course-1', ?)`, rider, ts)

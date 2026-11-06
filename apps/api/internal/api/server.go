@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/wncservices/domestique/apps/api/internal/accounts"
+	"github.com/wncservices/domestique/apps/api/internal/applehealthlink"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/auth0mgmt"
 	"github.com/wncservices/domestique/apps/api/internal/basemap"
@@ -344,6 +345,10 @@ type Server struct {
 	// internal/calendarfeed. Nil in a deployment without a database store,
 	// and the feed endpoints answer 404 / 501 then.
 	CalendarFeeds *calendarfeed.Store
+
+	// AppleHealth holds each rider's hashed Apple Health shortcut token, see
+	// internal/applehealthlink. Nil means the shortcut endpoints answer 404.
+	AppleHealth *applehealthlink.Store
 	// CalendarLimiter is the per-token fetch budget and CalendarMissLimiter
 	// the one global budget for tokens nothing matches; see NewCalendarLimiter.
 	// Nil means unlimited, which only a test wants.

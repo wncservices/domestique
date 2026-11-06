@@ -235,6 +235,11 @@ func (s *Server) purgeRiderSteps(ctx context.Context, rider string, unbind bool)
 			return sum, fmt.Errorf("removing calendar link: %w", err)
 		}
 	}
+	if s.AppleHealth != nil {
+		if err := s.AppleHealth.DeleteRider(ctx, rider); err != nil {
+			return sum, fmt.Errorf("removing Apple Health link: %w", err)
+		}
+	}
 	if s.Shares != nil {
 		n, err := s.Shares.DeleteRider(ctx, rider)
 		if err != nil {
