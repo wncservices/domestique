@@ -56,18 +56,18 @@ func TestFactsForEveryRule(t *testing.T) {
 		{
 			"missed moved", why.MissedMoved,
 			why.MissedMovedInputs{From: "2026-03-24", To: "2026-03-27", ReplacedEasy: true},
-			"Missed session made up",
+			"Missed session moved",
 			[]why.Fact{
 				{Label: "Missed", Value: "Tue 24 Mar"},
-				{Label: "Made up on", Value: "Fri 27 Mar"},
+				{Label: "Moved to", Value: "Fri 27 Mar"},
 				{Label: "Took the place of", Value: "an easy day"},
 			},
 		},
 		{
 			"missed moved into a free day", why.MissedMoved,
 			why.MissedMovedInputs{From: "2026-03-24", To: "2026-03-27"},
-			"Missed session made up",
-			[]why.Fact{{Label: "Missed", Value: "Tue 24 Mar"}, {Label: "Made up on", Value: "Fri 27 Mar"}},
+			"Missed session moved",
+			[]why.Fact{{Label: "Missed", Value: "Tue 24 Mar"}, {Label: "Moved to", Value: "Fri 27 Mar"}},
 		},
 		{
 			"fatigue struggles", why.FatigueStruggles,
@@ -291,10 +291,10 @@ func TestInputsSurviveAJSONRoundTrip(t *testing.T) {
 
 func TestTitlesForLoadRules(t *testing.T) {
 	for rule, want := range map[why.Rule]string{
-		why.LoadRepaid:         "Load made up",
+		why.LoadRepaid:         "Catching up missed training",
 		why.LoadRolled:         "Load carried to next week",
 		why.LoadForgiven:       "Load forgiven",
-		why.GreenPush:          "Pushed on a good day",
+		why.GreenPush:          "Using a good day to catch up",
 		why.ReshuffleReadiness: "Swapped with an easier day",
 	} {
 		if got := why.Title(rule); got != want {

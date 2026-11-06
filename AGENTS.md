@@ -625,8 +625,8 @@ note and break flags/description parity), nor one next to a hard, test or crew d
 as `load_repaid`, which is deliberately **not** an easing: `Flags.EasedBy` ignores it, so
 `scheduler.IsPlanSession` stays true (a repaid session no longer has the exact generated
 description, so refresh and trim leave it alone, but readiness can still ease it); only
-`ledger.Repayable` stops it being repaid a second time. The description says "Load made up." with
-no figure (it reaches the calendar feed and the head unit); the Why popover keeps the number. A
+`ledger.Repayable` stops it being repaid a second time. The description says what changed ("Longer than planned, to catch up on missed training." or
+"Harder than planned, ...", `repaymentNote`) with no figure (it reaches the calendar feed and the head unit); the Why popover keeps the number. A
 rider's pass is skipped, with a Warn counting riders, when this tick's metrics pass failed for
 them or their Garmin session has expired: rides the app has not seen must not read as missed. The
 illness return ramp (`lifeevents.NoTestDays`) is off-limits for repayment and does not count as an
@@ -636,7 +636,7 @@ repayable session goes one rung up (the lower of floor(session level)+1 and floo
 level)+1) or, if endurance, is lengthened under the repayment caps. A recovery or taper week, or
 a session that is not repayable, gets no push. Rule `green_push`, ignored by `EasedBy` like `load_repaid`; its gain is
 subtracted from the debt before later days are repaid; it does not consume `upgraded_at`;
-the marker is "Pushed on a good day." with no figure. Logs carry counts only, never a TSS beside a rider.
+the note is "A step harder today: you are fresh and behind this week." (or "A bit longer today: ...") with no figure. Logs carry counts only, never a TSS beside a rider.
 
 **On a Caution or Rest morning a hard session trades days with an easy one.** `reoptimise`
 (`internal/api/reoptimise.go`) runs in `AutoScheduleTick` under the scheduling lock, after the

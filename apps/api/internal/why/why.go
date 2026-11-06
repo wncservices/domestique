@@ -242,7 +242,7 @@ func Title(rule Rule) string {
 	case ReadinessTomorrow:
 		return "Eased ahead of time"
 	case MissedMoved:
-		return "Missed session made up"
+		return "Missed session moved"
 	case FatigueStruggles:
 		return "Two struggled sessions"
 	case FatigueOverload:
@@ -264,9 +264,9 @@ func Title(rule Rule) string {
 	case IllnessRamp:
 		return "Eased back in after time off"
 	case LoadRepaid:
-		return "Load made up"
+		return "Catching up missed training"
 	case GreenPush:
-		return "Pushed on a good day"
+		return "Using a good day to catch up"
 	case ReshuffleReadiness:
 		return "Swapped with an easier day"
 	case LoadRolled:
@@ -314,7 +314,7 @@ func ruleFacts(rule Rule, inputs map[string]any) []Fact {
 		if !ok {
 			return nil
 		}
-		out := []Fact{{"Missed", dayLabel(in.From)}, {"Made up on", dayLabel(in.To)}}
+		out := []Fact{{"Missed", dayLabel(in.From)}, {"Moved to", dayLabel(in.To)}}
 		if in.ReplacedEasy {
 			out = append(out, Fact{"Took the place of", "an easy day"})
 		}

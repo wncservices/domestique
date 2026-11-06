@@ -364,9 +364,9 @@ func (s *Server) applyRepayment(ctx context.Context, rider string, wk workout.Wo
 	}
 	name := wk.Name
 	var level *float64
-	rule, reason := why.LoadRepaid, "Load made up."
+	rule, reason := why.LoadRepaid, repaymentNote(a)
 	if a.Kind == "push" {
-		rule, reason = why.GreenPush, "Pushed on a good day."
+		rule = why.GreenPush
 	}
 	// A lengthened ride keeps its name ("Long ride, with climbing" must
 	// survive); an upgrade is a different session and takes the new one, and so
@@ -523,4 +523,21 @@ func partialRideLoad(today string, sessions []workout.CompletedSession, workouts
 		}
 	}
 	return out
+}
+
+// repaymentNote is the sentence a repayment adds to the session's description,
+// saying what changed and why in words a rider reads on the head unit. It never
+// carries a figure: the description reaches the calendar feed and the device,
+// and the Why popover keeps the number.
+func repaymentNote(a ledger.Action) string {
+	switch {
+	case a.Kind == "push" && a.Level > 0:
+		return "A step harder today: you are fresh and behind this week."
+	case a.Kind == "push":
+		return "A bit longer today: you are fresh and behind this week."
+	case a.Kind == "upgrade":
+		return "Harder than planned, to catch up on missed training."
+	default:
+		return "Longer than planned, to catch up on missed training."
+	}
 }
