@@ -179,9 +179,7 @@ func readings(in []Sample) []reading {
 func asleepIntervals(in []SleepSample) []interval {
 	var out []interval
 	for _, s := range in {
-		switch strings.ToLower(strings.TrimSpace(s.Value)) {
-		case "asleep", "core", "deep", "rem", "unspecified":
-		default:
+		if !isAsleepStage(s.Value) {
 			continue
 		}
 		start, err1 := time.Parse(time.RFC3339, s.Start)
@@ -192,6 +190,24 @@ func asleepIntervals(in []SleepSample) []interval {
 		out = append(out, interval{start, end})
 	}
 	return out
+}
+
+// isAsleepStage reads a Health stage label. Labels come as one word ("Core") or as a
+// compound ("Asleep Core", "Asleep (Unspecified)"), so the label is split into words. A label that
+// says awake or in bed is never sleep, whatever else it says.
+func isAsleepStage(value string) bool {
+	v := strings.ToLower(value)
+	if strings.Contains(v, "awake") || strings.Contains(v, "in bed") || strings.Contains(v, "inbed") {
+		return false
+	}
+	words := strings.FieldsFunc(v, func(r rune) bool { return r < 'a' || r > 'z' })
+	for _, w := range words {
+		switch w {
+		case "asleep", "core", "deep", "rem", "unspecified":
+			return true
+		}
+	}
+	return false
 }
 
 // unionSeconds is the length of the union of the intervals clipped to [from, to). A union, not a

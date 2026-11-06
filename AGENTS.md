@@ -400,8 +400,10 @@ A rider with a link gets their wellness from it instead of Garmin. What keeps it
 - **Hashed, shown once.** `apple_health_links` holds `sha256(token)`; regenerating is one upsert and the
   old token dies at once. Disconnecting deletes the row and hands wellness back to Garmin.
 - **Same 401** for a missing, malformed, unknown or revoked token. Under `mode: none` it still needs a
-  token, because the token is what names the rider.
-- **Limits:** 12 accepted posts an hour per token, one global budget of 60 misses a minute (in memory
+  token, because the token is what names the rider. Once the global miss budget is spent, a miss
+  answers 429 with `Retry-After` instead.
+- **Limits:** 12 posts an hour per token, counting refused bodies too (the limiter runs before the body
+  is read), one global budget of 60 misses a minute (in memory
   per replica), 256 KiB body and 2000 samples per kind (413). A non-JSON body is 415 from `csrfGuard`.
 - **One source per rider.** `wellnessSource` reads the link; `readinessWellness` keeps only rows of the
   rider's current source, so an Apple HRV (SDNN) never shares a band with Garmin's RMSSD. The Garmin

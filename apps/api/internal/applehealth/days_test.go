@@ -274,7 +274,9 @@ func TestWhichSleepStagesCountAsAsleep(t *testing.T) {
 	cases := map[string]bool{
 		"Asleep": true, "Core": true, "Deep": true, "REM": true, "Unspecified": true,
 		"core": true, "rem": true,
-		"In Bed": false, "Awake": false, "Mystery": false, "": false,
+		"Asleep Core": true, "Asleep (Unspecified)": true,
+		"In Bed Awake": false,
+		"In Bed":       false, "Awake": false, "Mystery": false, "": false,
 	}
 	for stage, counts := range cases {
 		p := Payload{Sleep: []SleepSample{sleep("2026-11-05T01:00:00+01:00", "2026-11-05T02:00:00+01:00", stage)}}

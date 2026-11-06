@@ -103,7 +103,7 @@ var (
 	// outcome. No rider label: who posted is a log line, not something to scrape.
 	appleHealthPostsTotal = must(meter.Int64Counter(
 		"domestique_apple_health_posts_total",
-		metric.WithDescription("Posts to the Apple Health endpoint, by result (ok, unauthorized, limited, invalid, too_large)."),
+		metric.WithDescription("Posts to the Apple Health endpoint, by result (ok, unauthorized, limited, invalid, too_large, error)."),
 	))
 
 	pushErrorsTotal = must(meter.Int64Counter(
