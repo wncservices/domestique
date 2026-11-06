@@ -50,6 +50,10 @@ func (d *DB) addWellnessSourceColumn() error {
 	return nil
 }
 
+// One row per (rider, date) is deliberate: a rider has one wellness source at
+// a time, so a source switch (linking Apple Health) may overwrite the nights
+// both sources reported rather than keeping two rows for one night.
+//
 // SaveWellness upserts on (rider, date) — a re-sync of the same day
 // corrects the stored reading rather than accumulating a second row, the
 // same upsert shape SaveLevel already uses for progression_levels.

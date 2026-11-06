@@ -83,14 +83,22 @@ func (s *Server) syncRiderWellness(ctx context.Context, rider string, consumer G
 	// An Apple rider's wellness comes from the Health shortcut; Garmin rows
 	// beside it would feed the same HRV band with a different device's numbers.
 	if s.wellnessSource(ctx, rider) == wellnessSourceApple {
-		s.noteWellnessSkipped()
+		s.wellnessSkipped.Add(1)
 		return
 	}
 
-	existing, err := s.Training.ListWellness(ctx, rider, "")
+	all, err := s.Training.ListWellness(ctx, rider, "")
 	if err != nil {
 		s.logger().Warn("wellness sync: reading existing rows failed", "rider", rider, "err", err)
 		return
+	}
+	// Only Garmin rows count: Apple rows left from a revoked link must not
+	// suppress the backfill the rider now needs.
+	var existing []workout.DailyWellness
+	for _, row := range all {
+		if row.Source == "" || row.Source == wellnessSourceGarmin {
+			existing = append(existing, row)
+		}
 	}
 
 	todayOK := s.fetchAndSaveWellness(ctx, rider, consumer, session, s.now())

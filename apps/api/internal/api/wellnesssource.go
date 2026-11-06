@@ -40,7 +40,7 @@ func (s *Server) readinessWellness(ctx context.Context, rider, sinceDate string)
 		return nil, err
 	}
 	want := s.wellnessSource(ctx, rider)
-	out := rows[:0:0]
+	out := make([]workout.DailyWellness, 0, len(rows))
 	for _, row := range rows {
 		src := row.Source
 		if src == "" {
@@ -52,5 +52,3 @@ func (s *Server) readinessWellness(ctx context.Context, rider, sinceDate string)
 	}
 	return out, nil
 }
-
-func (s *Server) noteWellnessSkipped() { s.wellnessSkipped.Add(1) }

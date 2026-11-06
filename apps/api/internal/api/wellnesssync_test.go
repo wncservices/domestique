@@ -245,3 +245,24 @@ func TestGarminWellnessSyncSkipsALinkedRider(t *testing.T) {
 		t.Error("unlinked rider has no wellness rows, want the Garmin sync to write them")
 	}
 }
+
+// A revoked Apple link leaves Apple rows behind; they must not count as
+// existing Garmin history, or the Garmin backfill never runs.
+func TestWellnessSyncBackfillsForARiderWithOnlyAppleRows(t *testing.T) {
+	fake := &fakeGarmin{}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
+	if err := h.srv.Training.SaveWellness(context.Background(), workout.DailyWellness{
+		Rider: "wilant", Date: "2026-02-01", RestingHR: 44, Source: "apple"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(fake.wellnessCalls) != 29 {
+		t.Fatalf("wellness calls = %d, want 29 (the Garmin backfill ran)", len(fake.wellnessCalls))
+	}
+}
