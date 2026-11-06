@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/applehealth"
+	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/ratelimit"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -142,4 +143,108 @@ func (s *Server) handleAppleHealthPost(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("apple health received", "rider", rider, "days", len(days))
 	recordAppleHealthPost("ok")
 	writeJSON(w, http.StatusOK, map[string]int{"days": len(days)})
+}
+
+// ---------- rider-facing management, behind the ordinary gate ----------
+
+// appleHealthShortcutURL is the install link from config, "" when unset.
+func (s *Server) appleHealthShortcutURL() string {
+	if s.Config == nil {
+		return ""
+	}
+	return s.Config.AppleHealth.ShortcutURL
+}
+
+// appleHealthRefused answers 412 and logs a Warn when this deployment has no
+// Apple Health store: the card cannot work, and the reason belongs in the log.
+func (s *Server) appleHealthRefused(w http.ResponseWriter) bool {
+	if s.AppleHealth != nil {
+		return false
+	}
+	s.logger().Warn("apple health request refused: this deployment has no apple health store")
+	writeJSON(w, http.StatusPreconditionFailed, map[string]string{
+		"error": "apple health is not set up on this deployment",
+	})
+	return true
+}
+
+// appleHealthDay turns a stored RFC 3339 instant into the training zone's
+// calendar date, so the card shows a day and never a time.
+func (s *Server) appleHealthDay(stored string) (string, error) {
+	t, err := time.Parse(time.RFC3339, stored)
+	if err != nil {
+		return "", err
+	}
+	loc := s.trainingLocation()
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc).Format(dateLayout), nil
+}
+
+// handleGetAppleHealth answers the card's state with no token. The rider is the
+// session's, never the request's.
+func (s *Server) handleGetAppleHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) {
+		return
+	}
+	if s.appleHealthRefused(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+	st, err := s.AppleHealth.Status(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	out := appleHealthDTO{Linked: st.Linked, ShortcutURL: s.appleHealthShortcutURL()}
+	if st.LastReceivedAt != "" {
+		day, err := s.appleHealthDay(st.LastReceivedAt)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		out.LastReceived = day
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleCreateAppleHealth generates, or regenerates, the rider's token. This is
+// the only response that carries it: the old URL stops working at once.
+func (s *Server) handleCreateAppleHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) {
+		return
+	}
+	if s.appleHealthRefused(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+	token, err := s.AppleHealth.Regenerate(r.Context(), rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.logger().Info("apple health link generated", "rider", rider)
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, appleHealthDTO{
+		Linked: true, ShortcutURL: s.appleHealthShortcutURL(), Token: token,
+	})
+}
+
+// handleRevokeAppleHealth ends the rider's link: its token stops working at once.
+func (s *Server) handleRevokeAppleHealth(w http.ResponseWriter, r *http.Request) {
+	if !s.require(w, r, auth.PermManageTraining) {
+		return
+	}
+	if s.appleHealthRefused(w) {
+		return
+	}
+	rider := auth.FromContext(r.Context()).User
+	if err := s.AppleHealth.Revoke(r.Context(), rider); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.logger().Info("apple health link revoked", "rider", rider)
+	w.WriteHeader(http.StatusNoContent)
 }

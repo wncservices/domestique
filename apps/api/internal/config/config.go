@@ -250,7 +250,22 @@ type Config struct {
 	// LLM is the self-hosted model behind the AI-assisted features; see
 	// internal/llm. Empty base_url means every job is off.
 	LLM LLMConfig `yaml:"llm,omitempty"`
+
+	// AppleHealth holds the link to the iPhone shortcut that posts Health
+	// readings; see the Fitness page's Apple Health card.
+	AppleHealth AppleHealthConfig `yaml:"apple_health,omitempty"`
 }
+
+// AppleHealthConfig is where the Apple Health shortcut is published. The
+// shortcut itself is an iCloud link, so that is the only shape accepted.
+type AppleHealthConfig struct {
+	// ShortcutURL is the iCloud shortcut riders add, https://www.icloud.com/shortcuts/...
+	// Empty leaves the card without an install link.
+	ShortcutURL string `yaml:"shortcut_url,omitempty"`
+}
+
+// appleHealthShortcutPrefix is the only place an Apple Health shortcut may live.
+const appleHealthShortcutPrefix = "https://www.icloud.com/shortcuts/"
 
 // LLMConfig points the AI-assisted features at a self-hosted OpenAI-compatible
 // endpoint. The API key is not here: DOMESTIQUE_LLM_API_KEY in the environment,
@@ -391,6 +406,12 @@ func (c *Config) Validate() error {
 		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
 			return fmt.Errorf("public_url %q is not an absolute http(s) URL", c.PublicURL)
 		}
+	}
+
+	// The card hands this link to riders, so anything but an iCloud shortcut
+	// would put a stranger's URL in front of them.
+	if c.AppleHealth.ShortcutURL != "" && !strings.HasPrefix(c.AppleHealth.ShortcutURL, appleHealthShortcutPrefix) {
+		return fmt.Errorf("apple_health.shortcut_url %q is not an iCloud shortcut link (%s...)", c.AppleHealth.ShortcutURL, appleHealthShortcutPrefix)
 	}
 
 	// A bad metrics address would otherwise mean a pod that runs with its

@@ -676,6 +676,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/training/calendar", s.handleGetCalendar)
 	mux.HandleFunc("POST /api/training/calendar", s.handleCreateCalendar)
 	mux.HandleFunc("DELETE /api/training/calendar", s.handleRevokeCalendar)
+	// The Apple Health card on the Fitness page: the rider's own shortcut link.
+	mux.HandleFunc("GET /api/training/apple-health", s.handleGetAppleHealth)
+	mux.HandleFunc("POST /api/training/apple-health", s.handleCreateAppleHealth)
+	mux.HandleFunc("DELETE /api/training/apple-health", s.handleRevokeAppleHealth)
 	// The only path that bypasses authentication: see isCalendarFeedPath.
 	// Go patterns cannot put a suffix on a wildcard, so the handler checks
 	// the segment itself.
@@ -885,6 +889,16 @@ func roleLabel(r auth.Role) string {
 }
 
 // ---------- payloads ----------
+
+// appleHealthDTO is the Apple Health card. Token is set only in the response
+// that creates it: only its hash is stored, so it cannot be shown again.
+type appleHealthDTO struct {
+	Linked bool `json:"linked"`
+	// LastReceived is a calendar date (YYYY-MM-DD) in the training zone, never a time.
+	LastReceived string `json:"lastReceived,omitempty"`
+	ShortcutURL  string `json:"shortcutUrl"`
+	Token        string `json:"token,omitempty"`
+}
 
 type configDTO struct {
 	// Source names the database and, for PostgreSQL, its host and port — not

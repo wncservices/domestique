@@ -4,6 +4,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -285,4 +286,100 @@ func TestBlockingAPersonRemovesTheirAppleHealthLink(t *testing.T) {
 			}
 		})
 	}
+}
+
+// appleCard is the card's JSON, as the Fitness page reads it.
+type appleCard struct {
+	Linked       bool   `json:"linked"`
+	LastReceived string `json:"lastReceived"`
+	ShortcutURL  string `json:"shortcutUrl"`
+	Token        string `json:"token"`
+}
+
+func (h *calHarness) appleCard(method string) (calResp, appleCard) {
+	h.t.Helper()
+	r := h.as("wilant", method, "/api/training/apple-health")
+	var c appleCard
+	if method != http.MethodDelete && r.code == http.StatusOK {
+		if err := json.Unmarshal([]byte(r.body), &c); err != nil {
+			h.t.Fatalf("card JSON %q: %v", r.body, err)
+		}
+	}
+	return r, c
+}
+
+func TestAppleHealthCardLifecycle(t *testing.T) {
+	eachAppleSetup(t, func(t *testing.T, h *calHarness) {
+		h.srv.Config.AppleHealth.ShortcutURL = "https://www.icloud.com/shortcuts/abc"
+
+		if _, c := h.appleCard(http.MethodGet); c.Linked || c.Token != "" || c.LastReceived != "" {
+			t.Fatalf("a fresh rider: %+v", c)
+		}
+
+		r := h.as("wilant", http.MethodPost, "/api/training/apple-health")
+		var created appleCard
+		if err := json.Unmarshal([]byte(r.body), &created); err != nil || r.code != http.StatusOK {
+			t.Fatalf("POST = %d %s", r.code, r.body)
+		}
+		if len(created.Token) != 43 {
+			t.Fatalf("token %q is %d characters, want 43", created.Token, len(created.Token))
+		}
+		if created.ShortcutURL != "https://www.icloud.com/shortcuts/abc" {
+			t.Errorf("shortcutUrl = %q", created.ShortcutURL)
+		}
+
+		_, c := h.appleCard(http.MethodGet)
+		if !c.Linked || c.Token != "" || strings.Contains(h.as("wilant", http.MethodGet, "/api/training/apple-health").body, created.Token) {
+			t.Fatalf("after generating, the card must show linked and never the token: %+v", c)
+		}
+
+		if p := h.postApple("Bearer "+created.Token, `{"hrv":[],"restingHr":[],"sleep":[]}`); p.code != http.StatusOK {
+			t.Fatalf("post = %d %s", p.code, p.body)
+		}
+		if _, c := h.appleCard(http.MethodGet); c.LastReceived != "2026-10-10" {
+			t.Errorf("lastReceived = %q, want the training-zone date 2026-10-10", c.LastReceived)
+		}
+
+		if d := h.as("wilant", http.MethodDelete, "/api/training/apple-health"); d.code != http.StatusNoContent {
+			t.Fatalf("DELETE = %d", d.code)
+		}
+		if p := h.postApple("Bearer "+created.Token, `{"hrv":[],"restingHr":[],"sleep":[]}`); p.code != http.StatusUnauthorized {
+			t.Errorf("a revoked token = %d, want 401", p.code)
+		}
+	})
+}
+
+// Mode none makes everyone a local admin, so the role and anonymous checks run
+// only where a session or a header says who is asking.
+func TestAViewerCannotLinkAppleHealth(t *testing.T) {
+	for engine, dsn := range calendarEngines(t) {
+		for _, mode := range []auth.Mode{auth.ModeProxy, auth.ModeOIDC} {
+			t.Run(engine+"/"+string(mode), func(t *testing.T) {
+				h := newCalHarness(t, mode, dsn, calendarPublicURL)
+				for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+					r := h.do(m, "/api/training/apple-health", func(r *http.Request) { h.identify(r, "viewer", "guests") })
+					if r.code != http.StatusForbidden {
+						t.Errorf("viewer %s = %d, want 403", m, r.code)
+					}
+				}
+				if r := h.do(http.MethodPost, "/api/training/apple-health", nil); r.code != http.StatusUnauthorized {
+					t.Errorf("anonymous POST = %d, want 401", r.code)
+				}
+			})
+		}
+	}
+}
+
+func TestAppleHealthCardIs412WithoutAStore(t *testing.T) {
+	eachAppleSetup(t, func(t *testing.T, h *calHarness) {
+		h.srv.AppleHealth = nil
+		for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+			if r := h.as("wilant", m, "/api/training/apple-health"); r.code != http.StatusPreconditionFailed {
+				t.Errorf("%s = %d, want 412", m, r.code)
+			}
+		}
+		if !strings.Contains(h.logs.String(), "level=WARN") {
+			t.Errorf("the 412 left no Warn:\n%s", h.logs.String())
+		}
+	})
 }
