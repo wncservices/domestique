@@ -33,12 +33,10 @@ import type {
   Workout,
 } from '@/api/types'
 import AppPage from '@/components/ui/AppPage.vue'
-import DetailsToggle from '@/components/ui/DetailsToggle.vue'
 import FtpTestBanner from '@/components/plan/FtpTestBanner.vue'
 import FtpTestModal from '@/components/plan/FtpTestModal.vue'
 import { FALLBACK_FTP_PROTOCOLS } from '@/utils/ftpTests'
 import GoalSlideover from '@/components/plan/GoalSlideover.vue'
-import GoalsSection from '@/components/plan/GoalsSection.vue'
 import IndoorConvertModal from '@/components/plan/IndoorConvertModal.vue'
 import LifeEventModal from '@/components/plan/LifeEventModal.vue'
 import { eventsOn } from '@/components/plan/lifeEvents'
@@ -114,7 +112,6 @@ const {
   editingGoalId,
   goalForm,
   openCreateGoal,
-  openEditGoal,
   goalNote,
   proposingGoal,
   goalExplanation,
@@ -125,14 +122,12 @@ const {
   startGeneralPlan,
   savingGoal,
   saveGoal,
-  deletingGoal,
   schedulingGoal,
   scheduleGoal,
   explainingGoal,
   explanationFor,
   explanationText,
   explainPlan,
-  deleteGoal,
 } = usePlanGoals({
   toast,
   errorMessage,
@@ -827,17 +822,6 @@ async function confirmReplan() {
   }
 }
 
-// Goals are set-up, not the daily view: collapsed once a goal
-// exists, open for a rider who has none yet. Decided once, when the goals first
-// finish loading, so opening or closing it by hand is never overridden.
-const goalsOpen = ref(true)
-const stopGoalsWatch = watch(loadingGoals, (loading) => {
-  // A failed read decides nothing: wait for a retry that returns goals.
-  if (loading || goalsError.value) return
-  goalsOpen.value = goals.value.length === 0
-  stopGoalsWatch()
-})
-
 const canFillWeek = computed(() => !!(profile.value.hoursPerAvailableDay && profile.value.availableDays?.length))
 
 const isCurrentWeek = computed(() => !!week.value && week.value.start <= week.value.today && week.value.today <= week.value.end)
@@ -1056,21 +1040,10 @@ const pageState = computed(() =>
       />
     </template>
 
-    <!-- Not while goals are loading or failed: GoalsSection would say "No goals yet". -->
-    <DetailsToggle
-      v-if="pageState !== 'loading' && pageState !== 'failed' && goals.length"
-      v-model:open="goalsOpen"
-      label="Goals"
-    >
-      <GoalsSection
-        :goals="goals"
-        :focus-goal-id="effectiveFocus?.goalId"
-        :deleting-goal="deletingGoal"
-        @edit-goal="openEditGoal"
-        @delete-goal="deleteGoal"
-        @focus-goal="selectGoal"
-      />
-    </DetailsToggle>
+    <p v-if="pageState !== 'loading' && pageState !== 'failed' && goals.length" class="text-[length:var(--text-body)] text-muted">
+      <UButton to="/goals" variant="link" icon="i-lucide-target" class="p-0 align-baseline">All goals</UButton>
+      ({{ goals.length }}): edit, reprioritise or add another.
+    </p>
 
     <GoalSlideover
       v-model:open="goalModalOpen"

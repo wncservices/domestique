@@ -237,6 +237,15 @@ export function usePlanGoals(deps: {
   const explainingGoal = ref('')
   const explanationFor = ref<string | null>(null)
   const explanationText = ref('')
+  // Kept per goal id for the Goals page, where several cards can each hold an
+  // answer; the single pair above is what the Plan header toggles.
+  const explanations = ref<Record<string, string>>({})
+
+  function dismissExplanation(id: string) {
+    const { [id]: _gone, ...rest } = explanations.value
+    explanations.value = rest
+    if (explanationFor.value === id) explanationFor.value = null
+  }
 
   async function explainPlan(g: Goal) {
     if (explanationFor.value === g.id) {
@@ -248,6 +257,7 @@ export function usePlanGoals(deps: {
       const result = await api.explainPlan(g.id)
       explanationText.value = result.text
       explanationFor.value = g.id
+      explanations.value = { ...explanations.value, [g.id]: result.text }
     } catch (err) {
       toast.add({ title: 'Could not explain this plan', description: errorMessage(err), icon: 'i-lucide-triangle-alert', color: 'error' })
     } finally {
@@ -295,6 +305,9 @@ export function usePlanGoals(deps: {
     explainingGoal,
     explanationFor,
     explanationText,
+    explanations,
+    dismissExplanation,
+    loadRouteOptions,
     explainPlan,
     deleteGoal,
   }

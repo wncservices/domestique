@@ -3,18 +3,18 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { menuItems, navItems } from '../src/components/shell/navItems.ts'
 
-test('nav: six destinations in two groups', () => {
+test('nav: seven destinations in two groups', () => {
   assert.deepEqual(
     navItems.map((i) => i.label),
-    ['Today', 'Plan', 'Workouts', 'Fitness', 'Routes', 'Crews'],
+    ['Today', 'Plan', 'Goals', 'Workouts', 'Fitness', 'Routes', 'Crews'],
   )
   assert.deepEqual(
     navItems.map((i) => i.group),
-    ['you', 'you', 'you', 'you', 'shared', 'shared'],
+    ['you', 'you', 'you', 'you', 'you', 'shared', 'shared'],
   )
   assert.deepEqual(
     navItems.map((i) => i.to),
-    ['/today', '/plan', '/workouts', '/fitness', '/routes', '/crews'],
+    ['/today', '/plan', '/goals', '/workouts', '/fitness', '/routes', '/crews'],
   )
 })
 
