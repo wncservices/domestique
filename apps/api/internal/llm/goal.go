@@ -59,7 +59,7 @@ const goalSystem = `You turn a rider's description of an event into the fields o
 - Seasons are months, placed mid-month: spring is April (4), summer July (7), autumn October (10), winter January (1).
 - Never work out a date yourself: name the parts.
 - eventInWeeks / eventInMonths: when the description gives the event as a span from now ("in 9 months", "in 12 weeks", "in six months' time"), put that number in the matching field and leave eventDate empty; else 0. Use only one of the two.
-- priority is "A" (peak for it), "B" or "C". Use "B" unless the description says how much it matters.
+- priority is "A" (peak for it), "B" (a mini-taper) or "C" (no taper). Use "A" for a dated event unless the description says it matters less, and "B" for an undated goal.
 - Use 0 for a distance or elevation the description does not state. Do not invent numbers it does not contain. A standard race distance counts as stated: 5K is 5, 10K is 10, a half marathon is 21.1 and a marathon is 42.2 (km). Give the number as written and its unit in targetDistanceUnit ("km" or "mi") and targetElevationUnit ("m" or "ft"); do not convert: "62 miles" is targetDistanceKm 62, targetDistanceUnit "mi".
 - explanation is one short sentence saying what you filled in, and anything the rider should check.
 
@@ -130,19 +130,25 @@ func goalFrom(raw goalReply, today time.Time) (GoalProposal, error) {
 		name = strings.TrimSpace(string([]rune(name)[:maxSaneGoalNameLen]))
 	}
 
-	p := GoalProposal{Name: name, Sport: "cycling", Priority: "B", Explanation: raw.Explanation}
+	p := GoalProposal{Name: name, Sport: "cycling", Explanation: raw.Explanation}
 	switch strings.ToLower(strings.TrimSpace(raw.Sport)) {
 	case "running":
 		p.Sport = "running"
 	case "other":
 		return GoalProposal{}, ErrUnsupportedSport
 	}
+	if d, ok := placeEvent(raw, today); ok {
+		p.EventDate = d.Format("2006-01-02")
+	}
+	// Without a usable priority a dated event is A and an undated goal B,
+	// the same default the store applies.
+	p.Priority = "B"
+	if p.EventDate != "" {
+		p.Priority = "A"
+	}
 	switch strings.ToUpper(strings.TrimSpace(raw.Priority)) {
 	case "A", "B", "C":
 		p.Priority = strings.ToUpper(strings.TrimSpace(raw.Priority))
-	}
-	if d, ok := placeEvent(raw, today); ok {
-		p.EventDate = d.Format("2006-01-02")
 	}
 	km := raw.TargetDistanceKm
 	if strings.EqualFold(strings.TrimSpace(raw.TargetDistanceUnit), "mi") {

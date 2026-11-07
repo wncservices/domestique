@@ -345,3 +345,27 @@ func TestGoalSystemMentionsTheNewFields(t *testing.T) {
 		}
 	}
 }
+
+// A priority the model did not give (or gave wrongly) follows the date: A for
+// a dated event, B for an undated goal.
+func TestProposeGoalPriorityFallsBackByDate(t *testing.T) {
+	for name, c := range map[string]struct{ date, want string }{
+		"dated":   {"2026-06-14", "A"},
+		"undated": {"", "B"},
+	} {
+		f := newFake(t, answer(t, `{"name":"Ride","sport":"cycling","eventDate":"`+c.date+`","priority":"","targetDistanceKm":0,"targetElevationM":0,"explanation":""}`))
+		p, err := newClient(t, f.srv.URL+"/v1", "").ProposeGoal(t.Context(), "x", goalToday)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Priority != c.want {
+			t.Errorf("%s: priority = %q, want %s", name, p.Priority, c.want)
+		}
+	}
+}
+
+func TestGoalPromptStatesTheDefaultPriority(t *testing.T) {
+	if !strings.Contains(goalSystem, `"A" for a dated event unless`) {
+		t.Error("the goal prompt does not say a dated event is A by default")
+	}
+}

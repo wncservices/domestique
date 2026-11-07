@@ -680,11 +680,44 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.copyAcceptedFTPSuggestions(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.migrateDatedGoalPriority(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	// After every workouts column exists: it reads the whole row.
 	if err := store.backfillFlags(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
+}
+
+// migrateDatedGoalPriority moves every dated goal stored as B to A, once. B
+// was the default for every goal until dated goals defaulted to A (priority
+// shapes the taper, so a race left at the old default would get no taper). A
+// marker row makes it run once, so a rider's later B for a dated goal stays.
+func (d *DB) migrateDatedGoalPriority() error {
+	if _, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS workout_migrations (
+        name TEXT PRIMARY KEY,
+        done_at TEXT NOT NULL
+    )`); err != nil {
+		return err
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(d.query(`INSERT INTO workout_migrations (name, done_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`),
+		"dated_goal_priority_a", d.timestamp())
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE goals SET priority = 'A' WHERE priority = 'B' AND event_date <> ''`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // addSessionAscentColumn adds ascent_m to a completed_sessions table that
@@ -1246,9 +1279,14 @@ func (d *DB) CreateGoal(ctx context.Context, req CreateGoalRequest) (Goal, error
 	if sport == "" {
 		sport = model.SportCycling
 	}
+	// A dated goal is a race the plan builds toward, so A unless said
+	// otherwise; an undated one is only a direction to train in.
 	priority := req.Priority
 	if priority == "" {
 		priority = PriorityB
+		if req.EventDate != "" {
+			priority = PriorityA
+		}
 	}
 
 	id, err := d.uniqueID(ctx, "goals", slugify(name))

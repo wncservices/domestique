@@ -490,7 +490,7 @@ func TestGoalPeriodization(t *testing.T) {
 
 	eventDate := now.AddDate(0, 0, 70).Format("2006-01-02") // 10 weeks out
 	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
-		fmt.Sprintf(`{"name":"Race Day","eventDate":%q,"priority":"A"}`, eventDate))
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, eventDate))
 	g := decodeGoal(t, resp)
 
 	resp = h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",

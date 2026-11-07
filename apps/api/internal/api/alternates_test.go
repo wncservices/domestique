@@ -538,7 +538,7 @@ func TestRecoveryAndTaperWeeksOfferNoHarderAndNoStructuredLongerButEnduranceLong
 	}); err != nil {
 		t.Fatal(err)
 	}
-	goal, err := h.training.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", EventDate: "2026-09-01", Priority: workout.PriorityA})
+	goal, err := h.training.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Gran Fondo", EventDate: "2026-09-01"})
 	if err != nil {
 		t.Fatal(err)
 	}

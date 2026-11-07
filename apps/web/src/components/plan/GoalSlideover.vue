@@ -7,7 +7,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import type { GoalPriority, Sport } from '@/api/types'
 import type { GoalForm } from '@/components/plan/forms'
-import { NO_ROUTE, sports } from '@/components/plan/forms'
+import { defaultPriority, NO_ROUTE, sports } from '@/components/plan/forms'
 import GoalFeasibility from '@/components/plan/GoalFeasibility.vue'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -26,8 +26,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:form': [GoalForm]; propose: []; save: [] }>()
 
+// A new goal's priority follows its date (A when dated, B when not) until the
+// rider picks one themselves; editing never changes a stored priority.
+const priorityChosen = ref(false)
+watch(open, (isOpen) => { if (isOpen) priorityChosen.value = false })
+
 function set<K extends keyof GoalForm>(field: K, value: GoalForm[K]) {
-  emit('update:form', { ...props.form, [field]: value })
+  const next = { ...props.form, [field]: value }
+  if (field === 'priority') priorityChosen.value = true
+  if (field === 'eventDate' && !props.editing && !priorityChosen.value) next.priority = defaultPriority(String(value))
+  emit('update:form', next)
 }
 
 // Pacing intensity: derived from how long the event takes, and shown here as the
@@ -59,9 +67,9 @@ function setCustomIf(on: boolean) {
 }
 
 const priorities: { value: GoalPriority; label: string }[] = [
-  { value: 'A', label: 'A — peak for this one' },
-  { value: 'B', label: 'B — good practice' },
-  { value: 'C', label: 'C — low priority' },
+  { value: 'A', label: 'A — full taper and peak' },
+  { value: 'B', label: 'B — short taper' },
+  { value: 'C', label: 'C — no taper' },
 ]
 </script>
 

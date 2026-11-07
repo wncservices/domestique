@@ -29,6 +29,13 @@ export interface GoalForm {
 // a sentinel too.
 export const NO_ROUTE = 'none'
 
+/** What priority a goal gets when the rider has not picked one: a dated event is
+ *  a race to peak for (A), an undated goal only a direction to train in (B).
+ *  The server applies the same default. */
+export function defaultPriority(eventDate: string): GoalPriority {
+  return eventDate ? 'A' : 'B'
+}
+
 export function freshGoalForm(): GoalForm {
   return {
     name: '', sport: 'cycling', eventDate: '', priority: 'B', targetDistanceKm: '', targetElevationM: '', notes: '',
