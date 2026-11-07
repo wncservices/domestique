@@ -1710,6 +1710,11 @@ Two things make the suite worth trusting, and both are easy to lose:
    A test of a migration itself (a table that predates a column) builds its
    own database instead. CI shards `internal/api` three ways by test-name hash
    (`scripts/test-shard.sh`).
+   A pull request runs the suite without `-race` (about nine times the cost)
+   plus one job running the concurrency-heavy tests under it (the `-run` pattern
+   in `ci.yml`: a new test of locks, replicas, limits or parallel requests
+   should match it by name); every push to main and the nightly run use `-race`
+   throughout. The Docker job runs on a PR only when the image's inputs change.
 4. **A frontend-only change skips the Go jobs.** `ci.yml`'s `changes` job skips
    the API tests, the API build and golangci-lint when every changed file is
    under `apps/web/`, `apps/e2e/`, `docs/` or is Markdown; skipped jobs report as
