@@ -723,6 +723,41 @@ func (d *DB) migrateDatedGoalPriority() error {
 	return tx.Commit()
 }
 
+// MigrationDone reports whether the one-time step name has run.
+func (d *DB) MigrationDone(ctx context.Context, name string) (bool, error) {
+	var n int
+	if err := d.db.QueryRowContext(ctx, d.query(`SELECT COUNT(*) FROM workout_migrations WHERE name = ?`), name).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// MarkMigration records that the one-time step name has run.
+func (d *DB) MarkMigration(ctx context.Context, name string) error {
+	_, err := d.db.ExecContext(ctx, d.query(`INSERT INTO workout_migrations (name, done_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`),
+		name, d.timestamp())
+	return err
+}
+
+// RidersWithGoallessSessions lists the riders holding a session with no goal
+// whose description is exactly desc, dated from or later.
+func (d *DB) RidersWithGoallessSessions(ctx context.Context, desc, from string) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx, d.query(`SELECT DISTINCT rider FROM workouts WHERE goal_id = '' AND description = ? AND date >= ? ORDER BY rider`), desc, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // addSessionAscentColumn adds ascent_m to a completed_sessions table that
 // predates it. Idempotent on both engines.
 func (d *DB) addSessionAscentColumn() error {
