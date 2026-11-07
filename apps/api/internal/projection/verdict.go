@@ -35,6 +35,8 @@ type JudgeInput struct {
 	TargetCTL    float64
 	WeeksCovered int
 	WeeksTotal   int
+	// Priority as in Input: only the wording and the advice change with it.
+	Priority string
 }
 
 // Unavailable is the verdict for a projection that cannot be made.
@@ -52,6 +54,10 @@ func Judge(in JudgeInput) Verdict {
 	ctl, tsb := math.Round(in.CTL), math.Round(in.TSB)
 	target := math.Round(in.TargetCTL)
 	outOfBand := tsb < in.Band.Low || tsb > in.Band.High
+	if in.Priority == "C" && ctl*100 >= target*85 {
+		// No taper is planned, so form is a fact about race day, not a fault.
+		return Verdict{KeyOnTrack, "Form on race day: " + Signed(in.TSB) + ", no taper is planned for this race", "info"}
+	}
 	switch {
 	case ctl*100 < target*85:
 		msg := fmt.Sprintf("Undertrained: fitness %.0f vs %.0f target", ctl, target)
@@ -59,6 +65,10 @@ func Judge(in JudgeInput) Verdict {
 			msg += " and form is " + Signed(in.TSB)
 		}
 		return Verdict{KeyUndertrained, msg, "warning"}
+	case tsb < in.Band.Low && in.Priority == "B":
+		return Verdict{KeyFatigued, "Too fatigued: form " + Signed(in.TSB) + ", consider easing the last days more", "warning"}
+	case tsb > in.Band.High && in.Priority == "B":
+		return Verdict{KeyFresh, "Very fresh: form " + Signed(in.TSB) + " on race day", "info"}
 	case tsb < in.Band.Low:
 		return Verdict{KeyFatigued, "Too fatigued: form " + Signed(in.TSB) + ", consider a longer taper", "warning"}
 	case tsb > in.Band.High:

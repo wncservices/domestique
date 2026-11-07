@@ -30,6 +30,10 @@ type Input struct {
 	Planned map[string]float64
 	Today   string
 	Event   string
+	// Priority is the goal's: "A" (or empty) tapers, "B" has a mini-taper of
+	// the last days, "C" has no taper. It words the verdict and limits what
+	// the suggestions may propose.
+	Priority string
 }
 
 // Point is one day's state at the start of that day, plus the load the day
