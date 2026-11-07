@@ -2238,17 +2238,14 @@ func hrZoneSeconds(a workout.SessionAnalysis, sport string, profile workout.Ride
 	if !ok {
 		return nil
 	}
-	out := make([]hrZoneSecondsDTO, 5)
-	for i := range out {
-		out[i] = hrZoneSecondsDTO{Zone: i + 1, Seconds: secs[i]}
-		if i > 0 {
-			out[i].Low = b[i-1]
-		}
-		if i < 4 {
-			out[i].High = b[i]
-		}
+	// Z1 has no floor and Z5 no ceiling (0 in both).
+	return []hrZoneSecondsDTO{
+		{Zone: 1, High: b[0], Seconds: secs[0]},
+		{Zone: 2, Low: b[0], High: b[1], Seconds: secs[1]},
+		{Zone: 3, Low: b[1], High: b[2], Seconds: secs[2]},
+		{Zone: 4, Low: b[2], High: b[3], Seconds: secs[3]},
+		{Zone: 5, Low: b[3], Seconds: secs[4]},
 	}
-	return out
 }
 
 func sessionAnalysisDTOFrom(a workout.SessionAnalysis, sport string, profile workout.RiderProfile) sessionAnalysisDTO {
