@@ -64,6 +64,11 @@ type SessionAnalysis struct {
 	// so a re-analysis overwrites it.
 	DecouplingPct *float64
 
+	// HRHistogram is the ride's seconds at each heart rate, nil when the ride
+	// had no readable samples (stored ''). Replaced by a re-analysis, and
+	// filled later for older rides by SetHRHistogram.
+	HRHistogram *HRHistogram
+
 	AnalysedAt string
 }
 
@@ -135,6 +140,10 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
 	if err != nil {
 		return fmt.Errorf("workout: encode steps: %w", err)
 	}
+	histogram, err := encodeHRHistogram(a.HRHistogram)
+	if err != nil {
+		return err
+	}
 
 	analysedAt := a.AnalysedAt
 	if analysedAt == "" {
@@ -146,8 +155,8 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
                     normalized_power, intensity_factor, tss, duration_ratio,
                     max_hr, best_hr_1200, best_speed_1200, best_speed_1800,
                     power_zone_seconds, hr_zone_seconds, power_curve, steps,
-                    feel, level_delta, decoupling_pct, analysed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    feel, level_delta, decoupling_pct, hr_histogram, analysed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (session_id) DO UPDATE SET
             rider = excluded.rider, workout_id = excluded.workout_id, outcome = excluded.outcome,
             load_source = excluded.load_source, normalized_power = excluded.normalized_power,
@@ -157,11 +166,12 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
             best_speed_1800 = excluded.best_speed_1800,
             power_zone_seconds = excluded.power_zone_seconds,
             hr_zone_seconds = excluded.hr_zone_seconds, power_curve = excluded.power_curve,
-            steps = excluded.steps, decoupling_pct = excluded.decoupling_pct, analysed_at = excluded.analysed_at`),
+            steps = excluded.steps, decoupling_pct = excluded.decoupling_pct,
+            hr_histogram = excluded.hr_histogram, analysed_at = excluded.analysed_at`),
 		a.SessionID, rider, a.WorkoutID, a.Outcome, a.LoadSource,
 		a.NormalizedPower, a.IntensityFactor, a.TSS, a.DurationRatio,
 		a.MaxHR, a.BestHR1200, a.BestSpeed1200, a.BestSpeed1800,
-		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, a.DecouplingPct, analysedAt)
+		powerZones, hrZones, powerCurve, steps, a.Feel, a.LevelDelta, a.DecouplingPct, histogram, analysedAt)
 	return err
 }
 
@@ -174,7 +184,7 @@ func (d *DB) GetAnalysis(ctx context.Context, sessionID string) (SessionAnalysis
                normalized_power, intensity_factor, tss, duration_ratio,
                max_hr, best_hr_1200, best_speed_1200, best_speed_1800,
                power_zone_seconds, hr_zone_seconds, power_curve, steps,
-               feel, level_delta, legs, stress, decoupling_pct, analysed_at
+               feel, level_delta, legs, stress, decoupling_pct, hr_histogram, analysed_at
         FROM session_analyses WHERE session_id = ?`), sessionID)
 	a, err := scanAnalysis(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -196,7 +206,7 @@ func (d *DB) ListAnalyses(ctx context.Context, rider, sinceDate string) ([]Sessi
                a.normalized_power, a.intensity_factor, a.tss, a.duration_ratio,
                a.max_hr, a.best_hr_1200, a.best_speed_1200, a.best_speed_1800,
                a.power_zone_seconds, a.hr_zone_seconds, a.power_curve, a.steps,
-               a.feel, a.level_delta, a.legs, a.stress, a.decoupling_pct, a.analysed_at, s.sport
+               a.feel, a.level_delta, a.legs, a.stress, a.decoupling_pct, a.hr_histogram, a.analysed_at, s.sport
         FROM session_analyses a
         JOIN completed_sessions s ON s.id = a.session_id
         WHERE a.rider = ? AND s.date >= ?
@@ -236,19 +246,25 @@ func scanAnalysis(row rowScanner) (SessionAnalysis, error) {
 	var (
 		a                                      SessionAnalysis
 		powerZones, hrZones, powerCurve, steps []byte
+		histogram                              string
 		decoupling                             sql.NullFloat64
 	)
 	if err := row.Scan(&a.SessionID, &a.Rider, &a.WorkoutID, &a.Outcome, &a.LoadSource,
 		&a.NormalizedPower, &a.IntensityFactor, &a.TSS, &a.DurationRatio,
 		&a.MaxHR, &a.BestHR1200, &a.BestSpeed1200, &a.BestSpeed1800,
 		&powerZones, &hrZones, &powerCurve, &steps,
-		&a.Feel, &a.LevelDelta, &a.Legs, &a.Stress, &decoupling, &a.AnalysedAt); err != nil {
+		&a.Feel, &a.LevelDelta, &a.Legs, &a.Stress, &decoupling, &histogram, &a.AnalysedAt); err != nil {
 		return SessionAnalysis{}, err
 	}
 	if decoupling.Valid {
 		v := decoupling.Float64
 		a.DecouplingPct = &v
 	}
+	h, err := decodeHRHistogram(histogram)
+	if err != nil {
+		return SessionAnalysis{}, fmt.Errorf("workout: decode heart-rate histogram for %s: %w", a.SessionID, err)
+	}
+	a.HRHistogram = h
 	if len(powerZones) > 0 {
 		if err := json.Unmarshal(powerZones, &a.PowerZoneSeconds); err != nil {
 			return SessionAnalysis{}, fmt.Errorf("workout: decode power zone seconds for %s: %w", a.SessionID, err)
@@ -308,6 +324,83 @@ func (d *DB) SetAnalysisSurvey(ctx context.Context, sessionID string, feel int, 
 		return fmt.Errorf("workout: no such session %q", sessionID)
 	}
 	return nil
+}
+
+// SetHRHistogram stores a ride's heart-rate histogram and nothing else: the
+// backfill for rides analysed before the column existed must never move a
+// rating or the survey, so it has its own single-column writer.
+func (d *DB) SetHRHistogram(ctx context.Context, sessionID string, h HRHistogram) error {
+	encoded, err := encodeHRHistogram(&h)
+	if err != nil {
+		return err
+	}
+	result, err := d.db.ExecContext(ctx, d.query(
+		`UPDATE session_analyses SET hr_histogram = ? WHERE session_id = ?`), encoded, sessionID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("workout: no such session %q", sessionID)
+	}
+	return nil
+}
+
+// SessionsMissingHRHistogram lists a rider's analysed rides that have no
+// heart-rate histogram yet, newest first, at most limit. Imported rides are
+// left out: their files are never fetched again, so a histogram for them could
+// only ever come from the upload that made them.
+func (d *DB) SessionsMissingHRHistogram(ctx context.Context, rider string, limit int) ([]CompletedSession, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := d.db.QueryContext(ctx, d.query(`
+        SELECT s.id, s.rider, s.provider, s.external_id, s.sport, s.date,
+               s.duration_seconds, s.distance_m, s.avg_hr, s.avg_power_watts, s.training_load, s.ascent_m, s.created_at
+        FROM completed_sessions s
+        JOIN session_analyses a ON a.session_id = s.id
+        WHERE s.rider = ? AND a.hr_histogram = '' AND s.provider <> 'import'
+        ORDER BY s.date DESC, s.id
+        LIMIT ?`), normalizeRider(rider), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var sessions []CompletedSession
+	for rows.Next() {
+		var s CompletedSession
+		if err := rows.Scan(&s.ID, &s.Rider, &s.Provider, &s.ExternalID, &s.Sport, &s.Date,
+			&s.DurationSeconds, &s.DistanceM, &s.AvgHR, &s.AvgPowerWatts, &s.TrainingLoad, &s.AscentM, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, s)
+	}
+	return sessions, rows.Err()
+}
+
+// encodeHRHistogram writes a histogram as JSON, and nil as ” so a ride with no
+// readable samples reads back as nil rather than as an empty histogram.
+func encodeHRHistogram(h *HRHistogram) (string, error) {
+	if h == nil {
+		return "", nil
+	}
+	raw, err := json.Marshal(h)
+	if err != nil {
+		return "", fmt.Errorf("workout: encode heart-rate histogram: %w", err)
+	}
+	return string(raw), nil
+}
+
+// decodeHRHistogram is encodeHRHistogram's inverse: ” is nil.
+func decodeHRHistogram(raw string) (*HRHistogram, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var h HRHistogram
+	if err := json.Unmarshal([]byte(raw), &h); err != nil {
+		return nil, err
+	}
+	return &h, nil
 }
 
 // SetAnalysisLoadSource records which basis a session's load now rests on,
