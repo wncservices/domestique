@@ -1351,7 +1351,9 @@ func runServe(src *source.DB, cfg *config.Config, store state.Store, addr, webDi
 	// predates it, or a rebuild that was cut short). The rebuild runs in the
 	// background, so listening is never delayed by it, and the loops wait for it
 	// so a sync cannot race it. A failed rebuild is logged and they start anyway.
-	srv.StartAfterBestEffortsRebuild(ctx, srv.RunAutoImportLoop, srv.RunAutoScheduleLoop, srv.RunMetricsSyncLoop)
+	// The one-time removal of the sessions old goal deletes left behind runs
+	// alongside them; it takes the scheduling lock like the tick.
+	srv.StartAfterBestEffortsRebuild(ctx, srv.RunGoalLeftoversCleanup, srv.RunAutoImportLoop, srv.RunAutoScheduleLoop, srv.RunMetricsSyncLoop)
 
 	// Drops generated route loops nobody came back for, so a rider's location
 	// data does not sit in memory past its 30 minutes.

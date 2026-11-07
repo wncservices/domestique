@@ -605,6 +605,13 @@ in `fillWeek` (rider-built ones too; they do not stop a week being recorded) unl
 rider switched off "Keep the plan off this day" (`workouts.plan_alongside`, default false: the
 day is held), so the rider's remaining goals, which the handler
 re-plans at once through `planRiderGoals` (dated first; immediately, auto-schedule on or off), never put a second session on it.
+Before 2.16.0 a delete took none of a goal's sessions: they lost the goal, kept the generated
+description and became the rider's own, so they held their days and a new goal planned around them.
+`RemoveGoalLeftovers` (`goalleftovers.go`, run once at start alongside the loops, marker
+`goal_delete_leftovers` in `workout_migrations`) removes those from today on (`goalLeftover`: no goal,
+the generated description exactly, nothing changed by the rider or a pass, not ridden today, Garmin
+copies withdrawn), keeps the past as history, and runs `rebuildRiderPlan` for each rider it touched so
+their goals take the freed days. It is marked done only once every rider is through.
 Editing a goal so its plan ends earlier makes the goal-save pass
 `trimSeason` delete the untouched plan-made sessions dated after the new last
 week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,
