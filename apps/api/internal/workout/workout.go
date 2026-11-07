@@ -360,6 +360,10 @@ type Workout struct {
 	// replaces or deletes it. It points at the ride and carries nothing of the
 	// ride's own, so a ride that is deleted leaves the session as it was.
 	CrewRideID string
+	// PlanAlongside lets the plan put a session of its own on this workout's
+	// day. It matters only for a workout with no goal (the rider's own): such a
+	// workout keeps the plan off its day unless the rider says otherwise.
+	PlanAlongside bool
 	// Indoor marks a workout that has been converted to its trainer version
 	// (internal/indoor): time-based steps, power targets where FTP is known.
 	// Conversion is idempotent on this flag, so a second click shortens
@@ -470,6 +474,8 @@ type CreateWorkoutRequest struct {
 	// CrewRideID marks the workout as the fixed session for a crew ride; see
 	// Workout.CrewRideID.
 	CrewRideID string
+	// PlanAlongside: see Workout.PlanAlongside.
+	PlanAlongside bool
 	// Flags is the new session's adaptation state; an empty Origin is stored
 	// as rider.
 	Flags Flags
@@ -488,8 +494,10 @@ type UpdateWorkoutRequest struct {
 	// Indoor sets the flag. OutdoorSteps sets the stored original steps: a
 	// pointer to a nil slice clears them (NULL), which is how a revert
 	// leaves nothing behind; a pointer to a non-nil slice stores it.
-	Indoor       *bool
-	OutdoorSteps *[]WorkoutStep
+	Indoor *bool
+	// PlanAlongside sets Workout.PlanAlongside.
+	PlanAlongside *bool
+	OutdoorSteps  *[]WorkoutStep
 	// PlannedSnapshot is stored only when the workout has none yet: the first
 	// swap's snapshot is the plan's version, and a later swap passing its own
 	// must not replace it. ClearPlannedSnapshot removes it (a revert).

@@ -227,6 +227,9 @@ type workoutDTO struct {
 	// an indoor workout that still has its outdoor steps. A manual edit of the
 	// steps or the sport retires them (see handleUpdateWorkout).
 	CanRevertIndoor bool `json:"canRevertIndoor,omitempty"`
+	// PlanAlongside is the rider's "let the plan add a session on this day"
+	// for a workout of their own; see workout.Workout.PlanAlongside.
+	PlanAlongside bool `json:"planAlongside,omitempty"`
 	// Swapped is true once the rider swapped this session for an alternate
 	// (scheduler.SwappedMarker in the description); HasPlannedSnapshot is
 	// whether "Back to planned version" would do anything.
@@ -260,6 +263,7 @@ func workoutDTOFrom(w workout.Workout) workoutDTO {
 		Zone: string(w.Zone), Level: w.Level,
 		TestProtocol:   w.TestProtocol,
 		Indoor:         w.Indoor,
+		PlanAlongside:  w.PlanAlongside,
 		PlannedSeconds: workout.PlannedSeconds(w.Steps),
 		routeSlug:      w.RouteSlug, routeSeconds: w.RouteSeconds,
 		Steps: make([]workoutStepDTO, 0, len(w.Steps)),
@@ -1140,8 +1144,12 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		// session whose goal was deleted after the rider touched it. Planning
 		// another on top would give the day two sessions. It is not heldByGoal:
 		// a week the rider's own sessions fill is settled, so it is recorded.
+		// The rider can let the plan share the day (PlanAlongside): a gym
+		// session that should not cost them the ride.
 		if wk.GoalID == "" {
-			alreadyScheduled[wk.Date] = true
+			if !wk.PlanAlongside {
+				alreadyScheduled[wk.Date] = true
+			}
 		} else {
 			alreadyScheduled[wk.Date] = true
 			if wk.GoalID != g.ID {
@@ -1750,6 +1758,9 @@ type workoutRequestBody struct {
 	Steps       []workoutStepDTO `json:"steps"`
 	Zone        string           `json:"zone"`
 	Level       float64          `json:"level"`
+	// PlanAlongside: see workoutDTO.PlanAlongside. Omitted is false, so the
+	// session keeps the plan off its day.
+	PlanAlongside bool `json:"planAlongside"`
 }
 
 func stepsFromDTOs(dtos []workoutStepDTO) []workout.WorkoutStep {
@@ -1779,7 +1790,7 @@ func (s *Server) handleCreateWorkout(w http.ResponseWriter, r *http.Request) {
 	wk, err := s.Training.CreateWorkout(r.Context(), workout.CreateWorkoutRequest{
 		Rider: rider, Sport: model.Sport(body.Sport), Name: body.Name, GoalID: body.GoalID,
 		Date: body.Date, Description: body.Description, Steps: stepsFromDTOs(body.Steps),
-		Zone: workout.Zone(body.Zone), Level: body.Level,
+		Zone: workout.Zone(body.Zone), Level: body.Level, PlanAlongside: body.PlanAlongside,
 		Flags: workout.Flags{Origin: workout.OriginRider},
 	})
 	if err != nil {
@@ -1809,14 +1820,15 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Sport       *string           `json:"sport"`
-		Name        *string           `json:"name"`
-		GoalID      *string           `json:"goalId"`
-		Date        *string           `json:"date"`
-		Description *string           `json:"description"`
-		Steps       *[]workoutStepDTO `json:"steps"`
-		Zone        *string           `json:"zone"`
-		Level       *float64          `json:"level"`
+		Sport         *string           `json:"sport"`
+		Name          *string           `json:"name"`
+		GoalID        *string           `json:"goalId"`
+		Date          *string           `json:"date"`
+		Description   *string           `json:"description"`
+		Steps         *[]workoutStepDTO `json:"steps"`
+		Zone          *string           `json:"zone"`
+		Level         *float64          `json:"level"`
+		PlanAlongside *bool             `json:"planAlongside"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxTrainingBodyBytes)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
@@ -1836,7 +1848,7 @@ func (s *Server) handleUpdateWorkout(w http.ResponseWriter, r *http.Request) {
 
 	req := workout.UpdateWorkoutRequest{
 		Name: body.Name, GoalID: body.GoalID, Date: body.Date, Description: body.Description,
-		Level: body.Level,
+		Level: body.Level, PlanAlongside: body.PlanAlongside,
 	}
 	if body.Sport != nil {
 		sport := model.Sport(*body.Sport)

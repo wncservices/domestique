@@ -78,6 +78,9 @@ export interface WorkoutForm {
   /** Likewise carried through only for the header badge; the convert and
    *  revert actions own it, not this form. */
   indoor?: boolean
+  /** "Keep the plan off this day": a session with no goal holds its day unless
+   *  the rider lets the plan add one beside it (planAlongside on the API). */
+  keepPlanOff: boolean
 }
 
 // Reka UI's <SelectItem> forbids an empty-string value — it reserves '' to
@@ -88,7 +91,7 @@ export interface WorkoutForm {
 export const NO_GOAL = 'none'
 
 export function freshWorkoutForm(): WorkoutForm {
-  return { name: '', sport: 'cycling', date: '', goalId: NO_GOAL, description: '', steps: [] }
+  return { name: '', sport: 'cycling', date: '', goalId: NO_GOAL, description: '', steps: [], keepPlanOff: true }
 }
 
 /** The fields of a goal request the form decides. On create a blank field is

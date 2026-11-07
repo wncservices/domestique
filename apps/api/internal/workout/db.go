@@ -656,6 +656,9 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.addCrewRideColumn(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.addPlanAlongsideColumn(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	if err := store.backfillProgressionHistory(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
@@ -749,6 +752,20 @@ func (d *DB) addCrewRideColumn() error {
 	}
 	_, err = d.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS workouts_crew_ride_idx ON workouts (rider, crew_ride_id) WHERE crew_ride_id <> ''`)
 	return err
+}
+
+// addPlanAlongsideColumn adds plan_alongside to a workouts table that predates
+// it. FALSE is what every existing row means: a rider's own session keeps the
+// plan off its day. Idempotent on both engines.
+func (d *DB) addPlanAlongsideColumn() error {
+	_, err := d.db.Exec(fmt.Sprintf(`ALTER TABLE workouts ADD COLUMN plan_alongside %s NOT NULL DEFAULT FALSE`, d.dialect.Boolean))
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if !strings.Contains(msg, "duplicate column") && !strings.Contains(msg, "already exists") {
+			return err
+		}
+	}
+	return nil
 }
 
 // isUniqueViolation reports whether err is a unique-constraint failure on
@@ -1586,7 +1603,7 @@ func (d *DB) SetTestResult(ctx context.Context, workoutID string, watts float64)
 
 func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, plan_alongside, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
         FROM workouts WHERE rider = ? ORDER BY date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -1606,7 +1623,7 @@ func (d *DB) ListWorkouts(ctx context.Context, rider string) ([]Workout, error) 
 
 func (d *DB) GetWorkout(ctx context.Context, id string) (Workout, error) {
 	row := d.db.QueryRowContext(ctx, d.query(`
-        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
+        SELECT id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, test_result_watts, crew_ride_id, plan_alongside, indoor, outdoor_steps, planned_snapshot, route_slug, route_seconds, origin, adapted_rules, swapped, kept, moved_from, moved_by, edited_at, created_at, updated_at
         FROM workouts WHERE id = ?`), id)
 	w, err := scanWorkout(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1632,7 +1649,7 @@ func scanWorkout(row rowScanner) (Workout, error) {
 		origin, rules, kept, movedBy string
 	)
 	if err := row.Scan(&w.ID, &w.Rider, &sport, &w.Name, &w.GoalID, &w.Date, &w.Description,
-		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds,
+		&steps, &zone, &w.Level, &w.TestProtocol, &w.TestResultWatts, &w.CrewRideID, &w.PlanAlongside, &w.Indoor, &outdoor, &planned, &w.RouteSlug, &w.RouteSeconds,
 		&origin, &rules, &w.Flags.Swapped, &kept, &w.Flags.MovedFrom, &movedBy, &w.EditedAt, &w.CreatedAt, &w.UpdatedAt); err != nil {
 		return Workout{}, err
 	}
@@ -1732,10 +1749,10 @@ func (d *DB) insertWorkout(ctx context.Context, q sqlRunner, req CreateWorkoutRe
 
 	ts := d.timestamp()
 	_, err = q.ExecContext(ctx, d.query(`
-        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id,
+        INSERT INTO workouts (id, rider, sport, name, goal_id, date, description, steps, zone, level, test_protocol, crew_ride_id, plan_alongside,
                origin, adapted_rules, swapped, kept, moved_from, moved_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, req.CrewRideID,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		id, rider, string(sport), name, req.GoalID, req.Date, req.Description, steps, string(req.Zone), req.Level, req.TestProtocol, req.CrewRideID, req.PlanAlongside,
 		string(origin), joinRules(f.AdaptedRules), f.Swapped, string(f.Kept), f.MovedFrom, string(f.MovedBy), ts, ts)
 	if err != nil {
 		// The partial unique index is what makes "one row per rider and ride"
@@ -1783,6 +1800,9 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 	}
 	if req.Indoor != nil {
 		current.Indoor = *req.Indoor
+	}
+	if req.PlanAlongside != nil {
+		current.PlanAlongside = *req.PlanAlongside
 	}
 	if req.OutdoorSteps != nil {
 		if *req.OutdoorSteps == nil {
@@ -1848,11 +1868,11 @@ func (d *DB) UpdateWorkout(ctx context.Context, id string, req UpdateWorkoutRequ
 	f := current.Flags
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE workouts SET sport=?, name=?, goal_id=?, date=?, description=?, steps=?, zone=?, level=?,
-               indoor=?, outdoor_steps=?, planned_snapshot=?, route_slug=?, route_seconds=?,
+               indoor=?, plan_alongside=?, outdoor_steps=?, planned_snapshot=?, route_slug=?, route_seconds=?,
                origin=?, adapted_rules=?, swapped=?, kept=?, moved_from=?, moved_by=?, edited_at=?, updated_at=?
         WHERE id=?`),
 		string(current.Sport), current.Name, current.GoalID, current.Date, current.Description,
-		steps, string(current.Zone), current.Level, current.Indoor, outdoor, planned,
+		steps, string(current.Zone), current.Level, current.Indoor, current.PlanAlongside, outdoor, planned,
 		current.RouteSlug, current.RouteSeconds,
 		string(f.Origin), joinRules(f.AdaptedRules), f.Swapped, string(f.Kept), f.MovedFrom, string(f.MovedBy), ts, ts, id)
 	if err != nil {

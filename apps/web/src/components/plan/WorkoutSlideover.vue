@@ -8,7 +8,7 @@ import { computed, ref, watch } from 'vue'
 import type { RiderProfile, Sport, Why, WorkoutRoute, WorkoutStep } from '@/api/types'
 import WorkoutStepEditor from '@/components/WorkoutStepEditor.vue'
 import type { WorkoutForm } from '@/components/plan/forms'
-import { sports } from '@/components/plan/forms'
+import { NO_GOAL, sports } from '@/components/plan/forms'
 import IndoorBadge from '@/components/plan/IndoorBadge.vue'
 import WhyPopover from '@/components/plan/WhyPopover.vue'
 import WorkoutProfile from '@/components/plan/WorkoutProfile.vue'
@@ -99,6 +99,13 @@ const canSave = computed(() => !!props.form.name.trim() && props.form.steps.leng
             <USelect :model-value="form.goalId" :items="goalOptions" value-key="value" class="w-full" @update:model-value="(v: string) => set('goalId', String(v))" />
           </UFormField>
         </div>
+
+        <UFormField
+          v-if="form.date && form.goalId === NO_GOAL"
+          help="When this is off, the plan can still add its own session on this day."
+        >
+          <USwitch :model-value="form.keepPlanOff" label="Keep the plan off this day" @update:model-value="(v: boolean) => set('keepPlanOff', v)" />
+        </UFormField>
 
         <div v-if="editing && (route || canRoute)" class="flex flex-wrap items-center gap-2 rounded-lg border border-default p-3">
           <UIcon name="i-lucide-route" class="size-4 text-primary" />
