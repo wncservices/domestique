@@ -824,10 +824,10 @@ func thisWeekPlanned(t *testing.T, h *trainingHarness, now time.Time) []schedule
 	if err := json.NewDecoder(h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "").Body).Decode(&listed); err != nil {
 		t.Fatal(err)
 	}
-	last := now.AddDate(0, 0, 6).Format("2006-01-02")
+	first, last := now.Format("2006-01-02"), now.AddDate(0, 0, 6).Format("2006-01-02")
 	var week []scheduledWorkoutOut
 	for _, w := range listed {
-		if w.Date <= last {
+		if w.Date >= first && w.Date <= last {
 			week = append(week, w)
 		}
 	}
@@ -855,18 +855,19 @@ func TestGoalSchedule(t *testing.T) {
 		t.Fatalf("save profile: status = %d", resp.StatusCode)
 	}
 
-	week := thisWeekPlanned(t, h, now)
-	if len(week) != 4 {
-		t.Fatalf("planned this week = %d workouts, want 4 (one per available day)", len(week))
+	// Saving the first days and creating the goal already planned the season.
+	// Clear it so Fill's own create path is what runs below.
+	h.srv.WaitForBackground()
+	existing, err := h.store.ListWorkouts(context.Background(), "wilant")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, wk := range week {
-		if wk.GoalID != g.ID || wk.Date == "" || len(wk.Steps) == 0 {
-			t.Errorf("planned workout incomplete: %+v", wk)
+	for _, w := range existing {
+		if err := h.store.DeleteWorkout(context.Background(), w.ID); err != nil {
+			t.Fatal(err)
 		}
 	}
 
-	// Fill is a top-up: the week is already done, so it creates nothing and
-	// counts the four days it skipped.
 	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", "")
 	if resp.StatusCode != http.StatusOK {
 		body := readAll(t, resp)
@@ -876,14 +877,55 @@ func TestGoalSchedule(t *testing.T) {
 	if out.GoalID != g.ID {
 		t.Errorf("goalId = %q, want %q", out.GoalID, g.ID)
 	}
-	if len(out.Created) != 0 || out.Skipped != 4 {
-		t.Errorf("fill created %d, skipped %d, want 0 and 4", len(out.Created), out.Skipped)
+	if len(out.Created) != 4 {
+		t.Fatalf("created = %d workouts, want 4 (one per available day)", len(out.Created))
+	}
+	for _, wk := range out.Created {
+		if wk.GoalID != g.ID || wk.Date == "" || len(wk.Steps) == 0 {
+			t.Errorf("created workout incomplete: %+v", wk)
+		}
+	}
+
+	// They are really persisted, not just returned.
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "")
+	var listed []scheduledWorkoutOut
+	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 4 {
+		t.Errorf("listed workouts = %d, want 4", len(listed))
 	}
 
 	// A different rider cannot schedule someone else's goal.
 	resp = h.as("other", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", "")
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("other rider: status = %d, want 403", resp.StatusCode)
+	}
+}
+
+// Saving the first days plans the goal made before them, so Fill finds this
+// week done: it creates nothing and counts the four days it skipped.
+func TestGoalScheduleIsATopUpAfterTheProfileSave(t *testing.T) {
+	h := newTrainingHarness(t)
+	now := utcNoon(2026, time.October, 5)
+	h.srv.Clock = func() time.Time { return now }
+	g := decodeGoal(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, now.AddDate(0, 0, 70).Format("2006-01-02"))))
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+
+	week := thisWeekPlanned(t, h, now)
+	if len(week) != 4 {
+		t.Fatalf("planned this week = %d workouts, want 4", len(week))
+	}
+	for _, wk := range week {
+		if wk.GoalID != g.ID || len(wk.Steps) == 0 {
+			t.Errorf("planned workout incomplete: %+v", wk)
+		}
+	}
+	out := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
+	if len(out.Created) != 0 || out.Skipped != 4 {
+		t.Errorf("fill created %d, skipped %d, want 0 and 4", len(out.Created), out.Skipped)
 	}
 }
 
