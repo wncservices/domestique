@@ -76,9 +76,13 @@
 - `sessionAnalysisDTO.HRZones []hrZoneSecondsDTO` (`json:"hrZones,omitempty"`), `hrZoneSecondsDTO{Zone int; Low, High float64 (high 0 = open); Seconds int}` with json `zone, low, high, seconds`. Filled from `hrzones.Bounds` + `hrzones.Seconds` for the ride's sport with the rider's current profile, by every response that builds `sessionAnalysisDTOFrom` (load the profile once per request). Z1 low 0, Z5 high 0.
 - `workoutlib.HRRange`: first `hrzones.Range`; when ok, return it (still capped at MaxHR when MaxHR > 0), else today's code.
 - [ ] Tests: PUT then GET round trip; 422 on bad custom bounds; a ride with a histogram returns hrZones that change after a PUT of a custom setting (recalculated, no re-analysis); auto rider's HRRange unchanged; custom rider's endurance HR target follows the custom bounds.
+- [ ] Journey test `internal/api/hrzonesjourney_test.go` over real HTTP: auto zones; custom cycling zones re-cut an analysed ride with no re-analysis while running rides keep theirs; reserve without a resting HR shows no zones, with one it does; back to auto; a generated endurance session's HR target follows custom bounds.
 - [ ] Commit `api: riders set their heart-rate zones; rides report time in zone`.
 
 ### Task 5: backfill
+
+- [ ] Journey: a rider's older synced ride without a histogram shows time in zone after the next metrics pass.
+
 
 **Files:** `apps/api/internal/api/rideanalysis.go` (or a new `hrhistogrambackfill.go`), the metrics sync call site after `analyseNewSessions`.
 
@@ -94,6 +98,7 @@
 - ProfileForm: section per the spec; method labels: "Auto", "% of threshold HR", "% of max HR", "Heart-rate reserve", "My own"; a missing input says which number is needed; saved with the profile (`hrZones` in the PUT body).
 - TrainingZones: HR zones for cycling and running.
 - Time in zone: five bars with minutes, only when `analysis.hrZones` is present.
+- [ ] Browser journey in `apps/e2e` (it gates the production rollout, so it must leave prod as it found it): the test rider opens Fitness, picks "My own" for cycling, enters four bounds, saves, sees them in the training zones card, then sets Auto again and saves.
 - [ ] `npm run -w @domestique/web typecheck` passes; check in the browser at desktop and 375 px.
 - [ ] Commit `web: choose your heart-rate zones; see time in zone per ride`.
 
