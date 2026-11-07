@@ -598,11 +598,11 @@ week becomes current. **A week that yields no sessions (no profile days yet) is
 not recorded**, or the empty season would be permanent. Deleting a goal deletes
 its rows, and `handleDeleteGoal` first removes its untouched plan-made sessions dated
 today or later (never one ridden today) with their Garmin copies, then deletes the goal, in
-one hold of the scheduling lock (409 with Replan's wording when it is busy, nothing changed:
+one hold of the scheduling lock (it waits up to about 3 s for it, then 409 with Replan's wording, nothing changed:
 once `DeleteGoal` clears `goal_id` no retry could find the sessions). Touched and past
 sessions stay as the rider's own (`goal_id` ''), and a session with no goal **holds its day**
-in `fillWeek` (rider-built ones too), so the rider's remaining goals, which the handler
-re-plans at once through `planRiderGoals` (dated first), never put a second session on it.
+in `fillWeek` (rider-built ones too; they do not stop a week being recorded), so the rider's remaining goals, which the handler
+re-plans at once through `planRiderGoals` (dated first; immediately, auto-schedule on or off), never put a second session on it.
 Editing a goal so its plan ends earlier makes the goal-save pass
 `trimSeason` delete the untouched plan-made sessions dated after the new last
 week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,

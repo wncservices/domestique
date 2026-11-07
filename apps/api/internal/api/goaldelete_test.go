@@ -116,8 +116,48 @@ func TestDeletingAGoalWithdrawsTodaysGarminCopy(t *testing.T) {
 	if _, err := h.training.GetWorkout(ctx, today.ID); err == nil {
 		t.Error("today's untouched session survived the goal's deletion")
 	}
-	if calls := h.calls(); !strings.Contains(calls, "delete garmin-workout-1") {
-		t.Errorf("calls = %q, want today's copy removed from Garmin", calls)
+	if calls := h.calls(); strings.Count(calls, "delete garmin-workout-1") != 1 {
+		t.Errorf("calls = %q, want today's copy removed from Garmin exactly once", calls)
+	}
+}
+
+// A session ridden today and a past plan session are history: both outlive the
+// goal, as the rider's own.
+func TestDeletingAGoalKeepsWhatWasRiddenAndWhatIsPast(t *testing.T) {
+	h := newSeasonHarness(t)
+	ctx := context.Background()
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+	today := h.now.Format("2006-01-02")
+	yesterday := h.now.AddDate(0, 0, -1).Format("2006-01-02")
+	mk := func(date string) workout.Workout {
+		w, err := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", g.ID, "Endurance ride", date, 3600)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return w
+	}
+	riddenToday, past := mk(today), mk(yesterday)
+	h.backdate(t)
+	if _, err := h.store.UpsertSession(ctx, workout.UpsertSessionRequest{
+		Rider: "wilant", Provider: "garmin", ExternalID: "ridden-today", Sport: string(riddenToday.Sport),
+		Date: today, DurationSeconds: 3600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.deleteGoal(t, g.ID)
+
+	for name, id := range map[string]string{"ridden today": riddenToday.ID, "past": past.ID} {
+		w, err := h.store.GetWorkout(ctx, id)
+		if err != nil {
+			t.Errorf("the %s session was deleted: %v", name, err)
+			continue
+		}
+		if w.GoalID != "" {
+			t.Errorf("the %s session still names goal %q", name, w.GoalID)
+		}
 	}
 }
 
@@ -181,6 +221,7 @@ func TestDeletingAGoalWhileSchedulingIsBusyChangesNothing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("never took the lock")
 	}
+	// Held longer than the handler's wait for the lock.
 	resp := do(http.MethodDelete, "/api/training/goals/"+goals[0].ID, "")
 	close(release)
 	if resp.StatusCode != http.StatusConflict {

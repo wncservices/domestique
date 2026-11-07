@@ -462,6 +462,13 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))
 }
 
+// deleteGoalLockAttempts tries, deleteGoalLockWait apart, bound how long
+// deleting a goal waits for the scheduling lock (about 3 s) before a 409.
+const (
+	deleteGoalLockAttempts = 12
+	deleteGoalLockWait     = 250 * time.Millisecond
+)
+
 func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
 		return
@@ -486,20 +493,33 @@ func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 	// the lock is busy nothing is deleted and the rider retries (409), rather
 	// than deleting the goal and leaving sessions no retry could find.
 	var removed int
-	ran := withDBLock(r.Context(), s.dbConn(), autoScheduleLockKey, func() {
-		s.seasonMu.Lock()
-		defer s.seasonMu.Unlock()
-		var existing []workout.Workout
-		if existing, err = s.Training.ListWorkouts(r.Context(), g.Rider); err != nil {
-			return
+	// A tick usually holds the lock for a moment: wait a little before giving up.
+	var ran bool
+wait:
+	for attempt := 0; ; attempt++ {
+		ran = withDBLock(r.Context(), s.dbConn(), autoScheduleLockKey, func() {
+			s.seasonMu.Lock()
+			defer s.seasonMu.Unlock()
+			var existing []workout.Workout
+			if existing, err = s.Training.ListWorkouts(r.Context(), g.Rider); err != nil {
+				return
+			}
+			if removed, err = s.removeUntouched(r.Context(), g.Rider, existing, s.localToday(), func(wk workout.Workout) bool {
+				return wk.GoalID == id
+			}, ""); err != nil {
+				return
+			}
+			err = s.Training.DeleteGoal(r.Context(), id)
+		})
+		if ran || attempt >= deleteGoalLockAttempts-1 {
+			break
 		}
-		if removed, err = s.removeUntouched(r.Context(), g.Rider, existing, s.localToday(), func(wk workout.Workout) bool {
-			return wk.GoalID == id
-		}, ""); err != nil {
-			return
+		select {
+		case <-r.Context().Done():
+			break wait
+		case <-time.After(deleteGoalLockWait):
 		}
-		err = s.Training.DeleteGoal(r.Context(), id)
-	})
+	}
 	if !ran {
 		s.logger().Warn("goal not deleted: scheduling is busy", "id", id)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": replanLockedMessage})
@@ -1004,17 +1024,13 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		// here: fixedOption hands it to scheduler.WeekWorkouts, which drops the slot
 		// on its day (applyFixed), so no session is ever made there to be skipped.
 		// A check on CrewRideID in this condition was redundant and untested.
-		// A session with no goal holds its day too: it is the rider's own, or a
-		// plan session whose goal was deleted after the rider had touched it.
-		// Planning another on top would give the day two sessions.
-		// A session with no goal holds its day too: it is the rider's own, or a
-		// plan session whose goal was deleted after the rider had touched it.
-		// Planning another on top would give the day two sessions.
+		// A session with no goal holds its day too: the rider's own, or a plan
+		// session whose goal was deleted after the rider touched it. Planning
+		// another on top would give the day two sessions. It is not heldByGoal:
+		// a week the rider's own sessions fill is settled, so it is recorded.
 		if wk.GoalID == "" {
 			alreadyScheduled[wk.Date] = true
-			heldByGoal[wk.Date] = true
-		}
-		if wk.GoalID != "" {
+		} else {
 			alreadyScheduled[wk.Date] = true
 			if wk.GoalID != g.ID {
 				heldByGoal[wk.Date] = true
