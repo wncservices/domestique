@@ -26,12 +26,14 @@ var goalSchema = map[string]any{
 		"eventDate":        map[string]any{"type": "string"},
 		"eventMonth":       map[string]any{"type": "integer"},
 		"eventPartOfMonth": map[string]any{"type": "string", "enum": []string{"", "early", "mid", "late"}},
+		"eventInWeeks":     map[string]any{"type": "integer"},
+		"eventInMonths":    map[string]any{"type": "integer"},
 		"priority":         map[string]any{"type": "string", "enum": []string{"A", "B", "C"}},
 		"targetDistanceKm": map[string]any{"type": "number"},
 		"targetElevationM": map[string]any{"type": "number"},
 		"explanation":      map[string]any{"type": "string"},
 	},
-	"required": []string{"name", "sport", "eventDate", "eventMonth", "eventPartOfMonth", "priority", "targetDistanceKm", "targetElevationM", "explanation"},
+	"required": []string{"name", "sport", "eventDate", "eventMonth", "eventPartOfMonth", "eventInWeeks", "eventInMonths", "priority", "targetDistanceKm", "targetElevationM", "explanation"},
 	// The schema's own properties all appear in required: a strict server
 	// must send every field, and an empty string or 0 is how it says "not given".
 	"additionalProperties": false,
@@ -41,6 +43,7 @@ const goalSystem = `You turn a rider's description of an event into the fields o
 - sport is exactly "cycling" or "running".
 - eventDate is YYYY-MM-DD, only when the description names the day; it must be after today's date given in the user message. Otherwise use an empty string. Never invent a day.
 - eventMonth is the month (1-12) when the description names a month but not the day ("in June", "mid June"), else 0. eventPartOfMonth is "early", "mid" or "late" when it says so, else "". The month alone is enough: do not complain that the day is missing.
+- eventInWeeks / eventInMonths: when the description gives the event as a span from now ("in 9 months", "in 12 weeks", "in six months' time"), put that number in the matching field and leave eventDate empty; else 0. Use only one of the two.
 - priority is "A" (peak for it), "B" or "C". Use "B" unless the description says how much it matters.
 - Use 0 for a distance or elevation the description does not state. Do not invent numbers it does not contain. A standard race distance counts as stated: 5K is 5, 10K is 10, a half marathon is 21.1 and a marathon is 42.2 (km).
 - explanation is one short sentence saying what you filled in, and anything the rider should check.
@@ -65,6 +68,8 @@ type goalReply struct {
 	EventDate        string  `json:"eventDate"`
 	EventMonth       int     `json:"eventMonth"`
 	EventPartOfMonth string  `json:"eventPartOfMonth"`
+	EventInWeeks     int     `json:"eventInWeeks"`
+	EventInMonths    int     `json:"eventInMonths"`
 	Priority         string  `json:"priority"`
 	TargetDistanceKm float64 `json:"targetDistanceKm"`
 	TargetElevationM float64 `json:"targetElevationM"`
@@ -111,6 +116,8 @@ func goalFrom(raw goalReply, today time.Time) GoalProposal {
 		p.EventDate = d.Format("2006-01-02")
 	} else if d, ok := placeMonth(raw.EventMonth, raw.EventPartOfMonth, today); ok {
 		p.EventDate = d.Format("2006-01-02")
+	} else if d, ok := placeSpan(raw.EventInWeeks, raw.EventInMonths, today); ok {
+		p.EventDate = d.Format("2006-01-02")
 	}
 	if raw.TargetDistanceKm > 0 && raw.TargetDistanceKm <= maxSaneDistanceKm {
 		p.TargetDistanceM = raw.TargetDistanceKm * 1000
@@ -148,4 +155,18 @@ func placeMonth(month int, part string, today time.Time) (time.Time, bool) {
 		d = d.AddDate(1, 0, 0)
 	}
 	return d, true
+}
+
+// placeSpan turns "in 9 months" or "in 12 weeks" into a day by adding the span
+// to today. Same reasoning as placeMonth: the model only names the number, the
+// calendar arithmetic is ours. Months win when both are given; a span past two
+// years is a mistake, not a plan.
+func placeSpan(weeks, months int, today time.Time) (time.Time, bool) {
+	switch {
+	case months >= 1 && months <= 24:
+		return today.AddDate(0, months, 0), true
+	case months == 0 && weeks >= 1 && weeks <= 104:
+		return today.AddDate(0, 0, 7*weeks), true
+	}
+	return time.Time{}, false
 }

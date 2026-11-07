@@ -174,9 +174,39 @@ func TestProposeGoalPlacesAMonthWithoutADay(t *testing.T) {
 // The prompt has to let the model place a month and fill in a standard race
 // distance, or "half marathon in June" comes back with neither.
 func TestGoalSystemAllowsMonthsAndStandardDistances(t *testing.T) {
-	for _, want := range []string{"eventMonth", "half marathon", "21.1", "marathon", "42.2"} {
+	for _, want := range []string{"eventMonth", "eventInWeeks", "eventInMonths", "half marathon", "21.1", "marathon", "42.2"} {
 		if !strings.Contains(goalSystem, want) {
 			t.Errorf("goalSystem does not mention %q", want)
+		}
+	}
+}
+
+func TestProposeGoalPlacesASpanFromNow(t *testing.T) {
+	cases := []struct {
+		reply string
+		want  string
+	}{
+		{`"eventDate":"","eventMonth":0,"eventInWeeks":0,"eventInMonths":9`, "2026-12-18"},
+		{`"eventDate":"","eventMonth":0,"eventInWeeks":12,"eventInMonths":0`, "2026-06-10"},
+		{`"eventDate":"","eventMonth":0,"eventInWeeks":0,"eventInMonths":0`, ""},
+		// Out of bounds is nothing.
+		{`"eventDate":"","eventMonth":0,"eventInWeeks":0,"eventInMonths":30`, ""},
+		{`"eventDate":"","eventMonth":0,"eventInWeeks":200,"eventInMonths":0`, ""},
+		// Months win when both are set.
+		{`"eventDate":"","eventMonth":0,"eventInWeeks":12,"eventInMonths":9`, "2026-12-18"},
+		// An explicit day wins over a span; a named month wins over a span.
+		{`"eventDate":"2026-06-07","eventMonth":0,"eventInWeeks":0,"eventInMonths":9`, "2026-06-07"},
+		{`"eventDate":"","eventMonth":6,"eventInWeeks":0,"eventInMonths":9`, "2026-06-15"},
+	}
+	for _, c := range cases {
+		f := newFake(t, answer(t, `{"name":"Half marathon","sport":"running",`+c.reply+`,"eventPartOfMonth":"","priority":"B","targetDistanceKm":21.1,"targetElevationM":0,"explanation":"x"}`))
+		cl := newClient(t, f.srv.URL+"/v1", "")
+		p, err := cl.ProposeGoal(t.Context(), "I want to run a half marathon in 9 months", goalToday)
+		if err != nil {
+			t.Fatalf("ProposeGoal: %v", err)
+		}
+		if p.EventDate != c.want {
+			t.Errorf("reply %s: eventDate = %q, want %q", c.reply, p.EventDate, c.want)
 		}
 	}
 }
