@@ -569,3 +569,35 @@ func TestNewReasonsKeepTheExclusions(t *testing.T) {
 		t.Errorf("snoozed: got %+v", s)
 	}
 }
+
+// The week of any dated event, whatever its priority, never holds a test, and
+// nor does the event day.
+func TestNoTestInTheWeekOfAnyEvent(t *testing.T) {
+	noFTP := func(plan *periodization.Plan, event string, p workout.Priority) Input {
+		in := input(plan)
+		in.Profile.FTPWatts = 0
+		in.Profile.FTPVerifiedAt = ""
+		in.Goals = []workout.Goal{{ID: "g", Priority: p, EventDate: event}}
+		return in
+	}
+	// A short plan whose only week is a C race week (Friday 2026-03-20): not a
+	// taper, not reduced, but the race is in it.
+	for _, p := range []workout.Priority{workout.PriorityB, workout.PriorityC} {
+		if s := Suggest(noFTP(planFrom(build()), "2026-03-20", p)); s != nil {
+			t.Errorf("%s race week: got %+v", p, s)
+		}
+	}
+	// A B race on Monday 2026-03-23 (no mini-taper days before it): the week
+	// holding it is out, so a test lands in the week before.
+	s := mustSuggest(t, noFTP(planFrom(build(), build()), "2026-03-23", workout.PriorityB))
+	if s.Date > "2026-03-22" {
+		t.Errorf("date = %s, want a day before the race week", s.Date)
+	}
+	// The event day itself is never the day, even for a rider with no plan.
+	in := noFTP(nil, "2026-03-19", workout.PriorityC)
+	in.Plan = nil
+	in.Profile.AvailableDays = []string{"thu"}
+	if s := Suggest(in); s != nil && s.Date == "2026-03-19" {
+		t.Errorf("the suggested day is the event day: %+v", s)
+	}
+}
