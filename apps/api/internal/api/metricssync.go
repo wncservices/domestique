@@ -394,11 +394,16 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// window, the per-provider cap, and why a download/decode/save failure
 	// here is a Warn rather than a sync failure.
 	consumer, _ := s.garminConsumer()
+	backfillWork := s.listMissingHRHistograms(ctx, rider)
 	analysisNotes, err := s.analyseNewSessions(ctx, rider, profile, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected)
 	if err != nil {
 		return syncMetricsResultDTO{}, err
 	}
 	warnings = append(warnings, analysisNotes...)
+
+	// Older rides analysed before heart-rate histograms existed. Best-effort:
+	// it returns nothing and a failure in it never fails this pass.
+	s.backfillHRHistograms(ctx, rider, backfillWork, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected)
 
 	// What the history itself can say, now that it is on file: an FTP
 	// estimate (only where Garmin gave none — its own detected FTP is a

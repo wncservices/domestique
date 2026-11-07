@@ -160,6 +160,10 @@ func (s *Server) analyseNewSessions(
 		// failed download it will crash again, so it is analysed from the
 		// provider's summary now instead of being retried on every sync.
 		panicked := false
+		// unreadableFile is a file that downloaded but cannot be read: it will
+		// not read any better next time, so it gets the empty histogram below
+		// and the heart-rate backfill does not fetch it again.
+		unreadableFile := false
 		switch {
 		case downloadErr != nil:
 			fitErr = downloadErr
@@ -171,6 +175,7 @@ func (s *Server) analyseNewSessions(
 				panicked = true
 			}
 			if decodeErr != nil {
+				unreadableFile = true
 				fitErr = decodeErr
 				s.logger().Warn("ride analysis: fit decode failed", "rider", rider, "provider", sess.Provider, "session", sess.ID, "err", decodeErr)
 			} else {
@@ -231,12 +236,17 @@ func (s *Server) analyseNewSessions(
 		}, rider, sess.Provider, sess.ID)
 		if scorePanicked {
 			act = nil
+			unreadableFile = true
 		}
 		if analysis.SamplesUnreadable {
 			// The file decoded but not one record had a usable time. The ride
 			// stays scored from the provider's summary, duration included.
 			s.logger().Warn("ride analysis: the FIT has no usable timestamps, using the provider summary", "rider", rider, "provider", sess.Provider, "session", sess.ID)
 			act = nil
+			unreadableFile = true
+		}
+		if unreadableFile && analysis.HRHistogram == nil {
+			analysis.HRHistogram = &workout.HRHistogram{}
 		}
 		if act == nil && len(analysis.PowerCurve) == 0 && len(fallbackCurve) > 0 {
 			analysis.PowerCurve = fallbackCurve
