@@ -689,6 +689,26 @@ Error on every tick. After a sport or date change rebuilds today's session, a ri
 session pushed in the same request (`pushTodayIfOptedIn`), or from the background retry once it succeeds, rather
 than waiting up to half an hour for the tick; the old copy is withdrawn either way.
 
+**A goal's priority shapes the end of its plan** (`periodization.hasTaper`, `Week.MiniTaperDays`).
+Priority A (and an unset one) gets the full taper phase, as ever. **B has no taper phase**: the taper's
+weeks become peak weeks (build in a plan under 4 weeks), and the event week runs as an ordinary week
+whose last `MiniTaperDays` days before the event (3, fewer when the event falls early in its week; the
+event day is the session and is not counted) drop to the taper's daily load, solved like the taper's so
+the event-day TSB lands on the form-band midpoint (`loadRun.miniTaper`, `solveDailyLoad`). The week's
+`TargetTSS`/`TargetHours` already include the drop, so the ledger measures debt against the reduced
+target and never reads the drop as load lost. **C has no taper and no mini-taper**: the event week is an
+ordinary week. Everything that asks "is this a reduced week" goes through `Week.Reduced()` (recovery,
+taper phase, or `MiniTaperDays > 0`): the ledger (a reduced week is opened with `reduced`, nothing
+carried in, nothing repaid, no green push), alternates (no harder swap) and FTP test scheduling (no test).
+Reoptimise, the readiness adapter and the explainer read no taper state except "taper next", which a
+mini-taper week also says. A plan with no taper phase aims its fitness at the CTL at the start of its
+last week, which is also what the feasibility check reads (`goalcheck.go`: the first taper week, else the
+last week); the race-day projection reads the stored workouts, so it follows the plan. Changing a dated
+goal's priority runs `rebuildPriority` (the sport rebuild: untouched sessions from today go, with Garmin
+copies; `plan_anchor` is **not** reset, so each week keeps its place), under the scheduling lock with the
+usual background retry, and sends today's session when auto-push is on. Priority of an undated goal
+changes nothing. Priorities other than A/B/C are refused by validation.
+
 **Weeks are sized in TSS from CTL, with available hours as the cap.**
 `periodization.BuildWithLoad` takes a `LoadInput` built by `api.loadInput`, which
 `reconciledPeriodizationPlan` alone calls, so every plan reader sees the same

@@ -229,9 +229,17 @@ func layerLoad(plan *Plan, pos []int, eventDate string, capHours float64, load L
 		}
 	}
 
+	// The fitness a dated plan aims for is the CTL at the start of its first
+	// taper week; a plan with no taper (priority B or C) aims it at the start
+	// of its last week, where the feasibility check reads it too.
+	buildEnd := firstTaper
+	if firstTaper == len(plan.Weeks) {
+		buildEnd = len(plan.Weeks) - 1
+	}
+
 	s := 1.0
-	if !undated && load.TargetCTL > 0 && firstTaper > 0 {
-		reached := func(s float64) float64 { st, _ := r.forecast(firstTaper, s); return st.ctl }
+	if !undated && load.TargetCTL > 0 && buildEnd > 0 {
+		reached := func(s float64) float64 { st, _ := r.forecast(buildEnd, s); return st.ctl }
 		sMax := math.Max(1, load.MaxRamp/minDefaultRamp)
 		if reached(1) < load.TargetCTL {
 			if top := reached(sMax); top < load.TargetCTL {
@@ -252,9 +260,19 @@ func layerLoad(plan *Plan, pos []int, eventDate string, capHours float64, load L
 		}
 	}
 
-	st, weeks := r.forecast(firstTaper, s)
-	if firstTaper < len(plan.Weeks) {
+	// A priority B event week is an ordinary week whose last days drop to the
+	// taper's daily load; it is sized apart from the weeks before it.
+	mini := !undated && firstTaper == len(plan.Weeks) && plan.Weeks[len(plan.Weeks)-1].MiniTaperDays > 0
+	forecastN := firstTaper
+	if mini {
+		forecastN = len(plan.Weeks) - 1
+	}
+	st, weeks := r.forecast(forecastN, s)
+	switch {
+	case firstTaper < len(plan.Weeks):
 		weeks = append(weeks, r.taper(plan.Weeks[firstTaper:], st)...)
+	case mini:
+		weeks = append(weeks, r.miniTaper(forecastN, s, st))
 	}
 	for i := range weeks {
 		plan.Weeks[i].TargetTSS = weeks[i].TargetTSS
@@ -283,12 +301,7 @@ func (r loadRun) taper(weeks []Week, st loadState) []Week {
 	hi = math.Min(hi, r.capTSS()/7)
 	lo = math.Min(lo, hi)
 
-	days := 0
-	start, err1 := time.Parse("2006-01-02", weeks[0].StartDate)
-	event, err2 := time.Parse("2006-01-02", r.eventDate)
-	if err1 == nil && err2 == nil {
-		days = max(0, int(event.Sub(start).Hours()/24))
-	}
+	days := r.daysToEvent(weeks[0])
 	tsb := func(l float64) float64 {
 		c, a := st.ctl, st.atl
 		for range days {
@@ -296,24 +309,7 @@ func (r loadRun) taper(weeks []Week, st loadState) []Week {
 		}
 		return c - a
 	}
-	var l float64
-	switch {
-	case tsb(lo) <= r.load.TaperTSB:
-		l = lo
-	case tsb(hi) >= r.load.TaperTSB:
-		l = hi
-	default:
-		for range 60 {
-			mid := (lo + hi) / 2
-			if tsb(mid) > r.load.TaperTSB {
-				lo = mid
-			} else {
-				hi = mid
-			}
-		}
-		l = (lo + hi) / 2
-	}
-	l = math.Max(0, finite(l))
+	l := math.Max(0, finite(solveDailyLoad(tsb, lo, hi, r.load.TaperTSB)))
 
 	out := make([]Week, len(weeks))
 	ctl, atl := st.ctl, st.atl
@@ -326,6 +322,73 @@ func (r loadRun) taper(weeks []Week, st loadState) []Week {
 		}
 		out[i] = Week{TargetTSS: tss, TargetHours: hours, LoadCapped: capped, PlannedCTL: ctl}
 		ctl, atl = NextFitness(ctl, atl, tss)
+	}
+	return out
+}
+
+// daysToEvent is how many days lie between a week's Monday and the event.
+func (r loadRun) daysToEvent(w Week) int {
+	start, err1 := time.Parse("2006-01-02", w.StartDate)
+	event, err2 := time.Parse("2006-01-02", r.eventDate)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	return max(0, int(event.Sub(start).Hours()/24))
+}
+
+// solveDailyLoad finds the daily load in [lo, hi] whose resulting TSB on the
+// event date (the decreasing function tsb) lands on target; the nearest bound
+// when none does.
+func solveDailyLoad(tsb func(float64) float64, lo, hi, target float64) float64 {
+	switch {
+	case tsb(lo) <= target:
+		return lo
+	case tsb(hi) >= target:
+		return hi
+	}
+	for range 60 {
+		mid := (lo + hi) / 2
+		if tsb(mid) > target {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return (lo + hi) / 2
+}
+
+// miniTaper sizes the event week of a priority B goal: sized as the ordinary
+// week it is, then its last MiniTaperDays days before the event are dropped
+// to the daily load that lands the event-day TSB on the form-band midpoint,
+// within [0.3, 1.0] x the week's own daily load. TargetTSS includes the drop,
+// so the load ledger never reads it as load the rider failed to ride.
+func (r loadRun) miniTaper(i int, s float64, st loadState) Week {
+	start := st
+	var out Week
+	r.step(i, s, &st, &out)
+	w := r.weeks[i]
+	daily := out.TargetTSS / 7
+	hi := math.Min(daily, r.capTSS()/7)
+	lo := math.Min(taperMinFraction*daily, hi)
+	days := r.daysToEvent(w)
+	normal := max(0, days-w.MiniTaperDays)
+	tsb := func(l float64) float64 {
+		c, a := start.ctl, start.atl
+		for d := range days {
+			load := daily
+			if d >= normal {
+				load = l
+			}
+			c, a = workout.RollFitness(c, a, load)
+		}
+		return c - a
+	}
+	l := math.Max(0, finite(solveDailyLoad(tsb, lo, hi, r.load.TaperTSB)))
+	d := float64(w.MiniTaperDays)
+	out.TargetTSS = daily*(7-d) + l*d
+	out.TargetHours = out.TargetTSS / (r.load.TypicalIF * r.load.TypicalIF * 100)
+	if out.LoadCapped {
+		out.TargetHours = math.Min(out.TargetHours, r.capHours)
 	}
 	return out
 }

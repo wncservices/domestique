@@ -477,11 +477,19 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 			s.logger().Error("could not hand the days to a dated goal", "goal", id, "rider", g.Rider, "err", err)
 		}
 	}
+	// Priority shapes the taper, so a dated goal whose priority moved is rebuilt
+	// from today the same way. A sport or date change did that already.
+	priorityMoved := updated.Priority != g.Priority && updated.EventDate != ""
+	if priorityMoved && updated.Sport == g.Sport && updated.EventDate == g.EventDate {
+		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildPriority); err != nil {
+			s.logger().Error("could not rebuild the season after a priority change", "goal", id, "rider", g.Rider, "err", err)
+		}
+	}
 	// A new event date or sport can add weeks to the plan.
 	s.planGoalNow(r.Context(), updated)
 	// The rebuild replaced today's session, and the tick that would send the
 	// new one may be half an hour away. A busy rebuild pushes from its retry.
-	if updated.Sport != g.Sport || updated.EventDate != g.EventDate {
+	if updated.Sport != g.Sport || updated.EventDate != g.EventDate || priorityMoved {
 		s.pushTodayIfOptedIn(r.Context(), g.Rider)
 	}
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))

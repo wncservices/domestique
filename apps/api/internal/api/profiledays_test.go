@@ -191,7 +191,7 @@ func TestChangingOnlyHoursRebuildsUntouchedSessions(t *testing.T) {
 	h := newSeasonHarness(t)
 	ctx := context.Background()
 	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
-	h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14","priority":"A"}`)
 	h.srv.WaitForBackground()
 	h.backdate(t)
 	thisMon, _ := weekBounds(h.now)

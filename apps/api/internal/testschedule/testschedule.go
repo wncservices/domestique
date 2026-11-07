@@ -198,7 +198,7 @@ func (s *suggester) suggestWithoutPlan() *Suggestion {
 // not run into the quiet period before an A event. Taper and peak never
 // qualify.
 func (s *suggester) candidateWeek(w periodization.Week, start time.Time) bool {
-	if w.Recovery || (w.Phase != periodization.PhaseBase && w.Phase != periodization.PhaseBuild) {
+	if w.Reduced() || (w.Phase != periodization.PhaseBase && w.Phase != periodization.PhaseBuild) {
 		return false
 	}
 	// A week is out when its last day falls inside the quiet period: being

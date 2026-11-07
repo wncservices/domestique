@@ -91,7 +91,7 @@ func (s *Server) handleGoalCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The fitness reached is the CTL at the start of the first taper week: the
-	// build is over by then. Without a taper, the last week stands in.
+	// build is over by then. Without a taper (priority B or C), the last week stands in.
 	reached := plan.Weeks[len(plan.Weeks)-1].PlannedCTL
 	capped := false
 	for _, wk := range plan.Weeks {

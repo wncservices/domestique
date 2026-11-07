@@ -355,6 +355,11 @@ const (
 	// rebuildDays: the rider's available days or hours changed, so every goal
 	// of theirs is rebuilt from today, dated goals first. g only names the rider.
 	rebuildDays rebuildReason = "days"
+	// rebuildPriority: a dated goal's priority changed, and priority shapes the
+	// taper (A full taper, B a mini-taper, C none), so its own untouched
+	// sessions from today are built for the old shape. The plan anchor is left
+	// alone: the weeks keep their phases and only the end of the plan moves.
+	rebuildPriority rebuildReason = "priority"
 )
 
 // rebuildGoalFromToday is the one entry point for a goal edit that has to
@@ -376,6 +381,9 @@ const (
 // rebuildRedate: the sport rebuild of g, then the takeover, in one lock hold.
 // The anchor itself was reset by the update, so the weeks are built as for a
 // goal created today and the taper sits before the new date.
+//
+// rebuildPriority: the sport rebuild of g, for a priority change of a dated
+// goal. The anchor is not reset, so each week keeps its place in the plan.
 //
 // Later weeks are then empty and unrecorded, so the season fill that follows
 // builds them. Moved, edited, eased, test, indoor, routed, ridden and past
@@ -490,6 +498,9 @@ func staleRebuild(cur, was workout.Goal, reason rebuildReason) bool {
 	if reason == rebuildTakeover {
 		// The goal exists (the caller got it); it only has to still be dated.
 		return cur.EventDate == ""
+	}
+	if reason == rebuildPriority {
+		return cur.Priority != was.Priority || cur.EventDate == ""
 	}
 	return cur.Sport != was.Sport
 }
@@ -684,7 +695,7 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 					return
 				}
 				s.logger().Info("goal changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "reason", string(reason), "removed", removed)
-				if pushRider != "" && (reason == rebuildSport || reason == rebuildRedate) {
+				if pushRider != "" && (reason == rebuildSport || reason == rebuildRedate || reason == rebuildPriority) {
 					// The request that asked for this has long been answered,
 					// so the new today's session is sent from here, outside
 					// the lock.

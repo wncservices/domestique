@@ -84,6 +84,14 @@ type Week struct {
 	// coming straight out of BuildPlan — nothing in this package sets it —
 	// so a caller that never calls Reconcile never sees it true either.
 	Adjusted bool
+	// MiniTaperDays is the number of days just before a priority B event
+	// that drop to the taper's daily load inside this (otherwise ordinary
+	// build or peak) week; 0 for every other week. TargetHours and TargetTSS
+	// already include the drop, so the ledger measures debt against the
+	// reduced target and never reads the drop as load lost. Consumers that
+	// keep a taper week free of extra load, hard sessions or tests treat
+	// a mini-taper week the same way (see Reduced).
+	MiniTaperDays int
 
 	// TargetTSS is the week's training load in TSS, PlannedCTL the forecast
 	// CTL at the start of the week (week 0: today's CTL, not Monday's), Ramp the CTL points per week this week was
@@ -94,6 +102,26 @@ type Week struct {
 	PlannedCTL float64
 	Ramp       float64
 	LoadCapped bool
+}
+
+// Reduced reports a week the plan is deliberately shedding load in: a recovery
+// week, a taper week, or the event week of a priority B goal whose last days
+// are a mini-taper. Nothing repays load into such a week, and no test or
+// harder alternate belongs in it.
+func (w Week) Reduced() bool {
+	return w.Recovery || w.Phase == PhaseTaper || w.MiniTaperDays > 0
+}
+
+// miniTaperMaxDays is the longest mini-taper before a priority B event. The
+// event day itself is the session and is not counted.
+const miniTaperMaxDays = 3
+
+// hasTaper reports whether a goal's plan ends in a taper phase: priority A
+// (and a goal with no priority, which is how every plan was built before
+// priority shaped it) does. B gets a mini-taper inside its event week and C
+// gets none: the event week is an ordinary training week.
+func hasTaper(goal workout.Goal) bool {
+	return goal.Priority != workout.PriorityB && goal.Priority != workout.PriorityC
 }
 
 // Plan is a full periodized structure for one goal.
@@ -215,6 +243,9 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
 
 	lengths := allocateWeeks(totalWeeks)
+	if !hasTaper(goal) {
+		lengths = withoutTaper(lengths, totalWeeks)
+	}
 	order := []Phase{PhaseBase, PhaseBuild, PhasePeak, PhaseTaper}
 
 	// Weeks before this one were already lived; only this week onward is
@@ -222,6 +253,8 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 	firstShown := max(0, int(startUTC.Sub(anchorUTC).Hours()/24)/7)
 	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, max(0, totalWeeks-firstShown)), TotalWeeks: totalWeeks, Adjustment: 1}
 	pos := make([]int, 0, cap(plan.Weeks))
+	// Days of the event week before the event: Monday is 0.
+	eventIdx := (int(event.Weekday()) + 6) % 7
 	weekNumber := 0
 	for _, phase := range order {
 		n := lengths[phase]
@@ -233,13 +266,24 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 			recovery := (phase == PhaseBase || phase == PhaseBuild) &&
 				(i+1)%recoveryEveryNWeeks == 0
 			pos = append(pos, i%recoveryEveryNWeeks)
-			plan.Weeks = append(plan.Weeks, Week{
+			frac := weekFraction(phase, i, n, recovery)
+			wk := Week{
 				Number:      weekNumber,
 				StartDate:   anchorUTC.AddDate(0, 0, (weekNumber-1)*7).Format("2006-01-02"),
 				Phase:       phase,
 				Recovery:    recovery,
-				TargetHours: peakHours * weekFraction(phase, i, n, recovery),
-			})
+				TargetHours: peakHours * frac,
+			}
+			if weekNumber == totalWeeks && goal.Priority == workout.PriorityB && !recovery {
+				if d := min(miniTaperMaxDays, eventIdx); d > 0 {
+					wk.MiniTaperDays = d
+					// The hours model drops those days to the first taper
+					// week's daily volume, never above the week's own.
+					low := math.Min(frac, taperStartFraction)
+					wk.TargetHours = peakHours * (frac*float64(7-d) + low*float64(d)) / 7
+				}
+			}
+			plan.Weeks = append(plan.Weeks, wk)
 		}
 	}
 	return plan, pos, nil
@@ -371,6 +415,20 @@ func allocateWeeks(total int) map[Phase]int {
 		}
 		return map[Phase]int{PhaseBase: base, PhaseBuild: build, PhasePeak: peak, PhaseTaper: taper}
 	}
+}
+
+// withoutTaper folds the taper weeks of an allocation into the phase before
+// it: peak when the plan is long enough to have one, else build. A plan
+// whose only week is the event week becomes a build week.
+func withoutTaper(lengths map[Phase]int, total int) map[Phase]int {
+	extra := lengths[PhaseTaper]
+	delete(lengths, PhaseTaper)
+	if total >= 4 {
+		lengths[PhasePeak] += extra
+	} else {
+		lengths[PhaseBuild] += extra
+	}
+	return lengths
 }
 
 func roundAtLeastOne(total int, fraction float64) int {

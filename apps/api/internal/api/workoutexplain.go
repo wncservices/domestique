@@ -333,7 +333,7 @@ func whyLine(plan periodization.Plan, goalName, date string) string {
 			switch {
 			case next.Recovery:
 				line += " · recovery week next"
-			case next.Phase == periodization.PhaseTaper && wk.Phase != periodization.PhaseTaper:
+			case (next.Phase == periodization.PhaseTaper && wk.Phase != periodization.PhaseTaper) || (next.MiniTaperDays > 0 && wk.MiniTaperDays == 0):
 				line += " · taper next"
 			}
 		}

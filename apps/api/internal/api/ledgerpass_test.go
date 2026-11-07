@@ -1184,3 +1184,56 @@ func TestRestOverridesAGreenPush(t *testing.T) {
 		t.Fatalf("session = %q %v s, want a 45-minute Recovery ride after the check-in", got.Name, workout.PlannedSeconds(got.Steps))
 	}
 }
+
+// The event week of a priority B goal ends in a mini-taper. Its plan target
+// already holds the drop, so the days it lightens are not load the rider lost,
+// and nothing is repaid into the week.
+func TestMiniTaperWeekOwesNothingAndIsNotRepaid(t *testing.T) {
+	h := &ledgerHarness{seasonHarness: newSeasonHarness(t)}
+	h.profile(t, ledgerDays, 250)
+	h.now = utcNoon(2026, time.October, 5)
+	h.ride(t, h.now, 40, 1, 60)
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	h.at(5, 13, 0)
+	// Sunday 2026-10-11 ends this week: a one-week plan with a 3-day mini-taper.
+	g, err := h.store.CreateGoal(context.Background(), workout.CreateGoalRequest{
+		Rider: "wilant", Name: "Club race", EventDate: "2026-10-11", Priority: workout.PriorityB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.goal = g
+	h.tick()
+	h.backdate(t)
+
+	profile, _, _ := h.store.GetProfile(context.Background(), "wilant")
+	plan, err := periodization.Build(g, profile, h.now)
+	if err != nil || len(plan.Weeks) != 1 || plan.Weeks[0].MiniTaperDays != 3 {
+		t.Fatalf("setup: plan = %+v, err %v", plan.Weeks, err)
+	}
+
+	before := h.thisWeek(t)
+	if len(before) == 0 {
+		t.Fatal("setup: no sessions this week")
+	}
+	h.at(7, 7, 0) // Wednesday morning, nothing ridden
+	h.tick()
+	if got := repaidSince(before, h.thisWeek(t)); len(got) != 0 {
+		t.Errorf("%d sessions repaid in a mini-taper week", len(got))
+	}
+	row, ok, err := h.store.GetLedgerWeek(context.Background(), "wilant", "2026-10-05")
+	if err != nil || !ok {
+		t.Fatalf("row = %+v ok=%v err=%v", row, ok, err)
+	}
+	if !row.Reduced || row.CarriedInTSS != 0 {
+		t.Errorf("row = %+v, want a reduced week with nothing carried in", row)
+	}
+	var built float64
+	for _, w := range before {
+		built += workout.PlannedTSSOrHours(w, 250)
+	}
+	if row.TargetTSS > built+1e-6 {
+		t.Errorf("target %v exceeds the %v the week's sessions carry: the drop would be read as debt", row.TargetTSS, built)
+	}
+}

@@ -18,6 +18,7 @@ var wed = time.Date(2026, 3, 18, 10, 0, 0, 0, brussels)
 type wk struct {
 	phase    periodization.Phase
 	recovery bool
+	mini     int
 }
 
 // planFrom builds a plan whose first week starts Monday 2026-03-16.
@@ -27,7 +28,7 @@ func planFrom(weeks ...wk) *periodization.Plan {
 	for i, w := range weeks {
 		p.Weeks = append(p.Weeks, periodization.Week{
 			Number: i + 1, StartDate: start.AddDate(0, 0, 7*i).Format("2006-01-02"),
-			Phase: w.phase, Recovery: w.recovery,
+			Phase: w.phase, Recovery: w.recovery, MiniTaperDays: w.mini,
 		})
 	}
 	return p
@@ -38,6 +39,9 @@ func build() wk { return wk{phase: periodization.PhaseBuild} }
 func rec() wk   { return wk{phase: periodization.PhaseBase, recovery: true} }
 func taper() wk { return wk{phase: periodization.PhaseTaper} }
 func peak() wk  { return wk{phase: periodization.PhasePeak} }
+
+// A priority B event week is a build week whose last days are a mini-taper.
+func miniTaper() wk { return wk{phase: periodization.PhaseBuild, mini: 3} }
 
 // input is a cycling rider who trains Tue/Thu/Sat with a fresh, known FTP and a
 // test ridden 17 days ago, so only the plan can make a test worth suggesting:
@@ -190,6 +194,7 @@ func TestNeverInTaperPeakOrARecoveryWeek(t *testing.T) {
 		"taper":    planFrom(taper(), taper(), taper()),
 		"peak":     planFrom(peak(), peak(), peak()),
 		"recovery": planFrom(rec(), rec()),
+		"mini":     planFrom(miniTaper(), miniTaper()),
 	} {
 		in := input(plan)
 		in.Profile.FTPWatts = 0 // even the strongest reason
@@ -537,6 +542,7 @@ func TestNewReasonsKeepTheExclusions(t *testing.T) {
 		"taper":    planFrom(taper(), taper(), taper()),
 		"peak":     planFrom(peak(), peak(), peak()),
 		"recovery": planFrom(rec(), rec()),
+		"mini":     planFrom(miniTaper(), miniTaper()),
 	} {
 		in := freshRider(plan)
 		in.Profile.FTPEstimated = true
