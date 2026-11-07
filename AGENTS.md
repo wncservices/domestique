@@ -604,7 +604,7 @@ eased, test, ridden and past sessions are kept.
 **A goal edit that must replace planned sessions goes through `rebuildGoalFromToday`**
 (`seasonplan.go`, run by `handleCreateGoal`/`handleUpdateGoal` before `planGoalNow`,
 under the scheduling locks; when the lock is busy `retryRebuild` keeps trying in the
-background and `staleRebuild` stops it once a later edit owns the plan). Two reasons:
+background and `staleRebuild` stops it once a later edit owns the plan). Three reasons:
 
 - *Sport change.* Every week is recorded and holds the old sport's sessions, so
   fill-once would never replace them. The goal's untouched plan-made sessions dated
@@ -617,6 +617,14 @@ background and `staleRebuild` stops it once a later edit owns the plan). Two rea
   fills. The undated goal's weeks after the event stay recorded, and it fills again
   through the normal season pass as its rolling window reaches them. Two dated goals
   never take from each other: the first to fill keeps its days.
+- *Available days or hours changed* (`PUT /api/training/profile`, only when the weekday
+  set or `hoursPerAvailableDay` differs: `availabilityChanged`). `rebuildDays` runs the
+  sport rebuild for **every** goal of the rider, dated first (so `inDatedGoalSpan` stays
+  consistent), then `planGoalNow` for each. Untouched sessions move to the new days
+  from today; touched ones stay. It runs with auto-schedule off too: the rider asked.
+  `staleRebuild` never calls it stale, because it reads the profile as it stands when
+  it runs. An FTP-only save rebuilds nothing: FTP flows through refresh and
+  recalibration (`TestChangingOnlyFTPDoesNotRebuild`).
 
 Rider-touched and past sessions stay in both. `fillWeek` does not record a week in
 which it placed nothing because other goals' sessions hold every day: recorded-empty

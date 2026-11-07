@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -343,6 +344,9 @@ const (
 	// moved), so the same rider's undated goals give up their untouched
 	// sessions from today through the event.
 	rebuildTakeover rebuildReason = "takeover"
+	// rebuildDays: the rider's available days or hours changed, so every goal
+	// of theirs is rebuilt from today, dated goals first. g only names the rider.
+	rebuildDays rebuildReason = "days"
 )
 
 // rebuildGoalFromToday is the one entry point for a goal edit that has to
@@ -389,15 +393,77 @@ func (s *Server) rebuildGoalFromToday(ctx context.Context, g workout.Goal, reaso
 // rebuildLocked dispatches on the reason; the caller holds the scheduling
 // advisory lock.
 func (s *Server) rebuildLocked(ctx context.Context, g workout.Goal, reason rebuildReason) (int, error) {
-	if reason == rebuildTakeover {
+	switch reason {
+	case rebuildTakeover:
 		return s.takeOverUndatedGoalsLocked(ctx, g)
+	case rebuildDays:
+		return s.rebuildRiderLocked(ctx, g.Rider)
 	}
 	return s.rebuildSeasonLocked(ctx, g)
+}
+
+// ridersGoalsDatedFirst lists a rider's goals with the dated ones first, by
+// event date. The undated fill refuses to plan inside a dated goal's span, so
+// the dated goals must be rebuilt (and re-recorded) before the undated ones.
+func (s *Server) ridersGoalsDatedFirst(ctx context.Context, rider string) ([]workout.Goal, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(goals, func(i, j int) bool {
+		a, b := goals[i].EventDate, goals[j].EventDate
+		if (a == "") != (b == "") {
+			return a != ""
+		}
+		return a < b
+	})
+	return goals, nil
+}
+
+// rebuildRiderLocked is the days rebuild: the sport rebuild for each of the
+// rider's goals, dated first. The caller holds the scheduling advisory lock.
+func (s *Server) rebuildRiderLocked(ctx context.Context, rider string) (int, error) {
+	goals, err := s.ridersGoalsDatedFirst(ctx, rider)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, g := range goals {
+		n, err := s.rebuildSeasonLocked(ctx, g)
+		removed += n
+		if err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
+}
+
+// planRebuilt is the season fill that follows a rebuild: every goal of the
+// rider for a days rebuild (dated first), else just g.
+func (s *Server) planRebuilt(ctx context.Context, g workout.Goal, reason rebuildReason) error {
+	goals := []workout.Goal{g}
+	if reason == rebuildDays {
+		var err error
+		if goals, err = s.ridersGoalsDatedFirst(ctx, g.Rider); err != nil {
+			return err
+		}
+	}
+	for _, goal := range goals {
+		if _, err := s.planSeason(ctx, goal); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // staleRebuild reports whether a retried rebuild no longer applies to cur, the
 // goal as it stands now: a later edit owns the plan then.
 func staleRebuild(cur, was workout.Goal, reason rebuildReason) bool {
+	if reason == rebuildDays {
+		// Never stale: the rebuild reads the profile as it stands when it
+		// runs, so a later days edit only makes it build the newer days.
+		return false
+	}
 	if reason == rebuildTakeover {
 		// The goal exists (the caller got it); it only has to still be dated.
 		return cur.EventDate == ""
@@ -529,6 +595,10 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 			)
 			ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
 				cur, gerr := s.Training.GetGoal(ctx, g.ID)
+				if gerr != nil && reason == rebuildDays && errors.Is(gerr, workout.ErrGoalNotFound) {
+					// The goal that named the rider is gone; the rider's others are not.
+					cur, gerr = g, nil
+				}
 				if gerr != nil {
 					stale, err = errors.Is(gerr, workout.ErrGoalNotFound), gerr
 					if stale {
@@ -541,7 +611,7 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 					return
 				}
 				if removed, err = s.rebuildLocked(ctx, cur, reason); err == nil {
-					_, err = s.planSeason(ctx, cur)
+					err = s.planRebuilt(ctx, cur, reason)
 				}
 			})
 			if ran {

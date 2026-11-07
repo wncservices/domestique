@@ -1283,11 +1283,63 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.logger().Info("rider profile saved", "rider", rider)
+	// The plan is filled once per goal and week, so new days or hours would
+	// never reach sessions already planned. FTP is not like that: it flows in
+	// through refresh and recalibration, so an FTP-only save rebuilds nothing.
+	if availabilityChanged(before, saved) {
+		s.rebuildRiderPlan(r.Context(), rider)
+	}
 	out := profileDTOFrom(saved)
 	if changed {
 		out.LevelsRecalibrated = &dto
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// availabilityChanged reports whether the weekdays (as a set) or the hours per
+// day differ between two saved profiles. A profile that had no days has no
+// plan built on them, so filling one in for the first time is not a change:
+// that stays the tick's and the Fill button's job, as it was.
+func availabilityChanged(before, after workout.RiderProfile) bool {
+	if len(before.AvailableDays) == 0 {
+		return false
+	}
+	if before.HoursPerAvailableDay != after.HoursPerAvailableDay {
+		return true
+	}
+	days := map[string]bool{}
+	for _, d := range before.AvailableDays {
+		days[strings.ToLower(d)] = true
+	}
+	seen := map[string]bool{}
+	for _, d := range after.AvailableDays {
+		d = strings.ToLower(d)
+		if !days[d] {
+			return true
+		}
+		seen[d] = true
+	}
+	return len(seen) != len(days)
+}
+
+// rebuildRiderPlan rebuilds every goal of the rider from today after their
+// availability changed, then plans the rest of each season. Dated goals go
+// first. It runs whatever the auto-schedule flag says: the rider asked.
+func (s *Server) rebuildRiderPlan(ctx context.Context, rider string) {
+	goals, err := s.ridersGoalsDatedFirst(ctx, rider)
+	if err != nil {
+		s.logger().Error("could not list goals to rebuild after an availability change", "rider", rider, "err", err)
+		return
+	}
+	if len(goals) == 0 {
+		return
+	}
+	if _, err := s.rebuildGoalFromToday(ctx, goals[0], rebuildDays); err != nil {
+		s.logger().Error("could not rebuild the season after an availability change", "rider", rider, "err", err)
+	}
+	for _, g := range goals {
+		s.planGoalNow(ctx, g)
+	}
 }
 
 type profileProposalDTO struct {
