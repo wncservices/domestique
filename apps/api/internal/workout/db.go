@@ -740,9 +740,9 @@ func (d *DB) MarkMigration(ctx context.Context, name string) error {
 }
 
 // RidersWithGoallessSessions lists the riders holding a session with no goal
-// whose description is exactly desc, dated from or later.
-func (d *DB) RidersWithGoallessSessions(ctx context.Context, desc, from string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, d.query(`SELECT DISTINCT rider FROM workouts WHERE goal_id = '' AND description = ? AND date >= ? ORDER BY rider`), desc, from)
+// whose description starts with prefix (ASCII), dated from or later.
+func (d *DB) RidersWithGoallessSessions(ctx context.Context, prefix, from string) ([]string, error) {
+	rows, err := d.db.QueryContext(ctx, d.query(`SELECT DISTINCT rider FROM workouts WHERE goal_id = '' AND substr(description, 1, ?) = ? AND date >= ? ORDER BY rider`), len(prefix), prefix, from)
 	if err != nil {
 		return nil, err
 	}

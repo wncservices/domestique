@@ -596,11 +596,12 @@ no plan-made workout in it. It never tops up a week it filled before: a session
 the rider deleted, moved or rewrote stays that way, including on the Monday the
 week becomes current. **A week that yields no sessions (no profile days yet) is
 not recorded**, or the empty season would be permanent. Deleting a goal deletes
-its rows, and `handleDeleteGoal` first removes its untouched plan-made sessions dated
-today or later (never one ridden today) with their Garmin copies, then deletes the goal, in
+its rows, and `handleDeleteGoal` first removes **every** session of the goal dated today or
+later, changed ones too (`removeGoalFuture`: eased, moved, renamed; never one ridden today, an
+FTP test or a crew ride), with their Garmin copies, then deletes the goal, in
 one hold of the scheduling lock (it waits up to about 3 s for it, then 409 with Replan's wording, nothing changed:
-once `DeleteGoal` clears `goal_id` no retry could find the sessions). Touched and past
-sessions stay as the rider's own (`goal_id` ''), and a session with no goal **holds its day**
+once `DeleteGoal` clears `goal_id` no retry could find the sessions). Past sessions stay as
+history, the rider's own (`goal_id` ''), and a session with no goal **holds its day**
 in `fillWeek` (rider-built ones too; they do not stop a week being recorded) unless the
 rider switched off "Keep the plan off this day" (`workouts.plan_alongside`, default false: the
 day is held), so the rider's remaining goals, which the handler
@@ -608,10 +609,11 @@ re-plans at once through `planRiderGoals` (dated first; immediately, auto-schedu
 Before 2.16.0 a delete took none of a goal's sessions: they lost the goal, kept the generated
 description and became the rider's own, so they held their days and a new goal planned around them.
 `RemoveGoalLeftovers` (`goalleftovers.go`, run once at start alongside the loops, marker
-`goal_delete_leftovers` in `workout_migrations`) removes those from today on (`goalLeftover`: no goal,
-the generated description exactly, nothing changed by the rider or a pass, not ridden today, Garmin
-copies withdrawn), keeps the past as history, and runs `rebuildRiderPlan` for each rider it touched so
-their goals take the freed days. It is marked done only once every rider is through.
+`goal_delete_leftovers_touched` in `workout_migrations`; 2.16.1's `goal_delete_leftovers` took only
+the untouched ones) removes those from today on (`goalLeftover`: no goal, a description that starts
+with the generated one, which nothing a rider builds does, not a test or crew ride, not ridden today,
+Garmin copies withdrawn), keeps the past as history, and runs `rebuildRiderPlan` for each rider it
+touched so their goals take the freed days. It is marked done only once every rider is through.
 Editing a goal so its plan ends earlier makes the goal-save pass
 `trimSeason` delete the untouched plan-made sessions dated after the new last
 week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,
@@ -630,12 +632,11 @@ pending per rider (`claimDaysRetry`): it reads the profile when it runs, so a la
 instead of rebuilding the same plan again and churning Garmin copies.
 
 - *Sport change.* Every week is recorded and holds the old sport's sessions, so
-  fill-once would never replace them. The goal's untouched plan-made sessions dated
-  today or later (and their Garmin copies) go, its `scheduled_weeks` rows from this
+  fill-once would never replace them. **Every** session of the goal dated today or later
+  goes, changed ones too (`removeGoalFuture`, as for a delete: an eased or renamed ride is
+  no use to a running plan), with their Garmin copies; its `scheduled_weeks` rows from this
   week on are forgotten, and this week is topped up (`refillAfterRebuild`); later weeks
-  fill as new. A later week that still holds a session the rider touched is topped up
-  around it in the same step: the season pass would otherwise read the kept session as
-  "already filled" (the legacy rule) and record the week without the new sport's other days.
+  fill as new.
 - *Takeover.* A goal that is dated at creation, or becomes dated or has its date moved,
   takes the calendar from the same rider's **undated** goals: their untouched
   plan-made sessions from today through the event date (and Garmin copies) go and
@@ -655,7 +656,7 @@ instead of rebuilding the same plan again and churning Garmin copies.
   profile had none) only plan the rider's goals (`planRiderGoals`): nothing sits on old
   days, and a goal made before the profile gets its plan without Fill or a tick.
 
-Rider-touched and past sessions stay in both. `fillWeek` does not record a week in
+Past sessions stay in both, and rider-touched ones in a takeover. `fillWeek` does not record a week in
 which it placed nothing because other goals' sessions hold every day: recorded-empty
 would keep that goal empty there for good, after the holder is gone. Only other
 goals' sessions count as holding; a week covered by the goal's own is still adopted.
@@ -1808,7 +1809,7 @@ tried and scored worse (3/10, with timeouts), so the flat schema stays. The 6b j
 (every score reading passed; the misses were Dutch life events, one of them "tot donderdag" landing a
 week late), so deployments run it with `llm.jobs.understand_checkin: false`.
 
-Goal proposals place their date server-side (`goalFrom`/`placeEvent`), the model only names parts, and fields combine rather than override: an explicit date after today wins; else a base day from the month (+ early/mid/late or a day of the month; in `eventYear`, next year for `eventYearOffset` 1, or the next time it is ahead), or the span from now (+ a day of the month: the first such day on or after it), or a bare day of the month; then `eventWeekday` (`sat`/`sun`) snaps a month base to the nearest such day in the month and a span base forward, and alone is the coming one, strictly after today (a Saturday asked on a Saturday is the Sunday). A day that does not exist in the month (30 February) falls back to the month's own placement. Distance and climb come with a unit (`mi`, `ft`) converted here before the sanity bounds. Sport `other` (a triathlon) is `ErrUnsupportedSport`: the handler answers 422 and nothing is pre-filled; it is not an invalid answer and is not retried.
+Goal proposals place their date server-side (`goalFrom`/`placeEvent`), the model only names parts, and fields combine rather than override: an explicit date after today wins; else a base day from the month (+ early/mid/late or a day of the month; in `eventYear`, next year for `eventYearOffset` 1, or the next time it is ahead), or the span from now (+ a day of the month: the first such day on or after it), or a bare day of the month; then `eventWeekday` (`sat`/`sun`) snaps a month base to the nearest such day in the month and a span base forward, and alone is the coming one, strictly after today (a Saturday asked on a Saturday is the Sunday). A day that does not exist in the month (30 February) falls back to the month's own placement. Distance and climb come with a unit (`mi`, `ft`) converted here before the sanity bounds. Sport `other` (a triathlon) is `ErrUnsupportedSport`: the handler answers 422 and nothing is pre-filled; it is not an invalid answer and is not retried. A cycling answer for a note or name that names a run (`namesARun`: half marathon, marathon, run, parkrun, "halve marathon", "lopen"... and no ride word) becomes running: `qwen3.5-9b` proposed "Half marathon of Leuven" as cycling in production, and the form gave no sign until the plan showed Sweet spot rides.
 
 Three more jobs sit on the same client (sub-project 6b): `explain_changes` (one to three sentences on
 why the morning's changes were made, from the Why facts), `weekly_summary` (at most five sentences on

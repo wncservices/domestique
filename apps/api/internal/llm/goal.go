@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -121,7 +122,25 @@ func (c *Client) ProposeGoal(ctx context.Context, note string, today time.Time) 
 	if err != nil {
 		return GoalProposal{}, err
 	}
-	return goalFrom(reply, today)
+	p, err := goalFrom(reply, today)
+	if err == nil && p.Sport == "cycling" && namesARun(note+" "+reply.Name) {
+		p.Sport = "running"
+	}
+	return p, err
+}
+
+// A run named in the rider's own words wins over the model's sport: the small
+// model has answered cycling for "Half marathon of Leuven", and a cycling plan
+// for a half marathon is the one mistake the rider cannot see in the form until
+// the plan shows Sweet spot rides. A note that also names a ride is left to the
+// model (a duathlon is "other" already).
+var (
+	runWords  = regexp.MustCompile(`(?i)\b(half[- ]?marathon|halve marathon|marathon|run|runs|running|parkrun|jogging|lopen|loopwedstrijd|stratenloop|veldloop|trail ?run)\b`)
+	rideWords = regexp.MustCompile(`(?i)\b(ride|rides|riding|bike|mtb|cycling|cyclo|sportive|fondo|gravel|fiets|fietsen|wielren\w*|tour)\b`)
+)
+
+func namesARun(text string) bool {
+	return runWords.MatchString(text) && !rideWords.MatchString(text)
 }
 
 func goalFrom(raw goalReply, today time.Time) (GoalProposal, error) {

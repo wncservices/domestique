@@ -352,8 +352,8 @@ func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
 type rebuildReason string
 
 const (
-	// rebuildSport: the goal's sport changed, so its own untouched sessions
-	// from today are the old sport's.
+	// rebuildSport: the goal's sport changed, so its own sessions from today,
+	// changed or not, are the old sport's.
 	rebuildSport rebuildReason = "sport"
 	// rebuildTakeover: the goal is dated now (created, or its date set or
 	// moved), so the same rider's undated goals give up their untouched
@@ -438,7 +438,7 @@ func (s *Server) rebuildLocked(ctx context.Context, g workout.Goal, reason rebui
 		if err != nil {
 			return removed, err
 		}
-		n, err := s.rebuildSeasonLocked(ctx, g)
+		n, err := s.rebuildSeasonLocked(ctx, g, reason)
 		removed += n
 		if err != nil {
 			return removed, err
@@ -447,7 +447,7 @@ func (s *Server) rebuildLocked(ctx context.Context, g workout.Goal, reason rebui
 		// back: fill them around what the rider kept.
 		return removed, s.refillFreedWeeksLocked(ctx, g.Rider)
 	}
-	return s.rebuildSeasonLocked(ctx, g)
+	return s.rebuildSeasonLocked(ctx, g, reason)
 }
 
 // ridersGoalsDatedFirst lists a rider's goals with the dated ones first, by
@@ -477,7 +477,7 @@ func (s *Server) rebuildRiderLocked(ctx context.Context, rider string) (int, err
 	}
 	removed := 0
 	for _, g := range goals {
-		n, err := s.rebuildSeasonLocked(ctx, g)
+		n, err := s.rebuildSeasonLocked(ctx, g, rebuildDays)
 		removed += n
 		if err != nil {
 			return removed, err
@@ -528,8 +528,11 @@ func staleRebuild(cur, was workout.Goal, reason rebuildReason) bool {
 
 // rebuildSeasonLocked is the sport rebuild itself; the caller holds the
 // scheduling advisory lock. It takes seasonMu around its own writes only, so a
-// season fill can follow it in the same lock.
-func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal) (int, error) {
+// season fill can follow it in the same lock. A sport change takes every
+// session of the goal from today on, the changed ones too (a session of the
+// old sport is no use to the new plan); the other reasons keep what the rider
+// or an automatic pass changed.
+func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal, reason rebuildReason) (int, error) {
 	s.seasonMu.Lock()
 	defer s.seasonMu.Unlock()
 
@@ -538,9 +541,14 @@ func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal) (int, 
 	if err != nil {
 		return 0, err
 	}
-	removed, err := s.removeUntouched(ctx, g.Rider, existing, today, func(wk workout.Workout) bool {
-		return wk.GoalID == g.ID
-	}, "")
+	var removed int
+	if reason == rebuildSport {
+		removed, err = s.removeGoalFuture(ctx, g.Rider, existing, today, g.ID)
+	} else {
+		removed, err = s.removeUntouched(ctx, g.Rider, existing, today, func(wk workout.Workout) bool {
+			return wk.GoalID == g.ID
+		}, "")
+	}
 	if err != nil {
 		return removed, err
 	}
@@ -703,6 +711,23 @@ func (s *Server) takeOverUndatedGoalsLocked(ctx context.Context, g workout.Goal)
 // dated today or later (and through lastDate when it is set), with their
 // Garmin copies. A session of today the rider has already ridden stays.
 func (s *Server) removeUntouched(ctx context.Context, rider string, existing []workout.Workout, today string, pick func(workout.Workout) bool, lastDate string) (int, error) {
+	return s.removeFromToday(ctx, rider, existing, today, func(wk workout.Workout) bool {
+		return pick(wk) && untouchedPlanSession(wk)
+	}, lastDate)
+}
+
+// removeGoalFuture deletes every session of the goal dated today or later,
+// changed or not, with its Garmin copy: what a goal delete and a sport change
+// leave behind is a plan for nothing, however it was eased, moved or renamed.
+// The past is history and stays, and so does a session of today already
+// ridden, an FTP test (the rider scheduled it) and a crew ride (the crew's).
+func (s *Server) removeGoalFuture(ctx context.Context, rider string, existing []workout.Workout, today, goalID string) (int, error) {
+	return s.removeFromToday(ctx, rider, existing, today, func(wk workout.Workout) bool {
+		return wk.GoalID == goalID && wk.TestProtocol == "" && wk.CrewRideID == ""
+	}, "")
+}
+
+func (s *Server) removeFromToday(ctx context.Context, rider string, existing []workout.Workout, today string, pick func(workout.Workout) bool, lastDate string) (int, error) {
 	ridden, err := s.riddenToday(ctx, rider, today, existing)
 	if err != nil {
 		return 0, err
@@ -710,7 +735,7 @@ func (s *Server) removeUntouched(ctx context.Context, rider string, existing []w
 	removed := 0
 	for _, wk := range existing {
 		if !pick(wk) || wk.Date < today || (lastDate != "" && wk.Date > lastDate) ||
-			!untouchedPlanSession(wk) || (wk.Date == today && ridden[wk.ID]) {
+			(wk.Date == today && ridden[wk.ID]) {
 			continue
 		}
 		s.removeWorkoutFromGarmin(ctx, wk)
