@@ -616,7 +616,10 @@ background and `staleRebuild` stops it once a later edit owns the plan). Three r
 - *Sport change.* Every week is recorded and holds the old sport's sessions, so
   fill-once would never replace them. The goal's untouched plan-made sessions dated
   today or later (and their Garmin copies) go, its `scheduled_weeks` rows from this
-  week on are forgotten, and this week is topped up; later weeks fill as new.
+  week on are forgotten, and this week is topped up (`refillAfterRebuild`); later weeks
+  fill as new. A later week that still holds a session the rider touched is topped up
+  around it in the same step: the season pass would otherwise read the kept session as
+  "already filled" (the legacy rule) and record the week without the new sport's other days.
 - *Takeover.* A goal that is dated at creation, or becomes dated or has its date moved,
   takes the calendar from the same rider's **undated** goals: their untouched
   plan-made sessions from today through the event date (and Garmin copies) go and
@@ -644,6 +647,13 @@ An undated goal's fill (`inDatedGoalSpan`, in `fillWeek`) never fills a week fro
 week through the week of any of the rider's dated goals' events, and does not record
 it: the takeover and the dated goal's own fill are separate lock holds, and a tick
 in between must not hand the freed days back.
+
+**No plan session is dated after the event.** `fillWeek` (the only place that creates plan
+sessions) drops slots dated after a dated goal's `EventDate`, so an event on a Wednesday leaves
+that week's Thursday to Sunday empty, and `trimSeason` removes untouched sessions after the event
+date itself (not after the end of its week). The event week still belongs to the dated goal as a
+whole (`inDatedGoalSpan` is week-granular): an undated goal resumes the Monday after, and the
+days between the event and Sunday stay empty rather than being split between two goals.
 
 **A new event date is a new plan.** The plan counts weeks from `periodization.planAnchor`: the Monday
 of `goals.plan_anchor`, else of `created_at` (the column is '' until a re-dating, so older rows need no

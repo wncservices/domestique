@@ -133,7 +133,24 @@ func seasonSessions(t *testing.T, h *autoScheduleHarness, rider string) int {
 		if err != nil {
 			continue
 		}
-		total += len(plan.Weeks) * len(profile.AvailableDays)
+		// One session per available day, none after the event.
+		for _, wk := range plan.Weeks {
+			start, err := time.Parse("2006-01-02", wk.StartDate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 7; i++ {
+				day := start.AddDate(0, 0, i)
+				if g.EventDate != "" && day.Format("2006-01-02") > g.EventDate {
+					continue
+				}
+				for _, d := range profile.AvailableDays {
+					if d == strings.ToLower(day.Weekday().String()[:3]) {
+						total++
+					}
+				}
+			}
+		}
 	}
 	return total
 }

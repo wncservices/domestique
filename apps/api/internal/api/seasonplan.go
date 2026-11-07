@@ -312,6 +312,10 @@ func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
 	}
 	lastStart := sc.plan.Weeks[len(sc.plan.Weeks)-1].StartDate
 	_, lastEnd := weekBounds(sc.plan.Weeks[len(sc.plan.Weeks)-1])
+	if g.EventDate != "" && g.EventDate < lastEnd {
+		// The event week's days after the event are not the plan's either.
+		lastEnd = g.EventDate
+	}
 	today := s.localToday()
 
 	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
@@ -514,11 +518,47 @@ func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal) (int, 
 	if err := s.Training.DeleteScheduledWeeksAfter(ctx, g.ID, thisMonday.AddDate(0, 0, -7).Format(dateLayout)); err != nil {
 		return removed, err
 	}
-	_, _, err = s.scheduleGoalWeek(ctx, g, thisMonday, today)
+	err = s.refillAfterRebuild(ctx, g, thisMonday, today)
 	if errors.Is(err, periodization.ErrNoEventDate) || errors.Is(err, periodization.ErrEventInThePast) {
 		err = nil
 	}
 	return removed, err
+}
+
+// refillAfterRebuild is the top-up that follows a rebuild's deletions. This
+// week gets its open days filled from today. A later week that still holds a
+// session of g, one the rider touched and the rebuild kept, is filled around it
+// now too: its row was just forgotten, and the season pass would read the kept
+// session as "this week was already filled" (the legacy rule) and record the
+// week without the new plan's other days. Weeks holding nothing of g are left
+// to the season fill. Caller holds seasonMu.
+func (s *Server) refillAfterRebuild(ctx context.Context, g workout.Goal, thisMonday time.Time, today string) error {
+	sc, err := s.seasonContext(ctx, g)
+	if err != nil {
+		return err
+	}
+	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
+	if err != nil {
+		return err
+	}
+	thisStart := thisMonday.Format(dateLayout)
+	for _, week := range sc.plan.Weeks {
+		if week.StartDate < thisStart {
+			continue
+		}
+		from := ""
+		if week.StartDate == thisStart {
+			from = today
+		} else if !hasPlanSessions(existing, g, week) {
+			continue
+		}
+		created, _, err := s.fillWeek(ctx, g, sc, week, existing, from)
+		if err != nil {
+			return err
+		}
+		existing = append(existing, created...)
+	}
+	return nil
 }
 
 // takeOverUndatedGoalsLocked is the takeover rebuild: dated goal g claims the

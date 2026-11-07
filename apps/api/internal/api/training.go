@@ -1073,6 +1073,11 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		if req.Date < fromDate {
 			continue
 		}
+		// The event is the last day of a dated plan: the rest of its week is
+		// not trained for.
+		if g.EventDate != "" && req.Date > g.EventDate {
+			continue
+		}
 		if alreadyScheduled[req.Date] {
 			skipped++
 			if heldByGoal[req.Date] {
