@@ -372,3 +372,11 @@ func TestAGoalSeasonStartsOnTheRidersLocalDay(t *testing.T) {
 		t.Errorf("no zone reads the stamp as UTC: %q", p.From)
 	}
 }
+
+func TestAReDatedGoalsSeasonStartsAtItsPlanAnchor(t *testing.T) {
+	g := workout.Goal{Name: "Spring", EventDate: "2027-05-01", CreatedAt: "2026-01-20T08:30:00Z", PlanAnchor: "2026-11-02T10:00:00Z"}
+	p, ok := GoalPeriod(g, nil)
+	if !ok || p.From != "2026-11-02" {
+		t.Errorf("period from %q ok=%v, want 2026-11-02", p.From, ok)
+	}
+}

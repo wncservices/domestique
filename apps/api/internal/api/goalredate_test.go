@@ -141,3 +141,47 @@ func TestMovingTheEventEarlierKeepsATaperBeforeTheNewDate(t *testing.T) {
 		t.Errorf("event week holds %.0f s against a peak week of %.0f s, want a lighter, non-empty taper", eventWeek, peak)
 	}
 }
+
+// A nudge of 14 days or less keeps the anchor (the build done so far counts) but
+// still rebuilds the untouched sessions so the taper sits before the new date.
+func TestANudgeOfTheEventDateKeepsTheAnchorAndMovesTheTaper(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Race","eventDate":"`+h.now.AddDate(0, 0, 70).Format("2006-01-02")+`"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	h.ageGoal(t, g.ID, "2026-08-12T00:00:00Z")
+	before := h.planWeeks(t, h.goal(t, g.ID))
+
+	newEvent := h.now.AddDate(0, 0, 73)
+	h.patchGoal(t, g.ID, `{"eventDate":"`+newEvent.Format("2006-01-02")+`"}`)
+
+	got := h.goal(t, g.ID)
+	if got.PlanAnchor != "" {
+		t.Errorf("anchor reset to %q by a 3-day move", got.PlanAnchor)
+	}
+	after := h.planWeeks(t, got)
+	if after[0].Number != before[0].Number {
+		t.Errorf("week numbering changed: %d, was %d", after[0].Number, before[0].Number)
+	}
+	var peak float64
+	for m := periodization.MondayOf(h.now); !m.After(newEvent); m = m.AddDate(0, 0, 7) {
+		peak = max(peak, h.weekSeconds(t, g.ID, m))
+	}
+	if ev := h.weekSeconds(t, g.ID, periodization.MondayOf(newEvent)); ev == 0 || ev >= peak {
+		t.Errorf("event week holds %.0f s against a peak of %.0f s, want a lighter taper", ev, peak)
+	}
+}
+
+func TestAMoveOfMoreThanTwoWeeksResetsTheAnchor(t *testing.T) {
+	for days, want := range map[int]bool{14: false, 15: true, -15: true, -14: false} {
+		h := newSeasonHarness(t)
+		h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+		g := h.createGoal(t, `{"name":"Race","eventDate":"`+h.now.AddDate(0, 0, 70).Format("2006-01-02")+`"}`)
+		h.srv.WaitForBackground()
+		h.patchGoal(t, g.ID, `{"eventDate":"`+h.now.AddDate(0, 0, 70+days).Format("2006-01-02")+`"}`)
+		if got := h.goal(t, g.ID).PlanAnchor != ""; got != want {
+			t.Errorf("move of %d days: anchor reset=%v, want %v", days, got, want)
+		}
+	}
+}

@@ -647,7 +647,7 @@ in between must not hand the freed days back.
 
 **A new event date is a new plan.** The plan counts weeks from `periodization.planAnchor`: the Monday
 of `goals.plan_anchor`, else of `created_at` (the column is '' until a re-dating, so older rows need no
-backfill). `UpdateGoal` sets it to now whenever `eventDate` changes, so an old goal given a date 10
+backfill). `UpdateGoal` sets it to now (`movesPlan`) when the goal was or becomes undated or the date moves by more than 14 days either way; a nudge of 14 or less keeps the anchor and the build done, but still rebuilds. `seasonreview.GoalPeriod` starts at the same anchor. So an old goal given a date 10
 weeks out starts in base like a goal created today, instead of landing 30 weeks in with no base. The
 handler then runs `rebuildGoalFromToday(..., rebuildRedate)`: the sport rebuild of the goal itself
 (its untouched sessions from today go, its weeks are forgotten, this week is topped up) followed by the

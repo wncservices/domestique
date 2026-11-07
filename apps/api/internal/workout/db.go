@@ -1282,7 +1282,7 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 		current.Sport = *req.Sport
 	}
 	if req.EventDate != nil {
-		if *req.EventDate != current.EventDate {
+		if movesPlan(current.EventDate, *req.EventDate) {
 			// A new date is a new plan: week 1 is this week, not the goal's
 			// creation, or an old goal given a near date would skip its base.
 			current.PlanAnchor = d.timestamp()
@@ -1935,3 +1935,23 @@ func splitList(raw string) []string {
 }
 
 func joinList(items []string) string { return strings.Join(items, ",") }
+
+// reanchorDays is how far an event date may move and keep the plan's anchor:
+// a nudge keeps the build already done, a bigger move is a different plan.
+const reanchorDays = 14
+
+// movesPlan reports whether changing the event date from old to next starts the
+// plan over: the goal was undated or becomes undated, a date cannot be read, or
+// the date moves by more than reanchorDays either way.
+func movesPlan(old, next string) bool {
+	if old == next {
+		return false
+	}
+	a, errA := time.Parse("2006-01-02", old)
+	b, errB := time.Parse("2006-01-02", next)
+	if old == "" || next == "" || errA != nil || errB != nil {
+		return true
+	}
+	days := b.Sub(a).Hours() / 24
+	return days > reanchorDays || days < -reanchorDays
+}
