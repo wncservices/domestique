@@ -424,8 +424,8 @@ A rider with a link gets their wellness from it instead of Garmin. What keeps it
 Today acts on today; Plan stays the place for the week. Today's session card can be sent to Garmin, swapped
 (alternates), converted indoor (`canChangeIndoor` in `utils/planActions.ts`, shared with Plan) or moved with
 **Not today**: `POST /api/training/workouts/{id}/move-next` (`movenext.go`) puts today's session on the first
-available, free, non-blackout day up to Sunday (`weekplan.NextFreeDay`, the same rule the adapter's make-up
-uses), records it as a rider move, and answers `{workout, from}`; Undo is the ordinary date PATCH back to
+available, free, non-blackout day up to Sunday, never an event day or a day after it that week (`eventDays`;
+`weekplan.NextFreeDay`, the same rule the adapter's make-up uses, which skips those days too), records it as a rider move, and answers `{workout, from}`; Undo is the ordinary date PATCH back to
 `from`. It refuses with 409 a crew ride, an FTP test, a session already ridden (`plannedFor`, hand links
 included), a session not dated today, and a week with no free day left. Owner-only, 404 otherwise.
 
@@ -661,7 +661,8 @@ in between must not hand the freed days back.
 The event week carries `Week.EventDate` (every dated plan, not only B), and
 `scheduler.splitEventWeek` drops the available days on or after it when the week is generated, so the
 week's hours are shared by the days before it. That is the one rule: `fillWeek` and `refreshWeek` both
-build through it. `trimSeason` removes untouched sessions on or after the event day. The event week
+build through it. `trimSeason` removes untouched sessions on or after the event day; the tick runs it for
+every dated goal, so a session an older plan left on race day goes without an edit. The event week
 still belongs to the dated goal as a whole (`inDatedGoalSpan` is week-granular): an undated goal
 resumes the Monday after, and the days between the event and Sunday stay empty rather than being
 split between two goals.

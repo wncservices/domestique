@@ -75,6 +75,35 @@ func TestAMissedKeySessionIsMadeUpInPlaceOfTheNextEasyDay(t *testing.T) {
 	}
 }
 
+// A missed session is never made up on race day or after it that week: the
+// event is the session.
+func TestAMissedSessionIsNotMadeUpOnTheEventDay(t *testing.T) {
+	h := newAutoScheduleHarness(t)
+	ctx := context.Background()
+	// Thursday. Tuesday's tempo was missed; Friday is free, and it is race day.
+	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC) }
+	goal, err := h.store.CreateGoal(ctx, workout.CreateGoalRequest{Rider: "wilant", Name: "Club race", EventDate: "2026-03-27", Priority: "C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", HoursPerAvailableDay: 1.5, AvailableDays: []string{"tue", "fri", "sat"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tempo, _ := h.store.CreateWorkout(ctx, api.LegacyFlagged(generated("wilant", goal.ID, "Tempo ride", "2026-03-24", 3600)))
+
+	h.srv.AdaptWorkouts(ctx)
+
+	got, err := h.store.GetWorkout(ctx, tempo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Date != "2026-03-24" {
+		t.Errorf("tempo moved to %s, want it left: the rest of the week is the race's", got.Date)
+	}
+}
+
 func TestAHardSessionIsSwappedForAnEasyOneWhenTheRiderIsExhausted(t *testing.T) {
 	h := newAutoScheduleHarness(t)
 	ctx := context.Background()

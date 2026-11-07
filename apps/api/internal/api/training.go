@@ -516,8 +516,9 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		s.planGoalNow(r.Context(), updated)
 	}
 	// The rebuild replaced today's session, and the tick that would send the
-	// new one may be half an hour away. A busy rebuild pushes from its retry.
-	if updated.Sport != g.Sport || updated.EventDate != g.EventDate || priorityMoved {
+	// new one may be half an hour away. A busy rebuild pushes from its retry;
+	// pushing here would send the session it is about to replace.
+	if !deferred && (updated.Sport != g.Sport || updated.EventDate != g.EventDate || priorityMoved) {
 		s.pushTodayIfOptedIn(r.Context(), g.Rider)
 	}
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))
@@ -642,9 +643,9 @@ wait:
 	}
 	// The rider's other goals take the freed days back now (dated first), not
 	// at the next tick.
+	// The deleted goal's copy of today is withdrawn: planRiderGoals also sends
+	// what took its place.
 	s.planRiderGoals(r.Context(), g.Rider)
-	// The deleted goal's copy of today is withdrawn: send what took its place.
-	s.pushTodayIfOptedIn(r.Context(), g.Rider)
 
 	s.logger().Info("goal deleted", "id", id, "by", identity.User, "removed", removed)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1230,6 +1231,28 @@ func (s *Server) inDatedGoalSpan(ctx context.Context, rider, weekStart string) (
 	return inDatedSpan(spans, weekStart), nil
 }
 
+// eventDays is every day on or after one of the rider's events up to that
+// event's Sunday: the event is the session, and the rest of its week is left
+// empty. A move ("Not today", a missed session made up) must not land there.
+func (s *Server) eventDays(ctx context.Context, rider string) (map[string]bool, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
+	days := map[string]bool{}
+	for _, g := range goals {
+		ev, err := time.Parse(dateLayout, g.EventDate)
+		if err != nil {
+			continue
+		}
+		sunday := periodization.MondayOf(ev).AddDate(0, 0, 6)
+		for d := ev; !d.After(sunday); d = d.AddDate(0, 0, 1) {
+			days[d.Format(dateLayout)] = true
+		}
+	}
+	return days, nil
+}
+
 // datedSpan is the Mondays, first and last, of a dated goal's span.
 type datedSpan struct{ first, last string }
 
@@ -1541,8 +1564,10 @@ func (s *Server) rebuildRiderPlan(ctx context.Context, rider string) {
 		}
 	}
 	// The rebuild withdrew today's copy: send the new session. A deferred
-	// rebuild pushes from its retry.
-	s.pushTodayIfOptedIn(ctx, rider)
+	// rebuild pushes from its retry; pushing here would send the old session.
+	if !deferred {
+		s.pushTodayIfOptedIn(ctx, rider)
+	}
 }
 
 // planRiderGoals plans every goal of the rider, dated first, with no rebuild.

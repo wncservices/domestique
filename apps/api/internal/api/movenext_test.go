@@ -138,6 +138,36 @@ func TestMoveNextSkipsLifeEventDays(t *testing.T) {
 	}
 }
 
+// race stores a dated goal without planning it, so the week holds only what
+// the test adds.
+func (f *moveNextFixture) race(date string) {
+	f.h.t.Helper()
+	if _, err := f.h.store.CreateGoal(context.Background(), workout.CreateGoalRequest{
+		Rider: "wilant", Name: "Club race", Sport: model.SportCycling, EventDate: date, Priority: "C",
+	}); err != nil {
+		f.h.t.Fatal(err)
+	}
+}
+
+// The event is the session: "Not today" never lands on race day or after it
+// that week.
+func TestMoveNextSkipsTheEventDayAndTheRestOfItsWeek(t *testing.T) {
+	f := newMoveNextFixture(t, "thu", "fri", "sat")
+	f.race("2026-10-02")
+	resp := f.move("wilant", f.today.ID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got, _ := f.h.store.GetWorkout(context.Background(), f.today.ID)
+	if got.Date != "2026-10-01" {
+		t.Errorf("date = %s, want 2026-10-01 (the race is on Friday)", got.Date)
+	}
+
+	f = newMoveNextFixture(t, "fri", "sat")
+	f.race("2026-10-02")
+	f.mustRefuse(f.today.ID, "No free day left this week")
+}
+
 func TestMoveNextOnTheLastFreeDayOfTheWeekChangesNothing(t *testing.T) {
 	// Only Sunday is available after today, and it is taken.
 	f := newMoveNextFixture(t, "wed", "sun")
