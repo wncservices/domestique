@@ -185,7 +185,8 @@ func Range(p workout.RiderProfile, sport, zone string) (low, high float64, ok bo
 	}
 	switch zone {
 	case "recovery":
-		return b[0] - (b[1] - b[0]), b[0], true
+		// A wide custom Z2 would put the mirrored floor below zero.
+		return max(0, b[0]-(b[1]-b[0])), b[0], true
 	case "endurance":
 		return b[0], b[1], true
 	case "tempo":
