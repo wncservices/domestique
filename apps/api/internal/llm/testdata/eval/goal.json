@@ -100,13 +100,13 @@
     {
       "name": "next spring",
       "lang": "en",
-      "input": {"note": "A gravel event next spring, in April"},
-      "want": {"sport": "cycling", "eventDate": "2027-04-15"}
+      "input": {"note": "A 200 km ride next spring"},
+      "want": {"sport": "cycling", "eventDate": "2027-04-15", "targetDistanceKm": 200}
     },
     {
       "name": "volgend voorjaar",
       "lang": "nl",
-      "input": {"note": "Volgend voorjaar, in april, wil ik een fietstocht rijden."},
+      "input": {"note": "Volgend voorjaar wil ik een fietstocht rijden."},
       "want": {"sport": "cycling", "eventDate": "2027-04-15"}
     },
     {
@@ -150,6 +150,30 @@
       "lang": "en",
       "input": {"note": "A long ride at the end of next year."},
       "want": {"sport": "cycling", "eventDate": "2027-12-25"}
+    },
+    {
+      "name": "a Saturday race in June",
+      "lang": "en",
+      "input": {"note": "A road race on a Saturday in June"},
+      "want": {"sport": "cycling", "eventDate": "2027-06-12"}
+    },
+    {
+      "name": "in 3 weeks on a Saturday",
+      "lang": "en",
+      "input": {"note": "A 40 km ride in 3 weeks, on a Saturday"},
+      "want": {"sport": "cycling", "eventDate": "2026-11-21", "targetDistanceKm": 40}
+    },
+    {
+      "name": "late March 2028",
+      "lang": "en",
+      "input": {"note": "A marathon in late March 2028"},
+      "want": {"sport": "running", "eventDate": "2028-03-25", "targetDistanceKm": 42.2}
+    },
+    {
+      "name": "volgend jaar eind mei",
+      "lang": "nl",
+      "input": {"note": "Volgend jaar eind mei wil ik een toertocht rijden."},
+      "want": {"sport": "cycling", "eventDate": "2027-05-25"}
     }
   ]
 }

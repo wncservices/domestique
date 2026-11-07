@@ -230,7 +230,6 @@ func TestProposeGoalPlacesDaysWeekdaysAndYears(t *testing.T) {
 	}{
 		{"this weekend, Saturday from a Wednesday", goalToday, `"eventWeekday":"sat"`, "2026-03-21"},
 		{"this weekend, Sunday from a Wednesday", goalToday, `"eventWeekday":"sun"`, "2026-03-22"},
-		{"a Saturday today is not allowed", sat, `"eventWeekday":"sat"`, "2026-03-28"},
 		{"Sunday from a Saturday", sat, `"eventWeekday":"sun"`, "2026-03-22"},
 		{"weekend across a year end", time.Date(2026, 12, 30, 0, 0, 0, 0, time.UTC), `"eventWeekday":"sat"`, "2027-01-02"},
 		{"the 20th, still ahead this month", goalToday, `"eventDayOfMonth":20`, "2026-03-20"},
@@ -251,8 +250,32 @@ func TestProposeGoalPlacesDaysWeekdaysAndYears(t *testing.T) {
 		{"a month already behind, no offset, near a year end", late, `"eventMonth":3`, "2027-03-15"},
 		{"next year alone means nothing", goalToday, `"eventYearOffset":1`, ""},
 		{"an explicit date beats a day of month", goalToday, `"eventDate":"2026-07-01","eventDayOfMonth":14,"eventWeekday":"sat"`, "2026-07-01"},
-		{"a day of month beats a weekday", goalToday, `"eventDayOfMonth":20,"eventWeekday":"sun"`, "2026-03-20"},
-		{"a weekday beats a month and a span", goalToday, `"eventWeekday":"sat","eventMonth":6,"eventInMonths":9`, "2026-03-21"},
+		// Fields combine: the weekday snaps a base day, it never replaces it.
+		// 15 June 2026 is a Monday: Saturday the 13th is nearer than the 20th.
+		{"a Saturday in June", goalToday, `"eventWeekday":"sat","eventMonth":6`, "2026-06-13"},
+		{"a Sunday in June", goalToday, `"eventWeekday":"sun","eventMonth":6`, "2026-06-14"},
+		{"a Saturday in late June", goalToday, `"eventWeekday":"sat","eventMonth":6,"eventPartOfMonth":"late"`, "2026-06-27"},
+		{"a Saturday in early June", goalToday, `"eventWeekday":"sat","eventMonth":6,"eventPartOfMonth":"early"`, "2026-06-06"},
+		// 15 March is behind 18 March, so the same month next year; 15 March 2027 is a Monday.
+		{"a Saturday in a month already behind", goalToday, `"eventWeekday":"sat","eventMonth":3`, "2027-03-13"},
+		{"a Saturday in June next year", goalToday, `"eventWeekday":"sat","eventMonth":6,"eventYearOffset":1`, "2027-06-12"},
+		// Today is that Saturday, so the snapped day is not after today: next year's.
+		{"a Saturday in a month, snapped day after today", time.Date(2026, 6, 13, 0, 0, 0, 0, time.UTC), `"eventWeekday":"sat","eventMonth":6`, "2027-06-12"},
+		{"a Saturday three weeks out", goalToday, `"eventWeekday":"sat","eventInWeeks":3`, "2026-04-11"},
+		{"a Sunday nine months out", goalToday, `"eventWeekday":"sun","eventInMonths":9`, "2026-12-20"},
+		{"a Saturday span that already lands on a Saturday stays", sat, `"eventWeekday":"sat","eventInWeeks":1`, "2026-03-28"},
+		{"the 14th, nine months out", goalToday, `"eventDayOfMonth":14,"eventInMonths":9`, "2027-01-14"},
+		{"the 20th, nine months out lands on it", goalToday, `"eventDayOfMonth":18,"eventInMonths":9`, "2026-12-18"},
+		{"the 31st, three months out skips a short month", goalToday, `"eventDayOfMonth":31,"eventInMonths":3`, "2026-07-31"},
+		{"late March 2028", goalToday, `"eventMonth":3,"eventPartOfMonth":"late","eventYear":2028`, "2028-03-25"},
+		{"a year wins over an offset", goalToday, `"eventMonth":3,"eventYear":2028,"eventYearOffset":1`, "2028-03-15"},
+		{"a past year is ignored", goalToday, `"eventMonth":6,"eventYear":2024`, "2026-06-15"},
+		{"this year pins this year", goalToday, `"eventMonth":6,"eventYear":2026`, "2026-06-15"},
+		{"a pinned month already behind is nothing", goalToday, `"eventMonth":3,"eventYear":2026`, ""},
+		{"14 June 2028", goalToday, `"eventDayOfMonth":14,"eventMonth":6,"eventYear":2028`, "2028-06-14"},
+		// A bare Saturday asked on a Saturday is that weekend's Sunday.
+		{"this weekend on a Saturday", sat, `"eventWeekday":"sat"`, "2026-03-22"},
+		{"this weekend on a Sunday", time.Date(2026, 3, 22, 0, 0, 0, 0, time.UTC), `"eventWeekday":"sat"`, "2026-03-28"},
 		{"a month beats a span", goalToday, `"eventMonth":6,"eventInMonths":9`, "2026-06-15"},
 		{"a span still works", goalToday, `"eventInMonths":9`, "2026-12-18"},
 		{"a past explicit date falls through to the day of month", goalToday, `"eventDate":"2024-01-01","eventDayOfMonth":20`, "2026-03-20"},
