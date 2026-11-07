@@ -101,3 +101,41 @@ func TestMiniTaperWeekIsNotBoostedBiasedOrGivenAThirdSession(t *testing.T) {
 		t.Errorf("%d structured sessions, want at most the phase's two", hard)
 	}
 }
+
+// A rider who can only train on Saturday and Sunday, with the race on Sunday:
+// Saturday is the one mini-taper day they have, and it is one day's taper load,
+// not the whole window's.
+func TestMiniTaperDayIsCappedAtTheTapersDailyLoad(t *testing.T) {
+	week, profile, levels := miniTaperWeek()
+	week.EventDate, week.MiniTaperStart = "2026-01-11", "2026-01-08"
+	profile.AvailableDays = []string{"sat", "sun"}
+	out, err := WeekWorkouts(week, profile, levels, "r", "g", model.SportCycling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Date != "2026-01-10" {
+		t.Fatalf("sessions = %+v, want only Saturday", out)
+	}
+	if got := workout.PlannedSeconds(out[0].Steps); math.Abs(got-1800) > 1 {
+		t.Errorf("Saturday lasts %v s, want one taper day's 1800", got)
+	}
+}
+
+// The event is the session for every priority: no session on its day, for a
+// plan with no mini-taper too.
+func TestNoSessionOnTheEventDayWithoutAMiniTaper(t *testing.T) {
+	week, profile, levels := miniTaperWeek()
+	week.MiniTaperDays, week.MiniTaperStart, week.MiniTaperDayHours = 0, "", 0
+	out, err := WeekWorkouts(week, profile, levels, "r", "g", model.SportCycling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 5 {
+		t.Errorf("%d sessions, want Monday to Friday", len(out))
+	}
+	for _, r := range out {
+		if r.Date >= "2026-01-10" {
+			t.Errorf("a session on %s, on or after the event", r.Date)
+		}
+	}
+}

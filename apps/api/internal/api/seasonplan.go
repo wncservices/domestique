@@ -322,9 +322,10 @@ func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
 	}
 	lastStart := sc.plan.Weeks[len(sc.plan.Weeks)-1].StartDate
 	_, lastEnd := weekBounds(sc.plan.Weeks[len(sc.plan.Weeks)-1])
-	if g.EventDate != "" && g.EventDate < lastEnd {
-		// The event week's days after the event are not the plan's either.
-		lastEnd = g.EventDate
+	if ev, err := time.Parse(dateLayout, g.EventDate); err == nil && g.EventDate <= lastEnd {
+		// The event day and the days after it are not the plan's either: the
+		// event is the session.
+		lastEnd = ev.AddDate(0, 0, -1).Format(dateLayout)
 	}
 	today := s.localToday()
 

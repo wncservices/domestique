@@ -13,6 +13,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/periodization"
 	"github.com/wncservices/domestique/apps/api/internal/pgtest"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
 	"github.com/wncservices/domestique/apps/api/internal/settings"
 	"github.com/wncservices/domestique/apps/api/internal/source"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
@@ -252,5 +253,72 @@ func TestRedatingADatedBGoalKeepsB(t *testing.T) {
 	h.patchGoal(t, g.ID, `{"eventDate":"2027-05-02","priority":"B"}`)
 	if got := h.goal(t, g.ID).Priority; got != "B" {
 		t.Errorf("priority = %q, want B", got)
+	}
+}
+
+// The event is the session: no priority plans a ride on the event day itself,
+// whether the goal was created like that or its date was moved up onto a day
+// the old plan had already filled.
+func TestNoPlanSessionOnTheEventDay(t *testing.T) {
+	for _, priority := range []string{"A", "B", "C"} {
+		t.Run("created "+priority, func(t *testing.T) {
+			h, g, eventMonday := priorityRace(t, priority)
+			event := eventMonday.AddDate(0, 0, 6).Format("2006-01-02")
+			before := 0
+			for _, w := range h.goalSessions(t, g.ID) {
+				if w.Date == event {
+					t.Errorf("a session on the event day %s", event)
+				}
+				if w.Date < event {
+					before++
+				}
+			}
+			if before == 0 {
+				t.Fatal("fixture: no sessions before the event")
+			}
+		})
+	}
+	t.Run("date moved onto a planned day", func(t *testing.T) {
+		h, g, eventMonday := priorityRace(t, "A")
+		// The Sunday a week earlier already holds a session of the old plan.
+		moved := eventMonday.AddDate(0, 0, -1).Format("2006-01-02")
+		if len(h.week(t, eventMonday.AddDate(0, 0, -7))) == 0 {
+			t.Fatal("fixture: the week before the event is empty")
+		}
+		h.patchGoal(t, g.ID, `{"eventDate":"`+moved+`"}`)
+		h.srv.WaitForBackground()
+		for _, w := range h.goalSessions(t, g.ID) {
+			if w.Date >= moved {
+				t.Errorf("session %s on or after the new event day %s", w.Date, moved)
+			}
+		}
+	})
+}
+
+// The goal-save pass clears an untouched plan session an older plan left on the
+// event day itself, not only the days after it.
+func TestTheSeasonTrimClearsAnUntouchedSessionOnTheEventDay(t *testing.T) {
+	h, g, eventMonday := priorityRace(t, "A")
+	event := eventMonday.AddDate(0, 0, 6).Format("2006-01-02")
+	var model workout.Workout
+	for _, w := range h.goalSessions(t, g.ID) {
+		model = w
+	}
+	stray, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: model.Sport, Name: model.Name, GoalID: g.ID, Date: event,
+		Description: scheduler.GeneratedDescription, Steps: model.Steps, Zone: model.Zone, Level: model.Level,
+		Flags: workout.Flags{Origin: workout.OriginPlan},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.patchGoal(t, g.ID, `{"notes":"saved again"}`)
+	h.srv.WaitForBackground()
+
+	for _, w := range h.goalSessions(t, g.ID) {
+		if w.ID == stray.ID {
+			t.Errorf("the untouched session on the event day %s survived the trim", event)
+		}
 	}
 }

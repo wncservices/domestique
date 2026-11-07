@@ -249,10 +249,10 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		return nil, fmt.Errorf("scheduler: parse week start %q: %w", week.StartDate, err)
 	}
 
-	// A priority B event week: nothing on or after the event, and the days of
-	// the mini-taper are easy rides at the taper's daily load, outside the
-	// week's own sessions.
-	days, mini := splitMiniTaper(week, weekStart, days)
+	// An event week: nothing on or after the event (every priority), and for a
+	// priority B week the days of the mini-taper are easy rides at the taper's
+	// daily load, outside the week's own sessions.
+	days, mini := splitEventWeek(week, weekStart, days)
 	n := len(days)
 	if n == 0 {
 		return nil, nil
@@ -284,7 +284,7 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		}
 	}
 	dropped, targetHours := applyFixed(o.fixed, week, weekStart, days, kinds)
-	targetHours = math.Max(targetHours-mini.totalHours, 0)
+	targetHours = math.Max(targetHours-mini.hoursIn(dropped), 0)
 
 	// Cap every structured slot's time budget at the share it would have
 	// gotten under slotWeight before any rung is picked, then let
@@ -363,7 +363,7 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		default:
 			hours := remainingHours * restShares[i]
 			if mini.days[i] {
-				hours = mini.dayHours(dropped)
+				hours = mini.perDay
 			}
 			if hours <= 0 {
 				continue
@@ -839,48 +839,48 @@ func clampToBoostedCeiling(l workoutlib.Ladder, picked workoutlib.Rung, unbooste
 type miniTaper struct {
 	// days marks, by index into the days kept, the ones inside the mini-taper.
 	days map[int]bool
-	// totalHours is what the whole mini-taper holds at the taper's daily load.
-	totalHours float64
+	// perDay is one mini-taper session's length: the taper's daily load. A day
+	// the rider cannot train does not hand its hours to the ones they can, or a
+	// Saturday-only rider would get three days' worth in one ride.
+	perDay float64
 }
 
-// dayHours is one mini-taper session's length: the window's hours shared by the
-// days that still have a session.
-func (m miniTaper) dayHours(dropped map[int]bool) float64 {
+// hoursIn is what the mini-taper sessions that still have a day hold, which the
+// rest of the week does not get to spend.
+func (m miniTaper) hoursIn(dropped map[int]bool) float64 {
 	n := 0
 	for i := range m.days {
 		if !dropped[i] {
 			n++
 		}
 	}
-	if n == 0 {
-		return 0
-	}
-	return m.totalHours / float64(n)
+	return float64(n) * m.perDay
 }
 
-// splitMiniTaper drops the available days on or after the event and marks the
-// ones inside the mini-taper. A week without a mini-taper comes back as it was.
-func splitMiniTaper(week periodization.Week, weekStart time.Time, days []string) ([]string, miniTaper) {
+// splitEventWeek drops the available days on or after the event and marks the
+// ones inside a priority B mini-taper. A week with no event comes back as it
+// was.
+func splitEventWeek(week periodization.Week, weekStart time.Time, days []string) ([]string, miniTaper) {
 	m := miniTaper{days: map[int]bool{}}
-	if week.MiniTaperDays <= 0 {
+	event, err := time.Parse("2006-01-02", week.EventDate)
+	if err != nil {
 		return days, m
 	}
-	event, err1 := time.Parse("2006-01-02", week.EventDate)
-	start, err2 := time.Parse("2006-01-02", week.MiniTaperStart)
-	if err1 != nil || err2 != nil {
-		return days, m
-	}
+	start, err := time.Parse("2006-01-02", week.MiniTaperStart)
+	mini := week.MiniTaperDays > 0 && err == nil
 	kept := make([]string, 0, len(days))
 	for _, d := range days {
 		date := weekStart.AddDate(0, 0, weekdayOffset(d))
 		if !date.Before(event) {
 			continue
 		}
-		if !date.Before(start) {
+		if mini && !date.Before(start) {
 			m.days[len(kept)] = true
 		}
 		kept = append(kept, d)
 	}
-	m.totalHours = float64(week.MiniTaperDays) * week.MiniTaperDayHours
+	if mini {
+		m.perDay = week.MiniTaperDayHours
+	}
 	return kept, m
 }
