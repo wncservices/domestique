@@ -72,6 +72,18 @@
       "lang": "nl",
       "input": {"note": "Eind mei 2027 wil ik een marathon lopen."},
       "want": {"sport": "running", "eventDate": "2027-05-25", "targetDistanceKm": 42.2}
+    },
+    {
+      "name": "half marathon, in nine months",
+      "lang": "en",
+      "input": {"note": "I want to run a half marathon in 9 months"},
+      "want": {"sport": "running", "eventDate": "2027-07-25", "targetDistanceKm": 21.1}
+    },
+    {
+      "name": "fietstocht over twaalf weken",
+      "lang": "nl",
+      "input": {"note": "Over 12 weken rij ik een fietstocht van 120 km."},
+      "want": {"sport": "cycling", "eventDate": "2027-01-17", "targetDistanceKm": 120}
     }
   ]
 }
