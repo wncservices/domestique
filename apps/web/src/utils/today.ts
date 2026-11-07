@@ -222,12 +222,12 @@ export function cardState(day: WeekDay | undefined): CardState {
 }
 
 export function eyebrowFor(
-  focus: Pick<WeekFocus, 'phase' | 'recovery' | 'weekNumber'> | undefined,
+  focus: Pick<WeekFocus, 'phase' | 'recovery' | 'weekNumber' | 'miniTaperDays'> | undefined,
   restDay = false,
 ): string {
   const lead = restDay ? 'Today' : "Today's ride"
   if (!focus?.phase) return lead
-  return `${lead} · ${phaseLabel(focus.phase, focus.recovery)}${focus.weekNumber ? ` week ${focus.weekNumber}` : ''}`
+  return `${lead} · ${phaseLabel(focus.phase, focus.recovery, focus.miniTaperDays)}${focus.weekNumber ? ` week ${focus.weekNumber}` : ''}`
 }
 
 /** The session the Swap menu belongs to: plan-made, unridden, not past, with no

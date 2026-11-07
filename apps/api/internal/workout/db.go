@@ -705,7 +705,7 @@ func (d *DB) migrateDatedGoalPriority() error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	res, err := tx.Exec(d.query(`INSERT INTO workout_migrations (name, done_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`),
 		"dated_goal_priority_a", d.timestamp())
 	if err != nil {

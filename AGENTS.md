@@ -690,24 +690,36 @@ session pushed in the same request (`pushTodayIfOptedIn`), or from the backgroun
 than waiting up to half an hour for the tick; the old copy is withdrawn either way.
 
 **A goal's priority shapes the end of its plan** (`periodization.hasTaper`, `Week.MiniTaperDays`).
-Priority A (and an unset one) gets the full taper phase, as ever. **B has no taper phase**: the taper's
-weeks become peak weeks (build in a plan under 4 weeks), and the event week runs as an ordinary week
-whose last `MiniTaperDays` days before the event (3, fewer when the event falls early in its week; the
-event day is the session and is not counted) drop to the taper's daily load, solved like the taper's so
-the event-day TSB lands on the form-band midpoint (`loadRun.miniTaper`, `solveDailyLoad`). The week's
-`TargetTSS`/`TargetHours` already include the drop, so the ledger measures debt against the reduced
-target and never reads the drop as load lost. **C has no taper and no mini-taper**: the event week is an
-ordinary week. Everything that asks "is this a reduced week" goes through `Week.Reduced()` (recovery,
-taper phase, or `MiniTaperDays > 0`): the ledger (a reduced week is opened with `reduced`, nothing
-carried in, nothing repaid, no green push), alternates (no harder swap) and FTP test scheduling (no test).
-Reoptimise, the readiness adapter and the explainer read no taper state except "taper next", which a
-mini-taper week also says. A plan with no taper phase aims its fitness at the CTL at the start of its
-last week, which is also what the feasibility check reads (`goalcheck.go`: the first taper week, else the
-last week); the race-day projection reads the stored workouts, so it follows the plan. Changing a dated
-goal's priority runs `rebuildPriority` (the sport rebuild: untouched sessions from today go, with Garmin
-copies; `plan_anchor` is **not** reset, so each week keeps its place), under the scheduling lock with the
-usual background retry, and sends today's session when auto-push is on. Priority of an undated goal
-changes nothing. Priorities other than A/B/C are refused by validation.
+A dated goal defaults to priority **A** (an undated one to B; `CreateGoal`, the goal form and the LLM
+proposal all apply it, and a one-time migration, marker `workout_migrations`, moved the stored dated B
+goals to A). Priority A (and an unset one in the pure functions) gets the full taper phase, as ever.
+**B has no taper phase**: the taper's weeks become peak weeks (build in a plan under 4 weeks), and the
+event week runs as an ordinary week whose last `MiniTaperDays` days before the event (3, fewer when the
+event falls early in its week; the event day is the session and is not counted) drop to the taper's
+daily load, solved like the taper's so the event-day TSB lands on the form-band midpoint
+(`loadRun.miniTaper`, `solveDailyLoad`). The week's `TargetTSS`/`TargetHours` already include the drop,
+it is not `LoadCapped` and has no ramp, so the ledger measures debt against the reduced target. The
+scheduler honours the days (`splitMiniTaper`): sessions on and after the event are dropped, the days
+from `MiniTaperStart` are easy endurance rides of `MiniTaperDayHours` each (the window's hours shared by
+the available days in it), structured sessions are placed only on the earlier days, and the week gets no
+route-demand bias, `WithTargetTSS` boost or third hard session. **C has no taper and no mini-taper**: the
+event week is an ordinary week. Everything that asks "is this a reduced week" goes through
+`Week.Reduced()` (recovery, taper phase, or `MiniTaperDays > 0`): the ledger (a reduced week is opened
+with `reduced`, nothing carried in, nothing repaid, no green push), alternates (no harder swap).
+FTP test scheduling is stricter: no test in the week of any dated goal's event, whatever its priority,
+and never on an event day. Reoptimise reads no taper state; the readiness adapter's `Reconcile` reads
+Base and Build weeks only, so it never touches a taper or a peak week; the explainer says "taper next"
+before a mini-taper week too. A plan with no taper phase aims its fitness at the CTL at the start of its
+last week, which is also what the feasibility check reads (`reachedFitness`: the first taper week, else
+the last week, with the cap flags of the weeks before it); the race-day projection reads the stored
+workouts, so it follows the plan. The projection's verdict wording and suggestions follow the priority
+(C: neutral wording about form, never a taper; B: at most the mini-taper), though the API still gives a
+verdict only for A goals. Changing a dated goal's priority runs `rebuildPriority` (the sport rebuild:
+untouched sessions from today go, with Garmin copies; `plan_anchor` is **not** reset, so each week keeps
+its place), under the scheduling lock with the usual background retry, and sends today's session when
+auto-push is on. Priority of an undated goal changes nothing, and giving an undated goal a date does not
+change its priority. Priorities other than A/B/C are refused by validation. The Plan page labels a
+mini-taper week "mini-taper" (`miniTaperDays` on the periodization and week-focus DTOs).
 
 **Weeks are sized in TSS from CTL, with available hours as the cap.**
 `periodization.BuildWithLoad` takes a `LoadInput` built by `api.loadInput`, which

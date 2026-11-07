@@ -160,7 +160,7 @@ const eventIndex = computed(() => weekIndexForDate(props.eventDate))
 const here = computed(() => {
   const w = weeks.value[todayIndex.value]
   if (!w) return null
-  return `You are here: week ${w.number} of ${totalWeeks.value}, ${phaseLabel(w.phase, w.recovery)}`
+  return `You are here: week ${w.number} of ${totalWeeks.value}, ${phaseLabel(w.phase, w.recovery, w.miniTaperDays)}`
 })
 
 const TONE_FILL: Record<ReturnType<typeof eventTone>, string> = {
@@ -313,7 +313,7 @@ function onKeydown(e: KeyboardEvent, w: PeriodizationWeek) {
           :stroke-width="w.startDate === selectedStart ? 2 : w.recovery ? 1 : 0"
           :stroke-dasharray="w.recovery && w.startDate !== selectedStart ? '2,2' : undefined"
         >
-          <title>Week {{ w.number }}, {{ phaseLabel(w.phase, w.recovery) }}, {{ weekLoad(w) }}</title>
+          <title>Week {{ w.number }}, {{ phaseLabel(w.phase, w.recovery, w.miniTaperDays) }}, {{ weekLoad(w) }}</title>
         </rect>
       </g>
 

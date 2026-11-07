@@ -7,8 +7,10 @@ import type { PeriodizationPhase } from '@/api/types'
 
 export const phaseOrder: PeriodizationPhase[] = ['base', 'build', 'peak', 'taper']
 
-export function phaseLabel(phase: PeriodizationPhase, recovery?: boolean): string {
-  return phase.charAt(0).toUpperCase() + phase.slice(1) + (recovery ? ' · recovery' : '')
+export function phaseLabel(phase: PeriodizationPhase, recovery?: boolean, miniTaperDays?: number): string {
+  return (
+    phase.charAt(0).toUpperCase() + phase.slice(1) + (recovery ? ' · recovery' : '') + (miniTaperDays ? ' · mini-taper' : '')
+  )
 }
 
 /** The phase's solid colour. */

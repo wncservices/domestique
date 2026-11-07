@@ -622,6 +622,9 @@ type periodizationWeekDTO struct {
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
 	Adjusted    bool    `json:"adjusted,omitempty"`
+	// MiniTaperDays is how many days before a priority B event drop to the
+	// taper's load inside this week; 0 for every other week.
+	MiniTaperDays int `json:"miniTaperDays,omitempty"`
 	// TargetTSS, PlannedCTL and LoadCapped are set only on the ctl basis: the
 	// week's load target, the CTL the plan expects at its start, and whether
 	// the rider's available hours cut that target short.
@@ -685,7 +688,7 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		wdto := periodizationWeekDTO{
 			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
 			Recovery: wk.Recovery, TargetHours: wk.TargetHours, Adjusted: wk.Adjusted,
-			TargetTSS: wk.TargetTSS, LoadCapped: wk.LoadCapped,
+			TargetTSS: wk.TargetTSS, LoadCapped: wk.LoadCapped, MiniTaperDays: wk.MiniTaperDays,
 		}
 		if plan.LoadBasis == "ctl" {
 			ctl := wk.PlannedCTL

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -187,5 +188,32 @@ func TestChangingPriorityWhileSchedulingIsBusyRebuildsOnceItFrees(t *testing.T) 
 
 	if got := eventWeek(); got <= taper {
 		t.Errorf("event week holds %.0f s after the lock freed, want more than the taper's %.0f s", got, taper)
+	}
+}
+
+// The periodization read tells the Plan page which week holds the mini-taper.
+func TestPeriodizationReadExposesTheMiniTaper(t *testing.T) {
+	h, g, _ := priorityRace(t, "B")
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var plan struct {
+		Weeks []struct {
+			Phase         string `json:"phase"`
+			MiniTaperDays int    `json:"miniTaperDays"`
+		} `json:"weeks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	last := plan.Weeks[len(plan.Weeks)-1]
+	if last.MiniTaperDays != 3 || last.Phase == "taper" {
+		t.Errorf("last week = %+v, want a non-taper week with 3 mini-taper days", last)
+	}
+	for _, w := range plan.Weeks[:len(plan.Weeks)-1] {
+		if w.MiniTaperDays != 0 {
+			t.Errorf("week %+v carries mini-taper days", w)
+		}
 	}
 }

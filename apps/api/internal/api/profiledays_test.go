@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -175,13 +176,16 @@ func TestSavingTheFirstAvailableDaysPlansExistingGoals(t *testing.T) {
 	}
 }
 
-func untouchedFutureIDs(h *seasonHarness, t *testing.T) map[string]bool {
+// untouchedFutureIDs maps every future session's id to what it holds (date,
+// name, planned seconds). Ids come from names, so a rebuilt session can keep
+// its id: a rebuild is told by the content changing, not the id.
+func untouchedFutureIDs(h *seasonHarness, t *testing.T) map[string]string {
 	t.Helper()
 	today := h.now.Format("2006-01-02")
-	m := map[string]bool{}
+	m := map[string]string{}
 	for _, w := range h.workouts(t) {
 		if w.Date > today {
-			m[w.ID] = true
+			m[w.ID] = fmt.Sprintf("%s|%s|%.0f", w.Date, w.Name, stepSeconds(w.Steps))
 		}
 	}
 	return m
@@ -205,12 +209,12 @@ func TestChangingOnlyHoursRebuildsUntouchedSessions(t *testing.T) {
 	h.putProfile(t, `{"availableDays":["thu","tue","sun","sat"],"hoursPerAvailableDay":2}`)
 
 	after := untouchedFutureIDs(h, t)
-	if !after[kept.ID] {
+	if _, ok := after[kept.ID]; !ok {
 		t.Error("the rider's edited session was deleted")
 	}
 	replaced := 0
-	for id := range before {
-		if id != kept.ID && !after[id] {
+	for id, was := range before {
+		if got, ok := after[id]; id != kept.ID && (!ok || got != was) {
 			replaced++
 		}
 	}
@@ -240,8 +244,8 @@ func TestSavingWithoutHoursClearsThemAndRebuilds(t *testing.T) {
 	}
 	after := untouchedFutureIDs(h, t)
 	same := 0
-	for id := range before {
-		if after[id] {
+	for id, was := range before {
+		if after[id] == was {
 			same++
 		}
 	}
