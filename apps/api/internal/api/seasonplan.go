@@ -331,40 +331,83 @@ func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
 	return removed, s.Training.DeleteScheduledWeeksAfter(ctx, g.ID, lastStart)
 }
 
-// rebuildSeasonForSport is what changing a goal's sport does to its plan. Every
-// week is already recorded and holds plan-made sessions of the old sport, and a
-// week is filled once per goal, so nothing would ever replace them. Untouched
-// plan-made sessions dated today or later go (a session of today the rider has
-// already ridden stays), each with its Garmin copy; the goal's scheduled-week
-// rows from this week on are forgotten; and this week's open days are filled at
-// once with the new sport's sessions. Later weeks are then empty and unrecorded,
-// so the season fill that follows builds them. Moved, edited, eased, test,
-// indoor, routed, ridden and past sessions are the rider's and stay. g is the
-// goal as updated. Takes the scheduling lock itself, so call it before
-// planGoalNow, not inside it. Returns how many sessions were deleted.
-func (s *Server) rebuildSeasonForSport(ctx context.Context, g workout.Goal) (int, error) {
+// rebuildReason says why a goal's plan is being rebuilt from today. It picks
+// the rebuild itself and what makes a background retry stale.
+type rebuildReason string
+
+const (
+	// rebuildSport: the goal's sport changed, so its own untouched sessions
+	// from today are the old sport's.
+	rebuildSport rebuildReason = "sport"
+	// rebuildTakeover: the goal is dated now (created, or its date set or
+	// moved), so the same rider's undated goals give up their untouched
+	// sessions from today through the event.
+	rebuildTakeover rebuildReason = "takeover"
+)
+
+// rebuildGoalFromToday is the one entry point for a goal edit that has to
+// replace sessions already planned, which a once-per-week fill would never do
+// on its own. g is the goal as updated.
+//
+// rebuildSport: every week is already recorded and holds plan-made sessions of
+// the old sport. Untouched plan-made sessions of g dated today or later go (a
+// session of today the rider has already ridden stays), each with its Garmin
+// copy; g's scheduled-week rows from this week on are forgotten; and this
+// week's open days are filled at once with the new sport's sessions.
+//
+// rebuildTakeover: the sessions of the rider's UNDATED goals from today through
+// g's event date go the same way, and those goals' rows for that stretch are
+// forgotten, so g's fill finds the days free. Weeks after the event stay
+// recorded; the undated goal fills them through the season pass when its
+// rolling window reaches them.
+//
+// Later weeks are then empty and unrecorded, so the season fill that follows
+// builds them. Moved, edited, eased, test, indoor, routed, ridden and past
+// sessions are the rider's and stay. Takes the scheduling lock itself, so call
+// it before planGoalNow, not inside it. When scheduling is busy it returns 0
+// and retries in the background. Returns how many sessions were deleted.
+func (s *Server) rebuildGoalFromToday(ctx context.Context, g workout.Goal, reason rebuildReason) (int, error) {
 	var (
 		removed int
 		err     error
 	)
 	ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
-		removed, err = s.rebuildSeasonLocked(ctx, g)
+		removed, err = s.rebuildLocked(ctx, g, reason)
 	})
 	if !ran {
 		// Scheduling is busy (a tick, another pod). The rider's edit must not
-		// leave the old sport's plan behind, so keep trying in the background.
-		s.retryRebuildForSport(g)
+		// leave the old plan behind, so keep trying in the background.
+		s.retryRebuild(g, reason)
 		return 0, nil
 	}
 	if err == nil {
-		s.logger().Info("goal sport changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "removed", removed)
+		s.logger().Info("goal changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "reason", string(reason), "removed", removed)
 	}
 	return removed, err
 }
 
-// rebuildSeasonLocked is the rebuild itself; the caller holds the scheduling
-// advisory lock. It takes seasonMu around its own writes only, so a season
-// fill can follow it in the same lock.
+// rebuildLocked dispatches on the reason; the caller holds the scheduling
+// advisory lock.
+func (s *Server) rebuildLocked(ctx context.Context, g workout.Goal, reason rebuildReason) (int, error) {
+	if reason == rebuildTakeover {
+		return s.takeOverUndatedGoalsLocked(ctx, g)
+	}
+	return s.rebuildSeasonLocked(ctx, g)
+}
+
+// staleRebuild reports whether a retried rebuild no longer applies to cur, the
+// goal as it stands now: a later edit owns the plan then.
+func staleRebuild(cur, was workout.Goal, reason rebuildReason) bool {
+	if reason == rebuildTakeover {
+		// The goal exists (the caller got it); it only has to still be dated.
+		return cur.EventDate == ""
+	}
+	return cur.Sport != was.Sport
+}
+
+// rebuildSeasonLocked is the sport rebuild itself; the caller holds the
+// scheduling advisory lock. It takes seasonMu around its own writes only, so a
+// season fill can follow it in the same lock.
 func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal) (int, error) {
 	s.seasonMu.Lock()
 	defer s.seasonMu.Unlock()
@@ -374,20 +417,11 @@ func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal) (int, 
 	if err != nil {
 		return 0, err
 	}
-	ridden, err := s.riddenToday(ctx, g.Rider, today, existing)
+	removed, err := s.removeUntouched(ctx, g.Rider, existing, today, func(wk workout.Workout) bool {
+		return wk.GoalID == g.ID
+	}, "")
 	if err != nil {
-		return 0, err
-	}
-	removed := 0
-	for _, wk := range existing {
-		if wk.GoalID != g.ID || wk.Date < today || !untouchedPlanSession(wk) || (wk.Date == today && ridden[wk.ID]) {
-			continue
-		}
-		s.removeWorkoutFromGarmin(ctx, wk)
-		if err := s.Training.DeleteWorkout(ctx, wk.ID); err != nil {
-			return removed, err
-		}
-		removed++
+		return removed, err
 	}
 	thisMonday := periodization.MondayOf(s.localNow())
 	// DeleteScheduledWeeksAfter is strictly after: the Monday before this
@@ -402,13 +436,79 @@ func (s *Server) rebuildSeasonLocked(ctx context.Context, g workout.Goal) (int, 
 	return removed, err
 }
 
-// retryRebuildForSport is startSeasonFill's retry loop for a sport change that
-// met the scheduling lock held. Each attempt re-reads the goal inside the lock
-// and stops quietly if it is gone or no longer has the sport being rebuilt for
-// (a later edit owns the plan then); a rebuild is followed by the season fill
-// for the later weeks. If the lock never frees it is an Error: the plan is
-// wrong and nothing will fix it unprompted.
-func (s *Server) retryRebuildForSport(g workout.Goal) {
+// takeOverUndatedGoalsLocked is the takeover rebuild: dated goal g claims the
+// calendar from today through its event from the rider's undated goals. The
+// caller holds the scheduling advisory lock.
+func (s *Server) takeOverUndatedGoalsLocked(ctx context.Context, g workout.Goal) (int, error) {
+	s.seasonMu.Lock()
+	defer s.seasonMu.Unlock()
+
+	today := s.localToday()
+	if g.EventDate == "" || g.EventDate < today {
+		return 0, nil
+	}
+	goals, err := s.Training.ListGoals(ctx, g.Rider)
+	if err != nil {
+		return 0, err
+	}
+	undated := map[string]bool{}
+	for _, o := range goals {
+		if o.ID != g.ID && o.EventDate == "" {
+			undated[o.ID] = true
+		}
+	}
+	if len(undated) == 0 {
+		return 0, nil
+	}
+	existing, err := s.Training.ListWorkouts(ctx, g.Rider)
+	if err != nil {
+		return 0, err
+	}
+	removed, err := s.removeUntouched(ctx, g.Rider, existing, today, func(wk workout.Workout) bool {
+		return undated[wk.GoalID]
+	}, g.EventDate)
+	if err != nil {
+		return removed, err
+	}
+	thisMonday := periodization.MondayOf(s.localNow()).Format(dateLayout)
+	for id := range undated {
+		if err := s.Training.DeleteScheduledWeeksBetween(ctx, id, thisMonday, g.EventDate); err != nil {
+			return removed, err
+		}
+	}
+	return removed, nil
+}
+
+// removeUntouched deletes the untouched plan-made sessions that pick selects,
+// dated today or later (and through lastDate when it is set), with their
+// Garmin copies. A session of today the rider has already ridden stays.
+func (s *Server) removeUntouched(ctx context.Context, rider string, existing []workout.Workout, today string, pick func(workout.Workout) bool, lastDate string) (int, error) {
+	ridden, err := s.riddenToday(ctx, rider, today, existing)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, wk := range existing {
+		if !pick(wk) || wk.Date < today || (lastDate != "" && wk.Date > lastDate) ||
+			!untouchedPlanSession(wk) || (wk.Date == today && ridden[wk.ID]) {
+			continue
+		}
+		s.removeWorkoutFromGarmin(ctx, wk)
+		if err := s.Training.DeleteWorkout(ctx, wk.ID); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// retryRebuild is startSeasonFill's retry loop for a rebuild that met the
+// scheduling lock held. Each attempt re-reads the goal inside the lock and
+// stops quietly if it is gone or staleRebuild says a later edit owns the plan;
+// a rebuild is followed by the season fill for the later weeks. If the lock
+// never frees it is an Error: the plan is wrong and nothing will fix it
+// unprompted.
+func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 	ctx := s.lifecycle()
 	retry := s.SeasonFillRetry
 	if retry <= 0 {
@@ -417,7 +517,7 @@ func (s *Server) retryRebuildForSport(g workout.Goal) {
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
-		defer s.guard("sport rebuild")
+		defer s.guard("season rebuild")
 		for attempt := 0; attempt < seasonFillAttempts; attempt++ {
 			if ctx.Err() != nil {
 				return
@@ -436,11 +536,11 @@ func (s *Server) retryRebuildForSport(g workout.Goal) {
 					}
 					return
 				}
-				if cur.Sport != g.Sport {
+				if staleRebuild(cur, g, reason) {
 					stale = true
 					return
 				}
-				if removed, err = s.rebuildSeasonLocked(ctx, cur); err == nil {
+				if removed, err = s.rebuildLocked(ctx, cur, reason); err == nil {
 					_, err = s.planSeason(ctx, cur)
 				}
 			})
@@ -452,7 +552,7 @@ func (s *Server) retryRebuildForSport(g workout.Goal) {
 					s.seasonPlanErr(g, err)
 					return
 				}
-				s.logger().Info("goal sport changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "removed", removed)
+				s.logger().Info("goal changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "reason", string(reason), "removed", removed)
 				return
 			}
 			select {
@@ -461,7 +561,7 @@ func (s *Server) retryRebuildForSport(g workout.Goal) {
 			case <-time.After(retry):
 			}
 		}
-		s.logger().Error("goal sport changed but the season was not rebuilt: scheduling stayed busy", "goal", g.ID, "rider", g.Rider)
+		s.logger().Error("goal changed but the season was not rebuilt: scheduling stayed busy", "goal", g.ID, "rider", g.Rider, "reason", string(reason))
 	}()
 }
 

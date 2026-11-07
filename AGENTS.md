@@ -601,13 +601,26 @@ its rows. Editing a goal so its plan ends earlier makes the goal-save pass
 week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,
 eased, test, ridden and past sessions are kept.
 
-**Changing a goal's sport rebuilds its plan from today.** Every week is recorded and
-holds the old sport's sessions, so fill-once would never replace them.
-`rebuildSeasonForSport` (run by `handleUpdateGoal` before `planGoalNow`, under the
-scheduling locks) deletes the goal's untouched plan-made sessions dated today or
-later (and their Garmin copies), forgets its `scheduled_weeks` rows from this
-week on, and tops up this week; later weeks then fill as new. Rider-touched and
-past sessions stay.
+**A goal edit that must replace planned sessions goes through `rebuildGoalFromToday`**
+(`seasonplan.go`, run by `handleCreateGoal`/`handleUpdateGoal` before `planGoalNow`,
+under the scheduling locks; when the lock is busy `retryRebuild` keeps trying in the
+background and `staleRebuild` stops it once a later edit owns the plan). Two reasons:
+
+- *Sport change.* Every week is recorded and holds the old sport's sessions, so
+  fill-once would never replace them. The goal's untouched plan-made sessions dated
+  today or later (and their Garmin copies) go, its `scheduled_weeks` rows from this
+  week on are forgotten, and this week is topped up; later weeks fill as new.
+- *Takeover.* A goal that is dated at creation, or becomes dated or has its date moved,
+  takes the calendar from the same rider's **undated** goals: their untouched
+  plan-made sessions from today through the event date (and Garmin copies) go and
+  their `scheduled_weeks` rows for that stretch are forgotten, then the dated goal
+  fills. The undated goal's weeks after the event stay recorded, and it fills again
+  through the normal season pass as its rolling window reaches them. Two dated goals
+  never take from each other: the first to fill keeps its days.
+
+Rider-touched and past sessions stay in both. `fillWeek` does not record a week in
+which it placed nothing because other goals' sessions hold every day: recorded-empty
+would keep that goal empty there for good, after the holder is gone.
 
 **A week built months ahead uses that day's levels and FTP, so it is refreshed
 once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).

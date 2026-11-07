@@ -498,6 +498,16 @@ func (d *DB) DeleteScheduledWeeksAfter(ctx context.Context, goalID, lastWeekStar
 	return err
 }
 
+// DeleteScheduledWeeksBetween forgets goalID's recorded weeks whose Monday lies
+// from fromWeekStart to toDate, both inclusive. It is how a dated goal taking
+// over a stretch of the calendar clears an undated goal's record of that
+// stretch only, leaving the weeks beyond it recorded.
+func (d *DB) DeleteScheduledWeeksBetween(ctx context.Context, goalID, fromWeekStart, toDate string) error {
+	_, err := d.db.ExecContext(ctx, d.query(
+		`DELETE FROM scheduled_weeks WHERE goal_id = ? AND week_start >= ? AND week_start <= ?`), goalID, fromWeekStart, toDate)
+	return err
+}
+
 // MarkWeekRefreshed records that a recorded week's untouched sessions have
 // been rebuilt from the plan and levels as they stand now (or were built from
 // them in the first place), so it is not done again. It never records a week

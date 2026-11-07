@@ -349,6 +349,12 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("goal created", "id", g.ID, "rider", rider)
+	// A race added later takes the days up to its event from the stay-fit goal.
+	if g.EventDate != "" {
+		if _, err := s.rebuildGoalFromToday(r.Context(), g, rebuildTakeover); err != nil {
+			s.logger().Error("could not hand the days to a dated goal", "goal", g.ID, "rider", rider, "err", err)
+		}
+	}
 	// Before the response, this week; after it, the rest of the season.
 	s.planGoalNow(r.Context(), g)
 	writeJSON(w, http.StatusCreated, goalDTOFrom(g))
@@ -440,8 +446,15 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	// The plan is filled once per goal, so a new sport has to clear the old
 	// sport's untouched sessions first or nothing would ever replace them.
 	if updated.Sport != g.Sport {
-		if _, err := s.rebuildSeasonForSport(r.Context(), updated); err != nil {
+		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildSport); err != nil {
 			s.logger().Error("could not rebuild the season after a sport change", "goal", id, "rider", g.Rider, "err", err)
+		}
+	}
+	// A goal that is dated now, or whose date moved, takes the days from the
+	// rider's undated goals up to its event.
+	if updated.EventDate != "" && updated.EventDate != g.EventDate {
+		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildTakeover); err != nil {
+			s.logger().Error("could not hand the days to a dated goal", "goal", id, "rider", g.Rider, "err", err)
 		}
 	}
 	// A new event date or sport can add weeks to the plan.
@@ -952,6 +965,7 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 	for d := range blackout {
 		alreadyScheduled[d] = true
 	}
+	heldByGoal := map[string]bool{}
 	for _, wk := range existing {
 		// A crew ride takes its day whether or not it is linked to a goal, but not
 		// here: fixedOption hands it to scheduler.WeekWorkouts, which drops the slot
@@ -959,12 +973,14 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		// A check on CrewRideID in this condition was redundant and untested.
 		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
+			heldByGoal[wk.Date] = true
 			// A workout moved to another day by an automatic adjustment
 			// leaves its original day empty. That day is not free: it is
 			// where the session was planned, and scheduling must not read the
 			// gap and plan it again on top of the moved one.
 			if from, ok := scheduler.MovedFrom(wk); ok {
 				alreadyScheduled[from] = true
+				heldByGoal[from] = true
 			}
 		}
 	}
@@ -988,16 +1004,26 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 	// the season pass adopt the half-built week as a legacy one (see
 	// planSeason) and the rest of it would never be made.
 	var fresh []workout.CreateWorkoutRequest
-	skipped := 0
+	skipped, heldSkipped := 0, 0
 	for _, req := range requests {
 		if req.Date < fromDate {
 			continue
 		}
 		if alreadyScheduled[req.Date] {
 			skipped++
+			if heldByGoal[req.Date] {
+				heldSkipped++
+			}
 			continue
 		}
 		fresh = append(fresh, req)
+	}
+	// Nothing placed because other sessions hold every day: not a filled week.
+	// Recording it would leave this goal empty here for good, even after the
+	// goal that holds the days is deleted or moves on (a race added over a
+	// stay-fit goal's weeks, and the stay-fit goal's weeks after it).
+	if len(fresh) == 0 && heldSkipped > 0 {
+		return nil, skipped, nil
 	}
 	created, err := s.Training.FillWeek(ctx, g.ID, week.StartDate, fresh, week.StartDate <= s.refreshHorizon())
 	if err != nil {
