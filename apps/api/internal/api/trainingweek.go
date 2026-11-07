@@ -123,6 +123,7 @@ func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, 
 	// than failing the whole week.
 	analyses := s.analysesSince(ctx, rider, start.Format(dateLayout))
 	awards := s.awardsSince(ctx, rider, start.Format(dateLayout))
+	profile := s.zoneProfile(ctx, rider)
 	// Degrades like analysesSince: without it the week only loses the
 	// "linked by you" marker.
 	links, err := s.Training.SessionLinks(ctx, rider)
@@ -160,7 +161,7 @@ func (s *Server) buildTrainingWeekDTO(ctx context.Context, rider string, start, 
 			dto.Totals.PlannedSeconds += d.PlannedSeconds
 		}
 		for _, sess := range doneBy[date] {
-			c := completedSessionDTOFrom(sess, analyses, awards)
+			c := completedSessionDTOFrom(sess, analyses, awards, profile)
 			_, c.LinkedByHand = links[sess.ID]
 			day.Completed = append(day.Completed, c)
 			dto.Totals.CompletedSeconds += sess.DurationSeconds

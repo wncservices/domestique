@@ -625,3 +625,33 @@ func TestFTPAndPaceBranchesIgnoreThresholdHR(t *testing.T) {
 		t.Errorf("running with a pace = %v, want pace", tt)
 	}
 }
+
+func TestHRRangeAutoRiderIsUnchangedByTheZoneSettingCode(t *testing.T) {
+	// An explicit "no setting" must give today's Friel numbers exactly.
+	low, high, ok := HRRange(model.SportCycling, workout.RiderProfile{ThresholdHR: 160}, "endurance")
+	if !ok || !approx(low, 160*0.81) || !approx(high, 160*0.89) {
+		t.Errorf("got [%v, %v] ok=%v", low, high, ok)
+	}
+}
+
+func TestHRRangeFollowsACustomSetting(t *testing.T) {
+	p := workout.RiderProfile{
+		ThresholdHR: 160, MaxHR: 190,
+		HRZonesCycling: workout.HRZoneSetting{Method: workout.HRZonesCustom, Bounds: []int{120, 140, 155, 170}},
+	}
+	low, high, ok := HRRange(model.SportCycling, p, "endurance")
+	if !ok || low != 120 || high != 140 {
+		t.Errorf("endurance = [%v, %v] ok=%v, want [120, 140]", low, high, ok)
+	}
+	// Running has no setting of its own, so it keeps the Friel table.
+	low, _, _ = HRRange(model.SportRunning, p, "endurance")
+	if !approx(low, 160*0.85) {
+		t.Errorf("running low = %v, want the automatic table", low)
+	}
+	// The ceiling still caps a custom band.
+	p.MaxHR = 165
+	_, high, _ = HRRange(model.SportCycling, p, "vo2max")
+	if high != 165 {
+		t.Errorf("vo2max high = %v, want capped at 165", high)
+	}
+}

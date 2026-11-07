@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/wncservices/domestique/apps/api/internal/hrzones"
 	"github.com/wncservices/domestique/apps/api/internal/model"
 	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
@@ -170,6 +171,15 @@ func lthrHRRange(sport model.Sport, zone string) (low, high float64) {
 // The basis switches per rider, never globally. Exported so
 // scheduler.enduranceZoneTarget shares the one table.
 func HRRange(sport model.Sport, profile workout.RiderProfile, zone string) (low, high float64, ok bool) {
+	// A rider's own zone setting wins; an automatic one returns ok false and
+	// falls through to the tables below, exactly as before.
+	if low, high, ok := hrzones.Range(profile, string(sport), zone); ok {
+		if profile.MaxHR > 0 {
+			ceiling := float64(profile.MaxHR)
+			low, high = math.Min(low, ceiling), math.Min(high, ceiling)
+		}
+		return low, high, true
+	}
 	switch {
 	case profile.ThresholdHR > 0:
 		lowFrac, highFrac := lthrHRRange(sport, zone)
