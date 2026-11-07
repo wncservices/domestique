@@ -596,7 +596,14 @@ no plan-made workout in it. It never tops up a week it filled before: a session
 the rider deleted, moved or rewrote stays that way, including on the Monday the
 week becomes current. **A week that yields no sessions (no profile days yet) is
 not recorded**, or the empty season would be permanent. Deleting a goal deletes
-its rows. Editing a goal so its plan ends earlier makes the goal-save pass
+its rows, and `handleDeleteGoal` first removes its untouched plan-made sessions dated
+today or later (never one ridden today) with their Garmin copies, then deletes the goal, in
+one hold of the scheduling lock (409 with Replan's wording when it is busy, nothing changed:
+once `DeleteGoal` clears `goal_id` no retry could find the sessions). Touched and past
+sessions stay as the rider's own (`goal_id` ''), and a session with no goal **holds its day**
+in `fillWeek` (rider-built ones too), so the rider's remaining goals, which the handler
+re-plans at once through `planRiderGoals` (dated first), never put a second session on it.
+Editing a goal so its plan ends earlier makes the goal-save pass
 `trimSeason` delete the untouched plan-made sessions dated after the new last
 week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,
 eased, test, ridden and past sessions are kept.
@@ -1532,7 +1539,7 @@ state file ──────Open────> state.Store ───┘
   `UpdateWorkout` leaves them stale), so rolling back across this release needs a restart of the new
   image to reconcile.
   `edited_at` is set by every `UpdateWorkout`, so it means "any edit" for now, as `UpdatedAt ==
-  CreatedAt` did. `DeleteGoal` turns the goal's unlinked plan sessions into origin `rider`.
+  CreatedAt` did. `DeleteGoal` turns the goal's remaining (touched or past) plan sessions into origin `rider`; the handler removes the untouched future ones first.
 
 `model.Route` carries **no file paths**. A route is a row; fetch its track through the library.
 

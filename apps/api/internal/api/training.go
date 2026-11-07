@@ -479,17 +479,41 @@ func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Not while a season pass is writing this goal's weeks, or the pass could
-	// record one after the goal has forgotten them all.
-	s.seasonMu.Lock()
-	err = s.Training.DeleteGoal(r.Context(), id)
-	s.seasonMu.Unlock()
+	// The goal's untouched future sessions go with it, Garmin copies included,
+	// and only then the goal: they are found by goal id, which DeleteGoal
+	// clears. Both happen in one hold of the scheduling lock (and seasonMu, so
+	// a season pass cannot record a week after the goal forgot them all). If
+	// the lock is busy nothing is deleted and the rider retries (409), rather
+	// than deleting the goal and leaving sessions no retry could find.
+	var removed int
+	ran := withDBLock(r.Context(), s.dbConn(), autoScheduleLockKey, func() {
+		s.seasonMu.Lock()
+		defer s.seasonMu.Unlock()
+		var existing []workout.Workout
+		if existing, err = s.Training.ListWorkouts(r.Context(), g.Rider); err != nil {
+			return
+		}
+		if removed, err = s.removeUntouched(r.Context(), g.Rider, existing, s.localToday(), func(wk workout.Workout) bool {
+			return wk.GoalID == id
+		}, ""); err != nil {
+			return
+		}
+		err = s.Training.DeleteGoal(r.Context(), id)
+	})
+	if !ran {
+		s.logger().Warn("goal not deleted: scheduling is busy", "id", id)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": replanLockedMessage})
+		return
+	}
 	if err != nil {
 		s.failTrainingLookup(w, err)
 		return
 	}
+	// The rider's other goals take the freed days back now (dated first), not
+	// at the next tick.
+	s.planRiderGoals(r.Context(), g.Rider)
 
-	s.logger().Info("goal deleted", "id", id, "by", identity.User)
+	s.logger().Info("goal deleted", "id", id, "by", identity.User, "removed", removed)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -980,6 +1004,16 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		// here: fixedOption hands it to scheduler.WeekWorkouts, which drops the slot
 		// on its day (applyFixed), so no session is ever made there to be skipped.
 		// A check on CrewRideID in this condition was redundant and untested.
+		// A session with no goal holds its day too: it is the rider's own, or a
+		// plan session whose goal was deleted after the rider had touched it.
+		// Planning another on top would give the day two sessions.
+		// A session with no goal holds its day too: it is the rider's own, or a
+		// plan session whose goal was deleted after the rider had touched it.
+		// Planning another on top would give the day two sessions.
+		if wk.GoalID == "" {
+			alreadyScheduled[wk.Date] = true
+			heldByGoal[wk.Date] = true
+		}
 		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
 			if wk.GoalID != g.ID {
