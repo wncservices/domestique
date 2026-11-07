@@ -1,10 +1,18 @@
 name: CI
 
+# Pull requests run everything except the race detector on the full suite,
+# which is about nine times the cost of a plain run: a PR gets a race job over
+# the concurrency-heavy tests, and main (every push) and the nightly run get
+# the whole suite under -race. No workflow-level paths filter: it would leave
+# a docs-only PR's required checks pending forever; the changes job skips the
+# Go and Docker jobs instead, and a skipped job reports as passed.
 on:
   pull_request:
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       api: ${{ steps.diff.outputs.api }}
+      docker: ${{ steps.diff.outputs.docker }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,8 +48,9 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if ! changed="$(git diff --name-only "$BASE...$HEAD")" || [ -z "$changed" ]; then
-            echo "api=true" >> "$GITHUB_OUTPUT"; exit 0
+          # A push or a scheduled run has no pull request to diff: run all.
+          if [ -z "$BASE" ] || ! changed="$(git diff --name-only "$BASE...$HEAD")" || [ -z "$changed" ]; then
+            echo "api=true" >> "$GITHUB_OUTPUT"; echo "docker=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           # Go tests that read a frontend file (rideanalysis checks
           # fitnessMath.ts against the Go formulas) make that file API-relevant.
@@ -56,22 +66,43 @@ jobs:
           done <<< "$changed"
           echo "api=$api" >> "$GITHUB_OUTPUT"
           echo "Go jobs needed: $api"
+          # The image build only changes with its own inputs: the Dockerfile,
+          # dependency manifests and toolchain pins, and the CLI whose flags the
+          # image's default command uses. image.yml builds and smoke-tests the
+          # image on every push to main, which is the backstop for the rest.
+          docker=false
+          while IFS= read -r f; do
+            case "$f" in
+              Dockerfile|.dockerignore|.nvmrc|.tool-versions|go.work|go.work.sum|package.json|package-lock.json|\
+              apps/api/go.mod|apps/api/go.sum|apps/api/cmd/*|apps/web/package.json|apps/web/vite.config.*|apps/web/index.html|\
+              .github/workflows/ci.yml) docker=true; break ;;
+            esac
+          done <<< "$changed"
+          echo "docker=$docker" >> "$GITHUB_OUTPUT"
+          echo "Docker job needed: $docker"
 
   api:
-    # The required check keeps its name; the work is in api-tests below. This
-    # job builds, checks formatting, and fails if any test shard did. Skipped
-    # (and so passed) when the change is frontend only.
+    # The required check keeps its name; the work is in api-build and
+    # api-tests, which run side by side. This job only fails if either did.
+    # Skipped (and so passed) when the change is frontend only.
     name: API — build & tests
     runs-on: ubuntu-latest
-    needs: [changes, api-tests]
+    needs: [changes, api-build, api-tests]
     if: ${{ !cancelled() && needs.changes.outputs.api == 'true' }}
     steps:
-      - name: Every test shard passed
+      - name: The build and every test shard passed
         run: |
-          if [ "${{ needs.api-tests.result }}" != "success" ]; then
-            echo "::error::API test shards: ${{ needs.api-tests.result }}"
+          if [ "${{ needs.api-build.result }}" != "success" ] || [ "${{ needs.api-tests.result }}" != "success" ]; then
+            echo "::error::API build: ${{ needs.api-build.result }}, test shards: ${{ needs.api-tests.result }}"
             exit 1
           fi
+
+  api-build:
+    name: API build & gofmt
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' }}
+    steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -118,6 +149,12 @@ jobs:
             shard: 2
           - name: api 3/3
             shard: 3
+          # On a pull request the shards run without -race; this job runs the
+          # tests most likely to race (locks, replicas, limits, parallel
+          # requests) under it. On main and nightly every job runs -race and
+          # this one would only repeat them.
+          - name: race (concurrency tests)
+            racesubset: true
     services:
       # PostgreSQL is what this runs against in the cluster. SQLite passing
       # says nothing about it: placeholders, booleans and blob types all
@@ -155,22 +192,26 @@ jobs:
         # Packages run in parallel: each test owns a PostgreSQL schema
         # (internal/pgtest) and a SQLite file, so they share nothing. The
         # old `-p 1` is gone.
-        # -cover prints a coverage figure per package; the three api shards
-        # each report only their share of internal/api, and nothing merges
-        # them (no coverage profile is consumed anywhere).
+        # -race only off pull requests (see the top of this file); no -cover,
+        # since nothing reads a coverage figure.
         working-directory: apps/api
+        env:
+          RACE: ${{ github.event_name == 'pull_request' && '' || '-race' }}
         run: |
-          if [ -n "${{ matrix.shard }}" ]; then
+          if [ -n "${{ matrix.racesubset }}" ]; then
+            if [ -n "$RACE" ]; then echo "every job runs -race here; nothing to add"; exit 0; fi
+            go test ./... -count=1 -race -timeout 25m -run 'Concurrent|Parallel|Replica|Lock|Busy|Race|Limit|Slot|Twice|Once'
+          elif [ -n "${{ matrix.shard }}" ]; then
             run="$(../../scripts/test-shard.sh ${{ matrix.shard }} 3)"
-            go test ./internal/api -count=1 -race -cover -timeout 25m -run "$run"
+            go test ./internal/api -count=1 $RACE -timeout 25m -run "$run"
           else
-            go test $(go list ./... | grep -v '/internal/api$') -count=1 -race -cover -timeout 25m
+            go test $(go list ./... | grep -v '/internal/api$') -count=1 $RACE -timeout 25m
           fi
       - name: Fail if the PostgreSQL tests were skipped
         # A silently skipped engine is worse than no test: it reads green while
         # covering nothing. DOMESTIQUE_REQUIRE_POSTGRES already turns a missing
         # server into a failure; this checks the tests really ran against it.
-        if: ${{ !matrix.shard }}
+        if: ${{ !matrix.shard && !matrix.racesubset }}
         working-directory: apps/api
         run: |
           if go test ./internal/source/ -run TestEachEngine -v 2>&1 | grep -q "SKIP.*postgres"; then
@@ -218,6 +259,8 @@ jobs:
   docker:
     name: Docker image builds
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.docker == 'true' }}
     steps:
       - uses: actions/checkout@v7
         with:
