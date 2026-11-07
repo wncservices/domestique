@@ -209,14 +209,20 @@ func TestSettingADateOnAGoalTakesTheStayFitDays(t *testing.T) {
 			t.Errorf("stay-fit session on %s survived", w.Date)
 		}
 	}
-	got := 0
+	// The dated goal holds every available day from today to the day before its
+	// event, the event day being the session.
+	have := map[string]bool{}
 	for _, w := range h.goalSessions(t, other.ID) {
-		if w.Date >= h.now.Format("2006-01-02") && w.Date <= raceTwentyWeeksOut {
-			got++
-		}
+		have[w.Date] = true
 	}
-	if got == 0 {
-		t.Error("the newly dated goal received no sessions on the days it took")
+	today := h.now.Format("2006-01-02")
+	for d := h.now; d.Format("2006-01-02") < raceTwentyWeeksOut; d = d.AddDate(0, 0, 1) {
+		switch d.Weekday() {
+		case time.Tuesday, time.Thursday, time.Saturday, time.Sunday:
+			if date := d.Format("2006-01-02"); date >= today && !have[date] {
+				t.Errorf("the newly dated goal has no session on its available day %s", date)
+			}
+		}
 	}
 }
 

@@ -76,7 +76,8 @@ type Goal struct {
 	// derived from the event's duration.
 	PacingIF float64
 	// PlanAnchor is the instant the plan's week 1 counts from, RFC 3339; ""
-	// means CreatedAt. Giving the goal a new event date sets it to that moment.
+	// means CreatedAt. Giving the goal a new event date sets it to that moment,
+	// so it is the last reset, not the creation.
 	PlanAnchor string
 	CreatedAt  string
 	UpdatedAt  string

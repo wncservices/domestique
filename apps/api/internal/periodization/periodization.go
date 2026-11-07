@@ -305,11 +305,12 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 	return plan, pos, nil
 }
 
-// planAnchor is the Monday week 1 falls on: the Monday of the goal's
-// creation (or of its last re-dating, when PlanAnchor is set), in today's own
-// zone. A goal with no usable creation date, or one "created in the future" (clock skew, hand-built test goals), anchors to
-// this week instead. That clamp is also what lets internal/adapter build the
-// plan as of some past date: a goal younger than that date is anchored there.
+// planAnchor is the Monday week 1 falls on: the Monday of the goal's last
+// reset (when PlanAnchor is set) or else of its creation, in today's own zone.
+// A goal with no usable creation date, or one "created in the future" (clock
+// skew, hand-built test goals), anchors to this week instead. That clamp is
+// also what lets internal/adapter build the plan as of some past date: a goal
+// younger than that date is anchored there.
 func planAnchor(goal workout.Goal, today time.Time) time.Time {
 	thisWeek := MondayOf(today)
 	from := goal.CreatedAt

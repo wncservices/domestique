@@ -417,10 +417,10 @@ func goals(in Input) []GoalResult {
 }
 
 // GoalPeriod is a goal's own season: from the day its plan is anchored (its
-// last re-dating when PlanAnchor is set, else its creation) to its event. The creation stamp is an instant, so loc (the rider's
-// training timezone; nil is UTC) says which calendar day it was. ok is false for
-// a goal that has no event date, was created after it, or whose dates cannot be
-// read.
+// last reset when PlanAnchor is set, else its creation) to its event. The
+// anchor stamp is an instant, so loc (the rider's training timezone; nil is
+// UTC) says which calendar day it was. ok is false for a goal that has no
+// event date, was created after it, or whose dates cannot be read.
 func GoalPeriod(g workout.Goal, loc *time.Location) (Period, bool) {
 	anchored := g.CreatedAt
 	if g.PlanAnchor != "" {

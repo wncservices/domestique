@@ -611,7 +611,14 @@ eased, test, ridden and past sessions are kept.
 **A goal edit that must replace planned sessions goes through `rebuildGoalFromToday`**
 (`seasonplan.go`, run by `handleCreateGoal`/`handleUpdateGoal` before `planGoalNow`,
 under the scheduling locks; when the lock is busy `retryRebuild` keeps trying in the
-background and `staleRebuild` stops it once a later edit owns the plan). Three reasons:
+background and `staleRebuild` stops it once a later edit owns the plan). Five reasons
+(`rebuildReason`): sport, takeover and days below; **redate** under *A new event date is a new
+plan*; **priority** under *A goal's priority shapes the end of its plan*. A rebuild that met the
+busy lock tells its caller (`deferred`), and the caller then starts no season fill of its own: the
+retry rebuilds *and* plans in one hold, while a plain fill that won the lock first would record
+the goal's weeks part-filled around days the rebuild had yet to free. At most one days retry is
+pending per rider (`claimDaysRetry`): it reads the profile when it runs, so a later save joins it
+instead of rebuilding the same plan again and churning Garmin copies.
 
 - *Sport change.* Every week is recorded and holds the old sport's sessions, so
   fill-once would never replace them. The goal's untouched plan-made sessions dated
@@ -648,21 +655,36 @@ week through the week of any of the rider's dated goals' events, and does not re
 it: the takeover and the dated goal's own fill are separate lock holds, and a tick
 in between must not hand the freed days back.
 
-**No plan session is dated after the event.** `fillWeek` (the only place that creates plan
-sessions) drops slots dated after a dated goal's `EventDate`, so an event on a Wednesday leaves
-that week's Thursday to Sunday empty, and `trimSeason` removes untouched sessions after the event
-date itself (not after the end of its week). The event week still belongs to the dated goal as a
-whole (`inDatedGoalSpan` is week-granular): an undated goal resumes the Monday after, and the
-days between the event and Sunday stay empty rather than being split between two goals.
+**No plan session is dated on or after the event, for every priority: the event is the session.**
+The event week carries `Week.EventDate` (every dated plan, not only B), and
+`scheduler.splitEventWeek` drops the available days on or after it when the week is generated, so the
+week's hours are shared by the days before it. That is the one rule: `fillWeek` and `refreshWeek` both
+build through it. `trimSeason` removes untouched sessions on or after the event day. The event week
+still belongs to the dated goal as a whole (`inDatedGoalSpan` is week-granular): an undated goal
+resumes the Monday after, and the days between the event and Sunday stay empty rather than being
+split between two goals.
+
+**A span a dated goal gives up is refilled around what the rider kept** (`refillFreedWeeks`). Deleting
+a dated goal (inside the delete's lock hold), dating it earlier or making it undated (the redate rebuild)
+frees weeks the takeover had forgotten for the rider's undated goals. A freed week where such a goal kept a
+session the rider touched is filled around it at once and recorded; left to the season pass it would
+read that session as "already filled" (the legacy rule) and be recorded nearly empty. `planSeason` does
+not record such a week while it is still inside a dated goal's span. Weeks holding nothing of the goal
+are left to the season fill.
 
 **A new event date is a new plan.** The plan counts weeks from `periodization.planAnchor`: the Monday
 of `goals.plan_anchor`, else of `created_at` (the column is '' until a re-dating, so older rows need no
-backfill). `UpdateGoal` sets it to now (`movesPlan`) when the goal was or becomes undated or the date moves by more than 14 days either way; a nudge of 14 or less keeps the anchor and the build done, but still rebuilds. `seasonreview.GoalPeriod` starts at the same anchor. So an old goal given a date 10
+backfill). `UpdateGoal` sets it to now (`movesPlan`) when the goal was or becomes undated or the date moves by
+more than 14 days either way; a nudge of 14 or less keeps the anchor and the build done, but still
+rebuilds. `seasonreview.GoalPeriod` starts at the same anchor. So an old goal given a date 10
 weeks out starts in base like a goal created today, instead of landing 30 weeks in with no base. The
-handler then runs `rebuildGoalFromToday(..., rebuildRedate)`: the sport rebuild of the goal itself
-(its untouched sessions from today go, its weeks are forgotten, this week is topped up) followed by the
-undated-goal takeover, in one lock hold, so the taper moves to the new date and moved, edited, eased,
-ridden and past sessions stay. A retry is stale when a later edit has changed the date again.
+handler then runs `rebuildGoalFromToday(..., rebuildRedate)`: the undated-goal takeover first
+(so the days it frees are free), then the sport rebuild of the goal itself (its untouched sessions from
+today go, its weeks are forgotten, this week is topped up), then `refillFreedWeeks` for the days the goal
+gave up, in one lock hold, so the taper moves to the new date and moved, edited, eased, ridden and past
+sessions stay. A retry is stale when a later edit has changed the date again. **Rollback:** an older image
+ignores `plan_anchor`, so a re-dated goal falls back to anchoring at its creation, and the one-time
+migration of dated B goals to A is not undone.
 
 **A week built months ahead uses that day's levels and FTP, so it is refreshed
 once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).
@@ -685,9 +707,10 @@ uses the rider's levels *now*.
 **Creating or editing a goal is validated before anything is written.** `POST /api/training/goals` and `PATCH /api/training/goals/{id}` answers 422 for an
 unknown sport (cycling or running), a priority outside A/B/C, a date that is not `YYYY-MM-DD` (empty is allowed and
 makes the goal undated), a negative target or an empty name (`goalPatchProblem`); a stored bad date used to log an
-Error on every tick. After a sport or date change rebuilds today's session, a rider with auto-push on has today's
-session pushed in the same request (`pushTodayIfOptedIn`), or from the background retry once it succeeds, rather
-than waiting up to half an hour for the tick; the old copy is withdrawn either way.
+Error on every tick. After any rebuild or re-plan (a sport, date, priority or takeover change, a days or hours change,
+the first days, a goal delete) a rider with auto-push on has today's session pushed in the same request,
+once per request and not per goal (`pushTodayIfOptedIn`), or from the background retry once it succeeds,
+rather than waiting up to half an hour for the tick; the old copy is withdrawn either way.
 
 **A goal's priority shapes the end of its plan** (`periodization.hasTaper`, `Week.MiniTaperDays`).
 A dated goal defaults to priority **A** (an undated one to B; `CreateGoal`, the goal form and the LLM
@@ -699,9 +722,10 @@ event falls early in its week; the event day is the session and is not counted) 
 daily load, solved like the taper's so the event-day TSB lands on the form-band midpoint
 (`loadRun.miniTaper`, `solveDailyLoad`). The week's `TargetTSS`/`TargetHours` already include the drop,
 it is not `LoadCapped` and has no ramp, so the ledger measures debt against the reduced target. The
-scheduler honours the days (`splitMiniTaper`): sessions on and after the event are dropped, the days
-from `MiniTaperStart` are easy endurance rides of `MiniTaperDayHours` each (the window's hours shared by
-the available days in it), structured sessions are placed only on the earlier days, and the week gets no
+scheduler honours the days (`splitEventWeek`): sessions on and after the event are dropped, the days
+from `MiniTaperStart` are easy endurance rides of `MiniTaperDayHours` each (a day the rider cannot train
+does not hand its hours to the others, so a Saturday-only rider with a Sunday race gets one day's taper
+load on Saturday), structured sessions are placed only on the earlier days, and the week gets no
 route-demand bias, `WithTargetTSS` boost or third hard session. **C has no taper and no mini-taper**: the
 event week is an ordinary week. Everything that asks "is this a reduced week" goes through
 `Week.Reduced()` (recovery, taper phase, or `MiniTaperDays > 0`): the ledger (a reduced week is opened
