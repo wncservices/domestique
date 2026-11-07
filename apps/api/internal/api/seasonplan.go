@@ -400,25 +400,26 @@ const (
 // builds them. Moved, edited, eased, test, indoor, routed, ridden and past
 // sessions are the rider's and stay. Takes the scheduling lock itself, so call
 // it before planGoalNow, not inside it. When scheduling is busy it returns 0
-// and retries in the background. Returns how many sessions were deleted.
-func (s *Server) rebuildGoalFromToday(ctx context.Context, g workout.Goal, reason rebuildReason) (int, error) {
-	var (
-		removed int
-		err     error
-	)
+// and deferred, and retries (rebuild and season fill) in the background.
+// Returns how many sessions were deleted.
+func (s *Server) rebuildGoalFromToday(ctx context.Context, g workout.Goal, reason rebuildReason) (removed int, deferred bool, err error) {
 	ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
 		removed, err = s.rebuildLocked(ctx, g, reason)
 	})
 	if !ran {
 		// Scheduling is busy (a tick, another pod). The rider's edit must not
-		// leave the old plan behind, so keep trying in the background.
+		// leave the old plan behind, so keep trying in the background. The
+		// retry plans the season itself, in the same lock hold as the rebuild,
+		// so the caller must not start a fill of its own meanwhile: one that
+		// won the lock first would fill the goal's weeks around days the
+		// rebuild has yet to free, and record them part-filled.
 		s.retryRebuild(g, reason)
-		return 0, nil
+		return 0, true, nil
 	}
 	if err == nil {
 		s.logger().Info("goal changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "reason", string(reason), "removed", removed)
 	}
-	return removed, err
+	return removed, false, err
 }
 
 // rebuildLocked dispatches on the reason; the caller holds the scheduling
@@ -727,6 +728,12 @@ func (s *Server) removeUntouched(ctx context.Context, rider string, existing []w
 // never frees it is an Error: the plan is wrong and nothing will fix it
 // unprompted.
 func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
+	if reason == rebuildDays && !s.claimDaysRetry(g.Rider) {
+		// One is already waiting for this rider and will read the profile as it
+		// stands when it gets the lock, which is this save's too. A second
+		// would rebuild the same plan again, churning sessions and Garmin copies.
+		return
+	}
 	ctx := s.lifecycle()
 	retry := s.SeasonFillRetry
 	if retry <= 0 {
@@ -736,6 +743,9 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 	go func() {
 		defer s.background.Done()
 		defer s.guard("season rebuild")
+		if reason == rebuildDays {
+			defer s.releaseDaysRetry(g.Rider)
+		}
 		for attempt := 0; attempt < seasonFillAttempts; attempt++ {
 			if ctx.Err() != nil {
 				return
@@ -763,6 +773,11 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 					stale = true
 					return
 				}
+				if reason == rebuildDays {
+					// A save from here on is not covered by this run (the
+					// profile is read below), so it may start its own retry.
+					s.releaseDaysRetry(cur.Rider)
+				}
 				if removed, err = s.rebuildLocked(ctx, cur, reason); err == nil {
 					err = s.planRebuilt(ctx, cur, reason)
 				}
@@ -777,7 +792,7 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 					return
 				}
 				s.logger().Info("goal changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "reason", string(reason), "removed", removed)
-				if pushRider != "" && (reason == rebuildSport || reason == rebuildRedate || reason == rebuildPriority) {
+				if pushRider != "" {
 					// The request that asked for this has long been answered,
 					// so the new today's session is sent from here, outside
 					// the lock.
@@ -793,6 +808,27 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 		}
 		s.logger().Error("goal changed but the season was not rebuilt: scheduling stayed busy", "goal", g.ID, "rider", g.Rider, "reason", string(reason))
 	}()
+}
+
+// claimDaysRetry reserves the one pending days rebuild a rider may have, and
+// reports whether the caller got it.
+func (s *Server) claimDaysRetry(rider string) bool {
+	s.daysRetryMu.Lock()
+	defer s.daysRetryMu.Unlock()
+	if s.daysRetry[rider] {
+		return false
+	}
+	if s.daysRetry == nil {
+		s.daysRetry = map[string]bool{}
+	}
+	s.daysRetry[rider] = true
+	return true
+}
+
+func (s *Server) releaseDaysRetry(rider string) {
+	s.daysRetryMu.Lock()
+	defer s.daysRetryMu.Unlock()
+	delete(s.daysRetry, rider)
 }
 
 // logSeasonPass writes what a pass did. Counts only, and only when something

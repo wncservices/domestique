@@ -192,6 +192,18 @@ func TestARaceAddedWhileSchedulingIsBusyTakesOverOnceItFrees(t *testing.T) {
 	if race == 0 {
 		t.Fatal("the race has no sessions once the lock freed")
 	}
+	// A fill that won the lock before the takeover retry would have recorded
+	// the race's weeks part-filled, around the days the stay-fit goal still held.
+	want := 0
+	for d := now; d.Format("2006-01-02") <= "2027-02-24"; d = d.AddDate(0, 0, 1) {
+		switch d.Weekday() {
+		case time.Tuesday, time.Thursday, time.Saturday, time.Sunday:
+			want++
+		}
+	}
+	if race < want-2 {
+		t.Errorf("the race has %d sessions to its event, want about %d", race, want)
+	}
 }
 
 // Taking a deleted session off the account is what keeps a cycling workout

@@ -363,13 +363,23 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("goal created", "id", g.ID, "rider", rider)
 	// A race added later takes the days up to its event from the stay-fit goal.
+	deferred := false
 	if g.EventDate != "" {
-		if _, err := s.rebuildGoalFromToday(r.Context(), g, rebuildTakeover); err != nil {
+		var err error
+		if _, deferred, err = s.rebuildGoalFromToday(r.Context(), g, rebuildTakeover); err != nil {
 			s.logger().Error("could not hand the days to a dated goal", "goal", g.ID, "rider", rider, "err", err)
 		}
 	}
-	// Before the response, this week; after it, the rest of the season.
-	s.planGoalNow(r.Context(), g)
+	// Before the response, this week; after it, the rest of the season. Not
+	// while the takeover waits for the lock: its retry plans this goal itself,
+	// after the days are free.
+	if !deferred {
+		s.planGoalNow(r.Context(), g)
+		// The takeover removed today's session of the goal that held the day.
+		if g.EventDate != "" {
+			s.pushTodayIfOptedIn(r.Context(), rider)
+		}
+	}
 	writeJSON(w, http.StatusCreated, goalDTOFrom(g))
 }
 
@@ -472,29 +482,35 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("goal updated", "id", id, "by", identity.User)
 	// The plan is filled once per goal, so a new sport has to clear the old
 	// sport's untouched sessions first or nothing would ever replace them.
-	if updated.Sport != g.Sport {
-		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildSport); err != nil {
-			s.logger().Error("could not rebuild the season after a sport change", "goal", id, "rider", g.Rider, "err", err)
+	// deferred: a rebuild met the busy lock and its background retry also plans
+	// the season, so a fill started here could win the lock first and part-fill.
+	deferred := false
+	rebuild := func(reason rebuildReason, what string) {
+		_, d, err := s.rebuildGoalFromToday(r.Context(), updated, reason)
+		deferred = deferred || d
+		if err != nil {
+			s.logger().Error("could not "+what, "goal", id, "rider", g.Rider, "err", err)
 		}
+	}
+	if updated.Sport != g.Sport {
+		rebuild(rebuildSport, "rebuild the season after a sport change")
 	}
 	// A changed date is a new plan: UpdateGoal re-anchored it at this week, so
 	// the goal's own untouched sessions are rebuilt, and a goal dated now takes
 	// the days from the rider's undated goals up to its event.
 	if updated.EventDate != g.EventDate {
-		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildRedate); err != nil {
-			s.logger().Error("could not hand the days to a dated goal", "goal", id, "rider", g.Rider, "err", err)
-		}
+		rebuild(rebuildRedate, "hand the days to a dated goal")
 	}
 	// Priority shapes the taper, so a dated goal whose priority moved is rebuilt
 	// from today the same way. A sport or date change did that already.
 	priorityMoved := updated.Priority != g.Priority && updated.EventDate != ""
 	if priorityMoved && updated.Sport == g.Sport && updated.EventDate == g.EventDate {
-		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildPriority); err != nil {
-			s.logger().Error("could not rebuild the season after a priority change", "goal", id, "rider", g.Rider, "err", err)
-		}
+		rebuild(rebuildPriority, "rebuild the season after a priority change")
 	}
 	// A new event date or sport can add weeks to the plan.
-	s.planGoalNow(r.Context(), updated)
+	if !deferred {
+		s.planGoalNow(r.Context(), updated)
+	}
 	// The rebuild replaced today's session, and the tick that would send the
 	// new one may be half an hour away. A busy rebuild pushes from its retry.
 	if updated.Sport != g.Sport || updated.EventDate != g.EventDate || priorityMoved {
@@ -623,6 +639,8 @@ wait:
 	// The rider's other goals take the freed days back now (dated first), not
 	// at the next tick.
 	s.planRiderGoals(r.Context(), g.Rider)
+	// The deleted goal's copy of today is withdrawn: send what took its place.
+	s.pushTodayIfOptedIn(r.Context(), g.Rider)
 
 	s.logger().Info("goal deleted", "id", id, "by", identity.User, "removed", removed)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1507,15 +1525,21 @@ func (s *Server) rebuildRiderPlan(ctx context.Context, rider string) {
 	if len(goals) == 0 {
 		return
 	}
-	if _, err := s.rebuildGoalFromToday(ctx, goals[0], rebuildDays); err != nil {
+	_, deferred, err := s.rebuildGoalFromToday(ctx, goals[0], rebuildDays)
+	if err != nil {
 		s.logger().Error("could not rebuild the season after an availability change", "rider", rider, "err", err)
 	}
-	// Planning after a rebuild that met a busy lock or failed is harmless: it
-	// is idempotent (fill-once per goal and week), and the background retry
-	// rebuilds and plans again.
-	for _, g := range goals {
-		s.planGoalNow(ctx, g)
+	// A busy lock leaves the plan to the background retry, which rebuilds and
+	// plans every goal in one hold; a fill started here could win the lock first
+	// and part-fill the weeks the rebuild is about to clear.
+	if !deferred {
+		for _, g := range goals {
+			s.planGoalNow(ctx, g)
+		}
 	}
+	// The rebuild withdrew today's copy: send the new session. A deferred
+	// rebuild pushes from its retry.
+	s.pushTodayIfOptedIn(ctx, rider)
 }
 
 // planRiderGoals plans every goal of the rider, dated first, with no rebuild.
@@ -1528,6 +1552,7 @@ func (s *Server) planRiderGoals(ctx context.Context, rider string) {
 	for _, g := range goals {
 		s.planGoalNow(ctx, g)
 	}
+	s.pushTodayIfOptedIn(ctx, rider)
 }
 
 type profileProposalDTO struct {
