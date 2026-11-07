@@ -44,6 +44,7 @@ export function useWorkoutEditor(deps: {
       zone: w.zone,
       level: w.level,
       indoor: w.indoor,
+      keepPlanOff: !w.planAlongside,
     }
     open.value = true
   }
@@ -63,6 +64,7 @@ export function useWorkoutEditor(deps: {
         goalId: form.value.goalId === NO_GOAL ? undefined : form.value.goalId || undefined,
         description: form.value.description || undefined,
         steps: form.value.steps,
+        planAlongside: !form.value.keepPlanOff,
       }
       if (editingId.value) {
         await api.updateWorkout(editingId.value, req)
