@@ -36,6 +36,24 @@ export function defaultPriority(eventDate: string): GoalPriority {
   return eventDate ? 'A' : 'B'
 }
 
+/** The priority the select shows after the event date changes. A new goal
+ *  follows its date. Editing an undated goal stored as B follows it too (a date
+ *  makes it a race, A), as the server does on save; a goal that was already dated
+ *  or has another priority keeps its own. A priority the rider picked in this edit
+ *  is never overridden. */
+export function priorityAfterDateChange(o: {
+  editing: boolean
+  wasUndated: boolean
+  storedPriority: GoalPriority
+  chosen: boolean
+  current: GoalPriority
+  eventDate: string
+}): GoalPriority {
+  if (o.chosen) return o.current
+  if (!o.editing || (o.wasUndated && o.storedPriority === 'B')) return defaultPriority(o.eventDate)
+  return o.current
+}
+
 export function freshGoalForm(): GoalForm {
   return {
     name: '', sport: 'cycling', eventDate: '', priority: 'B', targetDistanceKm: '', targetElevationM: '', notes: '',

@@ -58,7 +58,7 @@ func (h *seasonHarness) goal(t *testing.T, id string) workout.Goal {
 func TestRedatingAnOldGoalStartsItsPlanFromBase(t *testing.T) {
 	h := newSeasonHarness(t)
 	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
-	g := h.createGoal(t, `{"name":"Keep going","priority":"A"}`)
+	g := h.createGoal(t, `{"name":"Keep going"}`)
 	h.srv.WaitForBackground()
 	h.ageGoal(t, g.ID, "2026-03-11T00:00:00Z")
 	h.backdate(t)

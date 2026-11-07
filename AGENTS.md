@@ -717,8 +717,9 @@ workouts, so it follows the plan. The projection's verdict wording and suggestio
 verdict only for A goals. Changing a dated goal's priority runs `rebuildPriority` (the sport rebuild:
 untouched sessions from today go, with Garmin copies; `plan_anchor` is **not** reset, so each week keeps
 its place), under the scheduling lock with the usual background retry, and sends today's session when
-auto-push is on. Priority of an undated goal changes nothing, and giving an undated goal a date does not
-change its priority. Priorities other than A/B/C are refused by validation. The Plan page labels a
+auto-push is on. Priority of an undated goal changes nothing. Giving an undated goal stored as B a date makes it A
+(`handleUpdateGoal`; the form shows it too, `priorityAfterDateChange`), unless the same edit sets a
+different priority: the B the form sends back is not a choice. Priorities other than A/B/C are refused by validation. The Plan page labels a
 mini-taper week "mini-taper" (`miniTaperDays` on the periodization and week-focus DTOs).
 
 **Weeks are sized in TSS from CTL, with available hours as the cap.**

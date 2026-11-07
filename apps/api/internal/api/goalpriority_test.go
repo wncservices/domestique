@@ -217,3 +217,40 @@ func TestPeriodizationReadExposesTheMiniTaper(t *testing.T) {
 		}
 	}
 }
+
+// Dating an undated B goal makes it a race: A, unless the rider chose another
+// priority in the same edit. The form sends the old value back, which is not a choice.
+func TestDatingAnUndatedBGoalDefaultsItToA(t *testing.T) {
+	event := `"eventDate":"2027-04-14"`
+	for name, c := range map[string]struct{ body, want string }{
+		"date only":               {`{` + event + `}`, "A"},
+		"old priority sent back":  {`{` + event + `,"priority":"B"}`, "A"},
+		"explicit other priority": {`{` + event + `,"priority":"C"}`, "C"},
+		"explicit A":              {`{` + event + `,"priority":"A"}`, "A"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newSeasonHarness(t)
+			h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+			g := h.createGoal(t, `{"name":"Keep going"}`)
+			h.srv.WaitForBackground()
+			if got := h.goal(t, g.ID).Priority; got != "B" {
+				t.Fatalf("setup: undated goal is %q, want B", got)
+			}
+			h.patchGoal(t, g.ID, c.body)
+			if got := string(h.goal(t, g.ID).Priority); got != c.want {
+				t.Errorf("priority = %q, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRedatingADatedBGoalKeepsB(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Club ride","eventDate":"2027-04-14","priority":"B"}`)
+	h.srv.WaitForBackground()
+	h.patchGoal(t, g.ID, `{"eventDate":"2027-05-02","priority":"B"}`)
+	if got := h.goal(t, g.ID).Priority; got != "B" {
+		t.Errorf("priority = %q, want B", got)
+	}
+}

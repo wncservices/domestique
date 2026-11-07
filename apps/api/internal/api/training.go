@@ -454,6 +454,14 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		priority := workout.Priority(*body.Priority)
 		req.Priority = &priority
 	}
+	// Dating an undated goal makes it a race, which defaults to A. A B the
+	// rider did not just choose (absent, or the stored value the form sends
+	// back) is the old default; a different priority in the same edit wins.
+	if g.EventDate == "" && body.EventDate != nil && *body.EventDate != "" && g.Priority == workout.PriorityB &&
+		(body.Priority == nil || workout.Priority(*body.Priority) == g.Priority) {
+		a := workout.PriorityA
+		req.Priority = &a
+	}
 
 	updated, err := s.Training.UpdateGoal(r.Context(), id, req)
 	if err != nil {

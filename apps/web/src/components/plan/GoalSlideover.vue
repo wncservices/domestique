@@ -7,7 +7,7 @@ import { computed, ref, watch } from 'vue'
 import { api } from '@/api/client'
 import type { GoalPriority, Sport } from '@/api/types'
 import type { GoalForm } from '@/components/plan/forms'
-import { defaultPriority, NO_ROUTE, sports } from '@/components/plan/forms'
+import { NO_ROUTE, priorityAfterDateChange, sports } from '@/components/plan/forms'
 import GoalFeasibility from '@/components/plan/GoalFeasibility.vue'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -29,12 +29,25 @@ const emit = defineEmits<{ 'update:form': [GoalForm]; propose: []; save: [] }>()
 // A new goal's priority follows its date (A when dated, B when not) until the
 // rider picks one themselves; editing never changes a stored priority.
 const priorityChosen = ref(false)
-watch(open, (isOpen) => { if (isOpen) priorityChosen.value = false })
+// What the goal was when the form opened, for the rule on dating an undated goal.
+const openedUndated = ref(true)
+const openedPriority = ref<GoalPriority>('B')
+watch(open, (isOpen) => {
+  if (!isOpen) return
+  priorityChosen.value = false
+  openedUndated.value = !props.form.eventDate
+  openedPriority.value = props.form.priority
+})
 
 function set<K extends keyof GoalForm>(field: K, value: GoalForm[K]) {
   const next = { ...props.form, [field]: value }
   if (field === 'priority') priorityChosen.value = true
-  if (field === 'eventDate' && !props.editing && !priorityChosen.value) next.priority = defaultPriority(String(value))
+  if (field === 'eventDate') {
+    next.priority = priorityAfterDateChange({
+      editing: props.editing, wasUndated: openedUndated.value, storedPriority: openedPriority.value,
+      chosen: priorityChosen.value, current: props.form.priority, eventDate: String(value),
+    })
+  }
   emit('update:form', next)
 }
 
