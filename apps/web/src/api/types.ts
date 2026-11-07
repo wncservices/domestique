@@ -970,6 +970,9 @@ export interface Workout {
   /** "Back to outdoor version" would do something: indoor, with its outdoor
    *  steps still stored. Editing the steps or the sport retires them. */
   canRevertIndoor?: boolean
+  /** The plan may add its own session on this day; matters only for a
+   *  workout with no goal, which otherwise keeps the plan off its day. */
+  planAlongside?: boolean
   /** The rider swapped this session for an alternate (and it stays
    *  rider-touched even after "Back to planned version"). */
   swapped?: boolean
@@ -1059,6 +1062,7 @@ export interface CreateWorkoutRequest {
   date?: string
   description?: string
   steps: WorkoutStep[]
+  planAlongside?: boolean
 }
 
 export interface UpdateWorkoutRequest {
@@ -1068,6 +1072,7 @@ export interface UpdateWorkoutRequest {
   date?: string
   description?: string
   steps?: WorkoutStep[]
+  planAlongside?: boolean
 }
 
 // ---------- Metrics ingestion (docs/training-plan.md Phase B1) ----------
