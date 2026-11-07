@@ -682,7 +682,7 @@ have a workout, and record the week. The plan is built from today, so a
 future week is that plan's later week (its own phase and recovery flag) but
 uses the rider's levels *now*.
 
-**Editing a goal is validated before anything is written.** `PATCH /api/training/goals/{id}` answers 422 for an
+**Creating or editing a goal is validated before anything is written.** `POST /api/training/goals` and `PATCH /api/training/goals/{id}` answers 422 for an
 unknown sport (cycling or running), a priority outside A/B/C, a date that is not `YYYY-MM-DD` (empty is allowed and
 makes the goal undated), a negative target or an empty name (`goalPatchProblem`); a stored bad date used to log an
 Error on every tick. After a sport or date change rebuilds today's session, a rider with auto-push on has today's

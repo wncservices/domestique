@@ -334,6 +334,18 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "pacingIf must be 0 (derived) or between 0.60 and 1.05"})
 		return
 	}
+	// An empty sport or priority means the default, so only a value that was
+	// sent is checked; the name keeps its own 400 from CreateGoal.
+	nonEmpty := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
+	if msg := goalPatchProblem(nil, nonEmpty(body.Sport), &body.EventDate, nonEmpty(body.Priority), &body.TargetDistanceM, &body.TargetElevationM); msg != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": msg})
+		return
+	}
 	if status, msg := s.checkGoalRoute(r.Context(), rider, model.Sport(body.Sport), strings.TrimSpace(body.RouteSlug)); status != 0 {
 		writeJSON(w, status, map[string]string{"error": msg})
 		return

@@ -120,3 +120,30 @@ func TestASportChangeWithAutoPushOffWithdrawsTheCopyAndPushesNothing(t *testing.
 		t.Errorf("calls = %q, want nothing new pushed with auto-push off", calls)
 	}
 }
+
+func TestCreatingAGoalWithABadFieldIs422AndStoresNothing(t *testing.T) {
+	cases := map[string]string{
+		"unknown sport":      `{"name":"G","sport":"swimming"}`,
+		"unknown priority":   `{"name":"G","priority":"D"}`,
+		"malformed date":     `{"name":"G","eventDate":"next spring"}`,
+		"impossible date":    `{"name":"G","eventDate":"2027-02-30"}`,
+		"negative distance":  `{"name":"G","targetDistanceM":-1}`,
+		"negative elevation": `{"name":"G","targetElevationM":-5}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newReplanHarness(t)
+			resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals", body)
+			if resp.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", resp.StatusCode)
+			}
+			goals, err := h.training.ListGoals(context.Background(), "wilant")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(goals) != 0 {
+				t.Errorf("%d goals stored after a refused create", len(goals))
+			}
+		})
+	}
+}
