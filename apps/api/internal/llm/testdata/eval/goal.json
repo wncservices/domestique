@@ -84,6 +84,72 @@
       "lang": "nl",
       "input": {"note": "Over 12 weken rij ik een fietstocht van 120 km."},
       "want": {"sport": "cycling", "eventDate": "2027-01-17", "targetDistanceKm": 120}
+    },
+    {
+      "name": "this weekend",
+      "lang": "en",
+      "input": {"note": "I want to do a 60 km ride this weekend"},
+      "want": {"sport": "cycling", "eventDate": "2026-10-31", "targetDistanceKm": 60}
+    },
+    {
+      "name": "on the 14th",
+      "lang": "en",
+      "input": {"note": "I have a 10k run on the 14th"},
+      "want": {"sport": "running", "eventDate": "2026-11-14", "targetDistanceKm": 10}
+    },
+    {
+      "name": "next spring",
+      "lang": "en",
+      "input": {"note": "A gravel event next spring, in April"},
+      "want": {"sport": "cycling", "eventDate": "2027-04-15"}
+    },
+    {
+      "name": "volgend voorjaar",
+      "lang": "nl",
+      "input": {"note": "Volgend voorjaar, in april, wil ik een fietstocht rijden."},
+      "want": {"sport": "cycling", "eventDate": "2027-04-15"}
+    },
+    {
+      "name": "over negen maanden",
+      "lang": "nl",
+      "input": {"note": "Over 9 maanden loop ik een marathon."},
+      "want": {"sport": "running", "eventDate": "2027-07-25", "targetDistanceKm": 42.2}
+    },
+    {
+      "name": "half juni",
+      "lang": "nl",
+      "input": {"note": "Half juni wil ik een fietstocht van 100 km rijden."},
+      "want": {"sport": "cycling", "eventDate": "2027-06-15", "targetDistanceKm": 100}
+    },
+    {
+      "name": "numeric date",
+      "lang": "en",
+      "input": {"note": "A 5k run on 14/06/2027."},
+      "want": {"sport": "running", "eventDate": "2027-06-14", "targetDistanceKm": 5}
+    },
+    {
+      "name": "miles",
+      "lang": "en",
+      "input": {"note": "A 62 mile ride on 12 September 2027."},
+      "want": {"sport": "cycling", "eventDate": "2027-09-12", "targetDistanceKm": 99.8}
+    },
+    {
+      "name": "feet of climbing",
+      "lang": "en",
+      "input": {"note": "A hilly ride on 8 May 2027 with 2500 feet of climbing."},
+      "want": {"sport": "cycling", "eventDate": "2027-05-08", "targetElevationM": 762}
+    },
+    {
+      "name": "sprint triathlon",
+      "lang": "en",
+      "input": {"note": "I am doing a sprint triathlon in September."},
+      "want": {"unsupported": true}
+    },
+    {
+      "name": "end of next year",
+      "lang": "en",
+      "input": {"note": "A long ride at the end of next year."},
+      "want": {"sport": "cycling", "eventDate": "2027-12-25"}
     }
   ]
 }

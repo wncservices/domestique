@@ -1620,6 +1620,12 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := llmRequestContext(r)
 	defer cancel()
 	proposal, err := s.LLM.ProposeGoal(ctx, body.Note, s.now())
+	if errors.Is(err, llm.ErrUnsupportedSport) {
+		// An answer, not a failure: say so rather than pre-fill a cycling goal.
+		s.logger().Info("goal proposal for an unsupported sport", "rider", rider)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "Only cycling and running goals are supported."})
+		return
+	}
 	if err != nil {
 		s.logger().Warn("goal proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not turn that into a goal — try rephrasing it, or fill the form in by hand"})

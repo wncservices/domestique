@@ -1139,6 +1139,25 @@ func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
 	}
 }
 
+// A sport the app has no plans for is a 422 that says so, not a cycling goal.
+func TestProposeGoalForAnUnsupportedSportIs422(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.pinClock()
+	withLLM(t, h.srv, fixed(`{"name":"Sprint triathlon","sport":"other","priority":"B","explanation":"x"}`))
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/propose", `{"note":"a sprint triathlon"}`)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"] != "Only cycling and running goals are supported." || len(body) != 1 {
+		t.Errorf("body = %v", body)
+	}
+}
+
 // analysisOut mirrors sessionAnalysisDTO's JSON shape (see training.go) —
 // same pattern as goalDTOOut/weekOut: a local struct in the test package
 // rather than importing the unexported DTO.

@@ -1741,6 +1741,8 @@ tried and scored worse (3/10, with timeouts), so the flat schema stays. The 6b j
 (every score reading passed; the misses were Dutch life events, one of them "tot donderdag" landing a
 week late), so deployments run it with `llm.jobs.understand_checkin: false`.
 
+Goal proposals place their date server-side (`goalFrom`/`placeEvent`), the model only names parts: precedence is an explicit date after today, then `eventDayOfMonth` (with `eventMonth` if given, else the next such day after today), then `eventWeekday` (`sat`/`sun`, strictly after today), then the month (`eventYearOffset` 1 means next year's), then a span. Distance and climb come with a unit (`mi`, `ft`) converted here before the sanity bounds. Sport `other` (a triathlon) is `ErrUnsupportedSport`: the handler answers 422 and nothing is pre-filled; it is not an invalid answer and is not retried.
+
 Three more jobs sit on the same client (sub-project 6b): `explain_changes` (one to three sentences on
 why the morning's changes were made, from the Why facts), `weekly_summary` (at most five sentences on
 a plan week, from its own figures) and `understand_checkin` (reads a morning check-in note into scores

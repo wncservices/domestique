@@ -133,8 +133,8 @@ func TestEnumsAreInTheSchema(t *testing.T) {
 	if got := props["priority"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []string{"A", "B", "C"}) {
 		t.Errorf("goal priority enum = %v, want exactly A, B, C", got)
 	}
-	if got := props["sport"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []string{"cycling", "running"}) {
-		t.Errorf("goal sport enum = %v, want exactly cycling, running", got)
+	if got := props["sport"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []string{"cycling", "running", "other"}) {
+		t.Errorf("goal sport enum = %v, want exactly cycling, running, other", got)
 	}
 }
 
@@ -207,6 +207,116 @@ func TestProposeGoalPlacesASpanFromNow(t *testing.T) {
 		}
 		if p.EventDate != c.want {
 			t.Errorf("reply %s: eventDate = %q, want %q", c.reply, p.EventDate, c.want)
+		}
+	}
+}
+
+// proposeAt asks for a goal with the given reply fields, as of today.
+func proposeAt(t *testing.T, today time.Time, fields string) (GoalProposal, error) {
+	t.Helper()
+	f := newFake(t, answer(t, `{"name":"Ride","sport":"cycling","priority":"B","explanation":"x",`+fields+`}`))
+	return newClient(t, f.srv.URL+"/v1", "").ProposeGoal(t.Context(), "note", today)
+}
+
+func TestProposeGoalPlacesDaysWeekdaysAndYears(t *testing.T) {
+	sat := time.Date(2026, 3, 21, 0, 0, 0, 0, time.UTC)   // a Saturday
+	late := time.Date(2026, 12, 20, 0, 0, 0, 0, time.UTC) // near a year end
+	jan31 := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC) // 31st is today
+	cases := []struct {
+		name   string
+		today  time.Time
+		fields string
+		want   string
+	}{
+		{"this weekend, Saturday from a Wednesday", goalToday, `"eventWeekday":"sat"`, "2026-03-21"},
+		{"this weekend, Sunday from a Wednesday", goalToday, `"eventWeekday":"sun"`, "2026-03-22"},
+		{"a Saturday today is not allowed", sat, `"eventWeekday":"sat"`, "2026-03-28"},
+		{"Sunday from a Saturday", sat, `"eventWeekday":"sun"`, "2026-03-22"},
+		{"weekend across a year end", time.Date(2026, 12, 30, 0, 0, 0, 0, time.UTC), `"eventWeekday":"sat"`, "2027-01-02"},
+		{"the 20th, still ahead this month", goalToday, `"eventDayOfMonth":20`, "2026-03-20"},
+		{"the 14th, already past: next month", goalToday, `"eventDayOfMonth":14`, "2026-04-14"},
+		{"today's own day number: next month", goalToday, `"eventDayOfMonth":18`, "2026-04-18"},
+		{"the 14th across a year end", late, `"eventDayOfMonth":14`, "2027-01-14"},
+		{"the 31st skips a short month", time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC), `"eventDayOfMonth":31`, "2026-05-31"},
+		{"the 31st in January", jan31, `"eventDayOfMonth":31`, "2026-03-31"},
+		{"14 June, ahead", goalToday, `"eventDayOfMonth":14,"eventMonth":6`, "2026-06-14"},
+		{"14 February, behind: next year", goalToday, `"eventDayOfMonth":14,"eventMonth":2`, "2027-02-14"},
+		{"14 June next year", goalToday, `"eventDayOfMonth":14,"eventMonth":6,"eventYearOffset":1`, "2027-06-14"},
+		{"30 February never exists: the month stands", goalToday, `"eventDayOfMonth":30,"eventMonth":2`, "2027-02-15"},
+		{"29 February waits for a leap year", goalToday, `"eventDayOfMonth":29,"eventMonth":2`, "2028-02-29"},
+		{"a day out of range is nothing", goalToday, `"eventDayOfMonth":32`, ""},
+		{"end of next year", goalToday, `"eventMonth":12,"eventPartOfMonth":"late","eventYearOffset":1`, "2027-12-25"},
+		{"next spring", goalToday, `"eventMonth":4,"eventPartOfMonth":"mid","eventYearOffset":1`, "2027-04-15"},
+		{"next year from December", late, `"eventMonth":3,"eventYearOffset":1`, "2027-03-15"},
+		{"a month already behind, no offset, near a year end", late, `"eventMonth":3`, "2027-03-15"},
+		{"next year alone means nothing", goalToday, `"eventYearOffset":1`, ""},
+		{"an explicit date beats a day of month", goalToday, `"eventDate":"2026-07-01","eventDayOfMonth":14,"eventWeekday":"sat"`, "2026-07-01"},
+		{"a day of month beats a weekday", goalToday, `"eventDayOfMonth":20,"eventWeekday":"sun"`, "2026-03-20"},
+		{"a weekday beats a month and a span", goalToday, `"eventWeekday":"sat","eventMonth":6,"eventInMonths":9`, "2026-03-21"},
+		{"a month beats a span", goalToday, `"eventMonth":6,"eventInMonths":9`, "2026-06-15"},
+		{"a span still works", goalToday, `"eventInMonths":9`, "2026-12-18"},
+		{"a past explicit date falls through to the day of month", goalToday, `"eventDate":"2024-01-01","eventDayOfMonth":20`, "2026-03-20"},
+	}
+	for _, c := range cases {
+		p, err := proposeAt(t, c.today, c.fields)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if p.EventDate != c.want {
+			t.Errorf("%s: eventDate = %q, want %q", c.name, p.EventDate, c.want)
+		}
+	}
+}
+
+func TestProposeGoalConvertsUnitsBeforeTheSanityBounds(t *testing.T) {
+	cases := []struct {
+		name         string
+		fields       string
+		wantM, wantE float64
+	}{
+		{"62 miles", `"targetDistanceKm":62,"targetDistanceUnit":"mi"`, 99800, 0},
+		{"a hundred miles", `"targetDistanceKm":100,"targetDistanceUnit":"mi"`, 160900, 0},
+		{"km stays", `"targetDistanceKm":21.1,"targetDistanceUnit":"km"`, 21100, 0},
+		{"no unit is km", `"targetDistanceKm":180`, 180000, 0},
+		{"2500 feet", `"targetElevationM":2500,"targetElevationUnit":"ft"`, 0, 762},
+		{"metres stay", `"targetElevationM":2400,"targetElevationUnit":"m"`, 0, 2400},
+		// 2000 miles is 3219 km, past the bound, though the number alone is not.
+		{"too many miles", `"targetDistanceKm":2000,"targetDistanceUnit":"mi"`, 0, 0},
+		// 190000 ft is 57912 m, inside; 200000 ft is 60960 m, outside.
+		{"many feet, inside", `"targetElevationM":190000,"targetElevationUnit":"ft"`, 0, 57912},
+		{"many feet, outside", `"targetElevationM":200000,"targetElevationUnit":"ft"`, 0, 0},
+	}
+	for _, c := range cases {
+		p, err := proposeAt(t, goalToday, c.fields)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if p.TargetDistanceM != c.wantM || p.TargetElevationM != c.wantE {
+			t.Errorf("%s: distance/elevation = %v/%v, want %v/%v", c.name, p.TargetDistanceM, p.TargetElevationM, c.wantM, c.wantE)
+		}
+	}
+}
+
+// A triathlon is not a cycling goal. It is an answer, not a model failure: no
+// retry, and the caller can tell it from ErrInvalid.
+func TestProposeGoalRefusesAnUnsupportedSport(t *testing.T) {
+	f := newFake(t, answer(t, `{"name":"Sprint triathlon","sport":"other","priority":"B","explanation":"x"}`))
+	_, err := newClient(t, f.srv.URL+"/v1", "").ProposeGoal(t.Context(), "a sprint triathlon", goalToday)
+	if !errors.Is(err, ErrUnsupportedSport) {
+		t.Fatalf("err = %v, want ErrUnsupportedSport", err)
+	}
+	if errors.Is(err, ErrInvalid) {
+		t.Errorf("an unsupported sport must not look like an invalid answer")
+	}
+	if n := f.requests.Load(); n != 1 {
+		t.Errorf("requests = %d, want 1: a refusal is not retried", n)
+	}
+}
+
+func TestGoalSystemMentionsTheNewFields(t *testing.T) {
+	for _, want := range []string{"eventDayOfMonth", "eventWeekday", "eventYearOffset", "targetDistanceUnit", "targetElevationUnit", `"other"`} {
+		if !strings.Contains(goalSystem, want) {
+			t.Errorf("goalSystem does not mention %q", want)
 		}
 	}
 }

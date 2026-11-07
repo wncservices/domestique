@@ -157,10 +157,14 @@ func TestEval(t *testing.T) {
 				return err
 			}
 			got, err := c.ProposeGoal(t.Context(), in.Note, today)
+			if errors.Is(err, ErrUnsupportedSport) {
+				return checkWant(ec.Want, map[string]any{"unsupported": true})
+			}
 			if err != nil {
 				return err
 			}
 			return checkWant(ec.Want, map[string]any{
+				"unsupported":      false,
 				"sport":            got.Sport,
 				"eventDate":        got.EventDate,
 				"priority":         got.Priority,
