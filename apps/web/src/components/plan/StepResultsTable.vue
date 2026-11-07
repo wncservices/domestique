@@ -4,12 +4,14 @@
 // table rather than UTable: the actual column needs a second, muted line
 // for a fallback-scored step's in-range percentage (see AnalysisStep's own
 // doc comment), which UTable's single-string cell doesn't fit cleanly.
-import type { AnalysisStep, SessionAnalysis } from '@/api/types'
+import { computed } from 'vue'
+import type { AnalysisStep, RideHRZone, SessionAnalysis } from '@/api/types'
+import { zoneColorVar } from '@/utils/zones'
 import { effortLine, GRADE_LABEL, type EffortGrade } from '@/utils/effortSummary'
 import { formatPace } from '@/utils/fitnessMath'
 import FeelRating from './FeelRating.vue'
 
-defineProps<{
+const props = defineProps<{
   open: boolean
   title: string
   steps: AnalysisStep[]
@@ -20,6 +22,8 @@ defineProps<{
   feel?: number
   legs?: string
   stress?: string
+  // The ride's seconds per heart-rate zone; absent when there is nothing to show.
+  hrZones?: RideHRZone[]
 }>()
 const emit = defineEmits<{ 'update:open': [boolean]; rated: [analysis: SessionAnalysis] }>()
 
@@ -34,6 +38,23 @@ const GRADE_META: Record<EffortGrade, { icon: string; color: 'primary' | 'neutra
   under: { icon: 'i-lucide-arrow-down', color: 'neutral', class: EMBER },
   over: { icon: 'i-lucide-arrow-up', color: 'neutral' },
 }
+
+// Zone colours follow the five-zone scale the Training zones card uses.
+const HR_ZONE_KEYS = ['recovery', 'endurance', 'tempo', 'threshold', 'vo2max']
+
+const hrBars = computed(() => {
+  const zones = props.hrZones
+  if (!zones?.length) return []
+  const max = Math.max(...zones.map((z) => z.seconds), 1)
+  return zones.map((z) => ({
+    zone: z.zone,
+    minutes: Math.round(z.seconds / 60),
+    // A zone with any time shows at least a sliver.
+    widthPercent: z.seconds > 0 ? Math.max(2, (z.seconds / max) * 100) : 0,
+    color: zoneColorVar(HR_ZONE_KEYS[z.zone - 1] ?? 'recovery'),
+    range: z.zone === 1 ? `below ${z.high} bpm` : z.high === 0 ? `${z.low}+ bpm` : `${z.low}–${z.high} bpm`,
+  }))
+})
 
 function gradeOf(step: AnalysisStep): EffortGrade {
   return effortLine(step).grade
@@ -95,6 +116,18 @@ function formatActual(step: AnalysisStep): string {
           </tbody>
         </table>
       </div>
+      <section v-if="hrBars.length" class="mt-4" aria-labelledby="hr-zone-time-title">
+        <h4 id="hr-zone-time-title" class="text-[length:var(--text-label)] font-medium text-muted mb-2">Time in heart-rate zone</h4>
+        <ul class="flex flex-col gap-1.5">
+          <li v-for="bar in hrBars" :key="bar.zone" class="grid grid-cols-[1.5rem_1fr_3.5rem] items-center gap-2 text-[length:var(--text-label)]">
+            <span class="tabular-nums text-muted">Z{{ bar.zone }}</span>
+            <span class="h-3 rounded-full bg-elevated" :title="bar.range">
+              <span class="block h-3 rounded-full" :style="{ width: `${bar.widthPercent}%`, backgroundColor: bar.color }" />
+            </span>
+            <span class="tabular-nums text-right">{{ bar.minutes }} min</span>
+          </li>
+        </ul>
+      </section>
       <FeelRating
         v-if="sessionId"
         class="mt-4"

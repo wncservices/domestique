@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test'
 import { AUTH0_HOSTNAME, credentials, signIn, submitCredentials, watchForBreakage } from './helpers'
-import { deleteRoute, routeLifecycle, sweepLeftoverRoutes, walkAdminPages, walkRiderPages } from './journeys'
+import { deleteRoute, heartRateZonesJourney, routeLifecycle, sweepLeftoverRoutes, walkAdminPages, walkRiderPages } from './journeys'
 
 // Each signed-in test logs in once and walks its whole journey in steps,
 // because the Auth0 login is the slow part and the Job has a hard deadline
 // (see playwright.config.ts).
 
 test('test-rider: sign in, walk every page, add and delete a route', async ({ page }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(150_000)
   const assertNoBreakage = watchForBreakage(page)
 
   await test.step('sign in lands on Today', async () => {
@@ -44,6 +44,10 @@ test('test-rider: sign in, walk every page, add and delete a route', async ({ pa
       // The test accounts may create and delete; they must not accumulate.
       if (slug) await deleteRoute(page, slug)
     }
+  })
+
+  await test.step('choose your own heart-rate zones, then back to Auto', async () => {
+    await heartRateZonesJourney(page)
   })
 
   assertNoBreakage()

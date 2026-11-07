@@ -5,6 +5,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   clampBand,
+  customBoundsProblem,
+  hrZoneMissingInput,
+  hrZonesFor,
   eventTone,
   eventWithinRange,
   extendSeries,
@@ -117,4 +120,23 @@ test('projectionTone maps a verdict to a Nuxt UI colour, neutral when there is n
   assert.equal(projectionTone({ key: 'fatigued', message: '', tone: 'warning' }), 'warning')
   assert.equal(projectionTone({ key: 'unavailable', message: '' }), 'neutral')
   assert.equal(projectionTone(null), 'neutral')
+})
+
+test('hrZonesFor: auto is threshold when known, else max; Z1 has no floor and Z5 no ceiling', () => {
+  const cycling = hrZonesFor({ thresholdHr: 170, maxHr: 190, hrZones: { cycling: { method: '' }, running: { method: '' } } }, 'cycling')
+  assert.deepEqual(cycling.map((z) => [z.low, z.high]), [[0, 138], [138, 153], [153, 160], [160, 170], [170, null]])
+  const max = hrZonesFor({ maxHr: 200 }, 'cycling')
+  assert.deepEqual(max.map((z) => [z.low, z.high]), [[0, 120], [120, 140], [140, 160], [160, 180], [180, null]])
+  assert.equal(hrZonesFor({}, 'cycling'), null)
+})
+
+test('hrZonesFor: reserve and custom, and what each is missing', () => {
+  const reserve = { maxHr: 190, restingHr: 50, hrZones: { cycling: { method: 'reserve' }, running: { method: '' } } }
+  assert.deepEqual(hrZonesFor(reserve, 'cycling').map((z) => z.high), [134, 148, 162, 176, null])
+  assert.equal(hrZoneMissingInput({ maxHr: 190, hrZones: reserve.hrZones }, 'cycling'), 'needs max and resting HR')
+  const custom = { hrZones: { cycling: { method: 'custom', bounds: [120, 140, 155, 170] }, running: { method: '' } } }
+  assert.deepEqual(hrZonesFor(custom, 'cycling').map((z) => z.low), [0, 120, 140, 155, 170])
+  assert.equal(hrZonesFor({ hrZones: { cycling: { method: 'custom', bounds: [120, 110, 155, 170] } } }, 'cycling')?.length, 5)
+  assert.ok(customBoundsProblem([120, 110, 155, 170]))
+  assert.equal(customBoundsProblem([120, 140, 155, 170]), null)
 })

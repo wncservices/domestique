@@ -35,7 +35,7 @@ import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecal
 import { bestEffortToast } from '@/utils/bestEfforts'
 import type { PeriodChoice } from '@/utils/seasonReview'
 import { ftpTestToast } from '@/utils/ftpTests'
-import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
+import { formatThresholdValue, hrZonesProblem, thresholdFieldTitle } from '@/utils/fitnessMath'
 import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
@@ -157,6 +157,7 @@ function discardProfile() {
 }
 
 async function saveProfile() {
+  if (hrZonesProblem(profile.value)) return
   savingProfile.value = true
   try {
     // levelsRecalibrated is a one-shot notice on the response, not part of
@@ -661,6 +662,6 @@ onMounted(() => {
       </section>
     </template>
 
-    <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
+    <SaveBar :visible="dirty" :saving="savingProfile" :problem="hrZonesProblem(profile)" @save="saveProfile" @discard="discardProfile" />
   </AppPage>
 </template>

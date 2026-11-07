@@ -5,6 +5,8 @@
 defineProps<{
   visible: boolean
   saving: boolean
+  /** Why saving is not possible right now, shown in place of the button's action. */
+  problem?: string | null
 }>()
 
 const emit = defineEmits<{ save: []; discard: [] }>()
@@ -15,10 +17,10 @@ const emit = defineEmits<{ save: []; discard: [] }>()
     v-if="visible"
     class="sticky bottom-0 z-10 flex items-center justify-between gap-3 rounded-lg border border-default bg-elevated/95 backdrop-blur px-4 py-3"
   >
-    <span class="text-[length:var(--text-body)] font-medium">Unsaved changes</span>
+    <span class="text-[length:var(--text-body)] font-medium">{{ problem ?? 'Unsaved changes' }}</span>
     <div class="flex gap-2">
       <UButton color="neutral" variant="ghost" @click="emit('discard')">Discard</UButton>
-      <UButton icon="i-lucide-save" color="primary" :loading="saving" @click="emit('save')">Save</UButton>
+      <UButton icon="i-lucide-save" color="primary" :loading="saving" :disabled="!!problem" @click="emit('save')">Save</UButton>
     </div>
   </div>
 </template>

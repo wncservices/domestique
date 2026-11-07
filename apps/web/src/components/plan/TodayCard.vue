@@ -664,6 +664,7 @@ function onRated(analysis: SessionAnalysis) {
       :feel="analysedSession?.analysis?.feel"
       :legs="analysedSession?.analysis?.legs"
       :stress="analysedSession?.analysis?.stress"
+      :hr-zones="analysedSession?.analysis?.hrZones"
       @rated="onRated"
     />
   </div>
