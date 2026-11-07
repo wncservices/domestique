@@ -652,6 +652,7 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 				err     error
 				stale   bool
 			)
+			pushRider := ""
 			ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
 				cur, gerr := s.Training.GetGoal(ctx, g.ID)
 				if gerr != nil && reason == rebuildDays && errors.Is(gerr, workout.ErrGoalNotFound) {
@@ -672,6 +673,7 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 				if removed, err = s.rebuildLocked(ctx, cur, reason); err == nil {
 					err = s.planRebuilt(ctx, cur, reason)
 				}
+				pushRider = cur.Rider
 			})
 			if ran {
 				if stale {
@@ -682,6 +684,12 @@ func (s *Server) retryRebuild(g workout.Goal, reason rebuildReason) {
 					return
 				}
 				s.logger().Info("goal changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "reason", string(reason), "removed", removed)
+				if pushRider != "" && (reason == rebuildSport || reason == rebuildRedate) {
+					// The request that asked for this has long been answered,
+					// so the new today's session is sent from here, outside
+					// the lock.
+					s.pushTodayIfOptedIn(ctx, pushRider)
+				}
 				return
 			}
 			select {

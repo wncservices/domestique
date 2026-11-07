@@ -682,6 +682,13 @@ have a workout, and record the week. The plan is built from today, so a
 future week is that plan's later week (its own phase and recovery flag) but
 uses the rider's levels *now*.
 
+**Editing a goal is validated before anything is written.** `PATCH /api/training/goals/{id}` answers 422 for an
+unknown sport (cycling or running), a priority outside A/B/C, a date that is not `YYYY-MM-DD` (empty is allowed and
+makes the goal undated), a negative target or an empty name (`goalPatchProblem`); a stored bad date used to log an
+Error on every tick. After a sport or date change rebuilds today's session, a rider with auto-push on has today's
+session pushed in the same request (`pushTodayIfOptedIn`), or from the background retry once it succeeds, rather
+than waiting up to half an hour for the tick; the old copy is withdrawn either way.
+
 **Weeks are sized in TSS from CTL, with available hours as the cap.**
 `periodization.BuildWithLoad` takes a `LoadInput` built by `api.loadInput`, which
 `reconciledPeriodizationPlan` alone calls, so every plan reader sees the same

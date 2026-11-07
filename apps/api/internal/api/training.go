@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -397,6 +398,12 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "pacingIf must be 0 (derived) or between 0.60 and 1.05"})
 		return
 	}
+	// Nothing is written before every field has been checked: a bad value
+	// stored as sent would fail on every tick afterwards.
+	if msg := goalPatchProblem(body.Name, body.Sport, body.EventDate, body.Priority, body.TargetDistanceM, body.TargetElevationM); msg != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": msg})
+		return
+	}
 	// The route the goal will carry and the sport it will have, after this
 	// update: the visibility check runs only when the link is being set (a
 	// link already made is not re-litigated by an unrelated edit), the sport
@@ -460,7 +467,57 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 	// A new event date or sport can add weeks to the plan.
 	s.planGoalNow(r.Context(), updated)
+	// The rebuild replaced today's session, and the tick that would send the
+	// new one may be half an hour away. A busy rebuild pushes from its retry.
+	if updated.Sport != g.Sport || updated.EventDate != g.EventDate {
+		s.pushTodayIfOptedIn(r.Context(), g.Rider)
+	}
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))
+}
+
+// goalPatchProblem checks a goal edit's fields the way a goal is meant to look
+// and returns a short message for the first bad one, or "" when all are fine.
+// A nil field is not being changed. An empty event date is allowed: it makes
+// the goal undated.
+func goalPatchProblem(name, sport, eventDate, priority *string, distanceM, elevationM *float64) string {
+	if name != nil && strings.TrimSpace(*name) == "" {
+		return "name cannot be empty"
+	}
+	if sport != nil && model.Sport(*sport) != model.SportCycling && model.Sport(*sport) != model.SportRunning {
+		return "sport must be cycling or running"
+	}
+	if priority != nil {
+		switch workout.Priority(*priority) {
+		case workout.PriorityA, workout.PriorityB, workout.PriorityC:
+		default:
+			return "priority must be A, B or C"
+		}
+	}
+	if eventDate != nil && *eventDate != "" {
+		if _, err := time.Parse(dateLayout, *eventDate); err != nil {
+			return "eventDate must be a date as YYYY-MM-DD, or empty"
+		}
+	}
+	if distanceM != nil && (*distanceM < 0 || math.IsNaN(*distanceM) || math.IsInf(*distanceM, 0)) {
+		return "targetDistanceM cannot be negative"
+	}
+	if elevationM != nil && (*elevationM < 0 || math.IsNaN(*elevationM) || math.IsInf(*elevationM, 0)) {
+		return "targetElevationM cannot be negative"
+	}
+	return ""
+}
+
+// pushTodayIfOptedIn sends today's session to a rider who has auto-push on,
+// the same pass the tick runs. Failures are logged inside the push.
+func (s *Server) pushTodayIfOptedIn(ctx context.Context, rider string) {
+	profile, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		s.logger().Warn("auto-push: reading the profile failed", "rider", rider, "err", err)
+		return
+	}
+	if profile.AutoPushWorkouts {
+		s.pushWorkoutsForRider(ctx, rider)
+	}
 }
 
 // deleteGoalLockAttempts tries, deleteGoalLockWait apart, bound how long
