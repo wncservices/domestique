@@ -139,6 +139,16 @@ func (s *Server) adaptRider(ctx context.Context, rider string) (advise bool) {
 		return
 	}
 	blackout := lifeevents.Blackout(events)
+	// Race day and the rest of its week are not the plan's either: a missed
+	// session is never made up there.
+	eventDays, err := s.eventDays(ctx, rider)
+	if err != nil {
+		s.logger().Warn("adapt: reading goals failed", "rider", rider, "err", err)
+		return
+	}
+	for d := range eventDays {
+		blackout[d] = true
+	}
 
 	// AdaptSessions already keeps each workout to at most one Change per pass
 	// (stepDownTarget skips ids its own per-session loop has claimed — see

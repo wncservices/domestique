@@ -325,3 +325,34 @@ func TestTheSeasonTrimClearsAnUntouchedSessionOnTheEventDay(t *testing.T) {
 		}
 	}
 }
+
+// A goal saved before the event-day rule kept its race-day session until the
+// rider next edited it; the tick clears it with no edit.
+func TestTheTickClearsAnUntouchedSessionOnTheEventDay(t *testing.T) {
+	h, g, eventMonday := priorityRace(t, "A")
+	event := eventMonday.AddDate(0, 0, 6).Format("2006-01-02")
+	var model workout.Workout
+	for _, w := range h.goalSessions(t, g.ID) {
+		model = w
+	}
+	stray, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: model.Sport, Name: model.Name, GoalID: g.ID, Date: event,
+		Description: scheduler.GeneratedDescription, Steps: model.Steps, Zone: model.Zone, Level: model.Level,
+		Flags: workout.Flags{Origin: workout.OriginPlan},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	h.srv.AutoScheduleTick(context.Background())
+	h.srv.WaitForBackground()
+
+	for _, w := range h.goalSessions(t, g.ID) {
+		if w.ID == stray.ID {
+			t.Errorf("the untouched session on the event day %s survived the tick", event)
+		}
+	}
+}

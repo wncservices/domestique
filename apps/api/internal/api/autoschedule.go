@@ -189,6 +189,12 @@ func (s *Server) AutoScheduleTick(ctx context.Context) {
 				// skipped, no different from AGENTS.md's "one bad route never
 				// aborts a run": every other rider's goal still gets planned.
 				res, err := s.planSeason(ctx, g)
+				// A dated goal's untouched sessions on or after its event go
+				// too. A goal saved before that rule kept one on race day, and
+				// only an edit ran the trim; the tick clears it.
+				if err == nil && g.EventDate != "" {
+					res.sessionsTrimmed, err = s.trimSeason(ctx, g)
+				}
 				if err != nil {
 					s.seasonPlanErr(g, err)
 					return

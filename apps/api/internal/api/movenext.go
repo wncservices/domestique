@@ -108,6 +108,14 @@ func (s *Server) handleMoveNext(w http.ResponseWriter, r *http.Request) {
 	for d := range blackout {
 		taken[d] = true
 	}
+	events, err := s.eventDays(ctx, rider)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	for d := range events {
+		taken[d] = true
+	}
 	available := map[string]bool{}
 	for _, d := range profile.AvailableDays {
 		available[d] = true
