@@ -35,7 +35,7 @@ import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecal
 import { bestEffortToast } from '@/utils/bestEfforts'
 import type { PeriodChoice } from '@/utils/seasonReview'
 import { ftpTestToast } from '@/utils/ftpTests'
-import { thresholdFieldTitle, formatThresholdValue } from '@/utils/fitnessMath'
+import { formatThresholdValue, hrZonesProblem, thresholdFieldTitle } from '@/utils/fitnessMath'
 import { describeError } from '@/utils/errorMessage'
 
 const toast = useToast()
@@ -115,13 +115,20 @@ const savingProfile = ref(false)
 // `undefined` fields (present-but-undefined vs absent shouldn't either),
 // so a value round-tripping through the API or a clear-then-reset doesn't
 // register as dirty when nothing actually changed.
+// Keys are sorted at every depth: an allow-list replacer would apply the
+// top-level keys to nested objects too and drop hrZones' contents, so a zone
+// change never counted as unsaved.
 function normalise(p: RiderProfile): string {
   const sorted = { ...p, availableDays: [...(p.availableDays ?? [])].sort() }
-  const cleaned: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(sorted)) {
-    if (value !== undefined) cleaned[key] = value
-  }
-  return JSON.stringify(cleaned, Object.keys(cleaned).sort())
+  return JSON.stringify(sorted, (_key, value: unknown) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const out: Record<string, unknown> = {}
+    for (const key of Object.keys(value).sort()) {
+      const v = (value as Record<string, unknown>)[key]
+      if (v !== undefined) out[key] = v
+    }
+    return out
+  })
 }
 
 const dirty = computed(() => normalise(profile.value) !== normalise(savedProfile.value))
@@ -157,6 +164,7 @@ function discardProfile() {
 }
 
 async function saveProfile() {
+  if (hrZonesProblem(profile.value)) return
   savingProfile.value = true
   try {
     // levelsRecalibrated is a one-shot notice on the response, not part of
@@ -661,6 +669,6 @@ onMounted(() => {
       </section>
     </template>
 
-    <SaveBar :visible="dirty" :saving="savingProfile" @save="saveProfile" @discard="discardProfile" />
+    <SaveBar :visible="dirty" :saving="savingProfile" :problem="hrZonesProblem(profile)" @save="saveProfile" @discard="discardProfile" />
   </AppPage>
 </template>

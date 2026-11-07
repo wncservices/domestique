@@ -17,6 +17,7 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/fitnesstest"
 	"github.com/wncservices/domestique/apps/api/internal/fitworkout"
+	"github.com/wncservices/domestique/apps/api/internal/hrzones"
 	"github.com/wncservices/domestique/apps/api/internal/intensity"
 	"github.com/wncservices/domestique/apps/api/internal/llm"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -177,10 +178,32 @@ type riderProfileDTO struct {
 	// rider. Output only — handleSaveRiderProfile never reads it back.
 	Estimated []string `json:"estimated,omitempty"`
 	UpdatedAt string   `json:"updatedAt,omitempty"`
+	// HRZones is the rider's heart-rate zone setting per sport. Always in a
+	// response; on a save a nil sport leaves that stored setting alone, and
+	// each of its fields is written by its own writer (SetHRZones), never
+	// by SaveProfile.
+	HRZones *hrZonesDTO `json:"hrZones,omitempty"`
 	// LevelsRecalibrated is output only, and only on the response to a save
 	// that lowered the rider's progression levels for a new FTP.
 	// handleSaveRiderProfile never reads it back from the request.
 	LevelsRecalibrated *levelsRecalibratedDTO `json:"levelsRecalibrated,omitempty"`
+}
+
+type hrZonesDTO struct {
+	Cycling *workout.HRZoneSetting `json:"cycling,omitempty"`
+	Running *workout.HRZoneSetting `json:"running,omitempty"`
+}
+
+// zoneSetting is the setting the request names for a sport, nil when it does
+// not mention it.
+func (b riderProfileDTO) zoneSetting(sport string) *workout.HRZoneSetting {
+	if b.HRZones == nil {
+		return nil
+	}
+	if sport == "running" {
+		return b.HRZones.Running
+	}
+	return b.HRZones.Cycling
 }
 
 func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
@@ -194,6 +217,7 @@ func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 		MaxHR: p.MaxHR, ThresholdHR: p.ThresholdHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
 		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
 		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, SmartTrainer: p.SmartTrainer, UpdatedAt: p.UpdatedAt,
+		HRZones: &hrZonesDTO{Cycling: &p.HRZonesCycling, Running: &p.HRZonesRunning},
 	}
 }
 
@@ -1455,6 +1479,18 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Validated before anything is written, so a bad setting never leaves the
+	// rest of the form half saved.
+	for _, z := range []*workout.HRZoneSetting{body.zoneSetting("cycling"), body.zoneSetting("running")} {
+		if z == nil {
+			continue
+		}
+		if err := hrzones.Valid(*z); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
 	rider := auth.FromContext(r.Context()).User
 	// before is what recalibrateLevelsForFTP needs; the marker is not carried
 	// forward into the save below because SaveProfile never writes it.
@@ -1486,6 +1522,22 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		saved.WeightKG = *body.WeightKG
+	}
+	// Zone settings have their own writer too, for the same reason as weight.
+	for _, sp := range []string{"cycling", "running"} {
+		z := body.zoneSetting(sp)
+		if z == nil {
+			continue
+		}
+		if err := s.Training.SetHRZones(r.Context(), rider, sp, *z); err != nil {
+			s.fail(w, err)
+			return
+		}
+		if sp == "running" {
+			saved.HRZonesRunning = *z
+		} else {
+			saved.HRZonesCycling = *z
+		}
 	}
 	dto, changed, err := s.recalibrateLevelsForFTP(r.Context(), rider, before, "profile_saved")
 	if err != nil {
@@ -2156,27 +2208,78 @@ type sessionAnalysisDTO struct {
 	// Awards are the records this ride set when it was first analysed (a new
 	// season or all-time best), in display order; omitted when it set none.
 	Awards []sessionAwardDTO `json:"awards,omitempty"`
+	// HRZones is the ride's time in each of the rider's five heart-rate zones
+	// by their setting now, recomputed on every read from the stored
+	// histogram. Absent when there is no histogram, no heart rate in it, or
+	// the setting's inputs are missing.
+	HRZones []hrZoneSecondsDTO `json:"hrZones,omitempty"`
 }
 
-func sessionAnalysisDTOFrom(a workout.SessionAnalysis) sessionAnalysisDTO {
+// hrZoneSecondsDTO is one zone's bounds and the seconds spent in it. High 0
+// means open (Z5); Low 0 is Z1's floor.
+type hrZoneSecondsDTO struct {
+	Zone    int     `json:"zone"`
+	Low     float64 `json:"low"`
+	High    float64 `json:"high"`
+	Seconds int     `json:"seconds"`
+}
+
+// hrZoneSeconds builds the zone rows for a ride, nil when there is nothing
+// honest to show.
+func hrZoneSeconds(a workout.SessionAnalysis, sport string, profile workout.RiderProfile) []hrZoneSecondsDTO {
+	if a.HRHistogram == nil {
+		return nil
+	}
+	b, ok := hrzones.Bounds(profile, sport)
+	if !ok {
+		return nil
+	}
+	secs, ok := hrzones.Seconds(*a.HRHistogram, b)
+	if !ok {
+		return nil
+	}
+	// Z1 has no floor and Z5 no ceiling (0 in both).
+	return []hrZoneSecondsDTO{
+		{Zone: 1, High: b[0], Seconds: secs[0]},
+		{Zone: 2, Low: b[0], High: b[1], Seconds: secs[1]},
+		{Zone: 3, Low: b[1], High: b[2], Seconds: secs[2]},
+		{Zone: 4, Low: b[2], High: b[3], Seconds: secs[3]},
+		{Zone: 5, Low: b[3], Seconds: secs[4]},
+	}
+}
+
+func sessionAnalysisDTOFrom(a workout.SessionAnalysis, sport string, profile workout.RiderProfile) sessionAnalysisDTO {
 	return sessionAnalysisDTO{
 		Outcome: a.Outcome, LoadSource: a.LoadSource,
 		NP: a.NormalizedPower, IF: a.IntensityFactor, TSS: a.TSS, DurationRatio: a.DurationRatio,
 		Steps: a.Steps, WorkoutID: a.WorkoutID, Feel: a.Feel, Legs: a.Legs, Stress: a.Stress,
+		HRZones: hrZoneSeconds(a, sport, profile),
 	}
+}
+
+// zoneProfile loads the rider's profile once for a response that draws zones.
+// A failure degrades to no zones (zero profile) with a Warn: the request
+// worked before zones existed.
+func (s *Server) zoneProfile(ctx context.Context, rider string) workout.RiderProfile {
+	p, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		s.logger().Warn("reading profile for heart-rate zones failed", "rider", rider, "err", err)
+		return workout.RiderProfile{}
+	}
+	return p
 }
 
 // completedSessionDTOFrom attaches sess's analysis, if any, from analyses —
 // a map built once per request (see analysesSince) rather than a per-session
 // store lookup, since a fitness/week response can list dozens of sessions.
-func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]workout.SessionAnalysis, awards map[string][]sessionAwardDTO) completedSessionDTO {
+func completedSessionDTOFrom(sess workout.CompletedSession, analyses map[string]workout.SessionAnalysis, awards map[string][]sessionAwardDTO, profile workout.RiderProfile) completedSessionDTO {
 	dto := completedSessionDTO{
 		ID: sess.ID, Provider: sess.Provider, Sport: sess.Sport, Date: sess.Date,
 		DurationSeconds: sess.DurationSeconds, DistanceM: sess.DistanceM,
 		AvgHR: sess.AvgHR, AvgPowerWatts: sess.AvgPowerWatts, TrainingLoad: sess.TrainingLoad,
 	}
 	if a, ok := analyses[sess.ID]; ok {
-		sa := sessionAnalysisDTOFrom(a)
+		sa := sessionAnalysisDTOFrom(a, sess.Sport, profile)
 		sa.Awards = awards[sess.ID]
 		dto.Analysis = &sa
 	}
@@ -2260,6 +2363,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 		analyses = s.analysesSince(r.Context(), rider, sinceDate)
 		awards = s.awardsSince(r.Context(), rider, sinceDate)
 	}
+	profile := s.zoneProfile(r.Context(), rider)
 
 	dto := fitnessResponseDTO{
 		Snapshots: make([]fitnessSnapshotDTO, 0, len(snapshots)),
@@ -2269,7 +2373,7 @@ func (s *Server) handleGetFitness(w http.ResponseWriter, r *http.Request) {
 		dto.Snapshots = append(dto.Snapshots, fitnessSnapshotDTO{Date: snap.Date, CTL: snap.CTL, ATL: snap.ATL, TSB: snap.TSB})
 	}
 	for _, sess := range sessions {
-		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess, analyses, awards))
+		dto.Sessions = append(dto.Sessions, completedSessionDTOFrom(sess, analyses, awards, profile))
 	}
 	writeJSON(w, http.StatusOK, dto)
 }

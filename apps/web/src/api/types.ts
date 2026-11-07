@@ -903,6 +903,32 @@ export interface RiderProfile {
   /** Output only, and only on the response to a save that lowered the
    *  rider's progression levels for a new FTP. */
   levelsRecalibrated?: LevelsRecalibrated
+  /** Heart-rate zone setting per sport. Responses always carry both; on a
+   *  save a missing sport is left alone. */
+  hrZones?: HRZonesSettings
+}
+
+/** "" is automatic (threshold HR when known, else max HR). */
+export type HRZoneMethod = '' | 'threshold' | 'max' | 'reserve' | 'custom'
+
+export interface HRZoneSetting {
+  method: HRZoneMethod
+  /** Only for "custom": four strictly ascending bpm values, 40 to 230. */
+  bounds?: number[]
+}
+
+export interface HRZonesSettings {
+  cycling: HRZoneSetting
+  running: HRZoneSetting
+}
+
+/** One heart-rate zone of a ride. Z1's `low` is 0 and Z5's `high` is 0 (both
+ *  open ended). Mirrors internal/api's hrZoneDTO. */
+export interface RideHRZone {
+  zone: number
+  low: number
+  high: number
+  seconds: number
 }
 
 export type StepDuration = 'time' | 'distance' | 'open'
@@ -1125,6 +1151,9 @@ export interface SessionAnalysis {
   /** The records this ride set when it was first analysed, in display order;
    *  absent when it set none. Mirrors internal/api's sessionAwardDTO. */
   awards?: SessionAward[]
+  /** Seconds in each heart-rate zone, drawn with the rider's zone setting at
+   *  read time; absent when the ride has nothing to show. */
+  hrZones?: RideHRZone[]
 }
 
 /** A record a ride set: a new season or all-time best. */

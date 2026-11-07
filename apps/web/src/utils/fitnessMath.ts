@@ -332,6 +332,121 @@ export function hrZones(profile: HrProfile): Zone[] | null {
   return buildZones(basis.bpm, HR_ZONE_NAMES, edges, true)
 }
 
+export type HrZoneSport = 'cycling' | 'running'
+type HrZonesProfile = Pick<RiderProfile, 'thresholdHr' | 'maxHr' | 'restingHr' | 'hrZones'>
+
+// Mirrors hrzones.maxFractions and reserveFractions in
+// apps/api/internal/hrzones/hrzones.go: the four boundaries of the
+// %-of-max-HR and heart-rate-reserve tables.
+const MAX_BOUND_FRACTIONS = [0.6, 0.7, 0.8, 0.9]
+const RESERVE_BOUND_FRACTIONS = [0.6, 0.7, 0.8, 0.9]
+
+export const HR_CUSTOM_MIN_BPM = 40
+export const HR_CUSTOM_MAX_BPM = 230
+
+export type HrZoneMethodChoice = 'auto' | 'threshold' | 'max' | 'reserve' | 'custom'
+
+/** The method a sport's setting stores ('' on the wire is automatic). */
+export function hrZoneMethodOf(profile: Pick<RiderProfile, 'hrZones'>, sport: HrZoneSport): HrZoneMethodChoice {
+  const m = profile.hrZones?.[sport]?.method ?? ''
+  return m === '' ? 'auto' : m
+}
+
+/** The rider's own four bounds for a sport, as stored (possibly empty). */
+export function hrCustomBoundsOf(profile: Pick<RiderProfile, 'hrZones'>, sport: HrZoneSport): number[] {
+  return profile.hrZones?.[sport]?.bounds ?? []
+}
+
+/** Names the number a method still needs, or null when it has what it needs.
+ *  Automatic needs a threshold or a max heart rate. */
+export function hrZoneMissingInput(profile: HrZonesProfile, sport: HrZoneSport): string | null {
+  const method = hrZoneMethodOf(profile, sport)
+  const reserveOk = !!profile.maxHr && !!profile.restingHr && profile.restingHr < profile.maxHr
+  switch (method) {
+    case 'auto':
+      return profile.thresholdHr || profile.maxHr ? null : 'needs threshold HR or max HR'
+    case 'threshold':
+      return profile.thresholdHr ? null : 'needs threshold HR'
+    case 'max':
+      return profile.maxHr ? null : 'needs max HR'
+    case 'reserve':
+      return reserveOk ? null : 'needs max and resting HR'
+    case 'custom':
+      return customBoundsProblem(hrCustomBoundsOf(profile, sport)) ? 'needs four ascending bounds' : null
+  }
+}
+
+/** Why four custom bounds cannot be saved, or null. Same rule as
+ *  hrzones.Valid: four strictly ascending whole bpm values in 40..230. */
+export function customBoundsProblem(bounds: number[]): string | null {
+  if (bounds.length !== 4 || bounds.some((b) => !Number.isFinite(b))) return 'Enter all four boundaries.'
+  if (bounds.some((b) => !Number.isInteger(b) || b < HR_CUSTOM_MIN_BPM || b > HR_CUSTOM_MAX_BPM)) {
+    return `Boundaries must be whole numbers from ${HR_CUSTOM_MIN_BPM} to ${HR_CUSTOM_MAX_BPM} bpm.`
+  }
+  for (let i = 1; i < bounds.length; i++) {
+    if (bounds[i]! <= bounds[i - 1]!) return 'Each boundary must be higher than the one before.'
+  }
+  return null
+}
+
+/** The five heart-rate zones for a sport under the rider's own setting, or
+ *  null when the method's inputs are missing. Mirrors hrzones.Bounds: Z1 has
+ *  no floor (low 0) and Z5 no ceiling (high null). */
+export function hrZonesFor(profile: HrZonesProfile, sport: HrZoneSport): Zone[] | null {
+  let method = hrZoneMethodOf(profile, sport)
+  if (method === 'auto') method = profile.thresholdHr ? 'threshold' : profile.maxHr ? 'max' : 'auto'
+  let b: number[]
+  switch (method) {
+    case 'threshold': {
+      if (!profile.thresholdHr) return null
+      const edges = sport === 'running' ? LTHR_RUNNING_EDGES : LTHR_CYCLING_EDGES
+      b = edges.slice(1).map((f) => profile.thresholdHr! * f)
+      break
+    }
+    case 'max':
+      if (!profile.maxHr) return null
+      b = MAX_BOUND_FRACTIONS.map((f) => profile.maxHr! * f)
+      break
+    case 'reserve': {
+      const { maxHr, restingHr } = profile
+      if (!maxHr || !restingHr || restingHr >= maxHr) return null
+      b = RESERVE_BOUND_FRACTIONS.map((f) => restingHr + (maxHr - restingHr) * f)
+      break
+    }
+    case 'custom': {
+      const bounds = hrCustomBoundsOf(profile, sport)
+      if (bounds.length !== 4) return null
+      b = [...bounds]
+      break
+    }
+    default:
+      return null
+  }
+  return HR_ZONE_NAMES.map((name, i) => ({
+    name,
+    low: i === 0 ? 0 : Math.round(b[i - 1]!),
+    high: i === 4 ? null : Math.round(b[i]!),
+  }))
+}
+
+/** The first reason the profile's custom zones cannot be saved, or null. Only
+ *  a sport set to "custom" is checked. */
+export function hrZonesProblem(profile: Pick<RiderProfile, 'hrZones'>): string | null {
+  for (const sport of ['cycling', 'running'] as const) {
+    if (hrZoneMethodOf(profile, sport) !== 'custom') continue
+    const problem = customBoundsProblem(hrCustomBoundsOf(profile, sport))
+    if (problem) return `${sport === 'cycling' ? 'Cycling' : 'Running'} heart-rate zones: ${problem}`
+  }
+  return null
+}
+
+/** "below 140 bpm", "140–155 bpm", "170+ bpm": Z1 has no floor, Z5 no ceiling. */
+export function formatHrZoneRange(z: Zone): string {
+  if (z.high === null) return `${z.low}+ bpm`
+  if (z.low === 0) return `below ${z.high} bpm`
+  return `${z.low}–${z.high} bpm`
+}
+
 // 5-zone % threshold speed model. Threshold speed (m/s) is the inverse of
 // the rider's threshold pace (sec/km). Z5 has no upper bound.
 const PACE_ZONE_NAMES = ['Z1 Recovery', 'Z2 Endurance', 'Z3 Tempo', 'Z4 Threshold', 'Z5 Speed']

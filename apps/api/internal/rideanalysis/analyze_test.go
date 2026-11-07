@@ -646,3 +646,21 @@ func TestAnalyzeFTPTestRiddenShortIsCompleted(t *testing.T) {
 		t.Errorf("Steps = %+v, want none scored for a test", a.Steps)
 	}
 }
+
+func TestAnalyzeSetsHRHistogramWhenSamplesReadable(t *testing.T) {
+	act := buildActivity(t, constantHR(300, 150), nil)
+	a := Analyze(Input{Activity: act, Profile: fullProfile()})
+	if a.HRHistogram == nil {
+		t.Fatal("HRHistogram = nil, want a histogram for a readable ride")
+	}
+	if a.HRHistogram.Min != 150 || len(a.HRHistogram.Seconds) != 1 || a.HRHistogram.Seconds[0] != 300 {
+		t.Errorf("HRHistogram = %+v, want 300 seconds at 150", a.HRHistogram)
+	}
+}
+
+func TestAnalyzeLeavesHRHistogramNilWithoutActivity(t *testing.T) {
+	a := Analyze(Input{Profile: fullProfile()})
+	if a.HRHistogram != nil {
+		t.Errorf("HRHistogram = %+v, want nil without a decoded activity", a.HRHistogram)
+	}
+}

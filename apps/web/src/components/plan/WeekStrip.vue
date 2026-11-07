@@ -244,6 +244,7 @@ function openResults(day: WeekDay) {
 }
 
 const resultsSessionId = computed(() => (resultsDay.value ? analysedSession(resultsDay.value)?.id : undefined))
+const resultsHrZones = computed(() => (resultsDay.value ? analysedSession(resultsDay.value)?.analysis?.hrZones : undefined))
 const resultsFeel = computed(() => (resultsDay.value ? analysedSession(resultsDay.value)?.analysis?.feel : undefined))
 
 function onRated(analysis: SessionAnalysis) {
@@ -440,6 +441,7 @@ function rideLinkNote(c: CompletedSession): string {
       :steps="resultsSteps"
       :session-id="resultsSessionId"
       :feel="resultsFeel"
+      :hr-zones="resultsHrZones"
       @rated="onRated"
     />
   </UCard>

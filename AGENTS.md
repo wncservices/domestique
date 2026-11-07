@@ -949,6 +949,36 @@ excluded (not FTP-relative). A change under 3% leaves the marker alone in both d
 accumulates against the last calibrated FTP; a change over 25% moves only the marker. Logs carry
 counts and a stage, never a level, a decoupling or an FTP beside a rider.
 
+## Heart-rate zones
+
+A rider chooses how their heart-rate zones are drawn, per sport (`rider_profiles.hr_zones_cycling`,
+`hr_zones_running`, JSON, '' = auto). Design: `docs/superpowers/specs/2026-11-07-own-hr-zones-design.md`.
+
+- **One resolver.** `internal/hrzones` (pure) turns a profile and sport into four bpm boundaries
+  (`Bounds`): auto (threshold table when threshold HR is known, else max HR: what everyone had
+  before), `threshold` (Friel, the same edges as `LTHR_*_EDGES` in `fitnessMath.ts`, a test pins
+  them), `max`, `reserve` (Karvonen: needs max and resting HR, max above resting) and `custom` (four
+  ascending bpm in 40-230, `Valid`). `hrZonesFor` in `fitnessMath.ts` mirrors it for the UI.
+- **Own writer.** `SetHRZones`, like `SetWeight`: `SaveProfile*` never writes the columns, or an
+  automatic save would wipe a rider's choice. The profile PUT takes an optional `hrZones`; a
+  missing sport is left alone, an invalid one is a 422 before anything is written.
+- **Targets.** `workoutlib.HRRange` asks `hrzones.Range` first, which answers only for an explicit
+  method; auto keeps today's tables exactly.
+- **Time in zone is computed on read.** An analysis stores `hr_histogram` (seconds per whole bpm;
+  '' = never computed, the empty histogram = tried, nothing readable, not tried again). The analysis
+  DTO's `hrZones` cuts it with the rider's current setting, so a zone change applies to every ride
+  at once with no re-analysis. The old `hr_zone_seconds` column is still written and nothing reads it.
+- **Backfill** (`hrhistogrambackfill.go`, after `analyseNewSessions` in the metrics sync): up to 10
+  synced rides per provider per pass that have an analysis and no histogram, newest first, only for providers
+  connected this pass (Garmin with a session, Wahoo with a successful workout listing: Wahoo rides are
+  backfilled only while in that recent listing, and a missing file URL is marked empty only when it
+  succeeded); a failed download is retried next pass, the third failure (in-memory count per ride)
+  stores the empty histogram, imports are never fetched. `SaveAnalysis` keeps a stored histogram when
+  re-saved without one. Logs carry a rider and counts, never a bpm.
+- The web profile form compares saved and edited profiles with keys sorted at every depth
+  (`normalise` in `FitnessPage.vue`): an allow-list replacer drops nested objects like `hrZones`, and a
+  zone change then never shows the Save bar.
+
 ## Best efforts
 
 `internal/bestefforts` (pure) decides what a record is and when a ride set one;

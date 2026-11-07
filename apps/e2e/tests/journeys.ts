@@ -162,3 +162,79 @@ export async function walkAdminPages(page: Page) {
   await page.getByRole('menuitem', { name: 'Settings' }).click()
   await expect(pageHeading(page)).toHaveText('Settings')
 }
+
+// A rider chooses their own cycling heart-rate zones on Fitness, sees them in
+// the Training zones card, then puts the setting back to Auto. This runs
+// against production with the shared test rider, so it must leave the profile
+// as it found it: whatever happens, the `finally` restores the heart-rate zone
+// setting it read at the start.
+export async function heartRateZonesJourney(page: Page) {
+  type ZoneSetting = { method: string; bounds?: number[] }
+  type StoredProfile = { hrZones?: { cycling?: ZoneSetting; running?: ZoneSetting } }
+
+  const before = (await (await page.request.get('/api/training/profile')).json()) as StoredProfile
+  const methodBefore = before.hrZones?.cycling?.method ?? ''
+
+  const saveProfile = async () => {
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === '/api/training/profile',
+    )
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await saved).status(), 'PUT /api/training/profile').toBe(200)
+  }
+
+  try {
+    await navigateTo(page, 'Fitness', '/fitness')
+    await expect(pageHeading(page)).toHaveText('Fitness')
+
+    // Cycling is the first tab; pick the rider's own boundaries. The page has
+    // two Cycling tabs, the profile form's and the zones card's below it: the
+    // first is the form's.
+    await page.getByRole('tab', { name: 'Cycling' }).first().click()
+    await page.getByRole('combobox', { name: 'Zone method' }).click()
+    await page.getByRole('option', { name: 'My own' }).click()
+    const bounds: [string, string][] = [
+      ['Z1 ends at', '120'],
+      ['Z2 ends at', '140'],
+      ['Z3 ends at', '155'],
+      ['Z4 ends at', '170'],
+    ]
+    for (const [label, value] of bounds) {
+      await page.getByRole('spinbutton', { name: label }).fill(value)
+      await page.keyboard.press('Tab')
+    }
+    await expect(page.getByText('Z2 Endurance · 120–140 bpm').first()).toBeVisible()
+    await saveProfile()
+
+    // The Training zones card sits below the profile card: its copy is last.
+    await expect(page.getByText('Your own boundaries').first()).toBeVisible()
+    await expect(page.getByText('Z1 Recovery · below 120 bpm').last()).toBeVisible()
+    await expect(page.getByText('Z2 Endurance · 120–140 bpm').last()).toBeVisible()
+    await expect(page.getByText('Z3 Tempo · 140–155 bpm').last()).toBeVisible()
+    await expect(page.getByText('Z4 Threshold · 155–170 bpm').last()).toBeVisible()
+    await expect(page.getByText('Z5 VO2max · 170+ bpm').last()).toBeVisible()
+
+    // And back to Auto, through the same form.
+    await page.getByRole('combobox', { name: 'Zone method' }).click()
+    await page.getByRole('option', { name: 'Auto', exact: true }).click()
+    await saveProfile()
+    await expect(page.getByText('Your own boundaries')).toHaveCount(0)
+  } finally {
+    // Whatever failed above, the test rider's zone setting goes back to what
+    // it was. Only the heart-rate zone setting is written, and only when it
+    // differs, so a clean run touches nothing else on the profile.
+    const now = (await (await page.request.get('/api/training/profile')).json()) as StoredProfile & Record<string, unknown>
+    const changed =
+      JSON.stringify(now.hrZones?.cycling ?? { method: '' }) !== JSON.stringify(before.hrZones?.cycling ?? { method: '' })
+    if (changed) {
+      // PUT clears fields it omits, so send the profile as read now with the
+      // old cycling setting put back.
+      const { levelsRecalibrated: _ignored, ...profile } = now as Record<string, unknown>
+      void _ignored
+      const restored = await page.request.put('/api/training/profile', {
+        data: { ...profile, hrZones: { cycling: before.hrZones?.cycling ?? { method: methodBefore } } },
+      })
+      expect(restored.ok(), 'restoring the heart-rate zone setting').toBe(true)
+    }
+  }
+}

@@ -1,10 +1,20 @@
 <script setup lang="ts">
 // Derived, read-only training zones (spec §4) — power (FTP, Coggan 7),
-// heart rate (max HR, 5) and pace (threshold pace, 5). Nothing here is
+// heart rate (per sport, 5, from the rider's own setting) and pace (threshold pace, 5). Nothing here is
 // stored: it is all recomputed from the rider's own profile fields.
 import { computed } from 'vue'
 import type { RiderProfile } from '@/api/types'
-import { formatPace, hrZoneBasis, hrZones, paceZones, powerZones, type Zone } from '@/utils/fitnessMath'
+import {
+  formatHrZoneRange,
+  formatPace,
+  hrZoneMethodOf,
+  hrZoneMissingInput,
+  hrZonesFor,
+  paceZones,
+  powerZones,
+  type HrZoneSport,
+  type Zone,
+} from '@/utils/fitnessMath'
 import { ZONE_ORDER, zoneColorVar } from '@/utils/zones'
 
 const props = defineProps<{
@@ -65,22 +75,46 @@ const powerBars = computed(() => {
   return zoneBars(power.value, props.profile.ftpWatts, (z) => (z.high === null ? `${z.low}+ W` : `${z.low}–${z.high} W`))
 })
 
-// The %LTHR table has no floor for Z1, so it reads "below N bpm" like the
-// pace table's Z1 does, rather than a made-up lower bound.
-function formatHrRange(z: Zone): string {
-  if (z.high === null) return `${z.low}+ bpm`
-  if (z.low === 0) return `below ${z.high} bpm`
-  return `${z.low}–${z.high} bpm`
+// Fraction of the Z4 ceiling the bar starts Z1 from when it has no real floor.
+const HR_Z1_BAR_FLOOR = 0.65
+
+const HR_SPORTS: { sport: HrZoneSport; label: string }[] = [
+  { sport: 'cycling', label: 'Cycling' },
+  { sport: 'running', label: 'Running' },
+]
+
+// What the zones are drawn from, in the rider's words.
+function hrBasisText(sport: HrZoneSport): string {
+  const p = props.profile
+  const method = hrZoneMethodOf(p, sport)
+  const resolved = method === 'auto' ? (p.thresholdHr ? 'threshold' : 'max') : method
+  switch (resolved) {
+    case 'threshold':
+      return `Threshold HR ${p.thresholdHr} bpm`
+    case 'max':
+      return `Max HR ${p.maxHr} bpm`
+    case 'reserve':
+      return `Reserve: max ${p.maxHr}, resting ${p.restingHr} bpm`
+    default:
+      return 'Your own boundaries'
+  }
 }
 
-// Fraction of threshold HR the bar starts Z1 from when it has no real floor.
-const HR_Z1_BAR_FLOOR = 0.65
-const hr = computed(() => hrZones(props.profile))
-const hrBasis = computed(() => hrZoneBasis(props.profile))
-const hrBars = computed(() => {
-  if (!hr.value || !hrBasis.value) return null
-  return zoneBars(hr.value, hrBasis.value.bpm, formatHrRange, HR_Z1_BAR_FLOOR)
-})
+const hrSections = computed(() =>
+  HR_SPORTS.map(({ sport, label }) => {
+    const zones = hrZonesFor(props.profile, sport)
+    const ceiling = zones?.[3]?.high ?? 0
+    return {
+      sport,
+      label,
+      basis: zones ? hrBasisText(sport) : '',
+      missing: zones ? null : hrZoneMissingInput(props.profile, sport),
+      bars: zones && ceiling > 0 ? zoneBars(zones, ceiling, formatHrZoneRange, HR_Z1_BAR_FLOOR) : null,
+    }
+  }),
+)
+// With nothing to anchor automatic zones to, offer the max-HR test once.
+const hrNeedsAnchor = computed(() => !props.profile.thresholdHr && !props.profile.maxHr)
 
 // Pace zones are built from threshold speed, so `low`/`high` are m/s — but
 // pace (min/km) runs the other way: a faster (higher) speed is a *smaller*
@@ -139,28 +173,39 @@ const paceBars = computed(() => {
         </div>
       </div>
 
-      <!-- Heart rate -->
-      <div>
-        <p class="text-[length:var(--text-label)] text-muted">Heart rate</p>
-        <template v-if="hrBars">
-          <p class="mt-1 tabular-nums text-[length:var(--text-body)] font-medium">{{ hrBasis?.kind === 'threshold' ? 'Threshold HR' : 'Max HR' }} {{ hrBasis?.bpm }} bpm</p>
+      <!-- Heart rate, per sport -->
+      <div v-for="sec in hrSections" :key="sec.sport" :data-testid="`hr-zones-${sec.sport}`">
+        <p class="text-[length:var(--text-label)] text-muted">Heart rate · {{ sec.label }}</p>
+        <template v-if="sec.bars">
+          <p class="mt-1 tabular-nums text-[length:var(--text-body)] font-medium">{{ sec.basis }}</p>
           <div class="mt-2 flex h-3 overflow-hidden rounded-full">
             <div
-              v-for="bar in hrBars"
+              v-for="bar in sec.bars"
               :key="bar.name"
               :style="{ width: `${bar.widthPercent}%`, backgroundColor: bar.color }"
             />
           </div>
           <ul class="mt-2 flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
-            <li v-for="bar in hrBars" :key="bar.name" class="tabular-nums">
+            <li v-for="bar in sec.bars" :key="bar.name" class="tabular-nums">
               {{ bar.name }} · {{ bar.range }}
             </li>
           </ul>
         </template>
         <div v-else class="mt-1">
-          <UButton color="primary" variant="soft" size="sm" :loading="buildingMaxHrTest" @click="emit('buildMaxHrTest')">
+          <p v-if="sec.missing && !hrNeedsAnchor" class="text-[length:var(--text-body)] text-muted">
+            Heart-rate zones {{ sec.missing }}. Set it in the profile above.
+          </p>
+          <UButton
+            v-else-if="sec.sport === 'cycling'"
+            color="primary"
+            variant="soft"
+            size="sm"
+            :loading="buildingMaxHrTest"
+            @click="emit('buildMaxHrTest')"
+          >
             Build a max HR test
           </UButton>
+          <p v-else class="text-[length:var(--text-body)] text-muted">Set a max or threshold HR in the profile above.</p>
         </div>
       </div>
 

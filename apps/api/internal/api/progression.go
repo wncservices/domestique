@@ -286,7 +286,12 @@ func (s *Server) handleSetSessionFeel(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Info("session feel recorded", "session", id, "rider", identity.User)
 
-	writeJSON(w, http.StatusOK, sessionAnalysisDTOFrom(analysis))
+	// The sport is the session's; the analysis row does not carry it here.
+	var sport string
+	if sess, err := s.Training.GetSession(r.Context(), id); err == nil {
+		sport = sess.Sport
+	}
+	writeJSON(w, http.StatusOK, sessionAnalysisDTOFrom(analysis, sport, s.zoneProfile(r.Context(), identity.User)))
 }
 
 // applySurvey stores a whole survey on an analysis and does everything that

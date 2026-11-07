@@ -126,6 +126,12 @@ type Analysis struct {
 	HRZoneSeconds    [5]int
 	PowerCurve       map[int]float64
 
+	// HRHistogram is the ride's seconds at each whole heart rate (see
+	// HRHistogramOf), nil when the samples were not readable. It is kept
+	// beside HRZoneSeconds so zones can be recut for a rider's own bounds
+	// without re-analysing the ride.
+	HRHistogram *workout.HRHistogram
+
 	// DecouplingPct is the ride's aerobic decoupling (see Decoupling), nil
 	// when the ride does not qualify.
 	DecouplingPct *float64
@@ -577,6 +583,8 @@ func Analyze(in Input) Analysis {
 			a.HRZoneSeconds = HRZoneSeconds(samples, in.Profile.MaxHR)
 		}
 		a.PowerCurve = PowerCurve(samples)
+		h := HRHistogramOf(samples)
+		a.HRHistogram = &h
 		if in.Sport == "cycling" {
 			if pct, ok := Decoupling(samples, in.Profile.FTPWatts); ok {
 				a.DecouplingPct = &pct

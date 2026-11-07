@@ -170,7 +170,41 @@ type RiderProfile struct {
 	// ride indoors). The manual "Indoor version" action is available to every
 	// cycling rider regardless.
 	SmartTrainer bool
-	UpdatedAt    string
+	// HRZonesCycling and HRZonesRunning are the rider's own heart-rate zone
+	// settings, one per sport. The zero value is automatic, which is what
+	// every rider had before they could choose. Written only by DB.SetHRZones:
+	// SaveProfile never writes them, or an automatic save would wipe them.
+	HRZonesCycling HRZoneSetting
+	HRZonesRunning HRZoneSetting
+	UpdatedAt      string
+}
+
+// HRZoneSetting is how a rider's heart-rate zone boundaries are chosen for
+// one sport. Method is one of the HRZones* constants; Bounds is used only by
+// HRZonesCustom, where it holds the four ascending bpm boundaries.
+type HRZoneSetting struct {
+	Method string `json:"method"`
+	Bounds []int  `json:"bounds,omitempty"`
+}
+
+// The ways a rider's heart-rate zones can be drawn. "" is automatic: the
+// threshold table when threshold HR is known, otherwise the max-HR table.
+const (
+	HRZonesAuto      = ""
+	HRZonesThreshold = "threshold"
+	HRZonesMax       = "max"
+	HRZonesReserve   = "reserve"
+	HRZonesCustom    = "custom"
+)
+
+// HRHistogram is how many seconds a ride spent at each whole heart rate.
+// Min is the lowest bpm in Seconds, and Seconds[i] counts bpm Min+i. NoHR
+// counts seconds with no heart rate, kept apart so they never land in a zone.
+// Stored as JSON, so the short tags keep the column small.
+type HRHistogram struct {
+	Min     int   `json:"min"`
+	Seconds []int `json:"s"`
+	NoHR    int   `json:"n"`
 }
 
 // Names a field can appear under in RiderProfile.Estimated. FTP has its own

@@ -3,9 +3,19 @@
 // Availability, Automation. Emits a full replacement profile on every change
 // rather than mutating the prop — the page owns `profile` and decides what
 // "dirty" means against the last saved copy (see SaveBar.vue).
-import { computed } from 'vue'
-import type { DetectedThreshold, RiderProfile } from '@/api/types'
-import type { ThresholdField } from '@/utils/fitnessMath'
+import { computed, ref } from 'vue'
+import type { DetectedThreshold, HRZoneMethod, HRZonesSettings, RiderProfile } from '@/api/types'
+import {
+  customBoundsProblem,
+  formatHrZoneRange,
+  hrCustomBoundsOf,
+  hrZoneMethodOf,
+  hrZoneMissingInput,
+  hrZonesFor,
+  type HrZoneMethodChoice,
+  type HrZoneSport,
+  type ThresholdField,
+} from '@/utils/fitnessMath'
 
 const props = defineProps<{
   profile: RiderProfile
@@ -97,6 +107,65 @@ const experienceItems = computed(() => {
   }
   return EXPERIENCE_ITEMS
 })
+
+// --- heart-rate zones: one setting per sport, saved with the profile ---
+
+const hrSport = ref<HrZoneSport>('cycling')
+const HR_SPORT_TABS = [
+  { label: 'Cycling', value: 'cycling' },
+  { label: 'Running', value: 'running' },
+]
+const HR_METHOD_ITEMS: { value: HrZoneMethodChoice; label: string }[] = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'threshold', label: '% of threshold HR' },
+  { value: 'max', label: '% of max HR' },
+  { value: 'reserve', label: 'Heart-rate reserve' },
+  { value: 'custom', label: 'My own' },
+]
+const HR_METHOD_HELP: Record<HrZoneMethodChoice, string> = {
+  auto: 'Uses your threshold heart rate when known, otherwise your max heart rate.',
+  threshold: 'Zones as a share of your threshold heart rate (Friel).',
+  max: 'Zones as a share of your max heart rate.',
+  reserve: 'Zones as a share of the range between your resting and max heart rate (Karvonen).',
+  custom: 'Enter where each of your first four zones ends. Zone 5 runs from there up.',
+}
+const HR_BOUND_LABELS = ['Z1 ends at', 'Z2 ends at', 'Z3 ends at', 'Z4 ends at']
+
+const hrMethod = computed(() => hrZoneMethodOf(props.profile, hrSport.value))
+// An empty box is stored as 0, which the bounds check refuses: positions
+// stay where the rider typed them while the set is incomplete.
+const hrBounds = computed(() => {
+  const b = hrCustomBoundsOf(props.profile, hrSport.value)
+  return [0, 1, 2, 3].map((i) => b[i] ?? 0)
+})
+const hrPreview = computed(() => hrZonesFor(props.profile, hrSport.value))
+const hrMissing = computed(() => hrZoneMissingInput(props.profile, hrSport.value))
+const hrBoundsProblem = computed(() =>
+  hrMethod.value === 'custom' ? customBoundsProblem(hrCustomBoundsOf(props.profile, hrSport.value)) : null,
+)
+
+// Always sends both sports, so the save carries what the rider sees.
+function updateHrZones(sport: HrZoneSport, method: HRZoneMethod, bounds?: number[]) {
+  const current = props.profile.hrZones
+  const next: HRZonesSettings = {
+    cycling: { method: current?.cycling?.method ?? '', ...(current?.cycling?.bounds ? { bounds: current.cycling.bounds } : {}) },
+    running: { method: current?.running?.method ?? '', ...(current?.running?.bounds ? { bounds: current.running.bounds } : {}) },
+  }
+  next[sport] = method === 'custom' ? { method, bounds: bounds ?? [0, 0, 0, 0] } : { method }
+  update({ hrZones: next })
+}
+
+function setHrMethod(choice: HrZoneMethodChoice) {
+  const method: HRZoneMethod = choice === 'auto' ? '' : choice
+  const keep = hrCustomBoundsOf(props.profile, hrSport.value)
+  updateHrZones(hrSport.value, method, keep.length === 4 ? keep : undefined)
+}
+
+function setHrBound(i: number, v: number | null | undefined) {
+  const bounds = [...hrBounds.value]
+  bounds[i] = typeof v === 'number' && Number.isFinite(v) ? v : 0
+  updateHrZones(hrSport.value, 'custom', bounds)
+}
 </script>
 
 <template>
@@ -233,6 +302,46 @@ const experienceItems = computed(() => {
             from your watch's own wellness reading, or enter one yourself.
           </p>
         </UFormField>
+      </div>
+    </div>
+
+    <!-- Heart-rate zones -->
+    <div>
+      <p class="text-[length:var(--text-label)] text-muted mb-3">Heart-rate zones</p>
+      <UTabs v-model="hrSport" :items="HR_SPORT_TABS" :content="false" size="sm" class="mb-4" />
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="flex flex-col gap-4">
+          <UFormField label="Zone method" :help="HR_METHOD_HELP[hrMethod]">
+            <USelect
+              :model-value="hrMethod"
+              :items="HR_METHOD_ITEMS"
+              value-key="value"
+              class="w-full"
+              @update:model-value="(v: HrZoneMethodChoice) => setHrMethod(v)"
+            />
+          </UFormField>
+          <div v-if="hrMethod === 'custom'" class="grid grid-cols-2 gap-3">
+            <UFormField v-for="(label, i) in HR_BOUND_LABELS" :key="label" :label="label">
+              <UInputNumber
+                :model-value="hrBounds[i] || undefined"
+                :format-options="{ useGrouping: false }"
+                :increment="false"
+                :decrement="false"
+                class="w-full"
+                @update:model-value="(v: number | null | undefined) => setHrBound(i, v)"
+              />
+            </UFormField>
+            <p class="col-span-2 text-[length:var(--text-label)] text-muted -mt-1">bpm, whole numbers from 40 to 230.</p>
+          </div>
+          <p v-if="hrBoundsProblem" class="text-[length:var(--text-label)] text-error" role="alert">{{ hrBoundsProblem }}</p>
+        </div>
+        <div data-testid="hr-zones-preview" aria-live="polite">
+          <p class="text-[length:var(--text-label)] text-muted mb-1">Preview</p>
+          <ul v-if="hrPreview" class="flex flex-col gap-0.5 text-[length:var(--text-label)] text-muted">
+            <li v-for="z in hrPreview" :key="z.name" class="tabular-nums">{{ z.name }} · {{ formatHrZoneRange(z) }}</li>
+          </ul>
+          <p v-else class="text-[length:var(--text-body)] text-muted">No zones yet: {{ hrMissing }}.</p>
+        </div>
       </div>
     </div>
 

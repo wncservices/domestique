@@ -513,3 +513,42 @@ func TestDecouplingSkipsTheWarmup(t *testing.T) {
 		t.Fatalf("Decoupling = %v, %v; want 0, true", pct, ok)
 	}
 }
+
+func TestHRHistogramOfRoundsAndCountsNoHR(t *testing.T) {
+	// 120.4 rounds to 120 and 0 is no heart rate at all. The bins run from the
+	// lowest bpm seen (120) to the highest (125), so 122-124 are kept as zeros.
+	s := []Sample{
+		{HeartRate: 120, HasHR: true},
+		{HeartRate: 120.4, HasHR: true},
+		{HeartRate: 121, HasHR: true},
+		{HeartRate: 0},
+		{HeartRate: 125, HasHR: true},
+	}
+	h := HRHistogramOf(s)
+	if h.Min != 120 {
+		t.Errorf("Min = %d, want 120", h.Min)
+	}
+	want := []int{2, 1, 0, 0, 0, 1}
+	if len(h.Seconds) != len(want) {
+		t.Fatalf("Seconds = %v, want %v", h.Seconds, want)
+	}
+	for i := range want {
+		if h.Seconds[i] != want[i] {
+			t.Errorf("Seconds = %v, want %v", h.Seconds, want)
+			break
+		}
+	}
+	if h.NoHR != 1 {
+		t.Errorf("NoHR = %d, want 1", h.NoHR)
+	}
+}
+
+func TestHRHistogramOfWithoutHeartRateIsEmpty(t *testing.T) {
+	h := HRHistogramOf([]Sample{{}, {}, {}})
+	if h.Min != 0 || len(h.Seconds) != 0 {
+		t.Errorf("histogram = %+v, want no bins", h)
+	}
+	if h.NoHR != 3 {
+		t.Errorf("NoHR = %d, want 3", h.NoHR)
+	}
+}

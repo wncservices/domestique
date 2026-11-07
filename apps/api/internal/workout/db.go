@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS rider_profiles (
     experience_level           TEXT NOT NULL DEFAULT '',
     ftp_verified_at            TEXT NOT NULL DEFAULT '',
     ftp_test_snoozed_until     TEXT NOT NULL DEFAULT '',
+    hr_zones_cycling           TEXT NOT NULL DEFAULT '',
+    hr_zones_running           TEXT NOT NULL DEFAULT '',
     updated_at                 TEXT NOT NULL
 );
 
@@ -142,6 +144,7 @@ CREATE TABLE IF NOT EXISTS session_analyses (
     power_curve          TEXT NOT NULL DEFAULT '',
     steps                TEXT NOT NULL DEFAULT '',
     decoupling_pct       DOUBLE PRECISION, -- NULL: not computed
+    hr_histogram         TEXT NOT NULL DEFAULT '', -- seconds per bpm; '' until a sample-backed analysis or the backfill fills it
     analysed_at          TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_analyses_rider_idx ON session_analyses (rider);
@@ -863,6 +866,13 @@ func (d *DB) addEstimatedColumns() error {
 		// '' = anchored at created_at, which is right for every goal made before
 		// this column: only a re-dating writes one.
 		`ALTER TABLE goals ADD COLUMN plan_anchor TEXT NOT NULL DEFAULT ''`,
+		// A rider's own heart-rate zone choice per sport, JSON; '' is automatic,
+		// which is what every rider had before they could choose.
+		`ALTER TABLE rider_profiles ADD COLUMN hr_zones_cycling TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE rider_profiles ADD COLUMN hr_zones_running TEXT NOT NULL DEFAULT ''`,
+		// Seconds per bpm for a ride; '' for every ride analysed before it existed,
+		// which the backfill fills in later.
+		`ALTER TABLE session_analyses ADD COLUMN hr_histogram TEXT NOT NULL DEFAULT ''`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -1453,27 +1463,49 @@ func (d *DB) DeleteGoal(ctx context.Context, id string) error {
 
 func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, error) {
 	var (
-		p         RiderProfile
-		days      string
-		estimated string
+		p                    RiderProfile
+		days                 string
+		estimated            string
+		hrCycling, hrRunning string
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, threshold_hr, resting_hr,
                available_days, hours_per_available_day, experience_level, estimated_fields,
-               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, smart_trainer, weight_kg, updated_at
+               auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, smart_trainer, weight_kg,
+               hr_zones_cycling, hr_zones_running, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
 		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.ThresholdHR, &p.RestingHR,
 		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt,
-		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.WeightKG, &p.UpdatedAt)
+		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.WeightKG, &hrCycling, &hrRunning, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
 	if err != nil {
 		return RiderProfile{}, false, err
 	}
+	if p.HRZonesCycling, err = decodeHRZoneSetting(hrCycling); err != nil {
+		return RiderProfile{}, false, err
+	}
+	if p.HRZonesRunning, err = decodeHRZoneSetting(hrRunning); err != nil {
+		return RiderProfile{}, false, err
+	}
 	p.AvailableDays = splitList(days)
 	p.Estimated = splitList(estimated)
 	return p, true, nil
+}
+
+// decodeHRZoneSetting reads a stored zone choice. ” is the automatic
+// setting, the zero value, so a rider who never chose one reads exactly as
+// before the column existed.
+func decodeHRZoneSetting(raw string) (HRZoneSetting, error) {
+	if raw == "" {
+		return HRZoneSetting{}, nil
+	}
+	var s HRZoneSetting
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		return HRZoneSetting{}, fmt.Errorf("workout: decode heart-rate zones: %w", err)
+	}
+	return s, nil
 }
 
 // SetFTPCalibrated is a compare-and-set on the FTP the rider's levels were
@@ -1604,6 +1636,41 @@ func (d *DB) SetWeight(ctx context.Context, rider string, kg float64) error {
         INSERT INTO rider_profiles (rider, weight_kg, updated_at) VALUES (?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET weight_kg = excluded.weight_kg`),
 		rider, kg, d.timestamp())
+	return err
+}
+
+// SetHRZones records a rider's heart-rate zone choice for one sport, "cycling"
+// or "running". Its own writer, like SetWeight: a whole-profile save built by
+// the form would otherwise zero it. Automatic (the zero setting) is stored as
+// ” so it reads back as the zero value. The caller validates the setting
+// (hrzones.Valid); this only persists the one column for the sport.
+func (d *DB) SetHRZones(ctx context.Context, rider, sport string, s HRZoneSetting) error {
+	rider = normalizeRider(rider)
+	if rider == "" {
+		return errors.New("workout: no rider — whose heart-rate zones are these?")
+	}
+	var column string
+	switch sport {
+	case "cycling":
+		column = "hr_zones_cycling"
+	case "running":
+		column = "hr_zones_running"
+	default:
+		return fmt.Errorf("workout: no heart-rate zones for sport %q", sport)
+	}
+	stored := ""
+	if s.Method != HRZonesAuto {
+		raw, err := json.Marshal(s)
+		if err != nil {
+			return fmt.Errorf("workout: encode heart-rate zones: %w", err)
+		}
+		stored = string(raw)
+	}
+	// column is one of two fixed names chosen above, never caller input.
+	_, err := d.db.ExecContext(ctx, d.query(`
+        INSERT INTO rider_profiles (rider, `+column+`, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT (rider) DO UPDATE SET `+column+` = excluded.`+column),
+		rider, stored, d.timestamp())
 	return err
 }
 
