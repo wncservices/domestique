@@ -71,6 +71,10 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 	}
 	horizon := s.refreshHorizon()
 	today := s.localToday()
+	spans, err := s.datedSpans(ctx, g.Rider)
+	if err != nil {
+		return res, err
+	}
 
 	for _, week := range sc.plan.Weeks {
 		if err := ctx.Err(); err != nil {
@@ -79,6 +83,12 @@ func (s *Server) planSeason(ctx context.Context, g workout.Goal) (seasonPassResu
 		res.weeks++
 		refreshed, isRecorded := recorded[week.StartDate]
 		switch {
+		case !isRecorded && g.EventDate == "" && hasPlanSessions(existing, g, week) && inDatedSpan(spans, week.StartDate):
+			// A week a dated goal holds, where this goal kept a session the
+			// rider touched. Recording it would pass it off as filled: when the
+			// dated goal gives the span up the week would stay nearly empty.
+			// Left unrecorded, refillFreedWeeksLocked tops it up then.
+			continue
 		case !isRecorded && hasPlanSessions(existing, g, week):
 			// Sessions of this goal already sit in a week nothing recorded: a
 			// deployment that predates scheduled_weeks. Record it as filled
@@ -378,7 +388,8 @@ const (
 // recorded; the undated goal fills them through the season pass when its
 // rolling window reaches them.
 //
-// rebuildRedate: the sport rebuild of g, then the takeover, in one lock hold.
+// rebuildRedate: the takeover, then the sport rebuild of g, then the refill of
+// the weeks g gave up, in one lock hold.
 // The anchor itself was reset by the update, so the weeks are built as for a
 // goal created today and the taper sits before the new date.
 //
@@ -419,12 +430,20 @@ func (s *Server) rebuildLocked(ctx context.Context, g workout.Goal, reason rebui
 	case rebuildDays:
 		return s.rebuildRiderLocked(ctx, g.Rider)
 	case rebuildRedate:
-		removed, err := s.rebuildSeasonLocked(ctx, g)
+		// The takeover goes first, so the days it frees are free when g's own
+		// rebuild fills this week.
+		removed, err := s.takeOverUndatedGoalsLocked(ctx, g)
 		if err != nil {
 			return removed, err
 		}
-		n, err := s.takeOverUndatedGoalsLocked(ctx, g)
-		return removed + n, err
+		n, err := s.rebuildSeasonLocked(ctx, g)
+		removed += n
+		if err != nil {
+			return removed, err
+		}
+		// A date moved earlier, or removed, frees weeks the undated goals took
+		// back: fill them around what the rider kept.
+		return removed, s.refillFreedWeeksLocked(ctx, g.Rider)
 	}
 	return s.rebuildSeasonLocked(ctx, g)
 }
@@ -568,6 +587,69 @@ func (s *Server) refillAfterRebuild(ctx context.Context, g workout.Goal, thisMon
 			return err
 		}
 		existing = append(existing, created...)
+	}
+	return nil
+}
+
+// refillFreedWeeksLocked is the other half of a dated goal giving its span up
+// (deleted, dated earlier, or made undated): the rider's undated goals fill
+// the freed weeks again, and a week where one kept a session the rider touched
+// is filled around it now. Its row was forgotten by the takeover, and the
+// season pass would read that kept session as "this week was already filled"
+// (the legacy rule) and record the week with one session. Weeks holding nothing
+// of the goal are left to the season fill, and a week inside a span that is
+// still dated stays unrecorded. The caller holds the scheduling lock; seasonMu
+// is taken here.
+func (s *Server) refillFreedWeeksLocked(ctx context.Context, rider string) error {
+	s.seasonMu.Lock()
+	defer s.seasonMu.Unlock()
+	return s.refillFreedWeeks(ctx, rider)
+}
+
+// refillFreedWeeks is refillFreedWeeksLocked for a caller already holding
+// seasonMu.
+func (s *Server) refillFreedWeeks(ctx context.Context, rider string) error {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return err
+	}
+	spans, err := s.datedSpans(ctx, rider)
+	if err != nil {
+		return err
+	}
+	today := s.localToday()
+	thisStart := periodization.MondayOf(s.localNow()).Format(dateLayout)
+	for _, g := range goals {
+		if g.EventDate != "" {
+			continue
+		}
+		sc, err := s.seasonContext(ctx, g)
+		if err != nil {
+			return err
+		}
+		recorded, err := s.Training.ScheduledWeeks(ctx, g.ID)
+		if err != nil {
+			return err
+		}
+		existing, err := s.Training.ListWorkouts(ctx, g.Rider)
+		if err != nil {
+			return err
+		}
+		for _, week := range sc.plan.Weeks {
+			if _, done := recorded[week.StartDate]; done || week.StartDate < thisStart ||
+				inDatedSpan(spans, week.StartDate) || !hasPlanSessions(existing, g, week) {
+				continue
+			}
+			from := ""
+			if week.StartDate == thisStart {
+				from = today
+			}
+			created, _, err := s.fillWeek(ctx, g, sc, week, existing, from)
+			if err != nil {
+				return err
+			}
+			existing = append(existing, created...)
+		}
 	}
 	return nil
 }

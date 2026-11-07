@@ -595,7 +595,12 @@ wait:
 			}, ""); err != nil {
 				return
 			}
-			err = s.Training.DeleteGoal(r.Context(), id)
+			if err = s.Training.DeleteGoal(r.Context(), id); err != nil {
+				return
+			}
+			// The span the goal held is free: the rider's undated goals fill
+			// it, around any session they kept there.
+			err = s.refillFreedWeeks(r.Context(), g.Rider)
 		})
 		if ran || attempt >= deleteGoalLockAttempts-1 {
 			break
@@ -1197,12 +1202,25 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 // pod filling the undated goal's freed weeks before the dated goal's own fill
 // would otherwise find the days held again.
 func (s *Server) inDatedGoalSpan(ctx context.Context, rider, weekStart string) (bool, error) {
-	goals, err := s.Training.ListGoals(ctx, rider)
+	spans, err := s.datedSpans(ctx, rider)
 	if err != nil {
 		return false, err
 	}
+	return inDatedSpan(spans, weekStart), nil
+}
+
+// datedSpan is the Mondays, first and last, of a dated goal's span.
+type datedSpan struct{ first, last string }
+
+// datedSpans lists the spans of the rider's upcoming dated goals.
+func (s *Server) datedSpans(ctx context.Context, rider string) ([]datedSpan, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
 	today := s.localToday()
 	thisMonday := periodization.MondayOf(s.localNow()).Format(dateLayout)
+	var spans []datedSpan
 	for _, o := range goals {
 		if o.EventDate == "" || o.EventDate < today {
 			continue
@@ -1211,12 +1229,18 @@ func (s *Server) inDatedGoalSpan(ctx context.Context, rider, weekStart string) (
 		if err != nil {
 			continue
 		}
-		last := periodization.MondayOf(ev).Format(dateLayout)
-		if weekStart >= thisMonday && weekStart <= last {
-			return true, nil
+		spans = append(spans, datedSpan{first: thisMonday, last: periodization.MondayOf(ev).Format(dateLayout)})
+	}
+	return spans, nil
+}
+
+func inDatedSpan(spans []datedSpan, weekStart string) bool {
+	for _, sp := range spans {
+		if weekStart >= sp.first && weekStart <= sp.last {
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // refreshHorizon is the last Monday, "YYYY-MM-DD", whose week counts as close

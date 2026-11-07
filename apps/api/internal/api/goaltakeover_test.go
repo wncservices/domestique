@@ -313,3 +313,64 @@ func TestAWeekCoveredByTheGoalsOwnSessionsIsStillRecorded(t *testing.T) {
 		t.Error("a week covered by the goal's own sessions was not recorded")
 	}
 }
+
+// weekCount counts a goal's sessions in the week starting monday.
+func (h *seasonHarness) weekCount(t *testing.T, goalID string, monday time.Time) int {
+	t.Helper()
+	n := 0
+	end := monday.AddDate(0, 0, 6).Format("2006-01-02")
+	for _, w := range h.goalSessions(t, goalID) {
+		if w.Date >= monday.Format("2006-01-02") && w.Date <= end {
+			n++
+		}
+	}
+	return n
+}
+
+// The days a race gave up are the stay-fit goal's again: a week where it kept a
+// session the rider edited is filled around it, not recorded as already filled
+// with that one session.
+func TestGivingUpARaceRefillsTheWeekAroundAKeptSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		free func(t *testing.T, h *seasonHarness, race workout.Goal)
+	}{
+		{"delete", func(t *testing.T, h *seasonHarness, race workout.Goal) { h.deleteGoal(t, race.ID) }},
+		{"undated", func(t *testing.T, h *seasonHarness, race workout.Goal) {
+			h.patchGoal(t, race.ID, `{"eventDate":""}`)
+			h.srv.WaitForBackground()
+		}},
+		{"moved earlier", func(t *testing.T, h *seasonHarness, race workout.Goal) {
+			h.patchGoal(t, race.ID, `{"eventDate":"2026-10-14"}`)
+			h.srv.WaitForBackground()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newSeasonHarness(t)
+			h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+			stay := h.createGoal(t, `{"name":"Stay fit"}`)
+			h.srv.WaitForBackground()
+			h.backdate(t)
+			thisMon, _ := weekBounds(h.now)
+			target := thisMon.AddDate(0, 0, 14)
+			edited := h.week(t, target)[0]
+			name := "My own name"
+			if _, err := h.store.UpdateWorkout(context.Background(), edited.ID, workout.UpdateWorkoutRequest{Name: &name}); err != nil {
+				t.Fatal(err)
+			}
+			race := h.createGoal(t, `{"name":"Race","eventDate":"`+raceTwentyWeeksOut+`"}`)
+			h.srv.WaitForBackground()
+
+			tc.free(t, h, race)
+
+			// The undated stay-fit goal owns the week again: the edited session
+			// plus a new one on each of the other three days.
+			if got := h.weekCount(t, stay.ID, target); got != 4 {
+				t.Errorf("stay-fit sessions in the freed week = %d, want 4", got)
+			}
+			if d := twoOnADay(h.workouts(t), h.now.Format("2006-01-02")); d != "" {
+				t.Errorf("two sessions on %s", d)
+			}
+		})
+	}
+}
