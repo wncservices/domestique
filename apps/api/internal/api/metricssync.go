@@ -251,6 +251,8 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	sessionFITSources := map[string]sessionFITSource{}
 	var wahooToken string
 	var wahooConnected bool
+	// wahooListed is true only when this pass's workout listing succeeded.
+	wahooListed := false
 
 	// Biometrics first, and merged into the profile before any session is
 	// recorded: a session's training load is computed from FTP and heart
@@ -341,6 +343,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 				s.logger().Warn("metrics sync: listing wahoo workouts failed", "rider", rider, "err", err)
 				warnings = append(warnings, "wahoo: could not read your workouts")
 			} else {
+				wahooListed = true
 				for _, wk := range workouts {
 					if wk.ID == "" || wk.Starts.IsZero() {
 						continue
@@ -394,7 +397,14 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 	// window, the per-provider cap, and why a download/decode/save failure
 	// here is a Warn rather than a sync failure.
 	consumer, _ := s.garminConsumer()
-	backfillWork := s.listMissingHRHistograms(ctx, rider)
+	var backfillProviders []string
+	if garminConnected {
+		backfillProviders = append(backfillProviders, "garmin")
+	}
+	if wahooListed {
+		backfillProviders = append(backfillProviders, "wahoo")
+	}
+	backfillWork := s.listMissingHRHistograms(ctx, rider, backfillProviders)
 	analysisNotes, err := s.analyseNewSessions(ctx, rider, profile, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected)
 	if err != nil {
 		return syncMetricsResultDTO{}, err
@@ -403,7 +413,7 @@ func (s *Server) syncRiderMetrics(ctx context.Context, rider string, force bool)
 
 	// Older rides analysed before heart-rate histograms existed. Best-effort:
 	// it returns nothing and a failure in it never fails this pass.
-	s.backfillHRHistograms(ctx, rider, backfillWork, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected)
+	s.backfillHRHistograms(ctx, rider, backfillWork, sessionFITSources, consumer, garminSession, garminConnected, wahooToken, wahooConnected, wahooListed)
 
 	// What the history itself can say, now that it is on file: an FTP
 	// estimate (only where Garmin gave none — its own detected FTP is a

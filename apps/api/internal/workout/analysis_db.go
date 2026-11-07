@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // SessionAnalysis is rideanalysis's verdict on one completed session,
@@ -167,7 +168,8 @@ func (d *DB) SaveAnalysis(ctx context.Context, a SessionAnalysis) error {
             power_zone_seconds = excluded.power_zone_seconds,
             hr_zone_seconds = excluded.hr_zone_seconds, power_curve = excluded.power_curve,
             steps = excluded.steps, decoupling_pct = excluded.decoupling_pct,
-            hr_histogram = excluded.hr_histogram, analysed_at = excluded.analysed_at`),
+            hr_histogram = CASE WHEN excluded.hr_histogram = '' THEN session_analyses.hr_histogram ELSE excluded.hr_histogram END,
+            analysed_at = excluded.analysed_at`),
 		a.SessionID, rider, a.WorkoutID, a.Outcome, a.LoadSource,
 		a.NormalizedPower, a.IntensityFactor, a.TSS, a.DurationRatio,
 		a.MaxHR, a.BestHR1200, a.BestSpeed1200, a.BestSpeed1800,
@@ -348,19 +350,29 @@ func (d *DB) SetHRHistogram(ctx context.Context, sessionID string, h HRHistogram
 // SessionsMissingHRHistogram lists a rider's analysed rides that have no
 // heart-rate histogram yet, newest first, at most limit. Imported rides are
 // left out: their files are never fetched again, so a histogram for them could
-// only ever come from the upload that made them.
-func (d *DB) SessionsMissingHRHistogram(ctx context.Context, rider string, limit int) ([]CompletedSession, error) {
-	if limit <= 0 {
+// only ever come from the upload that made them. Only the given providers are
+// listed, so rides of a provider the rider is not connected to cannot fill the
+// limit and starve the ones that can be fetched.
+func (d *DB) SessionsMissingHRHistogram(ctx context.Context, rider string, providers []string, limit int) ([]CompletedSession, error) {
+	if limit <= 0 || len(providers) == 0 {
 		return nil, nil
 	}
+	args := []any{normalizeRider(rider)}
+	for _, p := range providers {
+		args = append(args, p)
+	}
+	args = append(args, limit)
+	// #nosec G202 -- only "?" placeholders are joined into the statement;
+	// every value is bound.
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT s.id, s.rider, s.provider, s.external_id, s.sport, s.date,
                s.duration_seconds, s.distance_m, s.avg_hr, s.avg_power_watts, s.training_load, s.ascent_m, s.created_at
         FROM completed_sessions s
         JOIN session_analyses a ON a.session_id = s.id
         WHERE s.rider = ? AND a.hr_histogram = '' AND s.provider <> 'import'
+          AND s.provider IN (`+strings.TrimSuffix(strings.Repeat("?,", len(providers)), ",")+`)
         ORDER BY s.date DESC, s.id
-        LIMIT ?`), normalizeRider(rider), limit)
+        LIMIT ?`), args...)
 	if err != nil {
 		return nil, err
 	}

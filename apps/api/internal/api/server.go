@@ -99,6 +99,12 @@ type Server struct {
 	metricsFailedMu sync.Mutex
 	metricsFailed   map[string]bool
 
+	// hrBackfillFailures counts failed FIT downloads per session id, in
+	// memory, so a ride whose file can never be fetched stops costing a slot
+	// of the backfill cap on every pass.
+	hrBackfillMu       sync.Mutex
+	hrBackfillFailures map[string]int
+
 	// Clock, when set, replaces time.Now for the parts of training that
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time

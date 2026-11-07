@@ -115,15 +115,25 @@ func TestHRZonesEachEngine(t *testing.T) {
 					t.Errorf("list sport = %q, want cycling", list[0].Sport)
 				}
 
-				// A re-analysis without samples replaces the histogram with none.
+				// A re-analysis without samples keeps the stored histogram.
 				if err := db.SaveAnalysis(ctx, SessionAnalysis{
 					SessionID: session.ID, Rider: "wilant", Outcome: "completed",
 				}); err != nil {
 					t.Fatal(err)
 				}
 				got, _, _ = db.GetAnalysis(ctx, session.ID)
-				if got.HRHistogram != nil {
-					t.Errorf("re-analysis left histogram %+v, want nil", got.HRHistogram)
+				if !reflect.DeepEqual(got.HRHistogram, &hist) {
+					t.Errorf("re-analysis left histogram %+v, want it kept as %+v", got.HRHistogram, hist)
+				}
+				newer := HRHistogram{Min: 70, Seconds: []int{9}}
+				if err := db.SaveAnalysis(ctx, SessionAnalysis{
+					SessionID: session.ID, Rider: "wilant", Outcome: "completed", HRHistogram: &newer,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				got, _, _ = db.GetAnalysis(ctx, session.ID)
+				if !reflect.DeepEqual(got.HRHistogram, &newer) {
+					t.Errorf("re-analysis with a histogram left %+v, want %+v", got.HRHistogram, newer)
 				}
 			})
 
@@ -182,7 +192,7 @@ func TestHRZonesEachEngine(t *testing.T) {
 				add("garmin", "unanalysed", "2026-03-07", false, nil)
 				add("wahoo", "mid", "2026-02-15", true, nil)
 
-				got, err := db.SessionsMissingHRHistogram(ctx, "wilant", 10)
+				got, err := db.SessionsMissingHRHistogram(ctx, "wilant", []string{"garmin", "wahoo"}, 10)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -195,7 +205,14 @@ func TestHRZonesEachEngine(t *testing.T) {
 					t.Errorf("missing = %v, want %v", ids, want)
 				}
 
-				limited, err := db.SessionsMissingHRHistogram(ctx, "wilant", 1)
+				if none, _ := db.SessionsMissingHRHistogram(ctx, "wilant", nil, 10); len(none) != 0 {
+					t.Errorf("no providers listed %d rides", len(none))
+				}
+				if only, _ := db.SessionsMissingHRHistogram(ctx, "wilant", []string{"wahoo"}, 10); len(only) != 1 || only[0].ID != "wahoo:mid" {
+					t.Errorf("wahoo only = %+v", only)
+				}
+
+				limited, err := db.SessionsMissingHRHistogram(ctx, "wilant", []string{"garmin", "wahoo"}, 1)
 				if err != nil {
 					t.Fatal(err)
 				}

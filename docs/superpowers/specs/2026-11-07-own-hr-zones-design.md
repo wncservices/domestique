@@ -41,8 +41,13 @@ anaerobic `[b3, ceiling]` with ceiling = max HR when above b3, else `b3 + (b3 - 
 - The old `hr_zone_seconds` column stays as written today and nothing reads it.
 - **Backfill**: the metrics sync, after `analyseNewSessions`, fetches the FIT of up to 10 synced
   rides per provider per pass that have an analysis and no histogram, newest first, and stores
-  only the histogram. A failed download leaves it '' (retried next pass); a file that decodes to
-  no samples stores the empty histogram. Imports are never fetched: an import re-uploaded is
+  only the histogram. Only providers the rider is connected to this pass are listed (Garmin with a usable
+  session, Wahoo with a successful workout listing), so a disconnected provider cannot starve the cap.
+  A failed download leaves it '' (retried next pass) and is counted in memory per ride: the third
+  failure stores the empty histogram. A file that decodes to no samples stores the empty histogram.
+  Wahoo rides are only backfilled while they are in the recent workout listing the sync reads; a
+  missing file URL is marked empty only when that listing succeeded. A re-analysis without samples
+  keeps a stored histogram. Imports are never fetched: an import re-uploaded is
   re-analysed with a histogram anyway.
 - Privacy: a histogram is health data in an already registered table (`session_analyses`), purged
   and renamed with the rider. Logs carry rider and counts only, never a bpm.

@@ -207,7 +207,7 @@ export async function heartRateZonesJourney(page: Page) {
     await saveProfile()
 
     // The Training zones card sits below the profile card: its copy is last.
-    await expect(page.getByText('Your own boundaries')).toBeVisible()
+    await expect(page.getByText('Your own boundaries').first()).toBeVisible()
     await expect(page.getByText('Z1 Recovery · below 120 bpm').last()).toBeVisible()
     await expect(page.getByText('Z2 Endurance · 120–140 bpm').last()).toBeVisible()
     await expect(page.getByText('Z3 Tempo · 140–155 bpm').last()).toBeVisible()

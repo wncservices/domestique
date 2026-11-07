@@ -969,8 +969,12 @@ A rider chooses how their heart-rate zones are drawn, per sport (`rider_profiles
   DTO's `hrZones` cuts it with the rider's current setting, so a zone change applies to every ride
   at once with no re-analysis. The old `hr_zone_seconds` column is still written and nothing reads it.
 - **Backfill** (`hrhistogrambackfill.go`, after `analyseNewSessions` in the metrics sync): up to 10
-  synced rides per provider per pass that have an analysis and no histogram, newest first; a failed
-  download is retried next pass, imports are never fetched. Logs carry a rider and counts, never a bpm.
+  synced rides per provider per pass that have an analysis and no histogram, newest first, only for providers
+  connected this pass (Garmin with a session, Wahoo with a successful workout listing: Wahoo rides are
+  backfilled only while in that recent listing, and a missing file URL is marked empty only when it
+  succeeded); a failed download is retried next pass, the third failure (in-memory count per ride)
+  stores the empty histogram, imports are never fetched. `SaveAnalysis` keeps a stored histogram when
+  re-saved without one. Logs carry a rider and counts, never a bpm.
 - The web profile form compares saved and edited profiles with keys sorted at every depth
   (`normalise` in `FitnessPage.vue`): an allow-list replacer drops nested objects like `hrZones`, and a
   zone change then never shows the Save bar.

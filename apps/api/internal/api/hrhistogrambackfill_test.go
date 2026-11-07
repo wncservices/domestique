@@ -132,3 +132,59 @@ func TestHRBackfillFillsAtMostTenRidesPerProviderPerPass(t *testing.T) {
 		t.Errorf("next pass downloads = %d, want the remaining 2", len(fake.fitCalls))
 	}
 }
+
+// Analysed rides of a provider the rider is not connected to must not fill the
+// scan window and hide a connected provider's ride behind them.
+func TestHRBackfillIsNotStarvedByADisconnectedProvider(t *testing.T) {
+	ctx := context.Background()
+	start := time.Now().AddDate(0, 0, -30)
+	fake := &fakeGarmin{
+		activities: []garmin.Activity{{ID: "7300", Sport: "cycling", StartTime: start, DurationSeconds: 600, AvgPowerWatts: 150}},
+		fitErr:     fmt.Errorf("garmin: 500"),
+	}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	for i := 0; i < 60; i++ {
+		s, err := h.training.UpsertSession(ctx, workout.UpsertSessionRequest{
+			Rider: "wilant", Provider: "wahoo", ExternalID: fmt.Sprintf("w%d", i), Sport: "cycling",
+			Date: time.Now().AddDate(0, 0, -i).Format("2006-01-02"), DurationSeconds: 600,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.training.SaveAnalysis(ctx, workout.SessionAnalysis{SessionID: s.ID, Rider: "wilant", Outcome: "completed"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fake.fitErr = nil
+	fake.fitByID = map[string][]byte{"7300": buildRideFITWithHR(t, start, 600, 150, 150)}
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	if a, _, _ := h.training.GetAnalysis(ctx, "garmin:7300"); a.HRHistogram == nil {
+		t.Error("the connected provider's ride was not filled in one pass")
+	}
+}
+
+// A download that always fails is given up on at the third failure, not before.
+func TestHRBackfillGivesUpOnADownloadThatKeepsFailing(t *testing.T) {
+	ctx := context.Background()
+	start := time.Now().AddDate(0, 0, -2)
+	fake := &fakeGarmin{
+		activities: []garmin.Activity{{ID: "7400", Sport: "cycling", StartTime: start, DurationSeconds: 600, AvgPowerWatts: 150}},
+		fitErr:     fmt.Errorf("garmin: 500"),
+	}
+	h := newMetricsSyncHarness(t, fake)
+	h.seedGarminSession("wilant")
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "") // analysed, no histogram
+	for pass := 1; pass <= 3; pass++ {
+		a, _, _ := h.training.GetAnalysis(ctx, "garmin:7400")
+		if a.HRHistogram != nil {
+			t.Fatalf("marked empty before backfill failure %d", pass)
+		}
+		h.as("wilant", "cyclists", http.MethodPost, "/api/training/sync", "")
+	}
+	if a, _, _ := h.training.GetAnalysis(ctx, "garmin:7400"); a.HRHistogram == nil {
+		t.Error("still unfilled after three failed backfill passes")
+	}
+}

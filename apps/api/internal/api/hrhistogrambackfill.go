@@ -18,14 +18,36 @@ const hrHistogramBackfillPerProvider = 10
 // rides of a provider that cannot be fetched do not hide the others behind them.
 const hrHistogramBackfillScan = 50
 
+// hrHistogramBackfillGiveUp is how many failed downloads, across passes, make
+// the backfill store the empty histogram and stop trying a ride.
+const hrHistogramBackfillGiveUp = 3
+
+func (s *Server) noteHRBackfillFailure(id string) int {
+	s.hrBackfillMu.Lock()
+	defer s.hrBackfillMu.Unlock()
+	if s.hrBackfillFailures == nil {
+		s.hrBackfillFailures = map[string]int{}
+	}
+	s.hrBackfillFailures[id]++
+	return s.hrBackfillFailures[id]
+}
+
+func (s *Server) clearHRBackfillFailure(id string) {
+	s.hrBackfillMu.Lock()
+	defer s.hrBackfillMu.Unlock()
+	delete(s.hrBackfillFailures, id)
+}
+
 // backfillHRHistograms gives older synced rides their heart-rate histogram. It
 // is best-effort: a failure here never fails the metrics pass, and it writes
 // the histogram column only (SetHRHistogram), never a rating or the survey.
 //
-// A download error leaves the ride unfilled to be retried next pass. A file
+// A download error leaves the ride unfilled to be retried next pass, up to
+// three failures (counted in memory), after which the empty histogram is stored. A file
 // that cannot be decoded (or crashes the decoder), or that has no samples,
 // stores the empty histogram, because it would fail the same way again. So
-// does a Wahoo ride with no file URL left: nothing can ever fetch it. A
+// does a Wahoo ride with no file URL left, but only when this pass's Wahoo
+// workout listing succeeded (a failed listing says nothing about the ride): nothing can ever fetch it. A
 // provider the rider is not connected to is skipped without counting, as it
 // is not the ride's fault.
 //
@@ -42,6 +64,7 @@ func (s *Server) backfillHRHistograms(
 	garminConnected bool,
 	wahooToken string,
 	wahooConnected bool,
+	wahooListed bool,
 ) {
 	attempts := map[string]int{}
 	filled, failed := 0, 0
@@ -54,6 +77,9 @@ func (s *Server) backfillHRHistograms(
 		switch {
 		case errors.Is(err, errNoGarminSession), errors.Is(err, errNoWahooSession):
 			continue
+		case errors.Is(err, errNoWahooFileURL) && !wahooListed:
+			// The listing failed, so the missing URL says nothing about the ride.
+			continue
 		case errors.Is(err, errNoWahooFileURL), errors.Is(err, errUnknownProvider):
 			// Permanent: store the empty histogram so it is not scanned again.
 			attempts[sess.Provider]++
@@ -64,6 +90,11 @@ func (s *Server) backfillHRHistograms(
 		case err != nil:
 			attempts[sess.Provider]++
 			failed++
+			if s.noteHRBackfillFailure(sess.ID) >= hrHistogramBackfillGiveUp {
+				// Failed on every pass so far: stop spending the cap on it.
+				_ = s.Training.SetHRHistogram(ctx, sess.ID, workout.HRHistogram{})
+				s.clearHRBackfillFailure(sess.ID)
+			}
 			continue
 		}
 		attempts[sess.Provider]++
@@ -87,8 +118,8 @@ func (s *Server) backfillHRHistograms(
 
 // listMissingHRHistograms is the backfill's worklist; a failure to read it
 // only skips the backfill.
-func (s *Server) listMissingHRHistograms(ctx context.Context, rider string) []workout.CompletedSession {
-	missing, err := s.Training.SessionsMissingHRHistogram(ctx, rider, hrHistogramBackfillScan)
+func (s *Server) listMissingHRHistograms(ctx context.Context, rider string, providers []string) []workout.CompletedSession {
+	missing, err := s.Training.SessionsMissingHRHistogram(ctx, rider, providers, hrHistogramBackfillScan)
 	if err != nil {
 		s.logger().Warn("hr histogram backfill: could not list rides", "rider", rider, "err", err)
 		return nil
