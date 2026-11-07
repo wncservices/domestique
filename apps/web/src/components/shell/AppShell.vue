@@ -65,7 +65,10 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
     <div class="border-t border-default p-2"><AvatarMenu /></div>
   </aside>
 
-  <header class="app-header sticky top-0 z-20 flex w-full items-center justify-between gap-3 px-4 py-2 sm:hidden">
+  <!-- index.html sets viewport-fit=cover, so the page reaches the screen's
+       edges: the header pads itself below the status bar, and the tab bar
+       below fills the home-indicator strip instead of leaving it to Safari. -->
+  <header class="app-header sticky top-0 z-20 flex w-full items-center justify-between gap-3 px-4 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-2 sm:hidden">
     <RouterLink to="/today" class="flex min-w-0 items-center gap-2">
       <UIcon name="i-lucide-bike" class="size-5 shrink-0 text-primary" aria-hidden="true" />
       <span class="font-display truncate text-[length:var(--text-lead)] font-semibold tracking-tight text-highlighted">Domestique</span>
@@ -79,7 +82,7 @@ const itemActive = 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-pr
 
   <nav
     aria-label="Main"
-    class="app-chrome fixed inset-x-0 bottom-0 z-20 border-t border-default pb-[env(safe-area-inset-bottom)] sm:hidden"
+    class="app-chrome fixed inset-x-0 bottom-0 z-20 border-t border-default pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:hidden"
   >
     <ul class="flex">
       <li v-for="item in visible" :key="item.to" class="min-w-0 flex-1">

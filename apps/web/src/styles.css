@@ -275,6 +275,12 @@
   --app-accent-blossom-soft: var(--color-blossom-950);
 }
 
+/* The root carries the page colour too: with viewport-fit=cover any strip the
+ * body does not reach (overscroll, a safe area) shows it, not the browser's. */
+html {
+  background-color: var(--ui-bg);
+}
+
 body {
   background-color: var(--ui-bg);
   background-image: var(--app-glow);
