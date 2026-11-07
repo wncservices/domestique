@@ -9,7 +9,7 @@ import { ref } from 'vue'
 import type { LocationQuery, Router } from 'vue-router'
 import { api } from '@/api/client'
 import type { Goal } from '@/api/types'
-import { freshGoalForm, NO_ROUTE } from '@/components/plan/forms'
+import { freshGoalForm, goalFieldsFromForm, NO_ROUTE } from '@/components/plan/forms'
 
 export function usePlanGoals(deps: {
   toast: { add: (opts: Record<string, unknown>) => void }
@@ -174,15 +174,7 @@ export function usePlanGoals(deps: {
     if (!goalForm.value.name.trim()) return
     savingGoal.value = true
     try {
-      const req = {
-        name: goalForm.value.name.trim(),
-        sport: goalForm.value.sport,
-        eventDate: goalForm.value.eventDate || undefined,
-        priority: goalForm.value.priority,
-        targetDistanceM: goalForm.value.targetDistanceKm ? Number(goalForm.value.targetDistanceKm) * 1000 : undefined,
-        targetElevationM: goalForm.value.targetElevationM ? Number(goalForm.value.targetElevationM) : undefined,
-        notes: goalForm.value.notes || undefined,
-      }
+      const req = goalFieldsFromForm(goalForm.value, !!editingGoalId.value)
       // A running goal carries no route. On edit, '' clears a link; on create
       // the field is simply left out.
       const slug = goalForm.value.sport === 'cycling' && goalForm.value.routeSlug !== NO_ROUTE ? goalForm.value.routeSlug : ''

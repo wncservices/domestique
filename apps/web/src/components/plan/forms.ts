@@ -90,3 +90,22 @@ export const NO_GOAL = 'none'
 export function freshWorkoutForm(): WorkoutForm {
   return { name: '', sport: 'cycling', date: '', goalId: NO_GOAL, description: '', steps: [] }
 }
+
+/** The fields of a goal request the form decides. On create a blank field is
+ *  left out; on edit it is sent as the API's "none" ("" for text and date, 0 for
+ *  a target), because an omitted field means "keep what is stored" and a
+ *  cleared date or target would otherwise never clear. */
+export function goalFieldsFromForm(form: GoalForm, editing: boolean) {
+  const distanceM = form.targetDistanceKm ? Number(form.targetDistanceKm) * 1000 : undefined
+  const elevationM = form.targetElevationM ? Number(form.targetElevationM) : undefined
+  const clear = <T>(value: T | undefined, none: T) => (value !== undefined ? value : editing ? none : undefined)
+  return {
+    name: form.name.trim(),
+    sport: form.sport,
+    eventDate: clear(form.eventDate || undefined, ''),
+    priority: form.priority,
+    targetDistanceM: clear(distanceM, 0),
+    targetElevationM: clear(elevationM, 0),
+    notes: clear(form.notes || undefined, ''),
+  }
+}

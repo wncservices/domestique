@@ -30,3 +30,32 @@ test('dating an undated B goal switches the select to A until the rider picks on
   // A new goal follows the date as before.
   assert.equal(priorityAfterDateChange({ editing: false, wasUndated: true, storedPriority: 'B', chosen: false, current: 'B', eventDate: '2027-04-14' }), 'A')
 })
+
+import { goalFieldsFromForm } from '../src/components/plan/forms.ts'
+
+const blank = { ...freshGoalForm(), name: ' Race ', eventDate: '', targetDistanceKm: '', targetElevationM: '', notes: '' }
+
+test('editing a goal sends "none" for every cleared field', () => {
+  const r = goalFieldsFromForm(blank, true)
+  assert.equal(r.eventDate, '')
+  assert.equal(r.targetDistanceM, 0)
+  assert.equal(r.targetElevationM, 0)
+  assert.equal(r.notes, '')
+  assert.equal(r.name, 'Race')
+})
+
+test('creating a goal leaves blank fields out', () => {
+  const r = goalFieldsFromForm(blank, false)
+  assert.equal(r.eventDate, undefined)
+  assert.equal(r.targetDistanceM, undefined)
+  assert.equal(r.targetElevationM, undefined)
+  assert.equal(r.notes, undefined)
+})
+
+test('filled fields are sent either way', () => {
+  const f = { ...blank, eventDate: '2027-05-01', targetDistanceKm: '120', targetElevationM: '2000', notes: 'n' }
+  for (const editing of [true, false]) {
+    const r = goalFieldsFromForm(f, editing)
+    assert.deepEqual([r.eventDate, r.targetDistanceM, r.targetElevationM, r.notes], ['2027-05-01', 120000, 2000, 'n'])
+  }
+})
