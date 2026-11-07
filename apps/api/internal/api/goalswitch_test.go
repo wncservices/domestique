@@ -85,10 +85,11 @@ func TestDatingAnUndatedGoalFillsUpToTheEvent(t *testing.T) {
 	}
 }
 
-// A sport change over a week where the rider kept one edited session fills that
-// week's other days with the new sport: the rebuild forgot the week, and the
-// season pass must top it up rather than adopt it as already filled.
-func TestASportChangeFillsTheRestOfAWeekThatKeepsAnEditedSession(t *testing.T) {
+// A sport change over a week where the rider had edited one session fills
+// every day of that week with the new sport: the edited cycling session goes
+// with the rest, and the rebuild forgot the week, so the season pass fills it
+// rather than adopting it as already filled.
+func TestASportChangeFillsAWeekThatHadAnEditedSession(t *testing.T) {
 	h := newSeasonHarness(t)
 	ctx := context.Background()
 	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
@@ -108,21 +109,15 @@ func TestASportChangeFillsTheRestOfAWeekThatKeepsAnEditedSession(t *testing.T) {
 
 	week := h.week(t, monday)
 	if len(week) != 4 {
-		t.Fatalf("the week has %d sessions, want the edited one plus 3 new", len(week))
+		t.Fatalf("the week has %d sessions, want 4 running ones", len(week))
 	}
 	for _, w := range week {
-		if w.ID == edited.ID {
-			if w.Sport != model.SportCycling || w.Name != name {
-				t.Errorf("the edited session changed: %s %q", w.Sport, w.Name)
-			}
-			continue
+		if w.Sport != model.SportRunning || w.Name == name {
+			t.Errorf("session on %s is %s %q, want a new running session", w.Date, w.Sport, w.Name)
 		}
-		if w.Sport != model.SportRunning {
-			t.Errorf("session on %s is %s, want running", w.Date, w.Sport)
-		}
-		if w.Date == edited.Date {
-			t.Errorf("a second session landed on the edited session's day %s", w.Date)
-		}
+	}
+	if d := twoOnADay(h.workouts(t), h.now.Format("2006-01-02")); d != "" {
+		t.Errorf("two sessions on %s", d)
 	}
 }
 

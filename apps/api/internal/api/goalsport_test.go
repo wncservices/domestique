@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -61,39 +60,6 @@ func TestChangingAGoalsSportRebuildsItsUntouchedSessions(t *testing.T) {
 				t.Fatal("no sessions from today on after the switch")
 			}
 		})
-	}
-}
-
-func TestChangingAGoalsSportKeepsTheRidersOwnSessions(t *testing.T) {
-	h := newSeasonHarness(t)
-	ctx := context.Background()
-	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
-	g := h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
-	h.srv.WaitForBackground()
-	h.backdate(t)
-
-	thisMon, _ := weekBounds(h.now)
-	w3 := h.week(t, thisMon.AddDate(0, 0, 14))
-	edited := w3[0]
-	newName := "My own name"
-	if _, err := h.store.UpdateWorkout(ctx, edited.ID, workout.UpdateWorkoutRequest{Name: &newName}); err != nil {
-		t.Fatal(err)
-	}
-
-	h.patchGoal(t, g.ID, `{"sport":"running"}`)
-
-	var found bool
-	for _, w := range h.workouts(t) {
-		if w.ID != edited.ID {
-			continue
-		}
-		found = true
-		if w.Name != newName || w.Sport != model.SportCycling {
-			t.Errorf("the rider's session is now %q (%s), want it unchanged", w.Name, w.Sport)
-		}
-	}
-	if !found {
-		t.Error("the rider's edited session was deleted by the sport change")
 	}
 }
 

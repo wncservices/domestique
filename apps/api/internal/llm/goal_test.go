@@ -369,3 +369,27 @@ func TestGoalPromptStatesTheDefaultPriority(t *testing.T) {
 		t.Error("the goal prompt does not say a dated event is A by default")
 	}
 }
+
+// The model has answered cycling for a half marathon; the rider's own words
+// decide then. A note that names a ride is left to the model.
+func TestProposeGoalTakesARunFromTheRidersWords(t *testing.T) {
+	for note, want := range map[string]string{
+		"Half marathon of Leuven on 11 April 2027": "running",
+		"Halve marathon van Gent in april":         "running",
+		"My first 10k run in December":             "running",
+		"Gran fondo in June, 160 km":               "cycling",
+		"MTB marathon in the Ardennes":             "cycling",
+		"Ride to the coast and back":               "cycling",
+	} {
+		t.Run(note, func(t *testing.T) {
+			f := newFake(t, answer(t, `{"name":"Event","sport":"cycling","eventDate":"","priority":"B","targetDistanceKm":0,"targetElevationM":0,"explanation":"x"}`))
+			p, err := newClient(t, f.srv.URL+"/v1", "").ProposeGoal(t.Context(), note, goalToday)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Sport != want {
+				t.Errorf("sport = %q, want %q", p.Sport, want)
+			}
+		})
+	}
+}

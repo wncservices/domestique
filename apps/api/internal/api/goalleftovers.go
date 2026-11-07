@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/scheduler"
@@ -10,11 +11,13 @@ import (
 )
 
 // goalLeftoversMigration names the one-time removal of the sessions a goal
-// delete left behind before deletes took a goal's future sessions with it
-// (2.16.0). Those sessions kept the generated description, lost their goal and
-// became the rider's own, so they held their days: a later goal planned around
-// them and the calendar showed the old plan with no goal behind it.
-const goalLeftoversMigration = "goal_delete_leftovers"
+// delete left behind before deletes took a goal's future sessions with it.
+// Those sessions kept the generated description, lost their goal and became
+// the rider's own, so they held their days: a later goal planned around them
+// and the calendar showed the old plan with no goal behind it. The first
+// version (goal_delete_leftovers, 2.16.1) removed only the untouched ones and
+// left the eased, moved and renamed; this one takes those too.
+const goalLeftoversMigration = "goal_delete_leftovers_touched"
 
 const (
 	leftoverLockAttempts = 20
@@ -23,14 +26,13 @@ const (
 
 var errLeftoversBusy = errors.New("scheduling stayed busy")
 
-// goalLeftover reports whether wk is such a session: no goal, the generated
-// description exactly, and nothing the rider or an automatic pass changed.
+// goalLeftover reports whether wk is such a session: no goal and a description
+// that starts with the generated one (an automatic change only appends to it).
+// Nothing the rider builds starts that way. An FTP test and a crew ride are
+// the rider's and the crew's, not a plan's.
 func goalLeftover(wk workout.Workout) bool {
-	f := wk.Flags
-	return wk.GoalID == "" && wk.Description == scheduler.GeneratedDescription &&
-		wk.EditedAt == "" && wk.TestProtocol == "" && wk.CrewRideID == "" &&
-		wk.RouteSlug == "" && !wk.Indoor && wk.PlannedSnapshot == nil &&
-		!f.Adapted() && !f.Swapped && f.Kept == workout.KeptNone && f.MovedFrom == ""
+	return wk.GoalID == "" && strings.HasPrefix(wk.Description, scheduler.GeneratedDescription) &&
+		wk.TestProtocol == "" && wk.CrewRideID == ""
 }
 
 // RemoveGoalLeftovers removes, once per deployment, the leftover sessions dated

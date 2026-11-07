@@ -50,10 +50,10 @@ func TestDeletingAGoalRemovesItsUntouchedFutureSessions(t *testing.T) {
 	}
 }
 
-// Touched sessions are the rider's: an edited future session stays (now the
-// rider's own, on its day), and the stay-fit goal that takes the race's freed
-// days back plans around it.
-func TestDeletingAGoalKeepsTheRidersOwnSessions(t *testing.T) {
+// Changed sessions go too: a renamed future session of a deleted goal is a
+// plan for nothing, and the stay-fit goal that takes the race's freed days back
+// plans those days as well.
+func TestDeletingAGoalRemovesItsChangedFutureSessions(t *testing.T) {
 	h := newSeasonHarness(t)
 	ctx := context.Background()
 	stay, race := h.stayFitThenRace(t)
@@ -69,20 +69,15 @@ func TestDeletingAGoalKeepsTheRidersOwnSessions(t *testing.T) {
 	h.deleteGoal(t, race.ID)
 
 	today := h.now.Format("2006-01-02")
-	var kept bool
 	for _, w := range h.workouts(t) {
-		if w.ID == edited.ID {
-			kept = true
-			if w.Name != newName || w.GoalID != "" {
-				t.Errorf("kept session = %q goal %q, want the rider's own", w.Name, w.GoalID)
-			}
+		if w.Name == newName {
+			t.Errorf("the changed session on %s survived the goal's deletion", w.Date)
 		}
+	}
+	for _, w := range h.workouts(t) {
 		if w.GoalID == race.ID {
 			t.Errorf("session %s still names the deleted goal", w.ID)
 		}
-	}
-	if !kept {
-		t.Fatal("the rider's edited session was deleted with the goal")
 	}
 	// The stay-fit goal comes back on the race's freed days, without a tick.
 	back := 0

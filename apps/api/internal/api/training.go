@@ -593,7 +593,7 @@ func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The goal's untouched future sessions go with it, Garmin copies included,
+	// The goal's future sessions go with it, changed ones too, Garmin copies included,
 	// and only then the goal: they are found by goal id, which DeleteGoal
 	// clears. Both happen in one hold of the scheduling lock (and seasonMu, so
 	// a season pass cannot record a week after the goal forgot them all). If
@@ -611,9 +611,7 @@ wait:
 			if existing, err = s.Training.ListWorkouts(r.Context(), g.Rider); err != nil {
 				return
 			}
-			if removed, err = s.removeUntouched(r.Context(), g.Rider, existing, s.localToday(), func(wk workout.Workout) bool {
-				return wk.GoalID == id
-			}, ""); err != nil {
+			if removed, err = s.removeGoalFuture(r.Context(), g.Rider, existing, s.localToday(), id); err != nil {
 				return
 			}
 			if err = s.Training.DeleteGoal(r.Context(), id); err != nil {

@@ -47,10 +47,10 @@ func TestACyclingGoalDeletedThenARunningGoalLeavesOnlyRunning(t *testing.T) {
 }
 
 // A goal deleted before deletes took its sessions left them as the rider's own,
-// unchanged plan sessions with no goal. They held their days, so a new goal
-// planned around them. The one-time cleanup removes those from today on, keeps
-// the past (history) and anything the rider changed, and the rider's goals take
-// the freed days.
+// plan sessions with no goal. They held their days, so a new goal planned
+// around them. The one-time cleanup removes those from today on, changed ones
+// too (2.16.1 left a renamed or eased one behind), keeps the past (history),
+// and the rider's goals take the freed days.
 func TestLeftoversOfAnOldGoalDeleteAreRemovedAndThePlanRefills(t *testing.T) {
 	h := newSeasonHarness(t)
 	ctx := context.Background()
@@ -70,7 +70,7 @@ func TestLeftoversOfAnOldGoalDeleteAreRemovedAndThePlanRefills(t *testing.T) {
 	if err := h.store.DeleteGoal(ctx, old.ID); err != nil {
 		t.Fatal(err)
 	}
-	// One leftover the rider has since changed is theirs.
+	// One leftover was changed since, as readiness easing or a rename does.
 	var edited workout.Workout
 	today := h.now.Format("2006-01-02")
 	for _, w := range h.workouts(t) {
@@ -79,7 +79,7 @@ func TestLeftoversOfAnOldGoalDeleteAreRemovedAndThePlanRefills(t *testing.T) {
 			break
 		}
 	}
-	if _, err := h.conn.Exec(`UPDATE workouts SET edited_at = '2026-10-06T08:00:00Z' WHERE id = ?`, edited.ID); err != nil {
+	if _, err := h.conn.Exec(`UPDATE workouts SET edited_at = '2026-10-06T08:00:00Z', description = description || ' Eased one level for readiness.' WHERE id = ?`, edited.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -96,16 +96,17 @@ func TestLeftoversOfAnOldGoalDeleteAreRemovedAndThePlanRefills(t *testing.T) {
 	h.srv.WaitForBackground()
 
 	after := h.futureBySport(t)
-	if after[model.SportCycling] != 1 {
-		t.Errorf("cycling sessions from today on = %d, want only the one the rider edited", after[model.SportCycling])
+	if after[model.SportCycling] != 0 {
+		t.Errorf("cycling sessions from today on = %d, want none", after[model.SportCycling])
 	}
 	if after[model.SportRunning] <= before[model.SportRunning] {
 		t.Errorf("running sessions %d before, %d after: the freed days were not planned", before[model.SportRunning], after[model.SportRunning])
 	}
-	for name, id := range map[string]string{"past": past.ID, "edited": edited.ID} {
-		if _, err := h.store.GetWorkout(ctx, id); err != nil {
-			t.Errorf("the %s leftover was removed: %v", name, err)
-		}
+	if _, err := h.store.GetWorkout(ctx, past.ID); err != nil {
+		t.Errorf("the past leftover was removed: %v", err)
+	}
+	if _, err := h.store.GetWorkout(ctx, edited.ID); err == nil {
+		t.Error("the changed leftover survived the cleanup")
 	}
 	if d := twoOnADay(h.workouts(t), today); d != "" {
 		t.Errorf("two sessions on %s", d)
