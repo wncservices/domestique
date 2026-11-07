@@ -87,6 +87,16 @@ func TestTomorrowsWorkoutIsPushedTheNextDay(t *testing.T) {
 	h := newTodayHarness(t, utcNoon(2026, time.October, 7), true)
 	ctx := context.Background()
 	h.srv.AutoScheduleTick(ctx)
+	// Yesterday's session was ridden: an unridden one would be moved as missed,
+	// copy and all, which is another test's business.
+	for _, wk := range h.workoutsOn(t, "2026-10-07") {
+		if _, err := h.training.UpsertSession(ctx, workout.UpsertSessionRequest{
+			Rider: "wilant", Provider: "garmin", ExternalID: "ridden-" + wk.ID, Sport: string(wk.Sport),
+			Date: wk.Date, DurationSeconds: 3600,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	h.now = utcNoon(2026, time.October, 8)
 	h.srv.AutoScheduleTick(ctx)

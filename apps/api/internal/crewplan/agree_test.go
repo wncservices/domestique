@@ -53,9 +53,11 @@ func TestThePreviewRemovesExactlyTheDaysTheFillDrops(t *testing.T) {
 				for _, r := range fixed {
 					kept[r.Date] = true
 				}
+				// A day already behind us is never filled again, and the preview
+				// rightly leaves a past session alone: compare from today on.
 				var dropped []string
 				for _, r := range plain {
-					if !kept[r.Date] {
+					if !kept[r.Date] && r.Date >= now.Format("2006-01-02") {
 						dropped = append(dropped, r.Date)
 					}
 				}

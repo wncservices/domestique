@@ -984,13 +984,17 @@ func TestPushMorningRaisesTodayAndThePushSendsTheRaisedSession(t *testing.T) {
 	if err != nil || adj[got.ID].Rule != why.GreenPush {
 		t.Errorf("no green_push reason stored: %v %+v", err, adj[got.ID])
 	}
-	// The head unit holds the raised session, not the planned one.
+	// The head unit holds the raised session, not the planned one. Monday's
+	// copy from the first tick stays too: past copies are history.
 	var onDevice []string
+	raised, planned := false, false
 	for _, n := range h.push.garmin.remoteWorkouts {
 		onDevice = append(onDevice, n)
+		raised = raised || n == got.Name
+		planned = planned || n == orig.Name
 	}
-	if len(onDevice) != 1 || onDevice[0] != got.Name {
-		t.Errorf("head unit holds %v, want the raised %q", onDevice, got.Name)
+	if !raised || planned {
+		t.Errorf("head unit holds %v, want the raised %q and not the planned %q", onDevice, got.Name, orig.Name)
 	}
 }
 

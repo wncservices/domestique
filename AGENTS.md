@@ -837,7 +837,7 @@ there is no mix. `ChooseZones` takes the phase's target split (base 80/18/2, bui
 is running, today's table stands. Only cycling sessions count towards the mix (`SessionAnalysis.Sport`,
 filled by `ListAnalyses` alone: running power is scored against the cycling FTP). Build and peak weeks
 of 6 or more available days with `PlannedCTL` of 60 or more get a cycling-only third structured session, only when
-`placeStructuredDays` can place it with no two structured days adjacent, else two. A recovery week
+`placeStructuredDays` can place it with no two structured days adjacent, else two. Days are counted around the week (`circularDays`: Sunday and the Monday after it are one day apart), and no structured day sits the day before or after the long day unless every other day does: coaching guides keep an easy day between the long session and the next quality one, and the old count put Monday's tempo straight after Sunday's long run. A recovery week
 holds one structured session, the phase's first zone at the rider's level minus one, at most 60
 minutes, on the first available day; `WithTargetTSS` never boosts it. `seasonContext` computes the
 mix once (`zoneMixFor`) and `weekOptions`/`mixOptions` hand it to every builder: fill, refresh, the
