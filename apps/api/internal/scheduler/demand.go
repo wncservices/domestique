@@ -130,7 +130,7 @@ func applyOptions(opts []Option) options {
 
 // biases reports whether a week is one a route demand applies to.
 func biases(week periodization.Week) bool {
-	return !week.Recovery && (week.Phase == periodization.PhaseBuild || week.Phase == periodization.PhasePeak)
+	return !week.Recovery && week.MiniTaperDays == 0 && (week.Phase == periodization.PhaseBuild || week.Phase == periodization.PhasePeak)
 }
 
 const (

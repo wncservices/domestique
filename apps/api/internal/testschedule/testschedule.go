@@ -198,7 +198,7 @@ func (s *suggester) suggestWithoutPlan() *Suggestion {
 // not run into the quiet period before an A event. Taper and peak never
 // qualify.
 func (s *suggester) candidateWeek(w periodization.Week, start time.Time) bool {
-	if w.Recovery || (w.Phase != periodization.PhaseBase && w.Phase != periodization.PhaseBuild) {
+	if w.Reduced() || (w.Phase != periodization.PhaseBase && w.Phase != periodization.PhaseBuild) {
 		return false
 	}
 	// A week is out when its last day falls inside the quiet period: being
@@ -206,11 +206,17 @@ func (s *suggester) candidateWeek(w periodization.Week, start time.Time) bool {
 	// test right before the goal race.
 	end := start.AddDate(0, 0, 6)
 	for _, g := range s.in.Goals {
-		if g.Priority != workout.PriorityA {
-			continue
-		}
 		event, ok := parseDate(g.EventDate)
 		if !ok {
+			continue
+		}
+		// The week of any event is out, whatever its priority: a B or C race
+		// has a lighter build-up, but a hard test in its week still costs
+		// the race.
+		if !event.Before(start) && !event.After(end) {
+			return false
+		}
+		if g.Priority != workout.PriorityA {
 			continue
 		}
 		if !end.Before(event.AddDate(0, 0, -aEventQuietDays)) && !start.After(event) {
@@ -223,10 +229,13 @@ func (s *suggester) candidateWeek(w periodization.Week, start time.Time) bool {
 // nearAEvent is the same quiet period, judged for a single day.
 func (s *suggester) nearAEvent(day time.Time) bool {
 	for _, g := range s.in.Goals {
+		event, ok := parseDate(g.EventDate)
+		if ok && day.Equal(event) {
+			return true // never the event day itself
+		}
 		if g.Priority != workout.PriorityA {
 			continue
 		}
-		event, ok := parseDate(g.EventDate)
 		if ok && !day.Before(event.AddDate(0, 0, -aEventQuietDays)) && !day.After(event) {
 			return true
 		}

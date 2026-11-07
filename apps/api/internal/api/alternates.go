@@ -174,7 +174,7 @@ func weekIsReduced(plan periodization.Plan, date string) bool {
 			continue
 		}
 		if !day.Before(start) && day.Before(start.AddDate(0, 0, 7)) {
-			return week.Recovery || week.Phase == periodization.PhaseTaper
+			return week.Reduced()
 		}
 	}
 	return false

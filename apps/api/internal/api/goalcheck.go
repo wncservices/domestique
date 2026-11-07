@@ -90,20 +90,28 @@ func (s *Server) handleGoalCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The fitness reached is the CTL at the start of the first taper week: the
-	// build is over by then. Without a taper, the last week stands in.
-	reached := plan.Weeks[len(plan.Weeks)-1].PlannedCTL
-	capped := false
-	for _, wk := range plan.Weeks {
-		if wk.Phase == periodization.PhaseTaper {
-			reached = wk.PlannedCTL
-			break
-		}
-		capped = capped || wk.LoadCapped
-	}
+	reached, capped := reachedFitness(plan.Weeks)
 	v := projection.JudgeFeasibility(projection.FeasibilityInput{
 		TargetCTL: plan.TargetCTL, Shortfall: plan.Shortfall, ReachedCTL: reached,
 		HoursCapped: capped, Weeks: len(plan.Weeks),
 	})
 	answer(goalCheckDTO{Key: string(v.Key), Message: v.Message, Tone: v.Tone})
+}
+
+// reachedFitness is the CTL the build reaches and whether the rider's hours
+// capped it: the CTL at the start of the first taper week, the build being over
+// by then. Without a taper (priority B or C) the last week stands in, and the
+// weeks that count towards the cap are the ones before it, the same span.
+func reachedFitness(weeks []periodization.Week) (reached float64, capped bool) {
+	end := len(weeks) - 1
+	for i, wk := range weeks {
+		if wk.Phase == periodization.PhaseTaper {
+			end = i
+			break
+		}
+	}
+	for _, wk := range weeks[:end] {
+		capped = capped || wk.LoadCapped
+	}
+	return weeks[end].PlannedCTL, capped
 }

@@ -71,7 +71,7 @@ const title = computed(() => (isCurrentWeek.value ? 'This week' : `${shortDate(p
 const phaseChip = computed(() => {
   const focus = props.week.focus
   if (!focus?.phase) return null
-  return { label: phaseLabel(focus.phase, focus.recovery), ...phaseChipStyle(focus.phase) }
+  return { label: phaseLabel(focus.phase, focus.recovery, focus.miniTaperDays), ...phaseChipStyle(focus.phase) }
 })
 
 const doneHours = computed(() => props.week.totals.completedSeconds / 3600)

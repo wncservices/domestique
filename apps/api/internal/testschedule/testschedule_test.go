@@ -18,6 +18,7 @@ var wed = time.Date(2026, 3, 18, 10, 0, 0, 0, brussels)
 type wk struct {
 	phase    periodization.Phase
 	recovery bool
+	mini     int
 }
 
 // planFrom builds a plan whose first week starts Monday 2026-03-16.
@@ -27,7 +28,7 @@ func planFrom(weeks ...wk) *periodization.Plan {
 	for i, w := range weeks {
 		p.Weeks = append(p.Weeks, periodization.Week{
 			Number: i + 1, StartDate: start.AddDate(0, 0, 7*i).Format("2006-01-02"),
-			Phase: w.phase, Recovery: w.recovery,
+			Phase: w.phase, Recovery: w.recovery, MiniTaperDays: w.mini,
 		})
 	}
 	return p
@@ -38,6 +39,9 @@ func build() wk { return wk{phase: periodization.PhaseBuild} }
 func rec() wk   { return wk{phase: periodization.PhaseBase, recovery: true} }
 func taper() wk { return wk{phase: periodization.PhaseTaper} }
 func peak() wk  { return wk{phase: periodization.PhasePeak} }
+
+// A priority B event week is a build week whose last days are a mini-taper.
+func miniTaper() wk { return wk{phase: periodization.PhaseBuild, mini: 3} }
 
 // input is a cycling rider who trains Tue/Thu/Sat with a fresh, known FTP and a
 // test ridden 17 days ago, so only the plan can make a test worth suggesting:
@@ -190,6 +194,7 @@ func TestNeverInTaperPeakOrARecoveryWeek(t *testing.T) {
 		"taper":    planFrom(taper(), taper(), taper()),
 		"peak":     planFrom(peak(), peak(), peak()),
 		"recovery": planFrom(rec(), rec()),
+		"mini":     planFrom(miniTaper(), miniTaper()),
 	} {
 		in := input(plan)
 		in.Profile.FTPWatts = 0 // even the strongest reason
@@ -537,6 +542,7 @@ func TestNewReasonsKeepTheExclusions(t *testing.T) {
 		"taper":    planFrom(taper(), taper(), taper()),
 		"peak":     planFrom(peak(), peak(), peak()),
 		"recovery": planFrom(rec(), rec()),
+		"mini":     planFrom(miniTaper(), miniTaper()),
 	} {
 		in := freshRider(plan)
 		in.Profile.FTPEstimated = true
@@ -561,5 +567,37 @@ func TestNewReasonsKeepTheExclusions(t *testing.T) {
 	in.Profile.FTPTestSnoozedUntil = "2026-04-01"
 	if s := Suggest(in); s != nil {
 		t.Errorf("snoozed: got %+v", s)
+	}
+}
+
+// The week of any dated event, whatever its priority, never holds a test, and
+// nor does the event day.
+func TestNoTestInTheWeekOfAnyEvent(t *testing.T) {
+	noFTP := func(plan *periodization.Plan, event string, p workout.Priority) Input {
+		in := input(plan)
+		in.Profile.FTPWatts = 0
+		in.Profile.FTPVerifiedAt = ""
+		in.Goals = []workout.Goal{{ID: "g", Priority: p, EventDate: event}}
+		return in
+	}
+	// A short plan whose only week is a C race week (Friday 2026-03-20): not a
+	// taper, not reduced, but the race is in it.
+	for _, p := range []workout.Priority{workout.PriorityB, workout.PriorityC} {
+		if s := Suggest(noFTP(planFrom(build()), "2026-03-20", p)); s != nil {
+			t.Errorf("%s race week: got %+v", p, s)
+		}
+	}
+	// A B race on Monday 2026-03-23 (no mini-taper days before it): the week
+	// holding it is out, so a test lands in the week before.
+	s := mustSuggest(t, noFTP(planFrom(build(), build()), "2026-03-23", workout.PriorityB))
+	if s.Date > "2026-03-22" {
+		t.Errorf("date = %s, want a day before the race week", s.Date)
+	}
+	// The event day itself is never the day, even for a rider with no plan.
+	in := noFTP(nil, "2026-03-19", workout.PriorityC)
+	in.Plan = nil
+	in.Profile.AvailableDays = []string{"thu"}
+	if s := Suggest(in); s != nil && s.Date == "2026-03-19" {
+		t.Errorf("the suggested day is the event day: %+v", s)
 	}
 }

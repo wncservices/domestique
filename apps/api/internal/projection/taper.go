@@ -25,6 +25,31 @@ type Suggestion struct {
 	ExcessTSS float64
 }
 
+// miniTaperDays are the lengths a priority B goal's what-if tries: its taper is
+// the last few days only.
+var miniTaperDays = []int{3, 4}
+
+// taperDaysFor is the taper lengths a goal of that priority may be offered:
+// none for C, the mini-taper's for B, the full set otherwise.
+func taperDaysFor(priority string) []int {
+	switch priority {
+	case "C":
+		return nil
+	case "B":
+		return miniTaperDays
+	}
+	return TaperDays
+}
+
+// gate is how many days out a suggestion is first offered: the shortest taper
+// on offer, and the full taper's 7 when none is (a ramp hint keeps that rule).
+func gate(days []int) int {
+	if len(days) == 0 {
+		return TaperDays[0]
+	}
+	return days[0]
+}
+
 // tsbWithTaper is the race-day form when the planned load of the last `days`
 // days is cut to taperScale. Completed sessions are never rescaled.
 func tsbWithTaper(in Input, days int) float64 {
@@ -65,12 +90,17 @@ func daysAway(in Input) (int, bool) {
 // the band's low edge, or says none does. Nothing is offered under 7 days out,
 // and a start earlier than today is not tried. nil means no suggestion.
 func TaperWhatIf(in Input, band Band) *Suggestion {
+	days := taperDaysFor(in.Priority)
 	away, ok := daysAway(in)
-	if !ok || away < TaperDays[0] || away > MaxDays {
+	if len(days) == 0 || !ok || away < days[0] || away > MaxDays {
 		return nil
 	}
+	word := "taper"
+	if in.Priority == "B" {
+		word = "mini-taper"
+	}
 	var last *Suggestion
-	for _, d := range TaperDays {
+	for _, d := range days {
 		if d > away {
 			break
 		}
@@ -78,11 +108,17 @@ func TaperWhatIf(in Input, band Band) *Suggestion {
 		last = &Suggestion{Days: d, TSB: tsb}
 		if math.Round(tsb) >= band.Low {
 			last.Reaches = true
-			last.Text = fmt.Sprintf("Starting your taper %d days out instead would land form at about %s", d, Signed(tsb))
+			last.Text = fmt.Sprintf("Starting your %s %d days out instead would land form at about %s", word, d, Signed(tsb))
+			if in.Priority == "B" {
+				last.Text = fmt.Sprintf("Easing the last %d days instead would land form at about %s", d, Signed(tsb))
+			}
 			return last
 		}
 	}
 	last.Text = fmt.Sprintf("No taper that starts up to %d days out reaches form +%.0f: the best lands at about %s", last.Days, band.Low, Signed(last.TSB))
+	if in.Priority == "B" {
+		last.Text = fmt.Sprintf("Easing even the last %d days does not reach form +%.0f: the best lands at about %s", last.Days, band.Low, Signed(last.TSB))
+	}
 	return last
 }
 
@@ -91,10 +127,11 @@ func TaperWhatIf(in Input, band Band) *Suggestion {
 // over-limit ramp week as a hint to trim. A fresh rider is told by the
 // message itself, and an undertrained one has no fix inside the plan.
 func Suggest(in Input, v Verdict, band Band, ramp Ramp) *Suggestion {
-	if away, ok := daysAway(in); !ok || away < TaperDays[0] {
+	days := taperDaysFor(in.Priority)
+	if away, ok := daysAway(in); !ok || away < gate(days) {
 		return nil
 	}
-	if v.Key == KeyFatigued {
+	if v.Key == KeyFatigued && len(days) > 0 {
 		if s := TaperWhatIf(in, band); s != nil {
 			return s
 		}

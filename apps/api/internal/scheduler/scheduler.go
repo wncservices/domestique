@@ -205,7 +205,7 @@ func NextWorkouts(plan periodization.Plan, profile workout.RiderProfile, levels 
 func WeekWorkouts(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, rider, goalID string, sport model.Sport, opts ...Option) ([]workout.CreateWorkoutRequest, error) {
 	o := applyOptions(opts)
 	out, err := buildWeek(week, profile, levels, rider, goalID, sport, o)
-	if err != nil || o.targetTSS <= 0 || o.levelBoost != 0 || week.Recovery || sport != model.SportCycling || profile.FTPWatts <= 0 {
+	if err != nil || o.targetTSS <= 0 || o.levelBoost != 0 || week.Recovery || week.MiniTaperDays > 0 || sport != model.SportCycling || profile.FTPWatts <= 0 {
 		return out, err
 	}
 	// Building with levelBoost set and the target cleared is what stops the
@@ -240,8 +240,7 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		demand = nil
 	}
 	days := sortedDays(profile.AvailableDays)
-	n := len(days)
-	if n == 0 || week.TargetHours <= 0 {
+	if len(days) == 0 || week.TargetHours <= 0 {
 		return nil, nil
 	}
 
@@ -250,7 +249,28 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		return nil, fmt.Errorf("scheduler: parse week start %q: %w", week.StartDate, err)
 	}
 
-	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days, o.mix)
+	// An event week: nothing on or after the event (every priority), and for a
+	// priority B week the days of the mini-taper are easy rides at the taper's
+	// daily load, outside the week's own sessions.
+	days, mini := splitEventWeek(week, weekStart, days)
+	n := len(days)
+	if n == 0 {
+		return nil, nil
+	}
+	structuredLimit := n
+	for i := range days {
+		if mini.days[i] {
+			structuredLimit = i
+			break
+		}
+	}
+
+	kinds, zones, targetLevels := assignSlots(week, profile, levels, sport, days, o.mix, structuredLimit)
+	for i := range kinds {
+		if mini.days[i] {
+			kinds[i], zones[i], targetLevels[i] = slotEndurance, "", 0
+		}
+	}
 	if o.levelBoost != 0 && week.Phase != periodization.PhaseTaper && !week.Recovery {
 		// The taper opener is deliberately easy, so only the other phases'
 		// structured slots are lifted. Boost and route demand each move the
@@ -264,6 +284,7 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 		}
 	}
 	dropped, targetHours := applyFixed(o.fixed, week, weekStart, days, kinds)
+	targetHours = math.Max(targetHours-mini.hoursIn(dropped), 0)
 
 	// Cap every structured slot's time budget at the share it would have
 	// gotten under slotWeight before any rung is picked, then let
@@ -272,7 +293,7 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 	// force a session the week has no room for.
 	weights := make([]float64, n)
 	for i, k := range kinds {
-		if !dropped[i] {
+		if !dropped[i] && !mini.days[i] {
 			weights[i] = slotWeight(k)
 		}
 	}
@@ -318,7 +339,7 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 	}
 	restWeights := make([]float64, n)
 	for i, k := range kinds {
-		if k == slotStructured || dropped[i] {
+		if k == slotStructured || dropped[i] || mini.days[i] {
 			continue
 		}
 		restWeights[i] = slotWeight(k)
@@ -341,10 +362,13 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 			req.Flags = workout.Flags{Origin: workout.OriginPlan}
 		default:
 			hours := remainingHours * restShares[i]
+			if mini.days[i] {
+				hours = mini.perDay
+			}
 			if hours <= 0 {
 				continue
 			}
-			req = BuildEnduranceSession(hours, kinds[i] == slotLong, sport, profile)
+			req = BuildEnduranceSession(hours, kinds[i] == slotLong && !mini.days[i], sport, profile)
 			// The steps and hours stay the plain long ride's: the name is what
 			// tells the rider to find a hilly road.
 			if kinds[i] == slotLong && demand != nil && demand.Climbing && sport == model.SportCycling {
@@ -439,7 +463,7 @@ const thirdSlotMinDays = 6
 // placeStructuredDays. For a cycling build or peak week with enough days
 // and planned CTL a third zone is added (when it can be placed without
 // adjacency), and a non-nil mix replaces the table's zones slot for slot.
-func assignSlots(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, sport model.Sport, days []string, mix *intensity.Mix) (kinds []slotKind, zones []string, targetLevels []float64) {
+func assignSlots(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, sport model.Sport, days []string, mix *intensity.Mix, structuredLimit int) (kinds []slotKind, zones []string, targetLevels []float64) {
 	n := len(days)
 	kinds = make([]slotKind, n)
 	zones = make([]string, n)
@@ -463,7 +487,7 @@ func assignSlots(week periodization.Week, profile workout.RiderProfile, levels m
 	cycling := sport != model.SportRunning
 	wantThird := cycling && len(structured) > 0 &&
 		(week.Phase == periodization.PhaseBuild || week.Phase == periodization.PhasePeak) &&
-		n >= thirdSlotMinDays && week.PlannedCTL >= thirdSlotMinCTL
+		week.MiniTaperDays == 0 && n >= thirdSlotMinDays && week.PlannedCTL >= thirdSlotMinCTL
 	count := len(structured)
 	if wantThird {
 		count++
@@ -472,10 +496,10 @@ func assignSlots(week periodization.Week, profile workout.RiderProfile, levels m
 		structured = zonesFor(week.Phase, structured, count, mix)
 	}
 
-	positions := placeStructuredDays(days, len(structured))
+	positions := placeStructuredDaysIn(days, len(structured), structuredLimit)
 	if wantThird && len(positions) < len(structured) {
 		structured = structured[:len(structured)-1]
-		positions = placeStructuredDays(days, len(structured))
+		positions = placeStructuredDaysIn(days, len(structured), structuredLimit)
 	}
 	for i, pos := range positions {
 		kinds[pos] = slotStructured
@@ -533,12 +557,33 @@ func zonesFor(phase periodization.Phase, table []structuredSlot, count int, mix 
 // structuredSlotsFor's own n-based rules) no non-adjacent combination
 // exists at all.
 func placeStructuredDays(days []string, k int) []int {
+	return placeStructuredDaysIn(days, k, len(days)-1)
+}
+
+// placeStructuredDaysIn is placeStructuredDays with the structured slots kept
+// among the first limit days. When fewer than k fit without two on adjacent
+// days it places as many as do.
+func placeStructuredDaysIn(days []string, k, limit int) []int {
+	if limit >= len(days)-1 {
+		// No restriction: exactly k or none, as always.
+		return placeStructured(days, k, limit)
+	}
+	for ; k > 0; k-- {
+		if best := placeStructured(days, k, limit); len(best) > 0 {
+			return best
+		}
+	}
+	return nil
+}
+
+func placeStructured(days []string, k, limit int) []int {
 	n := len(days)
 	if k <= 0 || n < 3 {
 		return nil
 	}
-	if k > n-1 {
-		k = n - 1
+	limit = min(limit, n-1)
+	if k > limit {
+		return nil
 	}
 	longOffset := weekdayOffset(days[n-1])
 
@@ -556,7 +601,7 @@ func placeStructuredDays(days []string, k int) []int {
 			}
 			return
 		}
-		for i := start; i < n-1; i++ {
+		for i := start; i < limit; i++ {
 			choose(i+1, append(chosen, i))
 		}
 	}
@@ -788,4 +833,54 @@ func clampToBoostedCeiling(l workoutlib.Ladder, picked workoutlib.Rung, unbooste
 		}
 	}
 	return best
+}
+
+// miniTaper is a priority B event week's split of its available days.
+type miniTaper struct {
+	// days marks, by index into the days kept, the ones inside the mini-taper.
+	days map[int]bool
+	// perDay is one mini-taper session's length: the taper's daily load. A day
+	// the rider cannot train does not hand its hours to the ones they can, or a
+	// Saturday-only rider would get three days' worth in one ride.
+	perDay float64
+}
+
+// hoursIn is what the mini-taper sessions that still have a day hold, which the
+// rest of the week does not get to spend.
+func (m miniTaper) hoursIn(dropped map[int]bool) float64 {
+	n := 0
+	for i := range m.days {
+		if !dropped[i] {
+			n++
+		}
+	}
+	return float64(n) * m.perDay
+}
+
+// splitEventWeek drops the available days on or after the event and marks the
+// ones inside a priority B mini-taper. A week with no event comes back as it
+// was.
+func splitEventWeek(week periodization.Week, weekStart time.Time, days []string) ([]string, miniTaper) {
+	m := miniTaper{days: map[int]bool{}}
+	event, err := time.Parse("2006-01-02", week.EventDate)
+	if err != nil {
+		return days, m
+	}
+	start, err := time.Parse("2006-01-02", week.MiniTaperStart)
+	mini := week.MiniTaperDays > 0 && err == nil
+	kept := make([]string, 0, len(days))
+	for _, d := range days {
+		date := weekStart.AddDate(0, 0, weekdayOffset(d))
+		if !date.Before(event) {
+			continue
+		}
+		if mini && !date.Before(start) {
+			m.days[len(kept)] = true
+		}
+		kept = append(kept, d)
+	}
+	if mini {
+		m.perDay = week.MiniTaperDayHours
+	}
+	return kept, m
 }

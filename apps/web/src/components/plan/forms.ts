@@ -29,6 +29,31 @@ export interface GoalForm {
 // a sentinel too.
 export const NO_ROUTE = 'none'
 
+/** What priority a goal gets when the rider has not picked one: a dated event is
+ *  a race to peak for (A), an undated goal only a direction to train in (B).
+ *  The server applies the same default. */
+export function defaultPriority(eventDate: string): GoalPriority {
+  return eventDate ? 'A' : 'B'
+}
+
+/** The priority the select shows after the event date changes. A new goal
+ *  follows its date. Editing an undated goal stored as B follows it too (a date
+ *  makes it a race, A), as the server does on save; a goal that was already dated
+ *  or has another priority keeps its own. A priority the rider picked in this edit
+ *  is never overridden. */
+export function priorityAfterDateChange(o: {
+  editing: boolean
+  wasUndated: boolean
+  storedPriority: GoalPriority
+  chosen: boolean
+  current: GoalPriority
+  eventDate: string
+}): GoalPriority {
+  if (o.chosen) return o.current
+  if (!o.editing || (o.wasUndated && o.storedPriority === 'B')) return defaultPriority(o.eventDate)
+  return o.current
+}
+
 export function freshGoalForm(): GoalForm {
   return {
     name: '', sport: 'cycling', eventDate: '', priority: 'B', targetDistanceKm: '', targetElevationM: '', notes: '',
@@ -64,4 +89,23 @@ export const NO_GOAL = 'none'
 
 export function freshWorkoutForm(): WorkoutForm {
   return { name: '', sport: 'cycling', date: '', goalId: NO_GOAL, description: '', steps: [] }
+}
+
+/** The fields of a goal request the form decides. On create a blank field is
+ *  left out; on edit it is sent as the API's "none" ("" for text and date, 0 for
+ *  a target), because an omitted field means "keep what is stored" and a
+ *  cleared date or target would otherwise never clear. */
+export function goalFieldsFromForm(form: GoalForm, editing: boolean) {
+  const distanceM = form.targetDistanceKm ? Number(form.targetDistanceKm) * 1000 : undefined
+  const elevationM = form.targetElevationM ? Number(form.targetElevationM) : undefined
+  const clear = <T>(value: T | undefined, none: T) => (value !== undefined ? value : editing ? none : undefined)
+  return {
+    name: form.name.trim(),
+    sport: form.sport,
+    eventDate: clear(form.eventDate || undefined, ''),
+    priority: form.priority,
+    targetDistanceM: clear(distanceM, 0),
+    targetElevationM: clear(elevationM, 0),
+    notes: clear(form.notes || undefined, ''),
+  }
 }

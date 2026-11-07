@@ -1444,6 +1444,9 @@ export interface PeriodizationWeek {
   phase: PeriodizationPhase
   recovery?: boolean
   targetHours?: number
+  /** Days before a priority B event that drop to the taper's load inside this
+   *  week; absent for every other week. */
+  miniTaperDays?: number
   /** Set when internal/adapter.Reconcile nudged this week's targetHours
    *  away from periodization's own baseline ramp, based on recent actual
    *  training — see PeriodizationPlan.adjustment. Never true for the
@@ -1476,6 +1479,8 @@ export interface WeekFocus {
   recovery?: boolean
   targetHours?: number
   targetTss?: number
+  /** Days before a priority B event that drop to the taper's load this week. */
+  miniTaperDays?: number
   /** Load ledger figures, whole TSS, current week only (mirror weekFocusDTO). */
   carriedTss?: number
   forgivenTss?: number

@@ -28,6 +28,8 @@ type weekFocusDTO struct {
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
 	TargetTSS   float64 `json:"targetTss,omitempty"`
+	// MiniTaperDays: see periodizationWeekDTO.
+	MiniTaperDays int `json:"miniTaperDays,omitempty"`
 	// The load ledger's figures, whole TSS, for the current week only and only
 	// where the ledger runs. CarriedTSS is what last week rolled in, ForgivenTSS
 	// what it let go of. The ring's debt, ridden and effective target are sent
@@ -232,6 +234,7 @@ func (s *Server) weekFocus(ctx context.Context, rider string, start, now time.Ti
 				GoalID: g.ID, Name: g.Name, Priority: string(g.Priority), Sport: string(g.Sport),
 				EventDate: g.EventDate, WeekNumber: wk.Number, TotalWeeks: plan.TotalWeeks,
 				Phase: string(wk.Phase), Recovery: wk.Recovery, TargetHours: wk.TargetHours, TargetTSS: wk.TargetTSS,
+				MiniTaperDays: wk.MiniTaperDays,
 			}
 			if g.EventDate != "" {
 				if ev, err := time.ParseInLocation(dateLayout, g.EventDate, now.Location()); err == nil {

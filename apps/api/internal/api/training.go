@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -333,6 +334,18 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "pacingIf must be 0 (derived) or between 0.60 and 1.05"})
 		return
 	}
+	// An empty sport or priority means the default, so only a value that was
+	// sent is checked; the name keeps its own 400 from CreateGoal.
+	nonEmpty := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
+	if msg := goalPatchProblem(nil, nonEmpty(body.Sport), &body.EventDate, nonEmpty(body.Priority), &body.TargetDistanceM, &body.TargetElevationM); msg != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": msg})
+		return
+	}
 	if status, msg := s.checkGoalRoute(r.Context(), rider, model.Sport(body.Sport), strings.TrimSpace(body.RouteSlug)); status != 0 {
 		writeJSON(w, status, map[string]string{"error": msg})
 		return
@@ -349,8 +362,24 @@ func (s *Server) handleCreateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("goal created", "id", g.ID, "rider", rider)
-	// Before the response, this week; after it, the rest of the season.
-	s.planGoalNow(r.Context(), g)
+	// A race added later takes the days up to its event from the stay-fit goal.
+	deferred := false
+	if g.EventDate != "" {
+		var err error
+		if _, deferred, err = s.rebuildGoalFromToday(r.Context(), g, rebuildTakeover); err != nil {
+			s.logger().Error("could not hand the days to a dated goal", "goal", g.ID, "rider", rider, "err", err)
+		}
+	}
+	// Before the response, this week; after it, the rest of the season. Not
+	// while the takeover waits for the lock: its retry plans this goal itself,
+	// after the days are free.
+	if !deferred {
+		s.planGoalNow(r.Context(), g)
+		// The takeover removed today's session of the goal that held the day.
+		if g.EventDate != "" {
+			s.pushTodayIfOptedIn(r.Context(), rider)
+		}
+	}
 	writeJSON(w, http.StatusCreated, goalDTOFrom(g))
 }
 
@@ -391,6 +420,12 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "pacingIf must be 0 (derived) or between 0.60 and 1.05"})
 		return
 	}
+	// Nothing is written before every field has been checked: a bad value
+	// stored as sent would fail on every tick afterwards.
+	if msg := goalPatchProblem(body.Name, body.Sport, body.EventDate, body.Priority, body.TargetDistanceM, body.TargetElevationM); msg != "" {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": msg})
+		return
+	}
 	// The route the goal will carry and the sport it will have, after this
 	// update: the visibility check runs only when the link is being set (a
 	// link already made is not re-litigated by an unrelated edit), the sport
@@ -429,6 +464,14 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 		priority := workout.Priority(*body.Priority)
 		req.Priority = &priority
 	}
+	// Dating an undated goal makes it a race, which defaults to A. A B the
+	// rider did not just choose (absent, or the stored value the form sends
+	// back) is the old default; a different priority in the same edit wins.
+	if g.EventDate == "" && body.EventDate != nil && *body.EventDate != "" && g.Priority == workout.PriorityB &&
+		(body.Priority == nil || workout.Priority(*body.Priority) == g.Priority) {
+		a := workout.PriorityA
+		req.Priority = &a
+	}
 
 	updated, err := s.Training.UpdateGoal(r.Context(), id, req)
 	if err != nil {
@@ -439,15 +482,94 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	s.logger().Info("goal updated", "id", id, "by", identity.User)
 	// The plan is filled once per goal, so a new sport has to clear the old
 	// sport's untouched sessions first or nothing would ever replace them.
-	if updated.Sport != g.Sport {
-		if _, err := s.rebuildSeasonForSport(r.Context(), updated); err != nil {
-			s.logger().Error("could not rebuild the season after a sport change", "goal", id, "rider", g.Rider, "err", err)
+	// deferred: a rebuild met the busy lock and its background retry also plans
+	// the season, so a fill started here could win the lock first and part-fill.
+	deferred := false
+	rebuild := func(reason rebuildReason, what string) {
+		_, d, err := s.rebuildGoalFromToday(r.Context(), updated, reason)
+		deferred = deferred || d
+		if err != nil {
+			s.logger().Error("could not "+what, "goal", id, "rider", g.Rider, "err", err)
 		}
 	}
+	if updated.Sport != g.Sport {
+		rebuild(rebuildSport, "rebuild the season after a sport change")
+	}
+	// A changed date is a new plan: UpdateGoal re-anchored it at this week, so
+	// the goal's own untouched sessions are rebuilt, and a goal dated now takes
+	// the days from the rider's undated goals up to its event.
+	if updated.EventDate != g.EventDate {
+		rebuild(rebuildRedate, "hand the days to a dated goal")
+	}
+	// Priority shapes the taper, so a dated goal whose priority moved is rebuilt
+	// from today the same way. A sport or date change did that already.
+	priorityMoved := updated.Priority != g.Priority && updated.EventDate != ""
+	if priorityMoved && updated.Sport == g.Sport && updated.EventDate == g.EventDate {
+		rebuild(rebuildPriority, "rebuild the season after a priority change")
+	}
 	// A new event date or sport can add weeks to the plan.
-	s.planGoalNow(r.Context(), updated)
+	if !deferred {
+		s.planGoalNow(r.Context(), updated)
+	}
+	// The rebuild replaced today's session, and the tick that would send the
+	// new one may be half an hour away. A busy rebuild pushes from its retry.
+	if updated.Sport != g.Sport || updated.EventDate != g.EventDate || priorityMoved {
+		s.pushTodayIfOptedIn(r.Context(), g.Rider)
+	}
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))
 }
+
+// goalPatchProblem checks a goal edit's fields the way a goal is meant to look
+// and returns a short message for the first bad one, or "" when all are fine.
+// A nil field is not being changed. An empty event date is allowed: it makes
+// the goal undated.
+func goalPatchProblem(name, sport, eventDate, priority *string, distanceM, elevationM *float64) string {
+	if name != nil && strings.TrimSpace(*name) == "" {
+		return "name cannot be empty"
+	}
+	if sport != nil && model.Sport(*sport) != model.SportCycling && model.Sport(*sport) != model.SportRunning {
+		return "sport must be cycling or running"
+	}
+	if priority != nil {
+		switch workout.Priority(*priority) {
+		case workout.PriorityA, workout.PriorityB, workout.PriorityC:
+		default:
+			return "priority must be A, B or C"
+		}
+	}
+	if eventDate != nil && *eventDate != "" {
+		if _, err := time.Parse(dateLayout, *eventDate); err != nil {
+			return "eventDate must be a date as YYYY-MM-DD, or empty"
+		}
+	}
+	if distanceM != nil && (*distanceM < 0 || math.IsNaN(*distanceM) || math.IsInf(*distanceM, 0)) {
+		return "targetDistanceM cannot be negative"
+	}
+	if elevationM != nil && (*elevationM < 0 || math.IsNaN(*elevationM) || math.IsInf(*elevationM, 0)) {
+		return "targetElevationM cannot be negative"
+	}
+	return ""
+}
+
+// pushTodayIfOptedIn sends today's session to a rider who has auto-push on,
+// the same pass the tick runs. Failures are logged inside the push.
+func (s *Server) pushTodayIfOptedIn(ctx context.Context, rider string) {
+	profile, _, err := s.Training.GetProfile(ctx, rider)
+	if err != nil {
+		s.logger().Warn("auto-push: reading the profile failed", "rider", rider, "err", err)
+		return
+	}
+	if profile.AutoPushWorkouts {
+		s.pushWorkoutsForRider(ctx, rider)
+	}
+}
+
+// deleteGoalLockAttempts tries, deleteGoalLockWait apart, bound how long
+// deleting a goal waits for the scheduling lock (about 3 s) before a 409.
+const (
+	deleteGoalLockAttempts = 12
+	deleteGoalLockWait     = 250 * time.Millisecond
+)
 
 func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 	if !s.require(w, r, auth.PermManageTraining) || !s.trainingAvailable(w) {
@@ -466,17 +588,61 @@ func (s *Server) handleDeleteGoal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Not while a season pass is writing this goal's weeks, or the pass could
-	// record one after the goal has forgotten them all.
-	s.seasonMu.Lock()
-	err = s.Training.DeleteGoal(r.Context(), id)
-	s.seasonMu.Unlock()
+	// The goal's untouched future sessions go with it, Garmin copies included,
+	// and only then the goal: they are found by goal id, which DeleteGoal
+	// clears. Both happen in one hold of the scheduling lock (and seasonMu, so
+	// a season pass cannot record a week after the goal forgot them all). If
+	// the lock is busy nothing is deleted and the rider retries (409), rather
+	// than deleting the goal and leaving sessions no retry could find.
+	var removed int
+	// A tick usually holds the lock for a moment: wait a little before giving up.
+	var ran bool
+wait:
+	for attempt := 0; ; attempt++ {
+		ran = withDBLock(r.Context(), s.dbConn(), autoScheduleLockKey, func() {
+			s.seasonMu.Lock()
+			defer s.seasonMu.Unlock()
+			var existing []workout.Workout
+			if existing, err = s.Training.ListWorkouts(r.Context(), g.Rider); err != nil {
+				return
+			}
+			if removed, err = s.removeUntouched(r.Context(), g.Rider, existing, s.localToday(), func(wk workout.Workout) bool {
+				return wk.GoalID == id
+			}, ""); err != nil {
+				return
+			}
+			if err = s.Training.DeleteGoal(r.Context(), id); err != nil {
+				return
+			}
+			// The span the goal held is free: the rider's undated goals fill
+			// it, around any session they kept there.
+			err = s.refillFreedWeeks(r.Context(), g.Rider)
+		})
+		if ran || attempt >= deleteGoalLockAttempts-1 {
+			break
+		}
+		select {
+		case <-r.Context().Done():
+			break wait
+		case <-time.After(deleteGoalLockWait):
+		}
+	}
+	if !ran {
+		s.logger().Warn("goal not deleted: scheduling is busy", "id", id)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": replanLockedMessage})
+		return
+	}
 	if err != nil {
 		s.failTrainingLookup(w, err)
 		return
 	}
+	// The rider's other goals take the freed days back now (dated first), not
+	// at the next tick.
+	s.planRiderGoals(r.Context(), g.Rider)
+	// The deleted goal's copy of today is withdrawn: send what took its place.
+	s.pushTodayIfOptedIn(r.Context(), g.Rider)
 
-	s.logger().Info("goal deleted", "id", id, "by", identity.User)
+	s.logger().Info("goal deleted", "id", id, "by", identity.User, "removed", removed)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -487,6 +653,9 @@ type periodizationWeekDTO struct {
 	Recovery    bool    `json:"recovery,omitempty"`
 	TargetHours float64 `json:"targetHours,omitempty"`
 	Adjusted    bool    `json:"adjusted,omitempty"`
+	// MiniTaperDays is how many days before a priority B event drop to the
+	// taper's load inside this week; 0 for every other week.
+	MiniTaperDays int `json:"miniTaperDays,omitempty"`
 	// TargetTSS, PlannedCTL and LoadCapped are set only on the ctl basis: the
 	// week's load target, the CTL the plan expects at its start, and whether
 	// the rider's available hours cut that target short.
@@ -550,7 +719,7 @@ func (s *Server) handleGoalPeriodization(w http.ResponseWriter, r *http.Request)
 		wdto := periodizationWeekDTO{
 			Number: wk.Number, StartDate: wk.StartDate, Phase: string(wk.Phase),
 			Recovery: wk.Recovery, TargetHours: wk.TargetHours, Adjusted: wk.Adjusted,
-			TargetTSS: wk.TargetTSS, LoadCapped: wk.LoadCapped,
+			TargetTSS: wk.TargetTSS, LoadCapped: wk.LoadCapped, MiniTaperDays: wk.MiniTaperDays,
 		}
 		if plan.LoadBasis == "ctl" {
 			ctl := wk.PlannedCTL
@@ -928,6 +1097,15 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
+	if g.EventDate == "" {
+		inSpan, err := s.inDatedGoalSpan(ctx, g.Rider, week.StartDate)
+		if err != nil {
+			return nil, 0, err
+		}
+		if inSpan {
+			return nil, 0, nil
+		}
+	}
 	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.weekOptions(week), fixedOption(existing, week))...)
 	if err != nil {
 		return nil, 0, err
@@ -952,19 +1130,32 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 	for d := range blackout {
 		alreadyScheduled[d] = true
 	}
+	heldByGoal := map[string]bool{}
 	for _, wk := range existing {
 		// A crew ride takes its day whether or not it is linked to a goal, but not
 		// here: fixedOption hands it to scheduler.WeekWorkouts, which drops the slot
 		// on its day (applyFixed), so no session is ever made there to be skipped.
 		// A check on CrewRideID in this condition was redundant and untested.
-		if wk.GoalID != "" {
+		// A session with no goal holds its day too: the rider's own, or a plan
+		// session whose goal was deleted after the rider touched it. Planning
+		// another on top would give the day two sessions. It is not heldByGoal:
+		// a week the rider's own sessions fill is settled, so it is recorded.
+		if wk.GoalID == "" {
 			alreadyScheduled[wk.Date] = true
+		} else {
+			alreadyScheduled[wk.Date] = true
+			if wk.GoalID != g.ID {
+				heldByGoal[wk.Date] = true
+			}
 			// A workout moved to another day by an automatic adjustment
 			// leaves its original day empty. That day is not free: it is
 			// where the session was planned, and scheduling must not read the
 			// gap and plan it again on top of the moved one.
 			if from, ok := scheduler.MovedFrom(wk); ok {
 				alreadyScheduled[from] = true
+				if wk.GoalID != g.ID {
+					heldByGoal[from] = true
+				}
 			}
 		}
 	}
@@ -988,22 +1179,81 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 	// the season pass adopt the half-built week as a legacy one (see
 	// planSeason) and the rest of it would never be made.
 	var fresh []workout.CreateWorkoutRequest
-	skipped := 0
+	skipped, heldSkipped := 0, 0
 	for _, req := range requests {
 		if req.Date < fromDate {
 			continue
 		}
 		if alreadyScheduled[req.Date] {
 			skipped++
+			if heldByGoal[req.Date] {
+				heldSkipped++
+			}
 			continue
 		}
 		fresh = append(fresh, req)
+	}
+	// Nothing placed because other sessions hold every day: not a filled week.
+	// Recording it would leave this goal empty here for good, even after the
+	// goal that holds the days is deleted or moves on (a race added over a
+	// stay-fit goal's weeks, and the stay-fit goal's weeks after it).
+	if len(fresh) == 0 && heldSkipped > 0 {
+		return nil, skipped, nil
 	}
 	created, err := s.Training.FillWeek(ctx, g.ID, week.StartDate, fresh, week.StartDate <= s.refreshHorizon())
 	if err != nil {
 		return nil, skipped, err
 	}
 	return created, skipped, nil
+}
+
+// inDatedGoalSpan reports whether the week starting weekStart lies in the span
+// of one of the rider's dated goals: this week through the week of its event.
+// Those weeks are the dated goal's, even on days its plan leaves free (a
+// recovery week), and an undated goal's fill must not take them. This is also
+// what makes a dated goal's takeover safe across lock holds: a tick or another
+// pod filling the undated goal's freed weeks before the dated goal's own fill
+// would otherwise find the days held again.
+func (s *Server) inDatedGoalSpan(ctx context.Context, rider, weekStart string) (bool, error) {
+	spans, err := s.datedSpans(ctx, rider)
+	if err != nil {
+		return false, err
+	}
+	return inDatedSpan(spans, weekStart), nil
+}
+
+// datedSpan is the Mondays, first and last, of a dated goal's span.
+type datedSpan struct{ first, last string }
+
+// datedSpans lists the spans of the rider's upcoming dated goals.
+func (s *Server) datedSpans(ctx context.Context, rider string) ([]datedSpan, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return nil, err
+	}
+	today := s.localToday()
+	thisMonday := periodization.MondayOf(s.localNow()).Format(dateLayout)
+	var spans []datedSpan
+	for _, o := range goals {
+		if o.EventDate == "" || o.EventDate < today {
+			continue
+		}
+		ev, err := time.Parse(dateLayout, o.EventDate)
+		if err != nil {
+			continue
+		}
+		spans = append(spans, datedSpan{first: thisMonday, last: periodization.MondayOf(ev).Format(dateLayout)})
+	}
+	return spans, nil
+}
+
+func inDatedSpan(spans []datedSpan, weekStart string) bool {
+	for _, sp := range spans {
+		if weekStart >= sp.first && weekStart <= sp.last {
+			return true
+		}
+	}
+	return false
 }
 
 // refreshHorizon is the last Monday, "YYYY-MM-DD", whose week counts as close
@@ -1214,11 +1464,90 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.logger().Info("rider profile saved", "rider", rider)
+	// The plan is filled once per goal and week, so new days or hours would
+	// never reach sessions already planned. FTP is not like that: it flows in
+	// through refresh and recalibration, so an FTP-only save rebuilds nothing.
+	switch {
+	case len(before.AvailableDays) == 0 && len(saved.AvailableDays) > 0:
+		// Nothing was planned on old days, so there is nothing to remove: the
+		// goals the rider made before saying when they can train get planned.
+		s.planRiderGoals(r.Context(), rider)
+	case availabilityChanged(before, saved):
+		s.rebuildRiderPlan(r.Context(), rider)
+	}
 	out := profileDTOFrom(saved)
 	if changed {
 		out.LevelsRecalibrated = &dto
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// availabilityChanged reports whether the weekdays (as a set) or the hours per
+// day differ between two saved profiles. A profile that had no days has no
+// plan built on them, so the first days are not a change to rebuild from: the
+// caller only plans (planRiderGoals).
+func availabilityChanged(before, after workout.RiderProfile) bool {
+	if len(before.AvailableDays) == 0 {
+		return false
+	}
+	if before.HoursPerAvailableDay != after.HoursPerAvailableDay {
+		return true
+	}
+	days := map[string]bool{}
+	for _, d := range before.AvailableDays {
+		days[strings.ToLower(d)] = true
+	}
+	seen := map[string]bool{}
+	for _, d := range after.AvailableDays {
+		d = strings.ToLower(d)
+		if !days[d] {
+			return true
+		}
+		seen[d] = true
+	}
+	return len(seen) != len(days)
+}
+
+// rebuildRiderPlan rebuilds every goal of the rider from today after their
+// availability changed, then plans the rest of each season. Dated goals go
+// first. It runs whatever the auto-schedule flag says: the rider asked.
+func (s *Server) rebuildRiderPlan(ctx context.Context, rider string) {
+	goals, err := s.ridersGoalsDatedFirst(ctx, rider)
+	if err != nil {
+		s.logger().Error("could not list goals to rebuild after an availability change", "rider", rider, "err", err)
+		return
+	}
+	if len(goals) == 0 {
+		return
+	}
+	_, deferred, err := s.rebuildGoalFromToday(ctx, goals[0], rebuildDays)
+	if err != nil {
+		s.logger().Error("could not rebuild the season after an availability change", "rider", rider, "err", err)
+	}
+	// A busy lock leaves the plan to the background retry, which rebuilds and
+	// plans every goal in one hold; a fill started here could win the lock first
+	// and part-fill the weeks the rebuild is about to clear.
+	if !deferred {
+		for _, g := range goals {
+			s.planGoalNow(ctx, g)
+		}
+	}
+	// The rebuild withdrew today's copy: send the new session. A deferred
+	// rebuild pushes from its retry.
+	s.pushTodayIfOptedIn(ctx, rider)
+}
+
+// planRiderGoals plans every goal of the rider, dated first, with no rebuild.
+func (s *Server) planRiderGoals(ctx context.Context, rider string) {
+	goals, err := s.ridersGoalsDatedFirst(ctx, rider)
+	if err != nil {
+		s.logger().Error("could not list goals to plan after the first availability", "rider", rider, "err", err)
+		return
+	}
+	for _, g := range goals {
+		s.planGoalNow(ctx, g)
+	}
+	s.pushTodayIfOptedIn(ctx, rider)
 }
 
 type profileProposalDTO struct {
@@ -1354,6 +1683,12 @@ func (s *Server) handleProposeGoal(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := llmRequestContext(r)
 	defer cancel()
 	proposal, err := s.LLM.ProposeGoal(ctx, body.Note, s.now())
+	if errors.Is(err, llm.ErrUnsupportedSport) {
+		// An answer, not a failure: say so rather than pre-fill a cycling goal.
+		s.logger().Info("goal proposal for an unsupported sport", "rider", rider)
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "Only cycling and running goals are supported."})
+		return
+	}
 	if err != nil {
 		s.logger().Warn("goal proposal failed", "rider", rider, "err", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not turn that into a goal — try rephrasing it, or fill the form in by hand"})

@@ -147,11 +147,14 @@ func TestCreatingAGoalPlansTheWholeSeasonInTheBackground(t *testing.T) {
 		if wk.StartDate == thisMon.Format("2006-01-02") {
 			want = 3 // Tuesday has gone by
 		}
+		if wk.StartDate == weeks[len(weeks)-1].StartDate {
+			want = 1 // the event is that week's Wednesday: only Tuesday before it
+		}
 		if n := len(h.week(t, start)); n != want {
 			t.Errorf("week %s has %d sessions, want %d", wk.StartDate, n, want)
 		}
 	}
-	if got, want := len(h.workouts(t)), 4*len(weeks)-1; got != want {
+	if got, want := len(h.workouts(t)), 4*len(weeks)-1-3; got != want {
 		t.Errorf("%d workouts in all, want %d (four a week, minus this week's past Tuesday, nothing past the event)", got, want)
 	}
 }
@@ -224,7 +227,7 @@ func TestTheTickFillsTheSeasonOnlyWhenAutoScheduleIsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.srv.AutoScheduleTick(context.Background())
-	if got, want := h.fromNextWeek(t), 4*(len(h.planWeeks(t, g))-1); got != want {
+	if got, want := h.fromNextWeek(t), 4*(len(h.planWeeks(t, g))-1)-3; got != want {
 		t.Errorf("after one tick: %d workouts from next week on, want %d — every week to the event", got, want)
 	}
 }
@@ -516,6 +519,9 @@ func TestMovingTheEventEarlierClearsUntouchedSessionsBeyondTheNewEnd(t *testing.
 		want := 4
 		if n == 1 {
 			want = 3 // the clock is a Wednesday: Tuesday has gone by
+		}
+		if n == 20 {
+			want = 1 // the event is that week's Wednesday: only Tuesday before it
 		}
 		if got := len(h.week(t, weekN(n))); got != want {
 			t.Errorf("week %d has %d sessions, want %d", n, got, want)

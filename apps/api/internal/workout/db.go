@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS goals (
     notes              TEXT NOT NULL DEFAULT '',
     route_slug         TEXT NOT NULL DEFAULT '',
     pacing_if          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    plan_anchor        TEXT NOT NULL DEFAULT '',
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL
 );
@@ -498,6 +499,16 @@ func (d *DB) DeleteScheduledWeeksAfter(ctx context.Context, goalID, lastWeekStar
 	return err
 }
 
+// DeleteScheduledWeeksBetween forgets goalID's recorded weeks whose Monday lies
+// from fromWeekStart to toDate, both inclusive. It is how a dated goal taking
+// over a stretch of the calendar clears an undated goal's record of that
+// stretch only, leaving the weeks beyond it recorded.
+func (d *DB) DeleteScheduledWeeksBetween(ctx context.Context, goalID, fromWeekStart, toDate string) error {
+	_, err := d.db.ExecContext(ctx, d.query(
+		`DELETE FROM scheduled_weeks WHERE goal_id = ? AND week_start >= ? AND week_start <= ?`), goalID, fromWeekStart, toDate)
+	return err
+}
+
 // MarkWeekRefreshed records that a recorded week's untouched sessions have
 // been rebuilt from the plan and levels as they stand now (or were built from
 // them in the first place), so it is not done again. It never records a week
@@ -669,11 +680,44 @@ func UseDB(db *sql.DB, dsn string) (*DB, error) {
 	if err := store.copyAcceptedFTPSuggestions(); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
+	if err := store.migrateDatedGoalPriority(); err != nil {
+		return nil, fmt.Errorf("migrate workout tables: %w", err)
+	}
 	// After every workouts column exists: it reads the whole row.
 	if err := store.backfillFlags(context.Background()); err != nil {
 		return nil, fmt.Errorf("migrate workout tables: %w", err)
 	}
 	return store, nil
+}
+
+// migrateDatedGoalPriority moves every dated goal stored as B to A, once. B
+// was the default for every goal until dated goals defaulted to A (priority
+// shapes the taper, so a race left at the old default would get no taper). A
+// marker row makes it run once, so a rider's later B for a dated goal stays.
+func (d *DB) migrateDatedGoalPriority() error {
+	if _, err := d.db.Exec(`CREATE TABLE IF NOT EXISTS workout_migrations (
+        name TEXT PRIMARY KEY,
+        done_at TEXT NOT NULL
+    )`); err != nil {
+		return err
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.Exec(d.query(`INSERT INTO workout_migrations (name, done_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`),
+		"dated_goal_priority_a", d.timestamp())
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE goals SET priority = 'A' WHERE priority = 'B' AND event_date <> ''`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // addSessionAscentColumn adds ascent_m to a completed_sessions table that
@@ -764,6 +808,9 @@ func (d *DB) addEstimatedColumns() error {
 		// every goal made before them.
 		`ALTER TABLE goals ADD COLUMN route_slug TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE goals ADD COLUMN pacing_if DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		// '' = anchored at created_at, which is right for every goal made before
+		// this column: only a re-dating writes one.
+		`ALTER TABLE goals ADD COLUMN plan_anchor TEXT NOT NULL DEFAULT ''`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -1135,7 +1182,7 @@ func (d *DB) query(q string) string { return d.dialect.Rebind(q) }
 func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at
         FROM goals WHERE rider = ? ORDER BY event_date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -1150,7 +1197,7 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 			priority string
 		)
 		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.PlanAnchor, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		g.Sport = model.Sport(sport)
@@ -1170,7 +1217,7 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at
         FROM goals ORDER BY (event_date = ''), event_date, name`))
 	if err != nil {
 		return nil, err
@@ -1185,7 +1232,7 @@ func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 			priority string
 		)
 		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.PlanAnchor, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		g.Sport = model.Sport(sport)
@@ -1203,10 +1250,10 @@ func (d *DB) GetGoal(ctx context.Context, id string) (Goal, error) {
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at
         FROM goals WHERE id = ?`), id).Scan(
 		&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-		&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt)
+		&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.PlanAnchor, &g.CreatedAt, &g.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Goal{}, ErrGoalNotFound
 	}
@@ -1232,9 +1279,14 @@ func (d *DB) CreateGoal(ctx context.Context, req CreateGoalRequest) (Goal, error
 	if sport == "" {
 		sport = model.SportCycling
 	}
+	// A dated goal is a race the plan builds toward, so A unless said
+	// otherwise; an undated one is only a direction to train in.
 	priority := req.Priority
 	if priority == "" {
 		priority = PriorityB
+		if req.EventDate != "" {
+			priority = PriorityA
+		}
 	}
 
 	id, err := d.uniqueID(ctx, "goals", slugify(name))
@@ -1245,8 +1297,8 @@ func (d *DB) CreateGoal(ctx context.Context, req CreateGoalRequest) (Goal, error
 	ts := d.timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO goals (id, rider, name, sport, event_date, priority,
-                            target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                            target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`),
 		id, rider, name, string(sport), req.EventDate, string(priority),
 		req.TargetDistanceM, req.TargetElevationM, req.Notes, strings.TrimSpace(req.RouteSlug), req.PacingIF, ts, ts)
 	if err != nil {
@@ -1268,6 +1320,11 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 		current.Sport = *req.Sport
 	}
 	if req.EventDate != nil {
+		if movesPlan(current.EventDate, *req.EventDate) {
+			// A new date is a new plan: week 1 is this week, not the goal's
+			// creation, or an old goal given a near date would skip its base.
+			current.PlanAnchor = d.timestamp()
+		}
 		current.EventDate = *req.EventDate
 	}
 	if req.Priority != nil {
@@ -1291,10 +1348,10 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE goals SET name=?, sport=?, event_date=?, priority=?,
-               target_distance_m=?, target_elevation_m=?, notes=?, route_slug=?, pacing_if=?, updated_at=?
+               target_distance_m=?, target_elevation_m=?, notes=?, route_slug=?, pacing_if=?, plan_anchor=?, updated_at=?
         WHERE id=?`),
 		current.Name, string(current.Sport), current.EventDate, string(current.Priority),
-		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, d.timestamp(), id)
+		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, current.PlanAnchor, d.timestamp(), id)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -1916,3 +1973,23 @@ func splitList(raw string) []string {
 }
 
 func joinList(items []string) string { return strings.Join(items, ",") }
+
+// reanchorDays is how far an event date may move and keep the plan's anchor:
+// a nudge keeps the build already done, a bigger move is a different plan.
+const reanchorDays = 14
+
+// movesPlan reports whether changing the event date from old to next starts the
+// plan over: the goal was undated or becomes undated, a date cannot be read, or
+// the date moves by more than reanchorDays either way.
+func movesPlan(old, next string) bool {
+	if old == next {
+		return false
+	}
+	a, errA := time.Parse("2006-01-02", old)
+	b, errB := time.Parse("2006-01-02", next)
+	if old == "" || next == "" || errA != nil || errB != nil {
+		return true
+	}
+	days := b.Sub(a).Hours() / 24
+	return days > reanchorDays || days < -reanchorDays
+}

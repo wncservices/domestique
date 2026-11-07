@@ -1,0 +1,327 @@
+package api_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/wncservices/domestique/apps/api/internal/api"
+	"github.com/wncservices/domestique/apps/api/internal/auth"
+	"github.com/wncservices/domestique/apps/api/internal/periodization"
+	"github.com/wncservices/domestique/apps/api/internal/pgtest"
+	"github.com/wncservices/domestique/apps/api/internal/scheduler"
+	"github.com/wncservices/domestique/apps/api/internal/settings"
+	"github.com/wncservices/domestique/apps/api/internal/source"
+	"github.com/wncservices/domestique/apps/api/internal/workout"
+)
+
+// priorityHarness is a race 70 days out (a Saturday-ish event: whatever day
+// h.now+70 lands on) whose event week is its taper under priority A.
+func priorityRace(t *testing.T, priority string) (*seasonHarness, workout.Goal, time.Time) {
+	t.Helper()
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	// The Sunday of the tenth week, so the event week is a whole week of days.
+	event := periodization.MondayOf(h.now).AddDate(0, 0, 70+6)
+	g := h.createGoal(t, `{"name":"Race","priority":"`+priority+`","eventDate":"`+event.Format("2006-01-02")+`"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	return h, g, periodization.MondayOf(event)
+}
+
+// A taper week asks for far less than the week before it.
+func (h *seasonHarness) eventWeekShare(t *testing.T, goalID string, eventMonday time.Time) float64 {
+	t.Helper()
+	before := h.weekSeconds(t, goalID, eventMonday.AddDate(0, 0, -7))
+	if before == 0 {
+		t.Fatal("the week before the event holds no sessions")
+	}
+	return h.weekSeconds(t, goalID, eventMonday) / before
+}
+
+func TestChangingPriorityToCRemovesTheTaper(t *testing.T) {
+	h, g, eventMonday := priorityRace(t, "A")
+	if share := h.eventWeekShare(t, g.ID, eventMonday); share > 0.7 {
+		t.Fatalf("priority A event week is %.2f of the week before, want a taper", share)
+	}
+	anchor := h.goal(t, g.ID).PlanAnchor
+
+	h.patchGoal(t, g.ID, `{"priority":"C"}`)
+
+	if share := h.eventWeekShare(t, g.ID, eventMonday); share < 0.9 {
+		t.Errorf("priority C event week is %.2f of the week before, want an ordinary week", share)
+	}
+	if got := h.goal(t, g.ID).PlanAnchor; got != anchor {
+		t.Errorf("plan anchor %q after a priority change, was %q", got, anchor)
+	}
+	if d := twoOnADay(h.workouts(t), h.now.Format("2006-01-02")); d != "" {
+		t.Errorf("two sessions on %s", d)
+	}
+
+	// And back: the taper returns.
+	h.patchGoal(t, g.ID, `{"priority":"A"}`)
+	if share := h.eventWeekShare(t, g.ID, eventMonday); share > 0.7 {
+		t.Errorf("priority A again: event week is %.2f of the week before, want a taper", share)
+	}
+}
+
+func TestChangingPriorityToBGivesAMiniTaper(t *testing.T) {
+	h, g, eventMonday := priorityRace(t, "A")
+	a := h.eventWeekShare(t, g.ID, eventMonday)
+	h.patchGoal(t, g.ID, `{"priority":"B"}`)
+	b := h.eventWeekShare(t, g.ID, eventMonday)
+	h.patchGoal(t, g.ID, `{"priority":"C"}`)
+	c := h.eventWeekShare(t, g.ID, eventMonday)
+
+	// The same race: B lightens only its last days and C none, so B's event
+	// week is below C's ordinary one. It is not compared with A's: this rider
+	// trains Tue/Thu/Sat and the race is on a Sunday, so B's mini-taper takes two
+	// of their three days at one day's taper load each (not the window's hours
+	// piled on one), which leaves it as light as A's full taper.
+	if a >= c || b >= c || b < 0.1 {
+		t.Errorf("event week shares: A %.2f, B %.2f, C %.2f, want A and B below C and B still a week of rides", a, b, c)
+	}
+}
+
+// A priority change on an undated goal has no taper to shape, so it rebuilds nothing.
+func TestChangingPriorityOfAnUndatedGoalRebuildsNothing(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Keep going"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	before := map[string]string{}
+	for _, w := range h.goalSessions(t, g.ID) {
+		before[w.ID] = w.Date
+	}
+	h.patchGoal(t, g.ID, `{"priority":"C"}`)
+	for _, w := range h.goalSessions(t, g.ID) {
+		if _, ok := before[w.ID]; !ok && w.Date >= h.now.Format("2006-01-02") {
+			t.Errorf("session %s on %s was rebuilt", w.ID, w.Date)
+		}
+	}
+}
+
+// A priority change that meets the scheduling lock held retries until it frees.
+func TestChangingPriorityWhileSchedulingIsBusyRebuildsOnceItFrees(t *testing.T) {
+	db, err := source.OpenDB(pgtest.DSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	store, err := workout.UseDB(db.Conn(), db.DSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	appSettings, err := settings.UseDB(db.Conn(), db.DSN(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.New(auth.Config{Mode: auth.ModeProxy, Roles: auth.RoleMapping{Rider: []string{"cyclists"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := utcNoon(2026, time.October, 7)
+	srv := &api.Server{Source: db, Auth: authenticator, Training: store, Settings: appSettings,
+		Clock: func() time.Time { return now }, SeasonFillRetry: 20 * time.Millisecond}
+	followServerClock(srv, store)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	do := func(method, path, body string) *http.Response {
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		req.Header.Set("Remote-User", "wilant")
+		req.Header.Set("Remote-Groups", "cyclists")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+	ctx := context.Background()
+	if _, err := store.SaveProfile(ctx, workout.RiderProfile{
+		Rider: "wilant", HoursPerAvailableDay: 3, AvailableDays: []string{"tue", "thu", "sat", "sun"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Sunday 2026-12-13 ends the tenth week from Monday 2026-10-05.
+	if resp := do(http.MethodPost, "/api/training/goals", `{"name":"Race","priority":"A","eventDate":"2026-12-13"}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create goal: status %d", resp.StatusCode)
+	}
+	srv.WaitForBackground()
+	goals, err := store.ListGoals(ctx, "wilant")
+	if err != nil || len(goals) != 1 {
+		t.Fatalf("goals = %v, %v", goals, err)
+	}
+	gid := goals[0].ID
+	eventWeek := func() float64 {
+		all, err := store.ListWorkouts(ctx, "wilant")
+		if err != nil {
+			t.Fatal(err)
+		}
+		total := 0.0
+		for _, w := range all {
+			if w.GoalID == gid && w.Date >= "2026-12-07" && w.Date <= "2026-12-13" {
+				total += stepSeconds(w.Steps)
+			}
+		}
+		return total
+	}
+	taper := eventWeek()
+	if taper == 0 {
+		t.Fatal("the event week holds no sessions")
+	}
+
+	holding, release := make(chan struct{}), make(chan struct{})
+	go api.HoldSchedulingLockForTest(ctx, db.Conn(), func() { close(holding); <-release })
+	select {
+	case <-holding:
+	case <-time.After(5 * time.Second):
+		t.Fatal("never took the lock")
+	}
+	if resp := do(http.MethodPatch, "/api/training/goals/"+gid, `{"priority":"C"}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("update goal: status %d", resp.StatusCode)
+	}
+	close(release)
+	srv.WaitForBackground()
+
+	if got := eventWeek(); got <= taper {
+		t.Errorf("event week holds %.0f s after the lock freed, want more than the taper's %.0f s", got, taper)
+	}
+}
+
+// The periodization read tells the Plan page which week holds the mini-taper.
+func TestPeriodizationReadExposesTheMiniTaper(t *testing.T) {
+	h, g, _ := priorityRace(t, "B")
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/goals/"+g.ID+"/periodization", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var plan struct {
+		Weeks []struct {
+			Phase         string `json:"phase"`
+			MiniTaperDays int    `json:"miniTaperDays"`
+		} `json:"weeks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	last := plan.Weeks[len(plan.Weeks)-1]
+	if last.MiniTaperDays != 3 || last.Phase == "taper" {
+		t.Errorf("last week = %+v, want a non-taper week with 3 mini-taper days", last)
+	}
+	for _, w := range plan.Weeks[:len(plan.Weeks)-1] {
+		if w.MiniTaperDays != 0 {
+			t.Errorf("week %+v carries mini-taper days", w)
+		}
+	}
+}
+
+// Dating an undated B goal makes it a race: A, unless the rider chose another
+// priority in the same edit. The form sends the old value back, which is not a choice.
+func TestDatingAnUndatedBGoalDefaultsItToA(t *testing.T) {
+	event := `"eventDate":"2027-04-14"`
+	for name, c := range map[string]struct{ body, want string }{
+		"date only":               {`{` + event + `}`, "A"},
+		"old priority sent back":  {`{` + event + `,"priority":"B"}`, "A"},
+		"explicit other priority": {`{` + event + `,"priority":"C"}`, "C"},
+		"explicit A":              {`{` + event + `,"priority":"A"}`, "A"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newSeasonHarness(t)
+			h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+			g := h.createGoal(t, `{"name":"Keep going"}`)
+			h.srv.WaitForBackground()
+			if got := h.goal(t, g.ID).Priority; got != "B" {
+				t.Fatalf("setup: undated goal is %q, want B", got)
+			}
+			h.patchGoal(t, g.ID, c.body)
+			if got := string(h.goal(t, g.ID).Priority); got != c.want {
+				t.Errorf("priority = %q, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+func TestRedatingADatedBGoalKeepsB(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Club ride","eventDate":"2027-04-14","priority":"B"}`)
+	h.srv.WaitForBackground()
+	h.patchGoal(t, g.ID, `{"eventDate":"2027-05-02","priority":"B"}`)
+	if got := h.goal(t, g.ID).Priority; got != "B" {
+		t.Errorf("priority = %q, want B", got)
+	}
+}
+
+// The event is the session: no priority plans a ride on the event day itself,
+// whether the goal was created like that or its date was moved up onto a day
+// the old plan had already filled.
+func TestNoPlanSessionOnTheEventDay(t *testing.T) {
+	for _, priority := range []string{"A", "B", "C"} {
+		t.Run("created "+priority, func(t *testing.T) {
+			h, g, eventMonday := priorityRace(t, priority)
+			event := eventMonday.AddDate(0, 0, 6).Format("2006-01-02")
+			before := 0
+			for _, w := range h.goalSessions(t, g.ID) {
+				if w.Date == event {
+					t.Errorf("a session on the event day %s", event)
+				}
+				if w.Date < event {
+					before++
+				}
+			}
+			if before == 0 {
+				t.Fatal("fixture: no sessions before the event")
+			}
+		})
+	}
+	t.Run("date moved onto a planned day", func(t *testing.T) {
+		h, g, eventMonday := priorityRace(t, "A")
+		// The Sunday a week earlier already holds a session of the old plan.
+		moved := eventMonday.AddDate(0, 0, -1).Format("2006-01-02")
+		if len(h.week(t, eventMonday.AddDate(0, 0, -7))) == 0 {
+			t.Fatal("fixture: the week before the event is empty")
+		}
+		h.patchGoal(t, g.ID, `{"eventDate":"`+moved+`"}`)
+		h.srv.WaitForBackground()
+		for _, w := range h.goalSessions(t, g.ID) {
+			if w.Date >= moved {
+				t.Errorf("session %s on or after the new event day %s", w.Date, moved)
+			}
+		}
+	})
+}
+
+// The goal-save pass clears an untouched plan session an older plan left on the
+// event day itself, not only the days after it.
+func TestTheSeasonTrimClearsAnUntouchedSessionOnTheEventDay(t *testing.T) {
+	h, g, eventMonday := priorityRace(t, "A")
+	event := eventMonday.AddDate(0, 0, 6).Format("2006-01-02")
+	var model workout.Workout
+	for _, w := range h.goalSessions(t, g.ID) {
+		model = w
+	}
+	stray, err := h.store.CreateWorkout(context.Background(), workout.CreateWorkoutRequest{
+		Rider: "wilant", Sport: model.Sport, Name: model.Name, GoalID: g.ID, Date: event,
+		Description: scheduler.GeneratedDescription, Steps: model.Steps, Zone: model.Zone, Level: model.Level,
+		Flags: workout.Flags{Origin: workout.OriginPlan},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.patchGoal(t, g.ID, `{"notes":"saved again"}`)
+	h.srv.WaitForBackground()
+
+	for _, w := range h.goalSessions(t, g.ID) {
+		if w.ID == stray.ID {
+			t.Errorf("the untouched session on the event day %s survived the trim", event)
+		}
+	}
+}

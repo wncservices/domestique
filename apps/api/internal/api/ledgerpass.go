@@ -186,7 +186,9 @@ func (s *Server) repayRider(ctx context.Context, rider string) (pushed bool, rep
 		return
 	}
 
-	reduced := planWeek.Recovery || planWeek.Phase == periodization.PhaseTaper
+	// A priority B event week counts too: its last days are a mini-taper and
+	// the plan target already includes the drop, so nothing is repaid into it.
+	reduced := planWeek.Reduced()
 	// Opened on neither the target nor the open-day count being set, not on the
 	// row being new: a crash between the claim and the open must not skip
 	// opening forever. A week that opens with a target of 0 still records at

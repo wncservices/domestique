@@ -813,6 +813,27 @@ func decodeSchedule(t *testing.T, resp *http.Response) scheduledWorkoutsOut {
 	return out
 }
 
+// thisWeekPlanned is what saving the first available days planned for the
+// goal's rider in the week of now (a Monday): the profile save plans the goals
+// made before it, so Fill finds the week already done. Waits for the season
+// fill that follows, then keeps to the first week.
+func thisWeekPlanned(t *testing.T, h *trainingHarness, now time.Time) []scheduledWorkoutOut {
+	t.Helper()
+	h.srv.WaitForBackground()
+	var listed []scheduledWorkoutOut
+	if err := json.NewDecoder(h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "").Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	first, last := now.Format("2006-01-02"), now.AddDate(0, 0, 6).Format("2006-01-02")
+	var week []scheduledWorkoutOut
+	for _, w := range listed {
+		if w.Date >= first && w.Date <= last {
+			week = append(week, w)
+		}
+	}
+	return week
+}
+
 // TestGoalSchedule drives internal/scheduler end to end through the API:
 // a goal and a rider's profile in, real persisted workout rows out, on the
 // right calendar dates, each with real steps a device could ride.
@@ -832,6 +853,19 @@ func TestGoalSchedule(t *testing.T) {
 		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"],"ftpWatts":250}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("save profile: status = %d", resp.StatusCode)
+	}
+
+	// Saving the first days and creating the goal already planned the season.
+	// Clear it so Fill's own create path is what runs below.
+	h.srv.WaitForBackground()
+	existing, err := h.store.ListWorkouts(context.Background(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range existing {
+		if err := h.store.DeleteWorkout(context.Background(), w.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	resp = h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", "")
@@ -869,6 +903,32 @@ func TestGoalSchedule(t *testing.T) {
 	}
 }
 
+// Saving the first days plans the goal made before them, so Fill finds this
+// week done: it creates nothing and counts the four days it skipped.
+func TestGoalScheduleIsATopUpAfterTheProfileSave(t *testing.T) {
+	h := newTrainingHarness(t)
+	now := utcNoon(2026, time.October, 5)
+	h.srv.Clock = func() time.Time { return now }
+	g := decodeGoal(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals",
+		fmt.Sprintf(`{"name":"Race Day","eventDate":%q}`, now.AddDate(0, 0, 70).Format("2006-01-02"))))
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
+
+	week := thisWeekPlanned(t, h, now)
+	if len(week) != 4 {
+		t.Fatalf("planned this week = %d workouts, want 4", len(week))
+	}
+	for _, wk := range week {
+		if wk.GoalID != g.ID || len(wk.Steps) == 0 {
+			t.Errorf("planned workout incomplete: %+v", wk)
+		}
+	}
+	out := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
+	if len(out.Created) != 0 || out.Skipped != 4 {
+		t.Errorf("fill created %d, skipped %d, want 0 and 4", len(out.Created), out.Skipped)
+	}
+}
+
 // Calling schedule twice must not double the workouts on the same dates —
 // this is the one safeguard handleGoalSchedule adds on top of the pure
 // scheduler.NextWorkouts function.
@@ -887,26 +947,21 @@ func TestGoalScheduleIsIdempotentPerDate(t *testing.T) {
 	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
 		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
 
-	first := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
-	if len(first.Created) == 0 {
-		t.Fatal("first schedule created nothing")
+	first := thisWeekPlanned(t, h, now)
+	if len(first) == 0 {
+		t.Fatal("saving the profile planned nothing")
 	}
 
 	second := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
 	if len(second.Created) != 0 {
 		t.Errorf("second schedule created = %d, want 0 (every date already covered)", len(second.Created))
 	}
-	if second.Skipped != len(first.Created) {
-		t.Errorf("second schedule skipped = %d, want %d (one per date already scheduled)", second.Skipped, len(first.Created))
+	if second.Skipped != len(first) {
+		t.Errorf("second schedule skipped = %d, want %d (one per date already scheduled)", second.Skipped, len(first))
 	}
 
-	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/workouts", "")
-	var listed []scheduledWorkoutOut
-	if err := json.NewDecoder(resp.Body).Decode(&listed); err != nil {
-		t.Fatal(err)
-	}
-	if len(listed) != len(first.Created) {
-		t.Errorf("total workouts after two schedules = %d, want %d (no duplicates)", len(listed), len(first.Created))
+	if got := len(thisWeekPlanned(t, h, now)); got != len(first) {
+		t.Errorf("this week's workouts after two schedules = %d, want %d (no duplicates)", got, len(first))
 	}
 }
 
@@ -928,15 +983,15 @@ func TestMovingAPlanWorkoutDoesNotGetItScheduledAgain(t *testing.T) {
 	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
 		`{"hoursPerAvailableDay":1.5,"availableDays":["tue","thu","sat","sun"]}`)
 
-	first := decodeSchedule(t, h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+g.ID+"/schedule", ""))
-	if len(first.Created) == 0 {
-		t.Fatal("first schedule created nothing")
+	first := thisWeekPlanned(t, h, now)
+	if len(first) == 0 {
+		t.Fatal("saving the profile planned nothing")
 	}
 	taken := map[string]bool{}
-	for _, w := range first.Created {
+	for _, w := range first {
 		taken[w.Date] = true
 	}
-	moved := first.Created[0]
+	moved := first[0]
 	orig, err := time.Parse("2006-01-02", moved.Date)
 	if err != nil {
 		t.Fatal(err)
@@ -1081,6 +1136,25 @@ func TestProposeGoalNeverCreatesAGoal(t *testing.T) {
 	}
 	if len(goals) != 0 {
 		t.Errorf("goals = %v, want none — a proposal must not create anything", goals)
+	}
+}
+
+// A sport the app has no plans for is a 422 that says so, not a cycling goal.
+func TestProposeGoalForAnUnsupportedSportIs422(t *testing.T) {
+	h := newTrainingHarness(t)
+	h.pinClock()
+	withLLM(t, h.srv, fixed(`{"name":"Sprint triathlon","sport":"other","priority":"B","explanation":"x"}`))
+
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/propose", `{"note":"a sprint triathlon"}`)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"] != "Only cycling and running goals are supported." || len(body) != 1 {
+		t.Errorf("body = %v", body)
 	}
 }
 

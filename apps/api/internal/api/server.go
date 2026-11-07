@@ -153,8 +153,12 @@ type Server struct {
 	// seasonMu serialises season passes inside this process (the advisory
 	// lock does nothing on SQLite), and background counts the ones in
 	// flight, for WaitForBackground.
-	seasonMu   sync.Mutex
-	background sync.WaitGroup
+	seasonMu sync.Mutex
+	// daysRetry holds the riders with a days rebuild waiting for the
+	// scheduling lock, so a second save joins it (retryRebuild).
+	daysRetryMu sync.Mutex
+	daysRetry   map[string]bool
+	background  sync.WaitGroup
 	// llmNotesBusy is set while a morning notes pass is in flight, so the
 	// scheduling tick starts at most one at a time in this process.
 	llmNotesBusy atomic.Bool

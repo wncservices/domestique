@@ -230,7 +230,7 @@ func (s *Server) handleGetProjection(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	start := snapshots[len(snapshots)-1]
-	in := projection.Input{Start: start, Actual: actual, Planned: planned, Today: today, Event: g.EventDate}
+	in := projection.Input{Start: start, Actual: actual, Planned: planned, Today: today, Event: g.EventDate, Priority: string(g.Priority)}
 
 	points := projection.Roll(in)
 	if len(points) == 0 {
@@ -294,7 +294,7 @@ func (s *Server) handleGetProjection(w http.ResponseWriter, r *http.Request) {
 
 	verdict := projection.Judge(projection.JudgeInput{
 		CTL: raceDay.CTL, TSB: raceDay.TSB, Band: band, TargetCTL: out.TargetCTL,
-		WeeksCovered: covered, WeeksTotal: total,
+		WeeksCovered: covered, WeeksTotal: total, Priority: string(g.Priority),
 	})
 	out.Verdict = &projectionVerdictDTO{Key: string(verdict.Key), Message: verdict.Message, Tone: verdict.Tone}
 
