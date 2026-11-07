@@ -374,3 +374,26 @@ func TestGivingUpARaceRefillsTheWeekAroundAKeptSession(t *testing.T) {
 		})
 	}
 }
+
+// Dating a goal hands it the days an undated goal held this week, from today.
+func TestDatingAGoalFillsThisWeekWithTheDaysItTook(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	stay := h.createGoal(t, `{"name":"Stay fit"}`)
+	other := h.createGoal(t, `{"name":"Later race"}`)
+	h.srv.WaitForBackground()
+	thisMon, _ := weekBounds(h.now)
+	if h.weekCount(t, stay.ID, thisMon) == 0 {
+		t.Fatal("fixture: the undated goal holds nothing this week")
+	}
+
+	h.patchGoal(t, other.ID, `{"eventDate":"`+raceTwentyWeeksOut+`"}`)
+
+	// Thursday, Saturday and Sunday are still ahead of the Wednesday clock.
+	if got := h.weekCount(t, other.ID, thisMon); got != 3 {
+		t.Errorf("the dated goal has %d sessions this week, want 3", got)
+	}
+	if got := h.weekCount(t, stay.ID, thisMon); got != 0 {
+		t.Errorf("the undated goal kept %d sessions this week", got)
+	}
+}
