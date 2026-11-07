@@ -331,6 +331,68 @@ func (s *Server) trimSeason(ctx context.Context, g workout.Goal) (int, error) {
 	return removed, s.Training.DeleteScheduledWeeksAfter(ctx, g.ID, lastStart)
 }
 
+// rebuildSeasonForSport is what changing a goal's sport does to its plan. Every
+// week is already recorded and holds plan-made sessions of the old sport, and a
+// week is filled once per goal, so nothing would ever replace them. Untouched
+// plan-made sessions dated today or later go (a session of today the rider has
+// already ridden stays), each with its Garmin copy; the goal's scheduled-week
+// rows from this week on are forgotten; and this week's open days are filled at
+// once with the new sport's sessions. Later weeks are then empty and unrecorded,
+// so the season fill that follows builds them. Moved, edited, eased, test,
+// indoor, routed, ridden and past sessions are the rider's and stay. g is the
+// goal as updated. Takes the scheduling lock itself, so call it before
+// planGoalNow, not inside it. Returns how many sessions were deleted.
+func (s *Server) rebuildSeasonForSport(ctx context.Context, g workout.Goal) (int, error) {
+	var (
+		removed int
+		err     error
+	)
+	ran := withDBLock(ctx, s.dbConn(), autoScheduleLockKey, func() {
+		s.seasonMu.Lock()
+		defer s.seasonMu.Unlock()
+
+		today := s.localToday()
+		var existing []workout.Workout
+		if existing, err = s.Training.ListWorkouts(ctx, g.Rider); err != nil {
+			return
+		}
+		var ridden map[string]bool
+		if ridden, err = s.riddenToday(ctx, g.Rider, today, existing); err != nil {
+			return
+		}
+		for _, wk := range existing {
+			if wk.GoalID != g.ID || wk.Date < today || !untouchedPlanSession(wk) || (wk.Date == today && ridden[wk.ID]) {
+				continue
+			}
+			s.removeWorkoutFromGarmin(ctx, wk)
+			if err = s.Training.DeleteWorkout(ctx, wk.ID); err != nil {
+				return
+			}
+			removed++
+		}
+		thisMonday := periodization.MondayOf(s.localNow())
+		// DeleteScheduledWeeksAfter is strictly after: the Monday before this
+		// week's forgets this week and everything later.
+		if err = s.Training.DeleteScheduledWeeksAfter(ctx, g.ID, thisMonday.AddDate(0, 0, -7).Format(dateLayout)); err != nil {
+			return
+		}
+		_, _, err = s.scheduleGoalWeek(ctx, g, thisMonday, today)
+	})
+	if !ran {
+		// The goal was saved; the old sport's sessions stay until the rider
+		// edits the goal again or replans.
+		s.logger().Warn("goal sport changed, season not rebuilt: scheduling busy", "goal", g.ID, "rider", g.Rider)
+		return 0, nil
+	}
+	if err != nil && (errors.Is(err, periodization.ErrNoEventDate) || errors.Is(err, periodization.ErrEventInThePast)) {
+		err = nil
+	}
+	if err == nil {
+		s.logger().Info("goal sport changed, season rebuilt", "goal", g.ID, "rider", g.Rider, "removed", removed)
+	}
+	return removed, err
+}
+
 // logSeasonPass writes what a pass did. Counts only, and only when something
 // happened: a tick that finds a settled season says nothing.
 func (s *Server) logSeasonPass(g workout.Goal, res seasonPassResult) {

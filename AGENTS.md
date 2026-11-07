@@ -601,6 +601,14 @@ its rows. Editing a goal so its plan ends earlier makes the goal-save pass
 week (and their Garmin copies and `scheduled_weeks` rows); moved, edited,
 eased, test, ridden and past sessions are kept.
 
+**Changing a goal's sport rebuilds its plan from today.** Every week is recorded and
+holds the old sport's sessions, so fill-once would never replace them.
+`rebuildSeasonForSport` (run by `handleUpdateGoal` before `planGoalNow`, under the
+scheduling locks) deletes the goal's untouched plan-made sessions dated today or
+later (and their Garmin copies), forgets its `scheduled_weeks` rows from this
+week on, and tops up this week; later weeks then fill as new. Rider-touched and
+past sessions stay.
+
 **A week built months ahead uses that day's levels and FTP, so it is refreshed
 once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).
 Only untouched sessions are rebuilt in place (same id, so a Garmin copy updates):

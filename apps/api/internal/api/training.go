@@ -437,6 +437,13 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger().Info("goal updated", "id", id, "by", identity.User)
+	// The plan is filled once per goal, so a new sport has to clear the old
+	// sport's untouched sessions first or nothing would ever replace them.
+	if updated.Sport != g.Sport {
+		if _, err := s.rebuildSeasonForSport(r.Context(), updated); err != nil {
+			s.logger().Error("could not rebuild the season after a sport change", "goal", id, "rider", g.Rider, "err", err)
+		}
+	}
 	// A new event date or sport can add weeks to the plan.
 	s.planGoalNow(r.Context(), updated)
 	writeJSON(w, http.StatusOK, goalDTOFrom(updated))
