@@ -941,6 +941,15 @@ func (sc seasonContext) week(startStr string) (periodization.Week, bool) {
 // be, so it is recorded as refreshed too; a week further out is refreshed when
 // it gets that close (see refreshWeek).
 func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext, week periodization.Week, existing []workout.Workout, fromDate string) ([]workout.Workout, int, error) {
+	if g.EventDate == "" {
+		inSpan, err := s.inDatedGoalSpan(ctx, g.Rider, week.StartDate)
+		if err != nil {
+			return nil, 0, err
+		}
+		if inSpan {
+			return nil, 0, nil
+		}
+	}
 	requests, err := scheduler.WeekWorkouts(week, sc.profile, sc.levels, g.Rider, g.ID, g.Sport, append(sc.weekOptions(week), fixedOption(existing, week))...)
 	if err != nil {
 		return nil, 0, err
@@ -973,14 +982,18 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		// A check on CrewRideID in this condition was redundant and untested.
 		if wk.GoalID != "" {
 			alreadyScheduled[wk.Date] = true
-			heldByGoal[wk.Date] = true
+			if wk.GoalID != g.ID {
+				heldByGoal[wk.Date] = true
+			}
 			// A workout moved to another day by an automatic adjustment
 			// leaves its original day empty. That day is not free: it is
 			// where the session was planned, and scheduling must not read the
 			// gap and plan it again on top of the moved one.
 			if from, ok := scheduler.MovedFrom(wk); ok {
 				alreadyScheduled[from] = true
-				heldByGoal[from] = true
+				if wk.GoalID != g.ID {
+					heldByGoal[from] = true
+				}
 			}
 		}
 	}
@@ -1030,6 +1043,36 @@ func (s *Server) fillWeek(ctx context.Context, g workout.Goal, sc seasonContext,
 		return nil, skipped, err
 	}
 	return created, skipped, nil
+}
+
+// inDatedGoalSpan reports whether the week starting weekStart lies in the span
+// of one of the rider's dated goals: this week through the week of its event.
+// Those weeks are the dated goal's, even on days its plan leaves free (a
+// recovery week), and an undated goal's fill must not take them. This is also
+// what makes a dated goal's takeover safe across lock holds: a tick or another
+// pod filling the undated goal's freed weeks before the dated goal's own fill
+// would otherwise find the days held again.
+func (s *Server) inDatedGoalSpan(ctx context.Context, rider, weekStart string) (bool, error) {
+	goals, err := s.Training.ListGoals(ctx, rider)
+	if err != nil {
+		return false, err
+	}
+	today := s.localToday()
+	thisMonday := periodization.MondayOf(s.localNow()).Format(dateLayout)
+	for _, o := range goals {
+		if o.EventDate == "" || o.EventDate < today {
+			continue
+		}
+		ev, err := time.Parse(dateLayout, o.EventDate)
+		if err != nil {
+			continue
+		}
+		last := periodization.MondayOf(ev).Format(dateLayout)
+		if weekStart >= thisMonday && weekStart <= last {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // refreshHorizon is the last Monday, "YYYY-MM-DD", whose week counts as close

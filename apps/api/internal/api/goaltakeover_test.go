@@ -201,7 +201,6 @@ func TestSettingADateOnAGoalTakesTheStayFitDays(t *testing.T) {
 	stay := h.createGoal(t, `{"name":"Stay fit"}`)
 	other := h.createGoal(t, `{"name":"Later race"}`)
 	h.srv.WaitForBackground()
-	_ = other
 
 	h.patchGoal(t, other.ID, `{"eventDate":"`+raceTwentyWeeksOut+`"}`)
 
@@ -209,5 +208,108 @@ func TestSettingADateOnAGoalTakesTheStayFitDays(t *testing.T) {
 		if w.Date >= h.now.Format("2006-01-02") && w.Date <= raceTwentyWeeksOut {
 			t.Errorf("stay-fit session on %s survived", w.Date)
 		}
+	}
+	got := 0
+	for _, w := range h.goalSessions(t, other.ID) {
+		if w.Date >= h.now.Format("2006-01-02") && w.Date <= raceTwentyWeeksOut {
+			got++
+		}
+	}
+	if got == 0 {
+		t.Error("the newly dated goal received no sessions on the days it took")
+	}
+}
+
+// fillStayFitWeek asks for the undated goal's week to be filled, the way its
+// Fill button or a tick would.
+func (h *seasonHarness) fillStayFitWeek(t *testing.T, id string, monday time.Time) {
+	t.Helper()
+	h.as("wilant", "cyclists", http.MethodPost, "/api/training/goals/"+id+"/schedule",
+		`{"weekStart":"`+monday.Format("2006-01-02")+`"}`)
+}
+
+// The takeover and the race's own fill are two lock holds. An undated goal's
+// fill that lands between them must not take the freed weeks back, or the race
+// finds its days held and stays empty.
+func TestAnUndatedFillBetweenTheTakeoverAndTheRaceFillLeavesTheDaysToTheRace(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	stay := h.createGoal(t, `{"name":"Stay fit"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+
+	gate := make(chan struct{})
+	h.srv.BeforeSeasonFill = func() { <-gate }
+	race := h.createGoal(t, `{"name":"Race","eventDate":"`+raceTwentyWeeksOut+`"}`)
+
+	thisMon, _ := weekBounds(h.now)
+	for i := 1; i <= 6; i++ {
+		h.fillStayFitWeek(t, stay.ID, thisMon.AddDate(0, 0, 7*i))
+	}
+	close(gate)
+	h.srv.WaitForBackground()
+
+	for _, w := range h.goalSessions(t, stay.ID) {
+		if w.Date >= h.now.Format("2006-01-02") && w.Date <= raceTwentyWeeksOut {
+			t.Errorf("stay-fit session on %s inside the race span", w.Date)
+		}
+	}
+	got := 0
+	for _, w := range h.goalSessions(t, race.ID) {
+		if w.Date >= thisMon.AddDate(0, 0, 7).Format("2006-01-02") && w.Date < thisMon.AddDate(0, 0, 49).Format("2006-01-02") {
+			got++
+		}
+	}
+	if got < 6*3 {
+		t.Errorf("the race has %d sessions in weeks 1-6, want its days", got)
+	}
+}
+
+// A race's recovery week may leave available days free; they are still the
+// race's weeks, not room for the stay-fit goal.
+func TestARaceRecoveryWeekDoesNotGetStayFitSessions(t *testing.T) {
+	h := newSeasonHarness(t)
+	stay, race := h.stayFitThenRace(t)
+	var rec string
+	for _, wk := range h.planWeeks(t, race) {
+		if wk.Recovery {
+			rec = wk.StartDate
+			break
+		}
+	}
+	if rec == "" {
+		t.Fatal("no recovery week in the race plan")
+	}
+	mon, _ := time.Parse("2006-01-02", rec)
+	h.fillStayFitWeek(t, stay.ID, mon)
+	if err := h.settings.SetFlag(api.FlagAutoSchedule, true, "test"); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.AutoScheduleTick(context.Background())
+	h.srv.WaitForBackground()
+	if n := len(datesIn(t, h.goalSessions(t, stay.ID), mon, mon.AddDate(0, 0, 6))); n != 0 {
+		t.Errorf("the stay-fit goal has %d sessions in the race's recovery week", n)
+	}
+}
+
+// A week already covered by the goal's own sessions is still recorded when it
+// is filled again (adopted): only other goals' sessions make a week unfilled.
+func TestAWeekCoveredByTheGoalsOwnSessionsIsStillRecorded(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	g := h.createGoal(t, `{"name":"Stay fit"}`)
+	h.srv.WaitForBackground()
+	thisMon, _ := weekBounds(h.now)
+	week := thisMon.AddDate(0, 0, 14)
+	if err := h.store.DeleteScheduledWeeksAfter(context.Background(), g.ID, week.AddDate(0, 0, -7).Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	h.fillStayFitWeek(t, g.ID, week)
+	weeks, err := h.store.ScheduledWeeks(context.Background(), g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := weeks[week.Format("2006-01-02")]; !ok {
+		t.Error("a week covered by the goal's own sessions was not recorded")
 	}
 }

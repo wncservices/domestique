@@ -620,7 +620,12 @@ background and `staleRebuild` stops it once a later edit owns the plan). Two rea
 
 Rider-touched and past sessions stay in both. `fillWeek` does not record a week in
 which it placed nothing because other goals' sessions hold every day: recorded-empty
-would keep that goal empty there for good, after the holder is gone.
+would keep that goal empty there for good, after the holder is gone. Only other
+goals' sessions count as holding; a week covered by the goal's own is still adopted.
+An undated goal's fill (`inDatedGoalSpan`, in `fillWeek`) never fills a week from this
+week through the week of any of the rider's dated goals' events, and does not record
+it: the takeover and the dated goal's own fill are separate lock holds, and a tick
+in between must not hand the freed days back.
 
 **A week built months ahead uses that day's levels and FTP, so it is refreshed
 once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).
