@@ -32,6 +32,7 @@ var goalSchema = map[string]any{
 		"eventPartOfMonth":    map[string]any{"type": "string", "enum": []string{"", "early", "mid", "late"}},
 		"eventDayOfMonth":     map[string]any{"type": "integer"},
 		"eventWeekday":        map[string]any{"type": "string", "enum": []string{"", "sat", "sun"}},
+		"eventYear":           map[string]any{"type": "integer"},
 		"eventYearOffset":     map[string]any{"type": "integer", "enum": []int{0, 1}},
 		"eventInWeeks":        map[string]any{"type": "integer"},
 		"eventInMonths":       map[string]any{"type": "integer"},
@@ -306,8 +307,14 @@ func placeInMonth(raw goalReply, want time.Weekday, hasWeekday bool, today time.
 	}
 	for _, useDay := range []bool{raw.EventDayOfMonth >= 1 && raw.EventDayOfMonth <= 31, false} {
 		for y := start; y <= start+4; y++ {
-			if d, ok := build(y, useDay); ok && d.After(today) {
+			d, ok := build(y, useDay)
+			if ok && d.After(today) {
 				return d, true
+			}
+			if ok && useDay && pinned {
+				// The rider named the day and the year, and it is gone: the
+				// 15th of that month would be a different day.
+				return time.Time{}, false
 			}
 			if pinned {
 				break

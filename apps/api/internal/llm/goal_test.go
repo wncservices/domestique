@@ -275,6 +275,8 @@ func TestProposeGoalPlacesDaysWeekdaysAndYears(t *testing.T) {
 		{"14 June 2028", goalToday, `"eventDayOfMonth":14,"eventMonth":6,"eventYear":2028`, "2028-06-14"},
 		// A bare Saturday asked on a Saturday is that weekend's Sunday.
 		{"this weekend on a Saturday", sat, `"eventWeekday":"sat"`, "2026-03-22"},
+		{"a Sunday asked on a Sunday is next Sunday", time.Date(2026, 3, 22, 0, 0, 0, 0, time.UTC), `"eventWeekday":"sun"`, "2026-03-29"},
+		{"a named day in a pinned year that is gone is nothing", goalToday, `"eventDayOfMonth":10,"eventMonth":3,"eventYear":2026`, ""},
 		{"this weekend on a Sunday", time.Date(2026, 3, 22, 0, 0, 0, 0, time.UTC), `"eventWeekday":"sat"`, "2026-03-28"},
 		{"a month beats a span", goalToday, `"eventMonth":6,"eventInMonths":9`, "2026-06-15"},
 		{"a span still works", goalToday, `"eventInMonths":9`, "2026-12-18"},
