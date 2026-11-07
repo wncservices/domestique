@@ -344,6 +344,10 @@ const (
 	// moved), so the same rider's undated goals give up their untouched
 	// sessions from today through the event.
 	rebuildTakeover rebuildReason = "takeover"
+	// rebuildRedate: the goal's event date changed, so its plan is anchored at
+	// this week again (workout.Goal.PlanAnchor) and its own untouched sessions
+	// from today are the old plan's. Includes the takeover.
+	rebuildRedate rebuildReason = "redate"
 	// rebuildDays: the rider's available days or hours changed, so every goal
 	// of theirs is rebuilt from today, dated goals first. g only names the rider.
 	rebuildDays rebuildReason = "days"
@@ -364,6 +368,10 @@ const (
 // forgotten, so g's fill finds the days free. Weeks after the event stay
 // recorded; the undated goal fills them through the season pass when its
 // rolling window reaches them.
+//
+// rebuildRedate: the sport rebuild of g, then the takeover, in one lock hold.
+// The anchor itself was reset by the update, so the weeks are built as for a
+// goal created today and the taper sits before the new date.
 //
 // Later weeks are then empty and unrecorded, so the season fill that follows
 // builds them. Moved, edited, eased, test, indoor, routed, ridden and past
@@ -398,6 +406,13 @@ func (s *Server) rebuildLocked(ctx context.Context, g workout.Goal, reason rebui
 		return s.takeOverUndatedGoalsLocked(ctx, g)
 	case rebuildDays:
 		return s.rebuildRiderLocked(ctx, g.Rider)
+	case rebuildRedate:
+		removed, err := s.rebuildSeasonLocked(ctx, g)
+		if err != nil {
+			return removed, err
+		}
+		n, err := s.takeOverUndatedGoalsLocked(ctx, g)
+		return removed + n, err
 	}
 	return s.rebuildSeasonLocked(ctx, g)
 }
@@ -463,6 +478,10 @@ func staleRebuild(cur, was workout.Goal, reason rebuildReason) bool {
 		// Never stale: the rebuild reads the profile as it stands when it
 		// runs, so a later days edit only makes it build the newer days.
 		return false
+	}
+	if reason == rebuildRedate {
+		// A later date edit owns the plan.
+		return cur.EventDate != was.EventDate
 	}
 	if reason == rebuildTakeover {
 		// The goal exists (the caller got it); it only has to still be dated.

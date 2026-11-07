@@ -645,6 +645,15 @@ week through the week of any of the rider's dated goals' events, and does not re
 it: the takeover and the dated goal's own fill are separate lock holds, and a tick
 in between must not hand the freed days back.
 
+**A new event date is a new plan.** The plan counts weeks from `periodization.planAnchor`: the Monday
+of `goals.plan_anchor`, else of `created_at` (the column is '' until a re-dating, so older rows need no
+backfill). `UpdateGoal` sets it to now whenever `eventDate` changes, so an old goal given a date 10
+weeks out starts in base like a goal created today, instead of landing 30 weeks in with no base. The
+handler then runs `rebuildGoalFromToday(..., rebuildRedate)`: the sport rebuild of the goal itself
+(its untouched sessions from today go, its weeks are forgotten, this week is topped up) followed by the
+undated-goal takeover, in one lock hold, so the taper moves to the new date and moved, edited, eased,
+ridden and past sessions stay. A retry is stale when a later edit has changed the date again.
+
 **A week built months ahead uses that day's levels and FTP, so it is refreshed
 once, when it becomes next week** (`refreshWeek`, `scheduled_weeks.refreshed_at`).
 Only untouched sessions are rebuilt in place (same id, so a Garmin copy updates):

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS goals (
     notes              TEXT NOT NULL DEFAULT '',
     route_slug         TEXT NOT NULL DEFAULT '',
     pacing_if          DOUBLE PRECISION NOT NULL DEFAULT 0,
+    plan_anchor        TEXT NOT NULL DEFAULT '',
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL
 );
@@ -774,6 +775,9 @@ func (d *DB) addEstimatedColumns() error {
 		// every goal made before them.
 		`ALTER TABLE goals ADD COLUMN route_slug TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE goals ADD COLUMN pacing_if DOUBLE PRECISION NOT NULL DEFAULT 0`,
+		// '' = anchored at created_at, which is right for every goal made before
+		// this column: only a re-dating writes one.
+		`ALTER TABLE goals ADD COLUMN plan_anchor TEXT NOT NULL DEFAULT ''`,
 	} {
 		_, err := d.db.Exec(stmt)
 		if err == nil {
@@ -1145,7 +1149,7 @@ func (d *DB) query(q string) string { return d.dialect.Rebind(q) }
 func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at
         FROM goals WHERE rider = ? ORDER BY event_date, name`), normalizeRider(rider))
 	if err != nil {
 		return nil, err
@@ -1160,7 +1164,7 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 			priority string
 		)
 		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.PlanAnchor, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		g.Sport = model.Sport(sport)
@@ -1180,7 +1184,7 @@ func (d *DB) ListGoals(ctx context.Context, rider string) ([]Goal, error) {
 func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 	rows, err := d.db.QueryContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at
         FROM goals ORDER BY (event_date = ''), event_date, name`))
 	if err != nil {
 		return nil, err
@@ -1195,7 +1199,7 @@ func (d *DB) ListAllGoals(ctx context.Context) ([]Goal, error) {
 			priority string
 		)
 		if err := rows.Scan(&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.PlanAnchor, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		g.Sport = model.Sport(sport)
@@ -1213,10 +1217,10 @@ func (d *DB) GetGoal(ctx context.Context, id string) (Goal, error) {
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT id, rider, name, sport, event_date, priority,
-               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at
+               target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at
         FROM goals WHERE id = ?`), id).Scan(
 		&g.ID, &g.Rider, &g.Name, &sport, &g.EventDate, &priority,
-		&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.CreatedAt, &g.UpdatedAt)
+		&g.TargetDistanceM, &g.TargetElevationM, &g.Notes, &g.RouteSlug, &g.PacingIF, &g.PlanAnchor, &g.CreatedAt, &g.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Goal{}, ErrGoalNotFound
 	}
@@ -1255,8 +1259,8 @@ func (d *DB) CreateGoal(ctx context.Context, req CreateGoalRequest) (Goal, error
 	ts := d.timestamp()
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO goals (id, rider, name, sport, event_date, priority,
-                            target_distance_m, target_elevation_m, notes, route_slug, pacing_if, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+                            target_distance_m, target_elevation_m, notes, route_slug, pacing_if, plan_anchor, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`),
 		id, rider, name, string(sport), req.EventDate, string(priority),
 		req.TargetDistanceM, req.TargetElevationM, req.Notes, strings.TrimSpace(req.RouteSlug), req.PacingIF, ts, ts)
 	if err != nil {
@@ -1278,6 +1282,11 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 		current.Sport = *req.Sport
 	}
 	if req.EventDate != nil {
+		if *req.EventDate != current.EventDate {
+			// A new date is a new plan: week 1 is this week, not the goal's
+			// creation, or an old goal given a near date would skip its base.
+			current.PlanAnchor = d.timestamp()
+		}
 		current.EventDate = *req.EventDate
 	}
 	if req.Priority != nil {
@@ -1301,10 +1310,10 @@ func (d *DB) UpdateGoal(ctx context.Context, id string, req UpdateGoalRequest) (
 
 	_, err = d.db.ExecContext(ctx, d.query(`
         UPDATE goals SET name=?, sport=?, event_date=?, priority=?,
-               target_distance_m=?, target_elevation_m=?, notes=?, route_slug=?, pacing_if=?, updated_at=?
+               target_distance_m=?, target_elevation_m=?, notes=?, route_slug=?, pacing_if=?, plan_anchor=?, updated_at=?
         WHERE id=?`),
 		current.Name, string(current.Sport), current.EventDate, string(current.Priority),
-		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, d.timestamp(), id)
+		current.TargetDistanceM, current.TargetElevationM, current.Notes, current.RouteSlug, current.PacingIF, current.PlanAnchor, d.timestamp(), id)
 	if err != nil {
 		return Goal{}, err
 	}

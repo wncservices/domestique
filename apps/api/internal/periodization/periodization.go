@@ -166,7 +166,7 @@ const (
 // every single time — recovery weeks would never arrive and Base would never
 // ramp, with phases advancing only because the remaining span shrinks.
 // Phases are instead allocated over the whole span from a stable anchor (the
-// Monday of the goal's creation, see planAnchor) to the event, then trimmed
+// Monday of the goal's creation or last re-dating, see planAnchor) to the event, then trimmed
 // to the current week onward, so a calendar week keeps its phase, recovery
 // flag, volume and Number whichever day the plan is built on. This is the
 // same idea as BuildRollingPlan's fixed anchor.
@@ -246,13 +246,17 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 }
 
 // planAnchor is the Monday week 1 falls on: the Monday of the goal's
-// creation, in today's own zone. A goal with no usable creation date, or one
+// creation (or of its last re-dating, when PlanAnchor is set), in today's own zone. A goal with no usable creation date, or one
 // "created in the future" (clock skew, hand-built test goals), anchors to
 // this week instead. That clamp is also what lets internal/adapter build the
 // plan as of some past date: a goal younger than that date is anchored there.
 func planAnchor(goal workout.Goal, today time.Time) time.Time {
 	thisWeek := MondayOf(today)
-	created, err := time.Parse(time.RFC3339, goal.CreatedAt)
+	from := goal.CreatedAt
+	if goal.PlanAnchor != "" {
+		from = goal.PlanAnchor
+	}
+	created, err := time.Parse(time.RFC3339, from)
 	if err != nil {
 		return thisWeek
 	}

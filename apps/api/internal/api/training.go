@@ -450,10 +450,11 @@ func (s *Server) handleUpdateGoal(w http.ResponseWriter, r *http.Request) {
 			s.logger().Error("could not rebuild the season after a sport change", "goal", id, "rider", g.Rider, "err", err)
 		}
 	}
-	// A goal that is dated now, or whose date moved, takes the days from the
-	// rider's undated goals up to its event.
-	if updated.EventDate != "" && updated.EventDate != g.EventDate {
-		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildTakeover); err != nil {
+	// A changed date is a new plan: UpdateGoal re-anchored it at this week, so
+	// the goal's own untouched sessions are rebuilt, and a goal dated now takes
+	// the days from the rider's undated goals up to its event.
+	if updated.EventDate != g.EventDate {
+		if _, err := s.rebuildGoalFromToday(r.Context(), updated, rebuildRedate); err != nil {
 			s.logger().Error("could not hand the days to a dated goal", "goal", id, "rider", g.Rider, "err", err)
 		}
 	}
