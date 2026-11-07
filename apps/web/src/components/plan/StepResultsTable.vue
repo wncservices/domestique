@@ -52,7 +52,7 @@ const hrBars = computed(() => {
     // A zone with any time shows at least a sliver.
     widthPercent: z.seconds > 0 ? Math.max(2, (z.seconds / max) * 100) : 0,
     color: zoneColorVar(HR_ZONE_KEYS[z.zone - 1] ?? 'recovery'),
-    range: z.zone === 1 ? `below ${z.high} bpm` : z.high === 0 ? `${z.low}+ bpm` : `${z.low}–${z.high} bpm`,
+    range: z.zone === 1 ? `below ${Math.round(z.high)} bpm` : z.high === 0 ? `${Math.round(z.low)}+ bpm` : `${Math.round(z.low)}–${Math.round(z.high)} bpm`,
   }))
 })
 

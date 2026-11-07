@@ -187,8 +187,10 @@ export async function heartRateZonesJourney(page: Page) {
     await navigateTo(page, 'Fitness', '/fitness')
     await expect(pageHeading(page)).toHaveText('Fitness')
 
-    // Cycling is the first tab; pick the rider's own boundaries.
-    await page.getByRole('tab', { name: 'Cycling' }).click()
+    // Cycling is the first tab; pick the rider's own boundaries. The page has
+    // two Cycling tabs, the profile form's and the zones card's below it: the
+    // first is the form's.
+    await page.getByRole('tab', { name: 'Cycling' }).first().click()
     await page.getByRole('combobox', { name: 'Zone method' }).click()
     await page.getByRole('option', { name: 'My own' }).click()
     const bounds: [string, string][] = [
