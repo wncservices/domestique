@@ -204,6 +204,7 @@ func saveAnalysis(ctx context.Context, st Store, rider, sessionID string, a ride
 		MaxHR: a.MaxHR, BestHR1200: a.BestHR1200, BestSpeed1200: a.BestSpeed1200, BestSpeed1800: a.BestSpeed1800,
 		PowerZoneSeconds: a.PowerZoneSeconds[:], HRZoneSeconds: a.HRZoneSeconds[:],
 		PowerCurve: powerCurve(a.PowerCurve), DecouplingPct: a.DecouplingPct,
+		HRHistogram: a.HRHistogram,
 	})
 }
 

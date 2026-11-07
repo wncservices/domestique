@@ -17,6 +17,8 @@ import (
 
 	"github.com/muktihari/fit/profile/basetype"
 	"github.com/muktihari/fit/profile/mesgdef"
+
+	"github.com/wncservices/domestique/apps/api/internal/workout"
 )
 
 // Sample is one second of a ride, 1 Hz, numbered from the ride's first
@@ -339,6 +341,37 @@ func HRZoneSeconds(s []Sample, maxHR int) [5]int {
 		zones[hrZoneIndex(pct)]++
 	}
 	return zones
+}
+
+// HRHistogramOf counts a ride's seconds at each whole heart rate. A sample
+// with no heart rate (HeartRate <= 0) goes to NoHR and stays out of the bins,
+// so a histogram can never put a dropout into a zone. The bins are dense from
+// the lowest bpm seen to the highest; a ride with no heart rate at all has no
+// bins, only NoHR.
+func HRHistogramOf(s []Sample) workout.HRHistogram {
+	var h workout.HRHistogram
+	bpms := make([]int, 0, len(s))
+	for _, sample := range s {
+		if sample.HeartRate <= 0 {
+			h.NoHR++
+			continue
+		}
+		bpms = append(bpms, int(math.Round(sample.HeartRate)))
+	}
+	if len(bpms) == 0 {
+		return h
+	}
+	lo, hi := bpms[0], bpms[0]
+	for _, bpm := range bpms {
+		lo = min(lo, bpm)
+		hi = max(hi, bpm)
+	}
+	h.Min = lo
+	h.Seconds = make([]int, hi-lo+1)
+	for _, bpm := range bpms {
+		h.Seconds[bpm-lo]++
+	}
+	return h
 }
 
 func hrZoneIndex(pct float64) int { return zoneIndex(pct, hrZoneEdges) }
