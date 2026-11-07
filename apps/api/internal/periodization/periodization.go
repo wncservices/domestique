@@ -92,6 +92,13 @@ type Week struct {
 	// keep a taper week free of extra load, hard sessions or tests treat
 	// a mini-taper week the same way (see Reduced).
 	MiniTaperDays int
+	// MiniTaperStart is the date of the first mini-taper day, EventDate the
+	// event (the day itself is the session, so nothing is planned on or after
+	// it) and MiniTaperDayHours the hours one mini-taper day holds at the
+	// taper's daily load. All set only with MiniTaperDays.
+	MiniTaperStart    string
+	EventDate         string
+	MiniTaperDayHours float64
 
 	// TargetTSS is the week's training load in TSS, PlannedCTL the forecast
 	// CTL at the start of the week (week 0: today's CTL, not Monday's), Ramp the CTL points per week this week was
@@ -276,10 +283,13 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 			}
 			if weekNumber == totalWeeks && goal.Priority == workout.PriorityB && !recovery {
 				if d := min(miniTaperMaxDays, eventIdx); d > 0 {
+					low := math.Min(frac, taperStartFraction)
 					wk.MiniTaperDays = d
+					wk.EventDate = event.Format("2006-01-02")
+					wk.MiniTaperStart = event.AddDate(0, 0, -d).Format("2006-01-02")
+					wk.MiniTaperDayHours = peakHours * low / 7
 					// The hours model drops those days to the first taper
 					// week's daily volume, never above the week's own.
-					low := math.Min(frac, taperStartFraction)
 					wk.TargetHours = peakHours * (frac*float64(7-d) + low*float64(d)) / 7
 				}
 			}

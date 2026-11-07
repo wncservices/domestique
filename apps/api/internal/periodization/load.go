@@ -280,6 +280,7 @@ func layerLoad(plan *Plan, pos []int, eventDate string, capHours float64, load L
 		plan.Weeks[i].PlannedCTL = weeks[i].PlannedCTL
 		plan.Weeks[i].Ramp = weeks[i].Ramp
 		plan.Weeks[i].LoadCapped = weeks[i].LoadCapped
+		plan.Weeks[i].MiniTaperDayHours = weeks[i].MiniTaperDayHours
 	}
 	plan.LoadBasis = "ctl"
 	plan.TargetCTL = load.TargetCTL
@@ -385,10 +386,13 @@ func (r loadRun) miniTaper(i int, s float64, st loadState) Week {
 	}
 	l := math.Max(0, finite(solveDailyLoad(tsb, lo, hi, r.load.TaperTSB)))
 	d := float64(w.MiniTaperDays)
+	ifSq100 := r.load.TypicalIF * r.load.TypicalIF * 100
 	out.TargetTSS = daily*(7-d) + l*d
-	out.TargetHours = out.TargetTSS / (r.load.TypicalIF * r.load.TypicalIF * 100)
-	if out.LoadCapped {
-		out.TargetHours = math.Min(out.TargetHours, r.capHours)
-	}
+	out.TargetHours = out.TargetTSS / ifSq100
+	out.MiniTaperDayHours = l / ifSq100
+	// The week is no longer capped once its last days drop, and it adds no
+	// fitness on purpose: it only holds what the build reached.
+	out.LoadCapped = out.TargetTSS > r.capTSS()*(1+1e-9)
+	out.Ramp = 0
 	return out
 }

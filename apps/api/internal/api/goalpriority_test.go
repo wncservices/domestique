@@ -69,13 +69,16 @@ func TestChangingPriorityToCRemovesTheTaper(t *testing.T) {
 
 func TestChangingPriorityToBGivesAMiniTaper(t *testing.T) {
 	h, g, eventMonday := priorityRace(t, "A")
+	a := h.eventWeekShare(t, g.ID, eventMonday)
 	h.patchGoal(t, g.ID, `{"priority":"B"}`)
+	b := h.eventWeekShare(t, g.ID, eventMonday)
+	h.patchGoal(t, g.ID, `{"priority":"C"}`)
+	c := h.eventWeekShare(t, g.ID, eventMonday)
 
-	// An ordinary week with its last days lighter: more than a taper week, less
-	// than the week before it.
-	share := h.eventWeekShare(t, g.ID, eventMonday)
-	if share < 0.7 || share > 1.01 {
-		t.Errorf("priority B event week is %.2f of the week before", share)
+	// The same race: B only lightens its last days, so its event week sits
+	// between a full taper and no taper at all.
+	if b < a || b >= c {
+		t.Errorf("event week shares: A %.2f, B %.2f, C %.2f, want A <= B < C", a, b, c)
 	}
 }
 

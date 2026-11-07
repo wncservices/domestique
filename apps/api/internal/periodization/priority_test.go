@@ -192,3 +192,31 @@ func TestShortPlansWithoutATaperStillHaveAWeek(t *testing.T) {
 		}
 	}
 }
+
+func TestMiniTaperWeekCarriesItsDaysAndIsNotRamped(t *testing.T) {
+	// Capped hours: the week before the drop would hit the hours ceiling.
+	p := workout.RiderProfile{HoursPerAvailableDay: 1, AvailableDays: []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}}
+	l := priorityLoad()
+	l.CTL, l.ATL, l.TargetCTL = 60, 60, 0
+	plan := mustBuild(t, priorityGoal(eventSunday, workout.PriorityB), p, l)
+	w := plan.Weeks[9]
+	if w.MiniTaperDays != 3 || w.EventDate != eventSunday || w.MiniTaperStart != "2026-03-12" {
+		t.Fatalf("week = %+v", w)
+	}
+	if w.Ramp != 0 {
+		t.Errorf("ramp = %v, want 0", w.Ramp)
+	}
+	if w.LoadCapped || w.TargetTSS > 7*1*0.7*0.7*100 {
+		t.Errorf("capped = %v, TSS %v: the reduced week is under the cap", w.LoadCapped, w.TargetTSS)
+	}
+	if w.MiniTaperDayHours <= 0 || w.MiniTaperDayHours > 1 {
+		t.Errorf("mini-taper day hours = %v", w.MiniTaperDayHours)
+	}
+	hours, err := BuildPlan(priorityGoal(eventSunday, workout.PriorityB), richProfile(), loadToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := hours.Weeks[9]; !near(h.MiniTaperDayHours, 28*0.5/7) {
+		t.Errorf("hours model mini-taper day hours = %v, want %v", h.MiniTaperDayHours, 28*0.5/7)
+	}
+}
