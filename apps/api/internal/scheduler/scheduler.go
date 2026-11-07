@@ -585,39 +585,58 @@ func placeStructured(days []string, k, limit int) []int {
 	if k > limit {
 		return nil
 	}
-	longOffset := weekdayOffset(days[n-1])
+	long := days[n-1]
 
-	var best []int
-	bestScore := -1.0
-	var choose func(start int, chosen []int)
-	choose = func(start int, chosen []int) {
-		if len(chosen) == k {
-			if hasAdjacentPair(days, chosen) {
+	// The first pass keeps every hard session off the days either side of the
+	// long day, the week boundary included (a Sunday long run is followed by
+	// Monday): coaching guides put an easy day or more between the long session
+	// and the next quality one. Only a week whose other days all sit beside the
+	// long day falls back to the second pass, which allows them.
+	for _, offLong := range []bool{true, false} {
+		var best []int
+		bestScore := -1.0
+		var choose func(start int, chosen []int)
+		choose = func(start int, chosen []int) {
+			if len(chosen) == k {
+				if hasAdjacentPair(days, chosen) {
+					return
+				}
+				if score := spreadScore(days, chosen, long); score > bestScore {
+					bestScore = score
+					best = append([]int(nil), chosen...)
+				}
 				return
 			}
-			if score := spreadScore(days, chosen, longOffset); score > bestScore {
-				bestScore = score
-				best = append([]int(nil), chosen...)
+			for i := start; i < limit; i++ {
+				if offLong && circularDays(days[i], long) == 1 {
+					continue
+				}
+				choose(i+1, append(chosen, i))
 			}
-			return
 		}
-		for i := start; i < limit; i++ {
-			choose(i+1, append(chosen, i))
+		choose(0, nil)
+		if best != nil {
+			sort.Ints(best)
+			return best
 		}
 	}
-	choose(0, nil)
+	return nil
+}
 
-	sort.Ints(best)
-	return best
+// circularDays is how many days apart two weekdays are when the week wraps:
+// Sunday and the Monday after it are one day apart, not six.
+func circularDays(a, b string) int {
+	d := (weekdayOffset(a) - weekdayOffset(b) + 7) % 7
+	return min(d, 7-d)
 }
 
 // hasAdjacentPair reports whether any two of chosen's slots fall on
 // calendar-adjacent days — the actual weekday, not the two slots' positions
-// in the (possibly gappy) available-days list.
+// in the (possibly gappy) available-days list, and across the week boundary.
 func hasAdjacentPair(days []string, chosen []int) bool {
 	for i := 0; i < len(chosen); i++ {
 		for j := i + 1; j < len(chosen); j++ {
-			if diff := weekdayOffset(days[chosen[i]]) - weekdayOffset(days[chosen[j]]); diff == 1 || diff == -1 {
+			if circularDays(days[chosen[i]], days[chosen[j]]) == 1 {
 				return true
 			}
 		}
@@ -626,14 +645,14 @@ func hasAdjacentPair(days []string, chosen []int) bool {
 }
 
 // spreadScore totals how far apart chosen's slots sit from each other and
-// from the long day (by weekday offset) — placeStructuredDays maximises
+// from the long day, in days around the week — placeStructuredDays maximises
 // this among the combinations the hard adjacency constraint allows.
-func spreadScore(days []string, chosen []int, longOffset int) float64 {
+func spreadScore(days []string, chosen []int, long string) float64 {
 	score := 0.0
 	for i, c := range chosen {
-		score += math.Abs(float64(weekdayOffset(days[c]) - longOffset))
+		score += float64(circularDays(days[c], long))
 		for j := i + 1; j < len(chosen); j++ {
-			score += math.Abs(float64(weekdayOffset(days[c]) - weekdayOffset(days[chosen[j]])))
+			score += float64(circularDays(days[c], days[chosen[j]]))
 		}
 	}
 	return score

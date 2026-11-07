@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -667,5 +668,46 @@ func TestWeekWorkoutsCarryPlanOrigin(t *testing.T) {
 	e := BuildEnduranceSession(1, false, model.SportCycling, profile)
 	if e.Flags.Origin != workout.OriginPlan {
 		t.Errorf("endurance flags = %+v", e.Flags)
+	}
+}
+
+// A hard session never lands on the day before or after the long day when the
+// available days allow it, counting across the week boundary: Sunday's long
+// run is followed by Monday, so Monday is the worst day for a tempo, not the
+// furthest. Coaching guides (Friel's hard/easy, McMillan's "never two hard
+// days in a row", the TrainingPeaks and Runner's World plans) keep an easy day
+// or more between the long session and the next quality one.
+func TestPlaceStructuredDaysKeepsOffTheLongDay(t *testing.T) {
+	for _, tc := range []struct {
+		days []string
+		k    int
+		want []string
+	}{
+		{[]string{"mon", "wed", "fri", "sun"}, 1, []string{"wed"}},
+		{[]string{"mon", "tue", "thu", "sun"}, 1, []string{"thu"}},
+		{[]string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}, 2, []string{"tue", "thu"}},
+		{[]string{"tue", "thu", "sat"}, 1, []string{"tue"}},
+	} {
+		positions := placeStructuredDays(tc.days, tc.k)
+		long := tc.days[len(tc.days)-1]
+		var got []string
+		for _, p := range positions {
+			got = append(got, tc.days[p])
+			if circularDays(tc.days[p], long) == 1 {
+				t.Errorf("%v: hard session on %s, beside the long day %s", tc.days, tc.days[p], long)
+			}
+		}
+		if len(tc.want) > 0 && !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%v, %d sessions: got %v, want %v", tc.days, tc.k, got, tc.want)
+		}
+	}
+}
+
+// Only when every other day is beside the long day does a hard session sit
+// there: Monday, Saturday and Sunday leave no choice, and a week with no
+// hard session at all would be worse.
+func TestPlaceStructuredDaysFallsBackBesideTheLongDay(t *testing.T) {
+	if got := placeStructuredDays([]string{"mon", "sat", "sun"}, 1); len(got) != 1 {
+		t.Fatalf("got %v, want one session placed", got)
 	}
 }
