@@ -1286,7 +1286,12 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	// The plan is filled once per goal and week, so new days or hours would
 	// never reach sessions already planned. FTP is not like that: it flows in
 	// through refresh and recalibration, so an FTP-only save rebuilds nothing.
-	if availabilityChanged(before, saved) {
+	switch {
+	case len(before.AvailableDays) == 0 && len(saved.AvailableDays) > 0:
+		// Nothing was planned on old days, so there is nothing to remove: the
+		// goals the rider made before saying when they can train get planned.
+		s.planRiderGoals(r.Context(), rider)
+	case availabilityChanged(before, saved):
 		s.rebuildRiderPlan(r.Context(), rider)
 	}
 	out := profileDTOFrom(saved)
@@ -1298,8 +1303,8 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 
 // availabilityChanged reports whether the weekdays (as a set) or the hours per
 // day differ between two saved profiles. A profile that had no days has no
-// plan built on them, so filling one in for the first time is not a change:
-// that stays the tick's and the Fill button's job, as it was.
+// plan built on them, so the first days are not a change to rebuild from: the
+// caller only plans (planRiderGoals).
 func availabilityChanged(before, after workout.RiderProfile) bool {
 	if len(before.AvailableDays) == 0 {
 		return false
@@ -1336,6 +1341,21 @@ func (s *Server) rebuildRiderPlan(ctx context.Context, rider string) {
 	}
 	if _, err := s.rebuildGoalFromToday(ctx, goals[0], rebuildDays); err != nil {
 		s.logger().Error("could not rebuild the season after an availability change", "rider", rider, "err", err)
+	}
+	// Planning after a rebuild that met a busy lock or failed is harmless: it
+	// is idempotent (fill-once per goal and week), and the background retry
+	// rebuilds and plans again.
+	for _, g := range goals {
+		s.planGoalNow(ctx, g)
+	}
+}
+
+// planRiderGoals plans every goal of the rider, dated first, with no rebuild.
+func (s *Server) planRiderGoals(ctx context.Context, rider string) {
+	goals, err := s.ridersGoalsDatedFirst(ctx, rider)
+	if err != nil {
+		s.logger().Error("could not list goals to plan after the first availability", "rider", rider, "err", err)
+		return
 	}
 	for _, g := range goals {
 		s.planGoalNow(ctx, g)

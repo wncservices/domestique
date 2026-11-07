@@ -146,3 +146,106 @@ func TestChangingOnlyFTPDoesNotRebuild(t *testing.T) {
 		}
 	}
 }
+
+// A goal made before the rider said when they can train has nothing planned.
+// Saving the first days plans it, with auto-schedule off, no Fill and no tick.
+func TestSavingTheFirstAvailableDaysPlansExistingGoals(t *testing.T) {
+	h := newSeasonHarness(t)
+	g := h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+	if n := len(h.workouts(t)); n != 0 {
+		t.Fatalf("%d workouts planned before any days", n)
+	}
+
+	h.putProfile(t, `{"availableDays":["tue","thu","sat","sun"],"hoursPerAvailableDay":3}`)
+
+	today := h.now.Format("2006-01-02")
+	_, nextMon := weekBounds(h.now)
+	var thisWeek, later int
+	for _, w := range h.goalSessions(t, g.ID) {
+		switch {
+		case w.Date > today && w.Date < nextMon.Format("2006-01-02"):
+			thisWeek++
+		case w.Date >= nextMon.Format("2006-01-02"):
+			later++
+		}
+	}
+	if thisWeek == 0 || later == 0 {
+		t.Errorf("%d sessions this week and %d later after the first days were saved", thisWeek, later)
+	}
+}
+
+func untouchedFutureIDs(h *seasonHarness, t *testing.T) map[string]bool {
+	t.Helper()
+	today := h.now.Format("2006-01-02")
+	m := map[string]bool{}
+	for _, w := range h.workouts(t) {
+		if w.Date > today {
+			m[w.ID] = true
+		}
+	}
+	return m
+}
+
+func TestChangingOnlyHoursRebuildsUntouchedSessions(t *testing.T) {
+	h := newSeasonHarness(t)
+	ctx := context.Background()
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	thisMon, _ := weekBounds(h.now)
+	kept := h.week(t, thisMon.AddDate(0, 0, 14))[0]
+	name := "Mine"
+	if _, err := h.store.UpdateWorkout(ctx, kept.ID, workout.UpdateWorkoutRequest{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	before := untouchedFutureIDs(h, t)
+
+	h.putProfile(t, `{"availableDays":["thu","tue","sun","sat"],"hoursPerAvailableDay":2}`)
+
+	after := untouchedFutureIDs(h, t)
+	if !after[kept.ID] {
+		t.Error("the rider's edited session was deleted")
+	}
+	replaced := 0
+	for id := range before {
+		if id != kept.ID && !after[id] {
+			replaced++
+		}
+	}
+	if replaced == 0 {
+		t.Error("no untouched session was replaced after the hours changed")
+	}
+}
+
+// A save that omits hoursPerAvailableDay stores 0 (SaveProfileOn writes the
+// whole row), so it is a change from the stored hours and rebuilds.
+func TestSavingWithoutHoursClearsThemAndRebuilds(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 0)
+	h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	before := untouchedFutureIDs(h, t)
+
+	h.putProfile(t, `{"availableDays":["tue","thu","sat","sun"]}`)
+
+	p, _, err := h.store.GetProfile(context.Background(), "wilant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.HoursPerAvailableDay != 0 {
+		t.Fatalf("stored hours = %v after a save that omitted them, want 0", p.HoursPerAvailableDay)
+	}
+	after := untouchedFutureIDs(h, t)
+	same := 0
+	for id := range before {
+		if after[id] {
+			same++
+		}
+	}
+	if same == len(before) {
+		t.Error("clearing the hours rebuilt nothing")
+	}
+}

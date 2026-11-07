@@ -624,7 +624,10 @@ background and `staleRebuild` stops it once a later edit owns the plan). Three r
   from today; touched ones stay. It runs with auto-schedule off too: the rider asked.
   `staleRebuild` never calls it stale, because it reads the profile as it stands when
   it runs. An FTP-only save rebuilds nothing: FTP flows through refresh and
-  recalibration (`TestChangingOnlyFTPDoesNotRebuild`).
+  recalibration (`TestChangingOnlyFTPDoesNotRebuild`). A save that omits
+  `hoursPerAvailableDay` stores 0, which is a change. The **first** days (the previous
+  profile had none) only plan the rider's goals (`planRiderGoals`): nothing sits on old
+  days, and a goal made before the profile gets its plan without Fill or a tick.
 
 Rider-touched and past sessions stay in both. `fillWeek` does not record a week in
 which it placed nothing because other goals' sessions hold every day: recorded-empty
