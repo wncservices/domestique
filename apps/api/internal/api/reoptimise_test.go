@@ -31,6 +31,8 @@ type reoptHarness struct {
 // newReoptHarness plants a hard tempo session today and a one-hour endurance
 // ride on Friday, on a rider with a connected Garmin and auto-push on.
 func newReoptHarness(t *testing.T) *reoptHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	h := &reoptHarness{ledgerPushHarness: newLedgerPushHarness(t)}
 	ctx := context.Background()

@@ -70,6 +70,7 @@ type pacingPushHarness struct {
 }
 
 func newPacingPushHarness(t *testing.T) *pacingPushHarness {
+	parallel(t)
 	t.Helper()
 	h := newConnectHarness(t, true)
 	courses := &idCourses{}

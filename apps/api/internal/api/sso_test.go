@@ -177,6 +177,7 @@ var ssoNow = time.Date(2026, 10, 13, 9, 30, 0, 0, time.FixedZone("CEST", 2*3600)
 // side of httptest.NewServer, since Handler() reads srv's fields per
 // request off the same pointer, not a snapshot taken at construction.
 func newSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
+	parallel(t)
 	t.Helper()
 	return buildSSOHarness(t, true, "", opts...)
 }
@@ -184,6 +185,7 @@ func newSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
 // newGatedSSOHarness is newSSOHarness before the startup step that binds the
 // riders that already exist has finished: an unbound account is refused.
 func newGatedSSOHarness(t *testing.T, opts ...func(*api.Server)) *ssoHarness {
+	parallel(t)
 	t.Helper()
 	return buildSSOHarness(t, false, "domestique-users", opts...)
 }

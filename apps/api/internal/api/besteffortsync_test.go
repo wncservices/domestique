@@ -37,11 +37,13 @@ type effortSyncResult struct {
 // who already has three earlier values for the three power windows a 400 s ride
 // can fill, so a new best is possible (a scope needs three prior values).
 func newEffortHarness(t *testing.T, acts []garmin.Activity, fits map[string][]byte) (*metricsSyncHarness, *bytes.Buffer) {
+	parallel(t)
 	t.Helper()
 	return newEffortHarnessAt(t, acts, fits, effortClock)
 }
 
 func newEffortHarnessAt(t *testing.T, acts []garmin.Activity, fits map[string][]byte, now time.Time) (*metricsSyncHarness, *bytes.Buffer) {
+	parallel(t)
 	t.Helper()
 	h := newMetricsSyncHarness(t, &fakeGarmin{activities: acts, fitByID: fits})
 	h.seedGarminSession("wilant")

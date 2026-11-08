@@ -23,6 +23,7 @@ type crewHarness struct {
 }
 
 func newCrewHarness(t *testing.T) *crewHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

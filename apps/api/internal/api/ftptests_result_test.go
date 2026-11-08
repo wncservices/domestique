@@ -45,12 +45,14 @@ type ftpResultHarness struct {
 // it at a constant watts (so every best-effort window equals watts). watts 0
 // makes a ride with no power data at all.
 func newFTPResultHarness(t *testing.T, protocol string, watts int, profile workout.RiderProfile) *ftpResultHarness {
+	parallel(t)
 	t.Helper()
 	return newFTPResultHarnessFor(t, protocol, watts, 1200, profile)
 }
 
 // newFTPResultHarnessFor is newFTPResultHarness with the ride's length chosen.
 func newFTPResultHarnessFor(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile) *ftpResultHarness {
+	parallel(t)
 	t.Helper()
 	return newFTPResultHarnessAt(t, protocol, watts, seconds, profile, ftpResultClock)
 }
@@ -65,6 +67,7 @@ var ftpResultClock = time.Date(2026, time.March, 12, 9, 0, 0, 0, time.UTC)
 // and the store both read now, and the test is ridden the day before. A zero
 // now means ftpResultClock.
 func newFTPResultHarnessAt(t *testing.T, protocol string, watts, seconds int, profile workout.RiderProfile, now time.Time) *ftpResultHarness {
+	parallel(t)
 	t.Helper()
 	if now.IsZero() {
 		now = ftpResultClock

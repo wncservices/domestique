@@ -46,12 +46,16 @@ type bindingHarness struct {
 }
 
 func newBindingHarness(t *testing.T, people ...auth0mgmt.Person) *bindingHarness {
+	parallel(t)
+	parallel(t)
 	return newBindingHarnessAs(t, "Boss", people...)
 }
 
 // newBindingHarnessAs is newBindingHarness with the admin signing in under the
 // given display name, which is what the rider is derived from.
 func newBindingHarnessAs(t *testing.T, adminName string, people ...auth0mgmt.Person) *bindingHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	fake := &fakePeople{people: people}
 	h := newGatedSSOHarness(t, func(s *api.Server) { s.People = fake })

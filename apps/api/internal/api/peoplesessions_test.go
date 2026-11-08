@@ -20,6 +20,8 @@ type sessionHarness struct {
 }
 
 func newSessionHarness(t *testing.T) *sessionHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	people := &fakePeople{}
 	var srv *api.Server

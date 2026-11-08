@@ -20,6 +20,7 @@ type onceHarness struct {
 }
 
 func newOnceHarness(t *testing.T) *onceHarness {
+	parallel(t)
 	t.Helper()
 	h := &onceHarness{autoScheduleHarness: newAutoScheduleHarness(t), now: utcNoon(2026, time.October, 7)} // a Wednesday
 	h.srv.Clock = func() time.Time { return h.now }
