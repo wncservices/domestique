@@ -1715,6 +1715,11 @@ Two things make the suite worth trusting, and both are easy to lose:
    in `ci.yml`: a new test of locks, replicas, limits or parallel requests
    should match it by name); every push to main and the nightly run use `-race`
    throughout. The Docker job runs on a PR only when the image's inputs change.
+   `internal/api` tests run in parallel: every `new*Harness` calls `parallel(t)`.
+   A test that touches process-wide state (`t.Setenv`, a `Set...ForTest` seam,
+   the global tracer provider, a before/after read of the metrics registry) calls
+   `serialOnly(t)` first, or it panics at `t.Setenv` or races silently on the
+   seam. The Garmin consumer env is set once in `TestMain`.
 4. **A frontend-only change skips the Go jobs.** `ci.yml`'s `changes` job skips
    the API tests, the API build and golangci-lint when every changed file is
    under `apps/web/`, `apps/e2e/`, `docs/` or is Markdown; skipped jobs report as
