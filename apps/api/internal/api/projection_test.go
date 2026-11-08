@@ -71,6 +71,7 @@ type projectionHarness struct{ *seasonHarness }
 // newProjectionHarness is a rider with FTP 250, a four-day week and a
 // snapshot from the day before the harness clock.
 func newProjectionHarness(t *testing.T) *projectionHarness {
+	parallel(t)
 	t.Helper()
 	h := &projectionHarness{newSeasonHarness(t)}
 	h.profile(t, []string{"tue", "thu", "sat", "sun"}, 250)

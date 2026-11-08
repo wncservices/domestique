@@ -44,6 +44,8 @@ type crewPlanHarness struct {
 }
 
 func newCrewPlanHarness(t *testing.T) *crewPlanHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	h := &crewPlanHarness{pushHarness: newPushHarness(t)}
 	h.srv.Clock = cpClock

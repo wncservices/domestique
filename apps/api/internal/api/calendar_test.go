@@ -94,6 +94,7 @@ func freshDSN(t *testing.T, engine string) string {
 }
 
 func newCalHarness(t *testing.T, mode auth.Mode, dsn string, publicURL string) *calHarness {
+	serialOnly(t) // swaps the global tracer provider
 	t.Helper()
 
 	db, err := source.OpenDB(freshDSN(t, dsn))

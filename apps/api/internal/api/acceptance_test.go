@@ -164,6 +164,7 @@ func seedCrews(t *testing.T, db *source.DB) *crew.Store {
 
 // newHarness starts a server over real HTTP against a fresh database.
 func newHarness(t *testing.T) *harness {
+	parallel(t)
 	t.Helper()
 
 	src, err := source.OpenDB(testdb.Path(t))
@@ -1543,6 +1544,7 @@ func TestDeletingACrewClearsItFromARoutesTargets(t *testing.T) {
 // of rides, waits for the background job, and then exports workouts, meeting
 // every refusal the trainer formats have.
 func TestAcceptanceImportRideHistoryThenExportWorkouts(t *testing.T) {
+	serialOnly(t) // TMPDIR is process-wide
 	h := newHarness(t)
 	t.Setenv("TMPDIR", t.TempDir())
 

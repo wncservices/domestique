@@ -18,6 +18,7 @@ import (
 // provider's summary, with a Warn that names ids only, and never as a
 // zero-length ride.
 func TestUnreadableTimestampsFallBackToTheSummaryWithAWarn(t *testing.T) {
+	serialOnly(t) // swaps a package-level analysis seam
 	start := time.Now().AddDate(0, 0, -1)
 	fake := &fakeGarmin{
 		activities: []garmin.Activity{

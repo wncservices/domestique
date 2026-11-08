@@ -18,7 +18,6 @@ import (
 	"github.com/wncservices/domestique/apps/api/internal/api"
 	"github.com/wncservices/domestique/apps/api/internal/auth"
 	"github.com/wncservices/domestique/apps/api/internal/config"
-	"github.com/wncservices/domestique/apps/api/internal/garmin"
 	"github.com/wncservices/domestique/apps/api/internal/garminmfa"
 	"github.com/wncservices/domestique/apps/api/internal/komoot"
 	"github.com/wncservices/domestique/apps/api/internal/providerlink"
@@ -140,12 +139,8 @@ func newConnectHarness(t *testing.T, withKey bool, opts ...func(*api.Server)) *c
 		t.Fatal(err)
 	}
 
-	// A consumer pair in the environment, so the default harness is a
-	// deployment where Garmin sign-in is available. Set explicitly rather than
-	// inherited: whether these tests pass must not depend on whether the
-	// machine running them has real Garmin credentials exported.
-	t.Setenv(garmin.EnvConsumerKey, "test-consumer-key")
-	t.Setenv(garmin.EnvConsumerSecret, "test-consumer-secret")
+	// The consumer pair is in the environment (see TestMain), so the default
+	// harness is a deployment where Garmin sign-in is available.
 
 	connector := &fakeConnector{}
 	garminConnector := &fakeGarmin{}

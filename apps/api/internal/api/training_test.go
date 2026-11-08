@@ -37,6 +37,7 @@ type trainingHarness struct {
 }
 
 func newTrainingHarness(t *testing.T) *trainingHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

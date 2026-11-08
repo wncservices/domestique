@@ -35,6 +35,7 @@ func TestSyncSurvivesAPanicWhileAnalysingARide(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			serialOnly(t) // swaps a package-level analysis seam
 			start := time.Now().AddDate(0, 0, -1)
 			fake := &fakeGarmin{
 				activities: []garmin.Activity{

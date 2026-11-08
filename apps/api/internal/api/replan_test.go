@@ -47,6 +47,7 @@ type replanOut struct {
 }
 
 func newReplanHarness(t *testing.T) *pushHarness {
+	parallel(t)
 	t.Helper()
 	h := newPushHarness(t)
 	h.srv.Clock = replanClock()

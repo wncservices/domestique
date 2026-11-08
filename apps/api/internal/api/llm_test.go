@@ -212,6 +212,7 @@ func TestNoLLMConfigTurnsEverythingOff(t *testing.T) {
 // TestLLMMetricCountsResults: one answer that passes and one that never does
 // (prose, retried, then invalid) each show up once under their result label.
 func TestLLMMetricCountsResults(t *testing.T) {
+	serialOnly(t) // reads the process-wide metrics registry before and after
 	h := newOnceHarness(t)
 	f := withLLM(t, h.srv, fixed(`{"text":"Base phase first."}`))
 	okBefore := llmCount(t, "explain_plan", "ok")
@@ -288,6 +289,7 @@ func TestNoPromptOrNoteInLogs(t *testing.T) {
 // A model call made while the rider waits gives up before Cloudflare's 100 s
 // limit, so the rider gets the app's own answer, not a 524 page.
 func TestARequestModelCallStopsAtTheRequestBudget(t *testing.T) {
+	serialOnly(t) // sets the package-level request budget
 	h := newOnceHarness(t)
 	t.Cleanup(api.SetLLMRequestBudgetForTest(100 * time.Millisecond))
 	// The model never answers until the test is over, so the only thing that

@@ -22,6 +22,7 @@ type moveNextFixture struct {
 }
 
 func newMoveNextFixture(t *testing.T, days ...string) *moveNextFixture {
+	parallel(t)
 	t.Helper()
 	h := newTrainingHarness(t)
 	h.pinClock()

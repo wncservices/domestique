@@ -43,6 +43,7 @@ type metricsSyncHarness struct {
 }
 
 func newMetricsSyncHarness(t *testing.T, garminConnector api.GarminConnector) *metricsSyncHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))
@@ -776,6 +777,7 @@ func (h *metricsSyncHarness) seedNamedGarminSession(rider string) {
 // end to end: the daily summary carries a null restingHeartRate, and the
 // value that reaches the rider's profile comes from the dedicated endpoint.
 func TestSyncFillsRestingHeartRateFromTheFallbackEndpoint(t *testing.T) {
+	serialOnly(t) // sets the Garmin consumer in the environment
 	live := liveGarminFake(t,
 		`{"restingHeartRate":null}`,
 		`{"allMetrics":{"metricsMap":{"WELLNESS_RESTING_HEART_RATE":[{"value":49}]}}}`,
@@ -807,6 +809,7 @@ func syncLogs(t *testing.T, live *api.LiveGarmin) string {
 }
 
 func TestSyncWarnsOnceWithKeyNamesWhenNoSourceHasRestingHeartRate(t *testing.T) {
+	serialOnly(t) // sets the Garmin consumer in the environment
 	live := liveGarminFake(t, `{"totalSteps":8123,"restingHeartRate":null}`, `{}`, `{}`)
 	logs := syncLogs(t, live)
 
@@ -825,6 +828,7 @@ func TestSyncWarnsOnceWithKeyNamesWhenNoSourceHasRestingHeartRate(t *testing.T) 
 }
 
 func TestSyncDoesNotWarnWhenRestingHeartRateWasFound(t *testing.T) {
+	serialOnly(t) // sets the Garmin consumer in the environment
 	live := liveGarminFake(t, `{"restingHeartRate":48}`, `{}`, `{}`)
 	if logs := syncLogs(t, live); strings.Contains(logs, "no reading from any source") {
 		t.Errorf("unexpected diagnostic warn:\n%s", logs)

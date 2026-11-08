@@ -27,6 +27,7 @@ type todayHarness struct {
 }
 
 func newTodayHarness(t *testing.T, now time.Time, autoPush bool) *todayHarness {
+	parallel(t)
 	t.Helper()
 	h := &todayHarness{pushHarness: newPushHarness(t), now: now}
 	h.srv.Clock = func() time.Time { return h.now }

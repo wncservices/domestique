@@ -57,6 +57,8 @@ func (h *seasonHarness) setLevels(t *testing.T) {
 // biasHarness is a rider with a four-level profile and FTP; route "" makes the
 // plain baseline.
 func newBiasHarness(t *testing.T, ftp float64) *seasonHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	h := newSeasonHarness(t)
 	h.profile(t, biasDays, ftp)

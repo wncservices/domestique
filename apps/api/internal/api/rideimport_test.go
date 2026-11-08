@@ -34,6 +34,7 @@ type importHarness struct {
 
 func newImportHarness(t *testing.T) *importHarness {
 	t.Helper()
+	serialOnly(t) // TMPDIR is process-wide
 	// The spool goes to the temp dir; pointing it at a dir of our own is how a
 	// test proves nothing is left behind.
 	tmp := t.TempDir()

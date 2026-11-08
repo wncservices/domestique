@@ -39,6 +39,7 @@ type tomorrowHarness struct {
 }
 
 func newTomorrowHarness(t *testing.T) *tomorrowHarness {
+	parallel(t)
 	t.Helper()
 	h := &tomorrowHarness{autoScheduleHarness: newAutoScheduleHarness(t)}
 	h.srv.Clock = func() time.Time { return time.Date(2026, 3, 19, 9, 0, 0, 0, time.UTC) }
