@@ -289,18 +289,28 @@ func TestNoPromptOrNoteInLogs(t *testing.T) {
 // limit, so the rider gets the app's own answer, not a 524 page.
 func TestARequestModelCallStopsAtTheRequestBudget(t *testing.T) {
 	h := newOnceHarness(t)
-	t.Cleanup(api.SetLLMRequestBudgetForTest(300 * time.Millisecond))
+	t.Cleanup(api.SetLLMRequestBudgetForTest(100 * time.Millisecond))
+	// The model never answers until the test is over, so the only thing that
+	// can end the call is the budget. The wait is bounded so a broken budget
+	// shows up as a slow request, not a hung test.
+	release := make(chan struct{})
 	withLLM(t, h.srv, func(string, []byte) string {
-		time.Sleep(2 * time.Second)
+		select {
+		case <-release:
+		case <-time.After(10 * time.Second):
+		}
 		return `{"text":"too late"}`
 	})
+	// Registered after withLLM's own cleanup, so it runs first and lets the
+	// fake model's handler return before its server is closed.
+	t.Cleanup(func() { close(release) })
 
 	start := time.Now()
 	status := h.explainStatus(t)
 	if status != http.StatusBadGateway {
 		t.Errorf("explain past the budget: status %d, want 502", status)
 	}
-	if took := time.Since(start); took > 1500*time.Millisecond {
-		t.Errorf("explain took %v, want it to stop at the 300ms budget", took)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("explain took %v, want it to stop at the 100ms budget", took)
 	}
 }

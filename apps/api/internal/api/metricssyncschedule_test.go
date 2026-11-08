@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,14 +146,31 @@ func TestTwoReplicasSyncOncePerSlot(t *testing.T) {
 	h := newMetricsSyncHarness(t, &fakeGarmin{})
 	h.seedWahooSession("other")
 	loc, _ := time.LoadLocation("Europe/Brussels")
-	start := time.Date(2026, 6, 10, 20, 59, 58, 500_000_000, loc)
-	realStart := time.Now()
-	clock := func(behind time.Duration) func() time.Time {
-		return func() time.Time { return start.Add(time.Since(realStart) - behind) }
+	slot := time.Date(2026, 6, 10, 21, 0, 0, 0, loc)
+
+	// Each replica has its own clock and its own timer that the test fires by
+	// hand: no real time passes. Replica B's clock runs half a second behind
+	// A's, as in a real deployment.
+	type replica struct {
+		srv    *api.Server
+		now    atomic.Pointer[time.Time]
+		timers chan chan time.Time // one per wait the loop starts
 	}
-	a, b := h.srv, h.newReplica()
-	a.Config, b.Config = &config.Config{}, &config.Config{}
-	a.Clock, b.Clock = clock(0), clock(500*time.Millisecond)
+	newR := func(srv *api.Server, at time.Time) *replica {
+		r := &replica{srv: srv, timers: make(chan chan time.Time, 4)}
+		r.now.Store(&at)
+		srv.Config = &config.Config{}
+		srv.Clock = func() time.Time { return *r.now.Load() }
+		srv.SyncAfter = func(time.Duration) <-chan time.Time {
+			c := make(chan time.Time, 1)
+			r.timers <- c
+			return c
+		}
+		return r
+	}
+	start := slot.Add(-1500 * time.Millisecond)
+	a := newR(h.srv, start)
+	b := newR(h.newReplica(), start.Add(-500*time.Millisecond))
 
 	// Already synced this morning: nothing to catch up on at start.
 	if err := h.settings.SetFlagAt("metrics_sync_last_run", true, "scheduler",
@@ -162,10 +180,31 @@ func TestTwoReplicasSyncOncePerSlot(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{}, 2)
-	for _, srv := range []*api.Server{a, b} {
-		go func() { srv.RunMetricsSyncLoop(ctx); done <- struct{}{} }()
+	for _, r := range []*replica{a, b} {
+		go func() { r.srv.RunMetricsSyncLoop(ctx); done <- struct{}{} }()
 	}
-	time.Sleep(4500 * time.Millisecond) // both timers (21:00 + 1s slack) have fired
+	wait := func(r *replica) chan time.Time {
+		select {
+		case c := <-r.timers:
+			return c
+		case <-time.After(10 * time.Second):
+			t.Fatal("a replica's loop never started waiting for the slot")
+			return nil
+		}
+	}
+	timerA, timerB := wait(a), wait(b)
+
+	// Both timers fire (the slot plus a second of slack), A first. A syncs and
+	// records the slot; only then does B's timer fire, so B's re-check is what
+	// stops it.
+	fireA := slot.Add(time.Second)
+	a.now.Store(&fireA)
+	timerA <- fireA
+	wait(a) // A is back to waiting: its pass is over
+	fireB := fireA.Add(-500 * time.Millisecond)
+	b.now.Store(&fireB)
+	timerB <- fireB
+	wait(b)
 	cancel()
 	<-done
 	<-done

@@ -173,12 +173,20 @@ func (s *Server) RunMetricsSyncLoop(ctx context.Context) {
 		}
 		// A second of slack so a timer that wakes a hair early does not
 		// compute the same slot again and sync twice.
-		timer := time.NewTimer(next.Sub(now) + time.Second)
+		wait := next.Sub(now) + time.Second
+		var fire <-chan time.Time
+		stop := func() {}
+		if s.SyncAfter != nil {
+			fire = s.SyncAfter(wait)
+		} else {
+			timer := time.NewTimer(wait)
+			fire, stop = timer.C, func() { timer.Stop() }
+		}
 		select {
 		case <-ctx.Done():
-			timer.Stop()
+			stop()
 			return
-		case <-timer.C:
+		case <-fire:
 			// Not an unconditional sync: every replica's timer fires at this
 			// slot, and only the one that finds it still unrecorded, under
 			// the lock, runs it.
