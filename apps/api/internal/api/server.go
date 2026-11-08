@@ -109,6 +109,12 @@ type Server struct {
 	// depend on which day of the week it is (see AdaptWorkouts). Tests only.
 	Clock func() time.Time
 
+	// SyncAfter, when set, replaces the real timer RunMetricsSyncLoop waits on
+	// between slots: it returns a channel that fires after d. Tests only, so a
+	// test steps the loop through a slot with a fake Clock instead of waiting
+	// for one.
+	SyncAfter func(d time.Duration) <-chan time.Time
+
 	// Lifecycle is the server's own context, cancelled on shutdown. Work that
 	// must outlive the request that started it (planning a season after a
 	// goal is saved) runs on a context derived from it, never from the
