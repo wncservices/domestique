@@ -1923,6 +1923,12 @@ is a name, not a figure.
   - `App.vue` must stay wrapped in `<UApp>` — toasts, tooltips and modals need it.
   - `vue-router` routes the app's pages (`src/router.ts` lists them; `src/pages/` holds
     them) and is also what Nuxt UI's link components import. Pages are lazy-loaded; keep it that way.
+  - **A deploy removes the old build's page chunks**, and a tab opened before it (phones keep
+    one for days) still asks for them by name. A missing `/assets/...` is therefore a 404 with
+    `no-store` (`spaHandler`), never the SPA shell or the landing redirect, and the router's
+    `onError` does one full load of the page that was tapped (`utils/staleChunk.ts`, at most once
+    per 10 s). Before this the import failed with a MIME error and the tap did nothing: riders
+    reported the app hanging.
 - The frontend has `maplibre-gl`, used by the interactive maps (`RouteMap.vue`, `RouteBuilderMap.vue`)
   and only ever loaded via dynamic `import()` (top-level imports are `import type` only) — never a top-level import, so it stays out of the `main`
   bundle for anyone who never opens a map, and out of `landing`'s bundle entirely. `TrackPreview.vue`

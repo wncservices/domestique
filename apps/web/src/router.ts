@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteLocationGeneric, type RouteRecordRaw } from 'vue-router'
 import { redirectFor } from './routeRedirects.ts'
+import { browserReloadDeps, isChunkLoadError, reloadForNewBuild } from './utils/staleChunk.ts'
 
 export { redirectFor }
 
@@ -48,14 +49,25 @@ export function buildRoutes(load: PageLoader): RouteRecordRaw[] {
   ]
 }
 
-export function createAppRouter(load: PageLoader, history = createWebHistory()) {
+// A page whose chunk a deploy removed fails to load and vue-router stays
+// put, so the tap seemed to do nothing. A full load of that page fetches the
+// new build instead (utils/staleChunk.ts). Tests pass their own reload.
+const reloadPage = (url: string) => {
+  reloadForNewBuild(url, browserReloadDeps())
+}
+
+export function createAppRouter(load: PageLoader, history = createWebHistory(), reload = reloadPage) {
   // Pages that own a hash (Settings sections, Fitness #profile) scroll
   // themselves, so a hash navigation is left alone.
-  return createRouter({
+  const router = createRouter({
     history,
     routes: buildRoutes(load),
     // A new page opens at the top; a hash or a query change on the same page
     // (the Fitness/Season switch) leaves scrolling to the page itself.
     scrollBehavior: (to, from, saved) => saved ?? (to.hash || to.path === from.path ? false : { top: 0 }),
   })
+  router.onError((err, to) => {
+    if (isChunkLoadError(err)) reload(to.fullPath)
+  })
+  return router
 }
