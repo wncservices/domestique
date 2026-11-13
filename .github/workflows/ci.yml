@@ -249,6 +249,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: e2e image and lockfile agree on Playwright
+        run: scripts/check-playwright-image.sh
       - run: npm run typecheck
       - name: Unit tests
         run: npm --workspace @domestique/web test

@@ -1,31 +1,53 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "schedule:weekly"],
+  "extends": [
+    "config:recommended",
+    "schedule:weekly"
+  ],
   "dependencyDashboard": true,
   "packageRules": [
     {
-      "matchManagers": ["gomod"],
+      "matchManagers": [
+        "gomod"
+      ],
       "groupName": "go dependencies"
     },
     {
-      "matchManagers": ["npm"],
+      "matchManagers": [
+        "npm"
+      ],
       "groupName": "web dependencies"
     },
     {
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "github actions"
     },
     {
-      "matchDepNames": ["node"],
+      "matchDepNames": [
+        "node"
+      ],
       "groupName": "Node toolchain (Dockerfile, compose.yaml, .nvmrc, .tool-versions)"
     },
     {
-      "matchDepNames": ["golang"],
+      "matchDepNames": [
+        "golang"
+      ],
       "groupName": "Go toolchain (Dockerfile, compose.yaml, .tool-versions)"
     },
     {
-      "matchDepNames": ["golangci/golangci-lint"],
+      "matchDepNames": [
+        "golangci/golangci-lint"
+      ],
       "groupName": "golangci-lint (.tool-versions, ci.yml)"
+    },
+    {
+      "matchDepNames": [
+        "@playwright/test",
+        "mcr.microsoft.com/playwright"
+      ],
+      "groupName": "Playwright (apps/e2e package and image)"
     }
   ],
   "dockerfile": {
@@ -37,7 +59,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["^Dockerfile$"],
+      "fileMatch": [
+        "^Dockerfile$"
+      ],
       "matchStrings": [
         "FROM --platform=\\$BUILDPLATFORM node:(?<currentValue>[\\d.]+)-alpine AS web"
       ],
@@ -47,7 +71,9 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["^Dockerfile$"],
+      "fileMatch": [
+        "^Dockerfile$"
+      ],
       "matchStrings": [
         "FROM --platform=\\$BUILDPLATFORM golang:(?<currentValue>[\\d.]+)-alpine AS api"
       ],
@@ -57,59 +83,100 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["^compose\\.yaml$"],
-      "matchStrings": ["image: node:(?<currentValue>[\\d.]+)-alpine"],
+      "fileMatch": [
+        "^compose\\.yaml$"
+      ],
+      "matchStrings": [
+        "image: node:(?<currentValue>[\\d.]+)-alpine"
+      ],
       "depNameTemplate": "node",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     },
     {
       "customType": "regex",
-      "fileMatch": ["^compose\\.yaml$"],
-      "matchStrings": ["image: golang:(?<currentValue>[\\d.]+)-alpine"],
+      "fileMatch": [
+        "^compose\\.yaml$"
+      ],
+      "matchStrings": [
+        "image: golang:(?<currentValue>[\\d.]+)-alpine"
+      ],
       "depNameTemplate": "golang",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     },
     {
       "customType": "regex",
-      "fileMatch": ["^\\.nvmrc$"],
-      "matchStrings": ["(?<currentValue>[\\d.]+)"],
+      "fileMatch": [
+        "^\\.nvmrc$"
+      ],
+      "matchStrings": [
+        "(?<currentValue>[\\d.]+)"
+      ],
       "depNameTemplate": "node",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     },
     {
       "customType": "regex",
-      "fileMatch": ["^\\.tool-versions$"],
-      "matchStrings": ["nodejs (?<currentValue>[\\d.]+)"],
+      "fileMatch": [
+        "^\\.tool-versions$"
+      ],
+      "matchStrings": [
+        "nodejs (?<currentValue>[\\d.]+)"
+      ],
       "depNameTemplate": "node",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     },
     {
       "customType": "regex",
-      "fileMatch": ["^\\.tool-versions$"],
-      "matchStrings": ["golang (?<currentValue>[\\d.]+)"],
+      "fileMatch": [
+        "^\\.tool-versions$"
+      ],
+      "matchStrings": [
+        "golang (?<currentValue>[\\d.]+)"
+      ],
       "depNameTemplate": "golang",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     },
     {
       "customType": "regex",
-      "fileMatch": ["^\\.tool-versions$"],
-      "matchStrings": ["golangci-lint (?<currentValue>[\\d.]+)"],
+      "fileMatch": [
+        "^\\.tool-versions$"
+      ],
+      "matchStrings": [
+        "golangci-lint (?<currentValue>[\\d.]+)"
+      ],
       "depNameTemplate": "golangci/golangci-lint",
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver"
     },
     {
       "customType": "regex",
-      "fileMatch": ["^\\.github/workflows/ci\\.yml$"],
-      "matchStrings": ["GOLANGCI_LINT_VERSION: v(?<currentValue>[\\d.]+)"],
+      "fileMatch": [
+        "^\\.github/workflows/ci\\.yml$"
+      ],
+      "matchStrings": [
+        "GOLANGCI_LINT_VERSION: v(?<currentValue>[\\d.]+)"
+      ],
       "depNameTemplate": "golangci/golangci-lint",
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "^apps/e2e/Dockerfile$"
+      ],
+      "matchStrings": [
+        "FROM mcr\\.microsoft\\.com/playwright:v(?<currentValue>[\\d.]+)-noble"
+      ],
+      "depNameTemplate": "mcr.microsoft.com/playwright",
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker",
+      "extractVersionTemplate": "^v(?<version>[\\d.]+)-noble$"
     }
   ]
 }
