@@ -44,6 +44,7 @@ func (h *ledgerHarness) at(day, hour, min int) {
 }
 
 func newLedgerHarness(t *testing.T, ftp float64) *ledgerHarness {
+	parallel(t)
 	t.Helper()
 	// The week is built on Monday afternoon, after the morning slot, so no
 	// repayment has happened yet; backdating makes every session look
@@ -54,6 +55,7 @@ func newLedgerHarness(t *testing.T, ftp float64) *ledgerHarness {
 // newLedgerHarnessBuiltOn saves the goal, and so builds the plan, at 13:00 on
 // the given October day (the 5th is the week's Monday).
 func newLedgerHarnessBuiltOn(t *testing.T, ftp float64, day int) *ledgerHarness {
+	parallel(t)
 	t.Helper()
 	h := &ledgerHarness{seasonHarness: newSeasonHarness(t)}
 	h.profile(t, ledgerDays, ftp)
@@ -847,6 +849,7 @@ type ledgerPushHarness struct {
 }
 
 func newLedgerPushHarness(t *testing.T) *ledgerPushHarness {
+	parallel(t)
 	t.Helper()
 	ph := newPushHarness(t)
 	asched := &autoScheduleHarness{t: t, client: ph.client, base: ph.base, store: ph.training, settings: ph.settings, srv: ph.srv, conn: ph.db.Conn(), now: utcNoon(2026, time.October, 5)}

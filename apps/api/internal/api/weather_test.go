@@ -73,6 +73,7 @@ func (s *syncBuffer) String() string {
 }
 
 func newWeatherHarness(t *testing.T, mutate ...func(*api.Server)) *weatherHarness {
+	parallel(t)
 	t.Helper()
 	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 // newBareServer is a server with nothing wired but what these tests are about:
 // the auth mode and a built frontend.
 func newBareServer(t *testing.T, mode auth.Mode) *httptest.Server {
+	parallel(t)
 	t.Helper()
 	a, err := auth.New(auth.Config{Mode: mode})
 	if err != nil {

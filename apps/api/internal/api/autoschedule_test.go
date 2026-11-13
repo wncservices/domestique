@@ -57,6 +57,7 @@ func followServerClock(srv *api.Server, store *workout.DB) {
 }
 
 func newAutoScheduleHarness(t *testing.T) *autoScheduleHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

@@ -82,6 +82,8 @@ func TestTheCueOnTheHeadUnitNamesTheBigClimbC2(t *testing.T) {
 }
 
 func newWahooPacingHarness(t *testing.T) (*wahooHarness, *pacingpush.Store, workout.Goal, string) {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	h := newWahooHarness(t, true)
 	h.connect("wilant", "cyclists")

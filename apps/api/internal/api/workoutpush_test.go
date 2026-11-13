@@ -19,6 +19,8 @@ type pushHarness struct {
 }
 
 func newPushHarness(t *testing.T) *pushHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	h := newConnectHarness(t, true)
 	training, err := workout.UseDB(h.db.Conn(), h.db.DSN())

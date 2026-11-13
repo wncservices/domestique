@@ -170,6 +170,7 @@ type wahooHarness struct {
 // upstream. withKey controls whether an encryption key is set — the same
 // "reads work, writes refuse" case every provider connection has to handle.
 func newWahooHarness(t *testing.T, withKey bool) *wahooHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

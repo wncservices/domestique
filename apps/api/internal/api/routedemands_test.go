@@ -65,6 +65,7 @@ type demandsOut struct {
 }
 
 func newDemandsHarness(t *testing.T) *routeHarness {
+	parallel(t)
 	t.Helper()
 	h := newRouteHarness(t)
 	h.srv.Clock = func() time.Time { return demandsClock }

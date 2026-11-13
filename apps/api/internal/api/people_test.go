@@ -162,6 +162,8 @@ type peopleHarness struct {
 // purgeRiderData nil-checks every one of them, so a test that only cares
 // about the Auth0 side of block/delete does not need to set any of these up.
 func newPeopleHarness(t *testing.T, people *fakePeople, opts ...func(*api.Server)) *peopleHarness {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

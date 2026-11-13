@@ -1,13 +1,13 @@
 module github.com/wncservices/domestique/apps/api
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/XSAM/otelsql v0.44.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/fogleman/gg v1.3.0
-	github.com/jackc/pgx/v5 v5.12.0
-	github.com/muktihari/fit v0.28.5
+	github.com/jackc/pgx/v5 v5.13.0
+	github.com/muktihari/fit v0.28.6
 	github.com/paulmach/orb v0.14.0
 	github.com/prometheus/client_golang v1.25.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
@@ -22,7 +22,7 @@ require (
 	k8s.io/api v0.37.2
 	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.37.2
-	modernc.org/sqlite v1.61.1
+	modernc.org/sqlite v1.62.0
 )
 
 require (
@@ -97,7 +97,7 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
-	modernc.org/libc v1.79.0 // indirect
+	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

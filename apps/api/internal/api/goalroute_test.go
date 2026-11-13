@@ -24,6 +24,7 @@ type routeHarness struct {
 }
 
 func newRouteHarness(t *testing.T) *routeHarness {
+	parallel(t)
 	t.Helper()
 	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {

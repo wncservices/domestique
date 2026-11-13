@@ -128,6 +128,7 @@ func (s stubRoutingClient) RoundTrip(_ context.Context, _ routing.LatLng, reques
 var suggestFixtureRoute = []gpx.Point{{Lat: 50.85, Lon: 4.35}, {Lat: 51.03, Lon: 4.35}}
 
 func newRouteBuilderHarness(t *testing.T, rt routing.Client) (client *http.Client, base string) {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))
@@ -1203,6 +1204,7 @@ func (f fakeGeocoder) Search(context.Context, string) ([]geocoding.Result, error
 }
 
 func newGeocodeHarness(t *testing.T, geocoder geocoding.Client) (client *http.Client, base string) {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

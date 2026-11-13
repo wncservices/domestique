@@ -49,6 +49,7 @@ type wrHarness struct {
 }
 
 func newWRHarness(t *testing.T, mutate ...func(*wrHarness, *api.Server)) *wrHarness {
+	parallel(t)
 	t.Helper()
 	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {

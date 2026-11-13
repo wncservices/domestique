@@ -54,6 +54,7 @@ type authHarness struct {
 }
 
 func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness {
+	parallel(t)
 	t.Helper()
 	return newAuthHarnessWithTargets(t, komootClient, func(model.Account) (targets.Target, error) {
 		return stubTarget{}, nil
@@ -64,6 +65,7 @@ func newAuthHarness(t *testing.T, komootClient api.KomootImporter) *authHarness 
 // chosen by the test, for the one case that needs to see which account a
 // push reached (TestAPushNeverReachesAFellowRidersPrivateRoute).
 func newAuthHarnessWithTargets(t *testing.T, komootClient api.KomootImporter, factory func(model.Account) (targets.Target, error)) *authHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

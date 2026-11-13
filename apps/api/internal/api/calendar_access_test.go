@@ -20,6 +20,7 @@ type accessHarness struct {
 }
 
 func newAccessHarness(t *testing.T, dsn string) *accessHarness {
+	serialOnly(t) // built on newCalHarness, which swaps the global tracer provider
 	t.Helper()
 	h := newCalHarness(t, auth.ModeProxy, dsn, calendarPublicURL)
 	fake := &fakePeople{people: []auth0mgmt.Person{

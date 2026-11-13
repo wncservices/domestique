@@ -32,6 +32,8 @@ type bootstrapEnv struct {
 }
 
 func newBootstrapEnv(t *testing.T, mode auth.Mode, people ...auth0mgmt.Person) *bootstrapEnv {
+	parallel(t)
+	parallel(t)
 	t.Helper()
 	db, err := source.OpenDB(testdb.Path(t))
 	if err != nil {

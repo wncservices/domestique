@@ -24,6 +24,7 @@ type seasonHarness struct {
 }
 
 func newSeasonHarness(t *testing.T) *seasonHarness {
+	parallel(t)
 	t.Helper()
 	h := &seasonHarness{autoScheduleHarness: newAutoScheduleHarness(t), now: utcNoon(2026, time.October, 7)}
 	h.srv.Clock = func() time.Time { return h.now }

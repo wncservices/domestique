@@ -44,6 +44,7 @@ type shareHarness struct {
 }
 
 func newShareHarness(t *testing.T) *shareHarness {
+	parallel(t)
 	t.Helper()
 
 	db, err := source.OpenDB(testdb.Path(t))

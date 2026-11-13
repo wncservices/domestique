@@ -24,6 +24,7 @@ type courseHarness struct {
 }
 
 func newCourseHarness(t *testing.T) *courseHarness {
+	parallel(t)
 	t.Helper()
 	h := &courseHarness{todayHarness: newTodayHarness(t, utcNoon(2026, time.October, 7), true), ledger: &fakeLedger{}}
 	h.srv.TargetFactory = func(a model.Account) (targets.Target, error) {

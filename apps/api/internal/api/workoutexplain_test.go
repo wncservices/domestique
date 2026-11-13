@@ -244,6 +244,7 @@ func TestAShutdownDuringTheBackgroundWriteReleasesTheClaim(t *testing.T) {
 // child of the request, carries llm.job, and ends after the response. Without
 // this the model call showed up as an unrelated root trace with no job tag.
 func TestTheBackgroundWriteIsInTheRequestsTrace(t *testing.T) {
+	serialOnly(t) // swaps the global tracer provider
 	rec := tracetest.NewSpanRecorder()
 	prev := otel.GetTracerProvider()
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
