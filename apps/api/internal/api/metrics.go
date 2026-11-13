@@ -41,9 +41,17 @@ var (
 	// series forever — unbounded cardinality that grows with the library,
 	// not with the code. method+status stays bounded by the handful of
 	// verbs and status codes this API actually returns.
+	//
+	// Explicit boundaries in seconds: the OTel SDK's default set (0, 5, 10,
+	// 25 ... 10000) is meant for milliseconds, so every request landed in
+	// le="5" and any quantile read about 4.95 s. The top buckets cover the
+	// LLM calls, which may run up to 120 s.
 	httpRequestDuration = must(meter.Float64Histogram(
 		"domestique_http_request_duration_seconds",
 		metric.WithDescription("HTTP request duration by method and status."),
+		metric.WithExplicitBucketBoundaries(
+			0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120,
+		),
 	))
 
 	// format is bounded ("json" or "image"), not a slug — same
@@ -53,9 +61,9 @@ var (
 	// Tempo traces one at a time) shows up in a dashboard instead.
 	//
 	// Explicit byte-sized bucket boundaries: the OTel SDK's default bucket
-	// set is tuned for second-denominated durations (largest boundary 10),
-	// so every sample here — bytes, five to seven digits — would otherwise
-	// land in the same +Inf overflow bucket, making a histogram in name
+	// set is tuned for millisecond durations (largest boundary 10000), so
+	// every sample here — bytes, five to seven digits — would otherwise
+	// land in the same few top buckets, making a histogram in name
 	// only (sum/count still work, but no meaningful p50/p95).
 	trackPreviewResponseBytes = must(meter.Float64Histogram(
 		"domestique_track_preview_response_bytes",
