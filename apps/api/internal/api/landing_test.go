@@ -416,3 +416,47 @@ func TestPrivacyHasACleanAddressOnTheApex(t *testing.T) {
 		t.Errorf("without privacy.html: %q, want the landing page", rec.Body.String())
 	}
 }
+
+// A tab opened before a deploy still asks for the old build's page chunks.
+// Answering those with the SPA shell (or, signed out, the landing redirect)
+// gave the browser HTML where it wanted a script: the dynamic import failed
+// with a MIME error and the tapped page never opened, which riders saw as the
+// app hanging. A missing asset must be a plain 404 the frontend can recognise.
+func TestAMissingAssetIsANotFoundOnEveryHost(t *testing.T) {
+	web := fstest.MapFS{
+		"index.html":         {Data: []byte("<html>APP</html>")},
+		"landing.html":       {Data: []byte("<html>LANDING</html>")},
+		"assets/main-new.js": {Data: []byte("JS")},
+	}
+
+	for _, tc := range []struct {
+		name, host string
+		oidc       bool
+	}{
+		{"the app host", "app.domestique.dev", false},
+		{"the app host, signed out under oidc", "app.domestique.dev", true},
+		{"the apex", "domestique.dev", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &Server{WebFS: web, LandingHost: "domestique.dev"}
+			if tc.oidc {
+				srv.Auth = oidcAuthenticator(t)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/assets/FitnessPage-oldhash.js", nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			srv.spaHandler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status %d, want 404", rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "<html>") {
+				t.Errorf("body %q, want no HTML shell", rec.Body.String())
+			}
+			if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+				t.Errorf("Cache-Control %q, want no-store so a 404 is never cached under a hashed name", cc)
+			}
+		})
+	}
+}

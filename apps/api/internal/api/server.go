@@ -3864,6 +3864,19 @@ func (s *Server) spaHandler() http.Handler {
 		// http.FileServer sends no Cache-Control at all, and a repeat
 		// visit re-fetches (or at best conditionally re-validates) every
 		// script and stylesheet instead of reading them off disk.
+		//
+		// A missing asset is a 404, never the SPA shell or the landing
+		// redirect: a tab opened before a deploy asks for the old build's
+		// chunks, and HTML in place of a script failed the import with a MIME
+		// error that left the tapped page unopened, which riders saw as the
+		// app hanging. The router reloads on the failed import (router.ts).
+		// no-store, so nothing caches the 404 under a name a later build
+		// could reuse.
+		if missing && strings.HasPrefix(clean, "assets/") {
+			w.Header().Set("Cache-Control", "no-store")
+			http.NotFound(w, r)
+			return
+		}
 		if !missing && strings.HasPrefix(clean, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
