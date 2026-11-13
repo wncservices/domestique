@@ -1,6 +1,6 @@
 module github.com/wncservices/domestique/apps/api
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/XSAM/otelsql v0.44.0
