@@ -3,9 +3,10 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@nuxt/ui/composables'
 import AppShell from '@/components/shell/AppShell.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useLibrary } from '@/composables/useLibrary'
 
-const { error, refresh } = useLibrary()
+const { error, refresh, me } = useLibrary()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -45,6 +46,15 @@ watch(
 // for that one route rather than trying to make it degrade gracefully.
 const isSharedRoutePage = computed(() => route.path.startsWith('/shared/'))
 
+// Signed out under mode: oidc, no page is worth rendering: every one of them
+// is a rider's own data, and would show as an empty library ("0 routes")
+// rather than as what it is. With DOMESTIQUE_LANDING_HOST set the server
+// sends such a visitor to the landing page before this shell loads; without
+// it (a self-hoster, the dev stage) the shell is what they reach, so it
+// offers sign-in and nothing else. Same return_to as the header's button.
+const signedOut = computed(() => me.value?.authMode === 'oidc' && !me.value.authenticated)
+const signInHref = computed(() => `/sso/login?return_to=${encodeURIComponent(route.fullPath)}`)
+
 onMounted(() => {
   if (!isSharedRoutePage.value) refresh()
 })
@@ -80,7 +90,19 @@ onMounted(() => {
              component-local fetch, so keeping the component alive doesn't
              risk showing a stale list — a route added on another page still
              appears the moment that shared state updates. -->
-        <RouterView v-slot="{ Component }">
+        <EmptyState
+          v-if="!isSharedRoutePage && signedOut"
+          icon="i-lucide-log-in"
+          title="Sign in to Domestique"
+          display
+          text="The route library, plans and training are only shown to signed-in riders."
+        >
+          <template #actions>
+            <UButton :to="signInHref" external icon="i-lucide-log-in">Sign in</UButton>
+          </template>
+        </EmptyState>
+
+        <RouterView v-else v-slot="{ Component }">
           <KeepAlive include="RoutesPage">
             <component :is="Component" />
           </KeepAlive>

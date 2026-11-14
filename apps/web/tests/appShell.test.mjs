@@ -18,3 +18,12 @@ test('App.vue keeps RoutesPage alive', () => {
 test('App.vue links to the source (AGPL-3.0 section 13)', () => {
   assert.ok(app.includes('github.com/wncservices/domestique'))
 })
+
+// Signed out under mode: oidc, the shell offers sign-in instead of a page:
+// otherwise /routes rendered an empty library ("0 routes") to anyone
+// (apps/e2e login.spec.ts "a signed-out visitor is offered sign-in, and
+// nothing else", on a host without DOMESTIQUE_LANDING_HOST).
+test('App.vue shows only sign-in when signed out', () => {
+  assert.ok(app.includes('<RouterView v-else'))
+  assert.ok(app.includes("authMode === 'oidc' && !me.value.authenticated"))
+})
