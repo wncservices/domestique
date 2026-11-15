@@ -105,7 +105,11 @@ profile this is the same number.
   against each day's hours: a slot whose share exceeds its day is set to the day's hours and the
   excess is shared among the slots still under their cap, repeated until nothing exceeds. If every
   slot is full the remainder is dropped (the week target cannot exceed the sum, so this only
-  happens after fixed sessions or rungs reshaped it).
+  happens after fixed sessions or rungs reshaped it, **and whenever a week sized at the weekly cap
+  has structured days that do not fill their hours**). Decided with the user during
+  implementation: the week is then smaller than its target, and that is accepted (hours mean hours).
+  Example: an old profile of 3 h on four days had a 12 h build week with 5 h rides; capped, it
+  places about 7.8 h. Spare hours on a structured day are not filled with easy riding.
 - **Mini-taper days** get `min(week.MiniTaperDayHours, HoursOn(day))`.
 - `slotWeight` and `longWeight` are unchanged.
 - Fixed sessions (crew rides) are not capped: the crew chose the ride. `applyFixed` is unchanged;
