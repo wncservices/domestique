@@ -28,6 +28,7 @@ package autoprofile
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -253,6 +254,11 @@ func Apply(p workout.RiderProfile, s Suggestion) (workout.RiderProfile, []string
 		p.HoursPerAvailableDay = s.HoursPerAvailableDay
 		p.MarkEstimated(workout.FieldHoursPerAvailableDay)
 		changed = append(changed, workout.FieldHoursPerAvailableDay)
+	}
+	if slices.Contains(changed, workout.FieldAvailableDays) || slices.Contains(changed, workout.FieldHoursPerAvailableDay) {
+		// The per-day map is what everything reads once it is set, so an
+		// inferred pattern has to reach it too.
+		p.HoursByDay = workout.UniformHours(p.AvailableDays, p.HoursPerAvailableDay)
 	}
 	if s.ExperienceLevel != "" && fillable(p.ExperienceLevel == "", p.IsEstimated(workout.FieldExperienceLevel)) &&
 		s.ExperienceLevel != p.ExperienceLevel {

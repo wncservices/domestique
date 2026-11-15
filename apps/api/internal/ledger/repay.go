@@ -3,6 +3,7 @@ package ledger
 import (
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/wncservices/domestique/apps/api/internal/indoor"
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -169,7 +170,7 @@ func lengthen(in RepayInput, w workout.Workout, longestID string) (Action, bool)
 	if v := cur + LengthenMaxSeconds; v < next {
 		next = v
 	}
-	if cap := in.Profile.HoursPerAvailableDay * 3600; cap > 0 && cap < next {
+	if cap := dayCapSeconds(in.Profile, w.Date); cap > 0 && cap < next {
 		next = cap
 	}
 	if next <= cur {
@@ -223,7 +224,7 @@ func PlanGreenPush(in RepayInput, today string) *Action {
 		// A rung one step up is a little longer; the rider's hours for a day bound
 		// it, and with none stated the ladder's own sizes do.
 		maxSeconds := math.Inf(1)
-		if cap := in.Profile.HoursPerAvailableDay * 3600; cap > 0 {
+		if cap := dayCapSeconds(in.Profile, w.Date); cap > 0 {
 			maxSeconds = math.Max(cap, workout.PlannedSeconds(old))
 		}
 		var rung workoutlib.Rung
@@ -309,4 +310,17 @@ func planUpgrade(in RepayInput, debt float64, longestID string, touched map[stri
 		}, true
 	}
 	return Action{}, false
+}
+
+// dayCapSeconds is the most a session may run on date: that weekday's hours,
+// or the rider's longest day when the weekday has none (a session moved onto
+// a day the rider did not offer is not squeezed below what they do ride). 0
+// means no cap.
+func dayCapSeconds(p workout.RiderProfile, date string) float64 {
+	if d, err := time.Parse("2006-01-02", date); err == nil {
+		if h := p.HoursOn(strings.ToLower(d.Weekday().String()[:3])); h > 0 {
+			return h * 3600
+		}
+	}
+	return p.MaxDayHours() * 3600
 }

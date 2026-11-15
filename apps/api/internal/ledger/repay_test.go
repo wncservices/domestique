@@ -334,3 +334,47 @@ func TestGreenPushNothingWithoutDebtOrInReducedWeeks(t *testing.T) {
 		t.Error("a session already raised was raised again")
 	}
 }
+
+func perDayProfile(hours map[string]float64) workout.RiderProfile {
+	p := testProfile
+	p.HoursByDay = hours
+	p.NormaliseAvailability()
+	return p
+}
+
+func TestLengthenStopsAtTheSessionsOwnDay(t *testing.T) {
+	// 2026-10-13 is a Tuesday, 2026-10-18 a Sunday.
+	in := input(enduranceWorkout("tue", "2026-10-13", 3000), enduranceWorkout("sun", "2026-10-18", 3000))
+	in.From, in.To = "2026-10-13", "2026-10-18"
+	in.Debt = 1000
+	in.Profile = perDayProfile(map[string]float64{"tue": 1, "sun": 3})
+	got := byID(PlanRepayment(in))
+	if a, ok := got["tue"]; ok {
+		if s := workout.PlannedSeconds(a.Steps); s > 3600 {
+			t.Fatalf("tuesday = %v s, over its day's 3600", s)
+		}
+	}
+	a, ok := got["sun"]
+	if !ok {
+		t.Fatal("sunday was not lengthened")
+	}
+	if s := workout.PlannedSeconds(a.Steps); s != 3000*1.3 {
+		t.Fatalf("sunday = %v s, want the 30%% rule (3900)", s)
+	}
+}
+
+func TestLengthenOnADayWithoutHoursUsesTheLongestDay(t *testing.T) {
+	// 2026-10-14 is a Wednesday, which has no hours of its own.
+	in := input(enduranceWorkout("wed", "2026-10-14", 3*3600-600))
+	in.From, in.To = "2026-10-14", "2026-10-18"
+	in.Debt = 1000
+	in.Profile = perDayProfile(map[string]float64{"tue": 1, "sun": 3})
+	got := byID(PlanRepayment(in))
+	a, ok := got["wed"]
+	if !ok {
+		t.Fatal("wednesday was not lengthened")
+	}
+	if s := workout.PlannedSeconds(a.Steps); s != 3*3600 {
+		t.Fatalf("wednesday = %v s, want the longest day's 10800", s)
+	}
+}
