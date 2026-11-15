@@ -132,6 +132,7 @@ func (s *Server) reoptimiseRider(ctx context.Context, rider string) bool {
 		Today: now.Format(dateLayout), Sunday: sunday, Week: week, Done: done,
 		ManualPushed: manual, NoTestDays: lifeevents.NoTestDays(events),
 		TomorrowReady: forecast.Verdict == readiness.Ready,
+		Fits:          func(d string, secs float64) bool { return weekplan.Fits(profile, d, secs) },
 	})
 	if !ok {
 		return false

@@ -834,3 +834,22 @@ func TestAMissedHardSessionIsNotMadeUpBesideATestOrCrewRide(t *testing.T) {
 		}
 	}
 }
+
+func TestMakeUpSkipsADayTooShort(t *testing.T) {
+	missed := planned("tue", "VO2max intervals", "2026-03-17")
+	missed.Steps = []workout.WorkoutStep{{Name: "Main", Duration: workout.DurationTime, Seconds: 7200}}
+	p := workout.RiderProfile{AvailableDays: []string{"tue", "thu", "sat"}, HoursByDay: map[string]float64{"tue": 2, "thu": 1, "sat": 3}}
+
+	got := AdaptSessions([]workout.Workout{missed}, nil, p, thursday, nil, readiness.Assessment{})
+	if len(got) != 1 || got[0].NewDate != "2026-03-21" {
+		t.Fatalf("changes = %+v, want the 2 h session made up on the 3 h Saturday", got)
+	}
+
+	p = workout.RiderProfile{AvailableDays: []string{"tue", "thu"}, HoursByDay: map[string]float64{"tue": 2, "thu": 1}}
+	got = AdaptSessions([]workout.Workout{missed}, nil, p, thursday, nil, readiness.Assessment{})
+	for _, c := range got {
+		if c.WorkoutID == "tue" && c.NewDate != "" {
+			t.Fatalf("changes = %+v, a 2 h session must not be made up on a 1 h day", got)
+		}
+	}
+}

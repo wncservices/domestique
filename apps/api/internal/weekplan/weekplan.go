@@ -7,6 +7,7 @@ package weekplan
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/wncservices/domestique/apps/api/internal/model"
@@ -83,6 +84,27 @@ type SwapInput struct {
 	ManualPushed  map[string]bool   // workout id -> has a manual Garmin copy
 	NoTestDays    map[string]bool   // days a hard session may not be put on
 	TomorrowReady bool              // tomorrow's outlook is Ready
+	// Fits reports whether a session of that many seconds fits the day's hours.
+	// Nil means every day fits.
+	Fits func(date string, seconds float64) bool
+}
+
+// FitSlackSeconds is how far past a day's hours a session may run and still
+// count as fitting: a planned 60 minutes on a 1 h day is not a conflict.
+const FitSlackSeconds = 300
+
+// Fits reports whether seconds of riding fit the profile's hours on date. A
+// weekday with no stated hours always fits: nothing was said, so nothing caps it.
+func Fits(profile workout.RiderProfile, date string, seconds float64) bool {
+	t, err := time.Parse(dateLayout, date)
+	if err != nil {
+		return true
+	}
+	hours := profile.HoursOn(strings.ToLower(t.Weekday().String()[:3]))
+	if hours <= 0 {
+		return true
+	}
+	return seconds <= hours*3600+FitSlackSeconds
 }
 
 // Swap names the two sessions to exchange and the day each moves to.
@@ -147,12 +169,20 @@ func PlanSwap(in SwapInput) (Swap, bool) {
 	})
 	h := hard[0]
 
+	fits := in.Fits
+	if fits == nil {
+		fits = func(string, float64) bool { return true }
+	}
 	tomorrow := shift(in.Today, 1)
 	var later, soon []workout.Workout
 	for _, w := range in.Week {
 		if w.Date <= in.Today || w.Date > in.Sunday || w.ID == h.ID ||
 			!Swappable(w, in.ManualPushed) || scheduler.IsKeySession(w) ||
 			in.Done[w.ID] || seconds(w) > seconds(h) {
+			continue
+		}
+		// Each session lands on the other's day, so each must fit it.
+		if !fits(w.Date, seconds(h)) || !fits(in.Today, seconds(w)) {
 			continue
 		}
 		if in.NoTestDays[w.Date] || EveOfFixed(w.Date, in.Week) || hardOn(w.Date, in.Week, h.ID) ||

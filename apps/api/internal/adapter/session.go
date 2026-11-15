@@ -228,7 +228,7 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 			// A hard session is not made up beside another hard day.
 			hardMiss := weekplan.Hard(w)
 			if next, ok := weekplan.NextFreeDay(today, weekEnd, available, taken, func(d string) bool {
-				return hardMiss && hardBeside(d, w.ID)
+				return !weekplan.Fits(profile, d, workout.PlannedSeconds(w.Steps)) || hardMiss && hardBeside(d, w.ID)
 			}); ok {
 				taken[next] = true
 				moved[w.ID] = next

@@ -309,3 +309,37 @@ func TestMoveNextIsOwnerOnly(t *testing.T) {
 		t.Errorf("date = %s, want unchanged", got.Date)
 	}
 }
+
+func TestNotTodayPrefersAFittingDay(t *testing.T) {
+	setup := func(hours map[string]float64, days ...string) *moveNextFixture {
+		f := newMoveNextFixture(t, days...)
+		secs := 7200.0
+		if _, err := f.h.store.UpdateWorkout(context.Background(), f.today.ID, workout.UpdateWorkoutRequest{
+			Steps: &[]workout.WorkoutStep{{Name: "ride", Duration: "time", Seconds: secs, Target: "open"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.h.store.SaveProfile(context.Background(), workout.RiderProfile{Rider: "wilant", HoursByDay: hours}); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	moved := func(f *moveNextFixture) string {
+		resp := f.move("wilant", f.today.ID)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		got, err := f.h.store.GetWorkout(context.Background(), f.today.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Date
+	}
+	if d := moved(setup(map[string]float64{"wed": 2, "thu": 1, "sat": 3}, "wed", "thu", "sat")); d != "2026-10-03" {
+		t.Errorf("moved to %s, want Saturday 2026-10-03", d)
+	}
+	f := setup(map[string]float64{"wed": 2, "thu": 1}, "wed", "thu")
+	if d := moved(f); d != "2026-10-01" {
+		t.Errorf("moved to %s, want the Thursday fallback 2026-10-01", d)
+	}
+}
