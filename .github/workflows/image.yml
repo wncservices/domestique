@@ -6,8 +6,9 @@ name: Container image
 # (`domestique-<chart version>`), because a chart fix and an app change are
 # rarely the same event: you can ship a values default without rebuilding the
 # app, and you can ship the app without touching the chart. What links them is
-# the chart's `appVersion`, which is the image tag the chart deploys — bump it
-# there when you want the chart to pick up a new release.
+# the chart's `appVersion`, which is the image tag the chart deploys. A release
+# bumps it automatically: once the image is pushed, the `chart` job below asks
+# the chart repo to point at it (its `app-release.yml` makes the commit).
 on:
   push:
     branches: [main]
@@ -208,3 +209,49 @@ jobs:
             echo
             echo "Digest: \`${{ steps.build.outputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Tell the chart repo about the release, so it bumps `appVersion` and publishes
+  # a chart. That is what Kargo watches, so without it a release deploys nowhere.
+  # Runs only after the image is pushed: the chart would deploy it.
+  #
+  # The token comes from the org's `wncservices-writer` GitHub App (see
+  # wncservices/lab docs/github-apps.md), narrowed here to the chart repo and
+  # Contents write, the permission a repository_dispatch needs. The commit
+  # itself is made in the chart repo by its own workflow.
+  chart:
+    name: Bump the chart
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check the App key is configured
+        id: key
+        env:
+          KEY: ${{ secrets.WNCSERVICES_WRITER_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning title=Chart not bumped::The WNCSERVICES_WRITER_PRIVATE_KEY secret is empty, so the chart repo was not told about ${GITHUB_REF_NAME}. Run: gh workflow run app-release.yml --repo wncservices/domestique-chart -f version=${GITHUB_REF_NAME}"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.key.outputs.present
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          # wncservices-writer's Client ID; not a secret.
+          client-id: Iv23liXq1uHDyCe28Z7t
+          private-key: ${{ secrets.WNCSERVICES_WRITER_PRIVATE_KEY }}
+          owner: wncservices
+          repositories: domestique-chart
+          permission-contents: write
+
+      - if: steps.key.outputs.present
+        name: Dispatch app-release to the chart repo
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          gh api repos/wncservices/domestique-chart/dispatches \
+            -f event_type=app-release -f "client_payload[version]=${GITHUB_REF_NAME}"
+          echo "Asked wncservices/domestique-chart to bump to ${GITHUB_REF_NAME}." >> "$GITHUB_STEP_SUMMARY"

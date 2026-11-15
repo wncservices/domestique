@@ -1250,9 +1250,14 @@ split out so it releases on its own schedule, independent of the application.
 Its own `AGENTS.md` covers chart-specific conventions (bumping `version` to
 trigger a release, its own CI validating rendered config against a
 cross-checked-out build of this repo). What's still here: `appVersion` in
-that chart's `Chart.yaml` is the image tag it deploys by default — bump it
-there, not here, when you want the chart to pick up a new release of this
-app.
+that chart's `Chart.yaml` is the image tag it deploys by default. A `v*` release
+bumps it automatically: `image.yml`'s `chart` job, after the image is pushed,
+sends the chart repo an `app-release` dispatch (token from the org's
+`wncservices-writer` App via the `WNCSERVICES_WRITER_PRIVATE_KEY` secret,
+narrowed to that repo), and its `app-release.yml` commits the bump and
+publishes the chart. Kargo watches the chart, so a release that skipped this
+deploys nowhere; re-try with
+`gh workflow run app-release.yml --repo wncservices/domestique-chart -f version=vX.Y.Z`.
 
 ## Container images
 
