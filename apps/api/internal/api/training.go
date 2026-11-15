@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1484,6 +1485,10 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Day keys are lowercase weekday abbreviations; anything else is dropped,
+	// as the proposal path does, so a capitalised "Mon" cannot be stored.
+	body.AvailableDays = lowercaseWeekdays(body.AvailableDays)
+
 	var hoursByDay map[string]float64
 	if body.HoursByDay != nil {
 		var err error
@@ -1673,6 +1678,22 @@ func (s *Server) planRiderGoals(ctx context.Context, rider string) {
 	s.pushTodayIfOptedIn(ctx, rider)
 }
 
+// lowercaseWeekdays keeps the entries that name a weekday, lowercased, in the
+// order given.
+func lowercaseWeekdays(days []string) []string {
+	if days == nil {
+		return nil
+	}
+	out := make([]string, 0, len(days))
+	for _, d := range days {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if slices.Contains([]string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}, d) && !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 type profileProposalDTO struct {
 	AvailableDays        []string `json:"availableDays,omitempty"`
 	HoursPerAvailableDay float64  `json:"hoursPerAvailableDay,omitempty"`
@@ -1760,8 +1781,15 @@ func (s *Server) handleProposeProfileChange(w http.ResponseWriter, r *http.Reque
 	}
 
 	s.logger().Info("profile change proposed", "rider", rider)
+	// The model is shown the mean and falls back to it, so a figure equal to
+	// the rider's current mean means "no change": leave it out, or the form
+	// would flatten a per-day shape to that figure.
+	hours := proposal.HoursPerAvailableDay
+	if math.Abs(hours-profile.HoursPerAvailableDay) <= 0.05 {
+		hours = 0
+	}
 	writeJSON(w, http.StatusOK, profileProposalDTO{
-		AvailableDays: proposal.AvailableDays, HoursPerAvailableDay: proposal.HoursPerAvailableDay,
+		AvailableDays: proposal.AvailableDays, HoursPerAvailableDay: hours,
 		Explanation: proposal.Explanation,
 	})
 }

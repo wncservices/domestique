@@ -106,15 +106,21 @@ func sameDaySet(a, b []string) bool {
 // is spread over its days; with days but no figure the days stay and the map
 // stays empty, meaning "available, no per-day cap".
 func (p *RiderProfile) NormaliseAvailability() {
-	if len(p.HoursByDay) > 0 {
-		days := make([]string, 0, len(p.HoursByDay))
-		var sum float64
-		for _, d := range weekdayKeys {
-			if h, ok := p.HoursByDay[d]; ok {
-				days = append(days, d)
-				sum += h
-			}
+	// Only weekday keys with positive hours count: a stored "Mon" or "xyz"
+	// must never reach the mean as 0/0. If nothing valid is left the map is
+	// dropped and the old fields stand.
+	days := make([]string, 0, len(p.HoursByDay))
+	valid := make(map[string]float64, len(p.HoursByDay))
+	var sum float64
+	for _, d := range weekdayKeys {
+		if h, ok := p.HoursByDay[d]; ok && h > 0 {
+			days = append(days, d)
+			valid[d] = h
+			sum += h
 		}
+	}
+	if len(days) > 0 {
+		p.HoursByDay = valid
 		p.AvailableDays = days
 		p.HoursPerAvailableDay = sum / float64(len(days))
 		return

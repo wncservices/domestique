@@ -349,10 +349,12 @@ func TestLengthenStopsAtTheSessionsOwnDay(t *testing.T) {
 	in.Debt = 1000
 	in.Profile = perDayProfile(map[string]float64{"tue": 1, "sun": 3})
 	got := byID(PlanRepayment(in))
-	if a, ok := got["tue"]; ok {
-		if s := workout.PlannedSeconds(a.Steps); s > 3600 {
-			t.Fatalf("tuesday = %v s, over its day's 3600", s)
-		}
+	// Tuesday offers 1 h and the ride is 50 min: it may reach the day's cap
+	// but never pass it, and is left alone only if it cannot grow.
+	if a, ok := got["tue"]; !ok {
+		t.Fatal("tuesday was not lengthened up to its day's hours")
+	} else if s := workout.PlannedSeconds(a.Steps); s > 3600 || s <= 3000 {
+		t.Fatalf("tuesday = %v s, want more than 3000 and at most its day's 3600", s)
 	}
 	a, ok := got["sun"]
 	if !ok {
@@ -360,6 +362,19 @@ func TestLengthenStopsAtTheSessionsOwnDay(t *testing.T) {
 	}
 	if s := workout.PlannedSeconds(a.Steps); s != 3000*1.3 {
 		t.Fatalf("sunday = %v s, want the 30%% rule (3900)", s)
+	}
+}
+
+func TestGreenPushLengthenStopsAtTheDaysHours(t *testing.T) {
+	// 2026-10-13 is a Tuesday offering 1 h; the 30% rule alone would give 3900 s.
+	in := input(enduranceWorkout("e", "2026-10-13", 3000))
+	in.Profile = perDayProfile(map[string]float64{"tue": 1, "sun": 3})
+	a := PlanGreenPush(in, "2026-10-13")
+	if a == nil {
+		t.Fatal("no push")
+	}
+	if s := workout.PlannedSeconds(a.Steps); s > 3600 || s <= 3000 {
+		t.Fatalf("pushed to %v s, want more than 3000 and at most the day's 3600", s)
 	}
 }
 

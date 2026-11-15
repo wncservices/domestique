@@ -139,3 +139,27 @@ func TestNoSessionOnTheEventDayWithoutAMiniTaper(t *testing.T) {
 		}
 	}
 }
+
+// With per-day hours the long ride goes on the day with the most hours, and
+// only the days before the mini-taper compete for it: a priority B race on
+// Sunday with Wednesday offering 4 h puts it on Wednesday.
+func TestMiniTaperWeekLongRideGoesOnTheBiggestDayBeforeTheTaper(t *testing.T) {
+	week, _, levels := miniTaperWeek()
+	week.EventDate, week.MiniTaperStart = "2026-01-11", "2026-01-08"
+	profile := hoursProfile(map[string]float64{"mon": 1, "tue": 1, "wed": 4, "thu": 1, "fri": 1, "sat": 1})
+	out, err := WeekWorkouts(week, profile, levels, "r", "g", model.SportCycling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := longDayOf(t, out); got != "wed" {
+		t.Errorf("long ride on %q, want wed", got)
+	}
+	for _, r := range out {
+		switch r.Date {
+		case "2026-01-08", "2026-01-09", "2026-01-10":
+			if r.Zone != workout.ZoneEndurance || IsLongRideName(r.Name) {
+				t.Errorf("%s: %s (%s), want an easy mini-taper ride", r.Date, r.Name, r.Zone)
+			}
+		}
+	}
+}

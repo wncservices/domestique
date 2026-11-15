@@ -75,8 +75,22 @@ test('a proposal of days only gives a new day 1 h when nothing is set', () => {
 
 test('a proposal with hours applies to its days, or to the current days', () => {
   const p = { hoursByDay: { tue: 1, sat: 3 } }
-  assert.deepEqual(withProposal(p, ['mon'], 2).hoursByDay, { mon: 2 })
-  assert.deepEqual(withProposal(p, undefined, 2).hoursByDay, { tue: 2, sat: 2 })
+  assert.deepEqual(withProposal(p, ['mon'], 4).hoursByDay, { mon: 4 })
+  assert.deepEqual(withProposal(p, undefined, 4).hoursByDay, { tue: 4, sat: 4 })
+})
+
+test('a figure equal to the current mean is no change: a new day gets the mean, the rest keep theirs', () => {
+  const p = { hoursByDay: { tue: 1, sat: 3 } }
+  const out = withProposal(p, ['tue', 'wed', 'sat'], 2.03)
+  assert.deepEqual(out.hoursByDay, { tue: 1, wed: 2, sat: 3 })
+  assert.deepEqual(withProposal(p, undefined, 2), {})
+})
+
+test('switching off the last switched-on day leaves nothing', () => {
+  const out = withDayToggled({ hoursByDay: { sat: 3 } }, 'sat')
+  assert.deepEqual(out.hoursByDay, {})
+  assert.deepEqual(out.availableDays, [])
+  assert.equal(out.hoursPerAvailableDay, 0)
 })
 
 test('a typed value is clamped to 0..12', () => {

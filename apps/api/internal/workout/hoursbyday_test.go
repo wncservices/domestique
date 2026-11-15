@@ -3,6 +3,7 @@ package workout
 import (
 	"math"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -84,6 +85,25 @@ func TestSameAvailability(t *testing.T) {
 	} {
 		if got := SameAvailability(stored, c.days, c.hours); got != c.want {
 			t.Errorf("%s: got %v, want %v", name, got, c.want)
+		}
+	}
+}
+
+func TestNormaliseNeverProducesNaNFromBadKeys(t *testing.T) {
+	for name, m := range map[string]map[string]float64{
+		"capitalised": {"Mon": 1.5},
+		"unknown":     {"xyz": 1},
+		"zero":        {"mon": 0},
+	} {
+		p := RiderProfile{HoursByDay: m, AvailableDays: []string{"mon"}, HoursPerAvailableDay: 1.5}
+		p.NormaliseAvailability()
+		if math.IsNaN(p.HoursPerAvailableDay) || math.IsInf(p.HoursPerAvailableDay, 0) {
+			t.Errorf("%s: mean = %v", name, p.HoursPerAvailableDay)
+		}
+		for d := range p.HoursByDay {
+			if !slices.Contains(weekdayKeys, d) {
+				t.Errorf("%s: map keeps %q", name, d)
+			}
 		}
 	}
 }

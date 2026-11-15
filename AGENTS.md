@@ -739,7 +739,9 @@ scheduler honours the days (`splitEventWeek`): sessions on and after the event a
 from `MiniTaperStart` are easy endurance rides of `MiniTaperDayHours` each (a day the rider cannot train
 does not hand its hours to the others, so a Saturday-only rider with a Sunday race gets one day's taper
 load on Saturday), structured sessions are placed only on the earlier days, and the week gets no
-route-demand bias, `WithTargetTSS` boost or third hard session. **C has no taper and no mini-taper**: the
+route-demand bias, `WithTargetTSS` boost or third hard session. The long ride goes on the day with
+the most hours before the mini-taper, if that day comes before it; otherwise the week has none, as
+before. **C has no taper and no mini-taper**: the
 event week is an ordinary week. Everything that asks "is this a reduced week" goes through
 `Week.Reduced()` (recovery, taper phase, or `MiniTaperDays > 0`): the ledger (a reduced week is opened
 with `reduced`, nothing carried in, nothing repaid, no green push), alternates (no harder swap).

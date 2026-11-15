@@ -92,7 +92,11 @@ export function uniformHours(days: string[], hours: number): HoursMap {
  *  the current ones when it names none. */
 export function withProposal(p: RiderProfile, days?: string[], hours?: number): Partial<RiderProfile> {
   const map = hoursMapOf(p)
-  if (hours !== undefined && hours > 0) {
+  // The server leaves out a figure that is the current mean, but a figure
+  // within 0.05 h of it is no change either way: applying it would flatten
+  // the per-day shape.
+  const current = derive(map).hoursPerAvailableDay ?? 0
+  if (hours !== undefined && hours > 0 && Math.abs(hours - current) > 0.05) {
     return derive(uniformHours(days ?? Object.keys(map), hours))
   }
   if (days === undefined) return {}

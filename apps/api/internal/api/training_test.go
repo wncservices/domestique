@@ -1291,3 +1291,44 @@ func TestFitnessDegradesWhenAnalysisStorageFails(t *testing.T) {
 		t.Errorf("analysis = %+v, want nil — analysis storage is broken, so nothing to attach", out.Sessions[0].Analysis)
 	}
 }
+
+func TestCapitalisedDayKeysRoundTripLowercase(t *testing.T) {
+	h := newTrainingHarness(t)
+	resp := h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"availableDays":["Mon"],"hoursPerAvailableDay":1.5}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save: status = %d, body = %s", resp.StatusCode, readAll(t, resp))
+	}
+	resp = h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get: status = %d", resp.StatusCode)
+	}
+	var got struct {
+		AvailableDays        []string `json:"availableDays"`
+		HoursPerAvailableDay float64  `json:"hoursPerAvailableDay"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("body is not JSON: %v", err)
+	}
+	if len(got.AvailableDays) != 1 || got.AvailableDays[0] != "mon" || got.HoursPerAvailableDay != 1.5 {
+		t.Errorf("profile = %+v", got)
+	}
+}
+
+func TestProposalOmitsHoursThatMatchTheMean(t *testing.T) {
+	h := newTrainingHarness(t)
+	withLLM(t, h.srv, fixed(`{"availableDays": ["tue", "wed", "sat"], "hoursPerAvailableDay": 2.3, "explanation": "Add Wednesday."}`))
+	h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile",
+		`{"hoursByDay":{"tue":1,"sat":3,"sun":3}}`)
+	resp := h.as("wilant", "cyclists", http.MethodPost, "/api/training/profile/propose", `{"note":"also wednesdays"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, readAll(t, resp))
+	}
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := raw["hoursPerAvailableDay"]; has {
+		t.Errorf("a figure equal to the current mean must be omitted: %v", raw)
+	}
+}
