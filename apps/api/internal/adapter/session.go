@@ -240,7 +240,7 @@ func AdaptSessionsAround(workouts []workout.Workout, sessions []workout.Complete
 				continue
 			}
 			if slot, ok := nextEasySlot(ordered, sessions, analyses, todayStr, weekEnd, replaced, blackout, func(slot workout.Workout) bool {
-				return hardMiss && hardBeside(slot.Date, w.ID, slot.ID)
+				return !weekplan.Fits(profile, slot.Date, workout.PlannedSeconds(w.Steps)) || hardMiss && hardBeside(slot.Date, w.ID, slot.ID)
 			}); ok {
 				replaced[slot.ID] = true
 				moved[w.ID] = slot.Date
