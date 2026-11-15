@@ -16,7 +16,7 @@ import (
 // load history is then a duration guess), no hours to spend, or no fitness
 // snapshot yet. Design: docs/superpowers/specs/2026-10-18-training-load-model-design.md.
 func (s *Server) loadInput(ctx context.Context, g workout.Goal, rider string, profile workout.RiderProfile) (*periodization.LoadInput, error) {
-	if !(profile.FTPWatts > 0) || !(profile.HoursPerAvailableDay*float64(len(profile.AvailableDays)) > 0) {
+	if !(profile.FTPWatts > 0) || !(profile.WeekHours() > 0) {
 		return nil, nil
 	}
 	// A failed read costs the TSS sizing, not the plan: every plan reader goes

@@ -353,3 +353,30 @@ func TestTaperStartsFromTheLastNonRecoveryWeekNotARecoveryOne(t *testing.T) {
 		t.Errorf("taper week %v tapers from the recovery week, under %v", out[0].TargetTSS, floor)
 	}
 }
+
+func TestUnevenDaysCapTheWeekAtTheirSum(t *testing.T) {
+	// Five 1 h weekdays and two 3 h weekend days: 11 h a week, though the
+	// mean (11/7) x 7 days is the same 11 h, so the cap must read the sum.
+	p := workout.RiderProfile{HoursByDay: map[string]float64{"mon": 1, "tue": 1, "wed": 1, "thu": 1, "fri": 1, "sat": 3, "sun": 3}}
+	p.NormaliseAvailability()
+	l := &LoadInput{CTL: 80, ATL: 80, TypicalIF: 0.7, HistoryWeeks: 52, MaxRamp: 6}
+	peak := 0.0
+	for _, w := range mustBuild(t, workout.Goal{ID: "u"}, p, l).Weeks {
+		if w.TargetHours > 11+0.01 {
+			t.Errorf("week %d over the 11 h cap: %v", w.Number, w.TargetHours)
+		}
+		peak = max(peak, w.TargetHours)
+	}
+	if math.Abs(peak-11) > 0.01 {
+		t.Errorf("peak week = %.2fh, want 11h (the sum of the days)", peak)
+	}
+
+	// Two days at 2 h, normalised from the map, plan exactly like the
+	// uniform profile over the same two days.
+	uneven := workout.RiderProfile{HoursByDay: map[string]float64{"mon": 2, "sun": 2}}
+	uneven.NormaliseAvailability()
+	uniform := workout.RiderProfile{HoursPerAvailableDay: 2, AvailableDays: []string{"mon", "sun"}}
+	if got, want := mustBuild(t, datedGoal(12), uneven, baseLoad()), mustBuild(t, datedGoal(12), uniform, baseLoad()); !reflect.DeepEqual(got, want) {
+		t.Errorf("uneven {mon:2,sun:2} plans differently from uniform 2 h on mon and sun")
+	}
+}
