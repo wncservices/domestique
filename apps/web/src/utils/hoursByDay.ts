@@ -5,6 +5,8 @@ import type { RiderProfile } from '@/api/types'
 
 export const WEEKDAYS: readonly string[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
+const MAX_HOURS_PER_DAY = 12
+
 type HoursMap = Record<string, number>
 type Derived = Pick<RiderProfile, 'hoursByDay' | 'availableDays' | 'hoursPerAvailableDay'>
 
@@ -68,7 +70,8 @@ export function withDayToggled(p: RiderProfile, day: string): Partial<RiderProfi
  *  switching a day off is the day button's job. */
 export function withDayHours(p: RiderProfile, day: string, hours: number | undefined): Partial<RiderProfile> {
   const map = hoursMapOf(p)
-  map[day] = hours !== undefined && hours > 0 ? hours : 0
+  // Clamped to the server's 0..12 so a typed 20 is not a 422.
+  map[day] = hours !== undefined && hours > 0 ? Math.min(hours, MAX_HOURS_PER_DAY) : 0
   return derive(map)
 }
 

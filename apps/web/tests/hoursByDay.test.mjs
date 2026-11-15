@@ -78,3 +78,9 @@ test('a proposal with hours applies to its days, or to the current days', () => 
   assert.deepEqual(withProposal(p, ['mon'], 2).hoursByDay, { mon: 2 })
   assert.deepEqual(withProposal(p, undefined, 2).hoursByDay, { tue: 2, sat: 2 })
 })
+
+test('a typed value is clamped to 0..12', () => {
+  const p = { hoursByDay: { sat: 3 } }
+  assert.equal(withDayHours(p, 'sat', 20).hoursByDay.sat, 12)
+  assert.equal(withDayHours(p, 'sat', -2).hoursByDay.sat, 0)
+})

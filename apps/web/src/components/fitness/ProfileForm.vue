@@ -382,19 +382,21 @@ function setHrBound(i: number, v: number | null | undefined) {
           </UButton>
         </div>
         <div v-if="weekdays.some((d) => hoursMap[d.value] !== undefined)" class="mt-3 flex flex-col gap-2">
-          <label v-for="d in weekdays.filter((w) => hoursMap[w.value] !== undefined)" :key="d.value" class="flex items-center gap-3">
-            <span class="w-10 text-[length:var(--text-body)]">{{ d.label }}</span>
+          <div v-for="d in weekdays.filter((w) => hoursMap[w.value] !== undefined)" :key="d.value" class="flex items-center gap-3">
+            <label :for="`hours-${d.value}`" class="w-10 text-[length:var(--text-body)]">{{ d.label }}</label>
             <UInput
+              :id="`hours-${d.value}`"
               type="number"
               step="0.25"
               min="0"
               max="12"
-              :model-value="hoursMap[d.value]"
+              :aria-label="`${d.label} hours`"
+              :model-value="hoursMap[d.value] || undefined"
               class="w-24"
               @update:model-value="(v: string | number) => update(withDayHours(profile, d.value, numberOrUndefined(v)))"
             />
             <span class="text-[length:var(--text-label)] text-muted">h</span>
-          </label>
+          </div>
           <p class="text-[length:var(--text-label)] text-muted">{{ weekTotal(profile) }} h a week</p>
         </div>
       </UFormField>
