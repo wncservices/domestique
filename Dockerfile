@@ -27,7 +27,11 @@ RUN cd apps/api && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     -o /out/domestique ./cmd/domestique
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && adduser -D -u 10001 domestique
+# zlib is upgraded explicitly because no alpine:3.22 image ships the fixed
+# 1.4-r0 yet (CVE-2026-4738; 3.22.8 still has 1.3.2-r1), though the 3.22
+# repository has it. Drop the upgrade once the base image carries it.
+RUN apk upgrade --no-cache zlib && \
+    apk add --no-cache ca-certificates && adduser -D -u 10001 domestique
 WORKDIR /app
 COPY --from=api /out/domestique /usr/local/bin/domestique
 COPY --from=web /src/apps/web/dist /app/web
