@@ -885,6 +885,9 @@ export interface RiderProfile {
   restingHr?: number
   /** Lowercase three-letter weekday abbreviations, e.g. ["tue","thu","sat","sun"]. */
   availableDays?: string[]
+  /** Hours per switched-on weekday, keyed mon..sun. Authoritative when present;
+   *  availableDays and hoursPerAvailableDay (the mean) are derived from it. */
+  hoursByDay?: Partial<Record<string, number>>
   hoursPerAvailableDay?: number
   experienceLevel?: string
   /** Standing permission to place scheduled workouts on the rider's Garmin

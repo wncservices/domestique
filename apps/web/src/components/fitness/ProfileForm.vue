@@ -4,6 +4,7 @@
 // rather than mutating the prop — the page owns `profile` and decides what
 // "dirty" means against the last saved copy (see SaveBar.vue).
 import { computed, ref } from 'vue'
+import { hoursMapOf, weekTotal, withDayHours, withDayToggled } from '@/utils/hoursByDay'
 import type { DetectedThreshold, HRZoneMethod, HRZonesSettings, RiderProfile } from '@/api/types'
 import {
   customBoundsProblem,
@@ -85,11 +86,10 @@ const weekdays = [
 ]
 
 function toggleDay(day: string) {
-  const days = new Set(props.profile.availableDays ?? [])
-  if (days.has(day)) days.delete(day)
-  else days.add(day)
-  update({ availableDays: [...days] })
+  update(withDayToggled(props.profile, day))
 }
+
+const hoursMap = computed(() => hoursMapOf(props.profile))
 
 const EXPERIENCE_ITEMS = [
   { value: 'beginner', label: 'Beginner' },
@@ -351,19 +351,6 @@ function setHrBound(i: number, v: number | null | undefined) {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <UFormField>
           <template #label>
-            Hours per available day
-            <UBadge v-if="isEstimated('hours_per_available_day')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
-          </template>
-          <UInput
-            type="number"
-            step="0.5"
-            :model-value="profile.hoursPerAvailableDay"
-            class="w-full"
-            @update:model-value="(v: string | number) => update({ hoursPerAvailableDay: numberOrUndefined(v) })"
-          />
-        </UFormField>
-        <UFormField>
-          <template #label>
             Experience level
             <UBadge v-if="isEstimated('experience_level')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
           </template>
@@ -380,7 +367,7 @@ function setHrBound(i: number, v: number | null | undefined) {
       <UFormField class="mt-4">
         <template #label>
           Available days
-          <UBadge v-if="isEstimated('available_days')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
+          <UBadge v-if="isEstimated('available_days') || isEstimated('hours_per_available_day')" color="info" variant="subtle" size="sm" class="ml-1">auto-filled</UBadge>
         </template>
         <div class="flex gap-2 flex-wrap">
           <UButton
@@ -393,6 +380,22 @@ function setHrBound(i: number, v: number | null | undefined) {
           >
             {{ d.label }}
           </UButton>
+        </div>
+        <div v-if="weekdays.some((d) => hoursMap[d.value] !== undefined)" class="mt-3 flex flex-col gap-2">
+          <label v-for="d in weekdays.filter((w) => hoursMap[w.value] !== undefined)" :key="d.value" class="flex items-center gap-3">
+            <span class="w-10 text-[length:var(--text-body)]">{{ d.label }}</span>
+            <UInput
+              type="number"
+              step="0.25"
+              min="0"
+              max="12"
+              :model-value="hoursMap[d.value]"
+              class="w-24"
+              @update:model-value="(v: string | number) => update(withDayHours(profile, d.value, numberOrUndefined(v)))"
+            />
+            <span class="text-[length:var(--text-label)] text-muted">h</span>
+          </label>
+          <p class="text-[length:var(--text-label)] text-muted">{{ weekTotal(profile) }} h a week</p>
         </div>
       </UFormField>
       <div v-if="proposeProfileEnabled" class="mt-4 pt-4 border-t border-default">
