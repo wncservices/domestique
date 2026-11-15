@@ -1,7 +1,7 @@
 // Run with: npm --workspace @domestique/web test
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { hoursMapOf, uniformHours, weekTotal, withDayHours, withDayToggled } from '../src/utils/hoursByDay.ts'
+import { hoursMapOf, uniformHours, weekTotal, withDayHours, withDayToggled, withProposal } from '../src/utils/hoursByDay.ts'
 
 test('a day switched on takes the hours of the nearest day, the earlier one on a tie', () => {
   const p = { hoursByDay: { fri: 1, sun: 3 }, availableDays: ['fri', 'sun'] }
@@ -57,4 +57,24 @@ test('weekTotal adds the week up', () => {
 
 test('uniformHours gives each day the same figure, Monday first', () => {
   assert.deepEqual(Object.keys(uniformHours(['sun', 'tue'], 2)), ['tue', 'sun'])
+})
+
+test('a proposal with neither field leaves the hours alone', () => {
+  assert.deepEqual(withProposal({ hoursByDay: { tue: 1, sat: 3 } }), {})
+})
+
+test('a proposal of days only keeps each remaining day and gives a new one the mean', () => {
+  const out = withProposal({ hoursByDay: { tue: 1, sat: 3 } }, ['sat', 'sun'])
+  assert.deepEqual(out.hoursByDay, { sat: 3, sun: 2 })
+  assert.deepEqual(out.availableDays, ['sat', 'sun'])
+})
+
+test('a proposal of days only gives a new day 1 h when nothing is set', () => {
+  assert.deepEqual(withProposal({}, ['wed']).hoursByDay, { wed: 1 })
+})
+
+test('a proposal with hours applies to its days, or to the current days', () => {
+  const p = { hoursByDay: { tue: 1, sat: 3 } }
+  assert.deepEqual(withProposal(p, ['mon'], 2).hoursByDay, { mon: 2 })
+  assert.deepEqual(withProposal(p, undefined, 2).hoursByDay, { tue: 2, sat: 2 })
 })

@@ -32,7 +32,7 @@ import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
-import { uniformHours, weekTotal } from '@/utils/hoursByDay'
+import { weekTotal, withProposal } from '@/utils/hoursByDay'
 import { bestEffortToast } from '@/utils/bestEfforts'
 import type { PeriodChoice } from '@/utils/seasonReview'
 import { ftpTestToast } from '@/utils/ftpTests'
@@ -267,14 +267,9 @@ async function proposeProfileChange() {
   proposingProfileChange.value = true
   try {
     const proposal = await api.proposeProfileChange(profileNote.value)
-    const days = proposal.availableDays ?? profile.value.availableDays
-    const hours = proposal.hoursPerAvailableDay ?? profile.value.hoursPerAvailableDay
     profile.value = {
       ...profile.value,
-      availableDays: days,
-      hoursPerAvailableDay: hours,
-      // The proposal speaks of one figure for every day it names; the map wins on save.
-      ...(days && hours ? { hoursByDay: uniformHours(days, hours) } : {}),
+      ...withProposal(profile.value, proposal.availableDays, proposal.hoursPerAvailableDay),
     }
     proposalExplanation.value = proposal.explanation ?? ''
     toast.add({ title: 'Suggested a profile change', description: 'Review the fields below, then Save profile if this looks right.', icon: 'i-lucide-sparkles' })

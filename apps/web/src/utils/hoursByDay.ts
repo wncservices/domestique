@@ -82,3 +82,19 @@ export function uniformHours(days: string[], hours: number): HoursMap {
   for (const d of WEEKDAYS) if (days.includes(d)) out[d] = hours
   return out
 }
+
+/** What a profile proposal changes in the hours. Without days or hours it
+ *  changes nothing; days alone keep each remaining day's own hours and give a
+ *  new day the mean (1 h with none); hours apply to the proposed days, or to
+ *  the current ones when it names none. */
+export function withProposal(p: RiderProfile, days?: string[], hours?: number): Partial<RiderProfile> {
+  const map = hoursMapOf(p)
+  if (hours !== undefined && hours > 0) {
+    return derive(uniformHours(days ?? Object.keys(map), hours))
+  }
+  if (days === undefined) return {}
+  const mean = derive(map).hoursPerAvailableDay || 1
+  const out: HoursMap = {}
+  for (const d of WEEKDAYS) if (days.includes(d)) out[d] = map[d] ?? mean
+  return derive(out)
+}
