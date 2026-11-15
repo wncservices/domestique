@@ -2,8 +2,10 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -251,5 +253,120 @@ func TestSavingWithoutHoursClearsThemAndRebuilds(t *testing.T) {
 	}
 	if same == len(before) {
 		t.Error("clearing the hours rebuilt nothing")
+	}
+}
+
+func (h *seasonHarness) getProfile(t *testing.T) riderProfileBody {
+	t.Helper()
+	resp := h.as("wilant", "cyclists", http.MethodGet, "/api/training/profile", "")
+	var out riderProfileBody
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+type riderProfileBody struct {
+	AvailableDays        []string           `json:"availableDays"`
+	HoursPerAvailableDay float64            `json:"hoursPerAvailableDay"`
+	HoursByDay           map[string]float64 `json:"hoursByDay"`
+}
+
+func idsAndDates(ws []workout.Workout) map[string]string {
+	m := map[string]string{}
+	for _, w := range ws {
+		m[w.ID] = w.Date
+	}
+	return m
+}
+
+func TestPerDayHoursRoundTrip(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.putProfile(t, `{"hoursByDay":{"mon":1,"sat":3,"sun":3}}`)
+	got := h.getProfile(t)
+	if !reflect.DeepEqual(got.HoursByDay, map[string]float64{"mon": 1, "sat": 3, "sun": 3}) {
+		t.Errorf("hoursByDay = %v", got.HoursByDay)
+	}
+	if !reflect.DeepEqual(got.AvailableDays, []string{"mon", "sat", "sun"}) {
+		t.Errorf("availableDays = %v", got.AvailableDays)
+	}
+}
+
+func TestBadPerDayHoursAre422(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.putProfile(t, `{"hoursByDay":{"mon":2}}`)
+	for _, body := range []string{
+		`{"hoursByDay":{"mon":13}}`, `{"hoursByDay":{"xyz":1}}`, `{"hoursByDay":{"mon":-1}}`,
+	} {
+		resp := h.as("wilant", "cyclists", http.MethodPut, "/api/training/profile", body)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status %d, want 422", body, resp.StatusCode)
+		}
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&e)
+		if e.Error == "" {
+			t.Errorf("%s: no error message", body)
+		}
+	}
+	if got := h.getProfile(t); !reflect.DeepEqual(got.HoursByDay, map[string]float64{"mon": 2}) {
+		t.Errorf("profile changed by refused saves: %v", got.HoursByDay)
+	}
+}
+
+func TestChangingOneDaysHoursRebuilds(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.putProfile(t, `{"hoursByDay":{"tue":1,"thu":1,"sat":3,"sun":3}}`)
+	h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	today := h.now.Format("2006-01-02")
+
+	before := idsAndDates(h.workouts(t))
+	h.putProfile(t, `{"hoursByDay":{"tue":1,"thu":1,"sat":3,"sun":3}}`)
+	if after := idsAndDates(h.workouts(t)); !reflect.DeepEqual(before, after) {
+		t.Fatal("an identical save changed sessions")
+	}
+
+	h.putProfile(t, `{"hoursByDay":{"tue":1,"thu":1,"sat":2,"sun":3}}`)
+	var sats int
+	for _, w := range h.workouts(t) {
+		if w.Date <= today || weekdayOf(t, w.Date) != time.Saturday {
+			continue
+		}
+		sats++
+		if s := workout.PlannedSeconds(w.Steps); s > 2*3600+300 {
+			t.Errorf("Saturday %s is %.0f s, over the 2 h cap", w.Date, s)
+		}
+	}
+	if sats == 0 {
+		t.Fatal("no future Saturday sessions")
+	}
+}
+
+func TestAnOldTabsSaveKeepsThePerDayHours(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.putProfile(t, `{"hoursByDay":{"mon":1,"sat":3}}`)
+	h.createGoal(t, `{"name":"Race","eventDate":"2027-04-14"}`)
+	h.srv.WaitForBackground()
+	h.backdate(t)
+	before := idsAndDates(h.workouts(t))
+
+	h.putProfile(t, `{"ftpWatts":260,"availableDays":["sat","mon"],"hoursPerAvailableDay":2}`)
+
+	if got := h.getProfile(t); !reflect.DeepEqual(got.HoursByDay, map[string]float64{"mon": 1, "sat": 3}) {
+		t.Errorf("hoursByDay = %v", got.HoursByDay)
+	}
+	if after := idsAndDates(h.workouts(t)); !reflect.DeepEqual(before, after) {
+		t.Error("an old tab's save rebuilt sessions")
+	}
+}
+
+func TestOldFieldsStillSave(t *testing.T) {
+	h := newSeasonHarness(t)
+	h.putProfile(t, `{"availableDays":["tue","sat"],"hoursPerAvailableDay":1.5}`)
+	if got := h.getProfile(t); !reflect.DeepEqual(got.HoursByDay, map[string]float64{"tue": 1.5, "sat": 1.5}) {
+		t.Errorf("hoursByDay = %v", got.HoursByDay)
 	}
 }

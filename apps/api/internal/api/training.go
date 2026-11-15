@@ -166,7 +166,12 @@ type riderProfileDTO struct {
 	RestingHR             int      `json:"restingHr,omitempty"`
 	AvailableDays         []string `json:"availableDays,omitempty"`
 	HoursPerAvailableDay  float64  `json:"hoursPerAvailableDay,omitempty"`
-	ExperienceLevel       string   `json:"experienceLevel,omitempty"`
+	// HoursByDay is the hours offered per weekday ("mon".."sun"); a day with
+	// none is absent. When present on a save it decides AvailableDays and
+	// HoursPerAvailableDay, which stay in responses (derived) for older
+	// clients.
+	HoursByDay      map[string]float64 `json:"hoursByDay,omitempty"`
+	ExperienceLevel string             `json:"experienceLevel,omitempty"`
 	// AutoPushWorkouts is the rider's standing permission to place their
 	// scheduled workouts on their Garmin account automatically.
 	AutoPushWorkouts bool `json:"autoPushWorkouts,omitempty"`
@@ -215,7 +220,7 @@ func profileDTOFrom(p workout.RiderProfile) riderProfileDTO {
 		WeightKG: weight,
 		FTPWatts: p.FTPWatts, FTPEstimated: p.FTPEstimated, ThresholdPaceSecPerKM: p.ThresholdPaceSecPerKM,
 		MaxHR: p.MaxHR, ThresholdHR: p.ThresholdHR, RestingHR: p.RestingHR, AvailableDays: p.AvailableDays,
-		HoursPerAvailableDay: p.HoursPerAvailableDay, ExperienceLevel: p.ExperienceLevel,
+		HoursPerAvailableDay: p.HoursPerAvailableDay, HoursByDay: p.HoursByDay, ExperienceLevel: p.ExperienceLevel,
 		Estimated: p.Estimated, AutoPushWorkouts: p.AutoPushWorkouts, SmartTrainer: p.SmartTrainer, UpdatedAt: p.UpdatedAt,
 		HRZones: &hrZonesDTO{Cycling: &p.HRZonesCycling, Running: &p.HRZonesRunning},
 	}
@@ -1479,6 +1484,15 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	var hoursByDay map[string]float64
+	if body.HoursByDay != nil {
+		var err error
+		if hoursByDay, err = workout.ValidateHoursByDay(body.HoursByDay); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
 	// Validated before anything is written, so a bad setting never leaves the
 	// rest of the form half saved.
 	for _, z := range []*workout.HRZoneSetting{body.zoneSetting("cycling"), body.zoneSetting("running")} {
@@ -1499,6 +1513,13 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
+	// An old tab sends the single figure and its days and knows nothing of the
+	// map. If they still describe what is stored, the rider changed nothing
+	// about their days, so the per-day shape is kept rather than flattened.
+	if body.HoursByDay == nil && len(before.HoursByDay) > 0 &&
+		workout.SameAvailability(before, body.AvailableDays, body.HoursPerAvailableDay) {
+		hoursByDay = before.HoursByDay
+	}
 	saved, err := s.Training.SaveProfileOn(r.Context(), workout.RiderProfile{
 		// FTPEstimated and Estimated are deliberately not read from body:
 		// this is the manual save form, and a rider willing to click Save
@@ -1507,7 +1528,7 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 		// ever mean "not yet looked at and confirmed."
 		Rider: rider, FTPWatts: body.FTPWatts, ThresholdPaceSecPerKM: body.ThresholdPaceSecPerKM,
 		MaxHR: body.MaxHR, ThresholdHR: body.ThresholdHR, RestingHR: body.RestingHR, AvailableDays: body.AvailableDays,
-		HoursPerAvailableDay: body.HoursPerAvailableDay, ExperienceLevel: body.ExperienceLevel,
+		HoursPerAvailableDay: body.HoursPerAvailableDay, HoursByDay: hoursByDay, ExperienceLevel: body.ExperienceLevel,
 		AutoPushWorkouts: body.AutoPushWorkouts, SmartTrainer: body.SmartTrainer,
 	}, workout.FTPSourceManual, s.localDate(s.now()))
 	if err != nil {
@@ -1563,30 +1584,49 @@ func (s *Server) handleSaveRiderProfile(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, out)
 }
 
-// availabilityChanged reports whether the weekdays (as a set) or the hours per
-// day differ between two saved profiles. A profile that had no days has no
-// plan built on them, so the first days are not a change to rebuild from: the
-// caller only plans (planRiderGoals).
+// availabilityChanged reports whether the weekdays (as a set) or the hours on
+// any of them differ between two saved profiles. A profile that had no days
+// has no plan built on them, so the first days are not a change to rebuild
+// from: the caller only plans (planRiderGoals). Both profiles come back
+// normalised, so a map-less one is the old figure spread over its days and the
+// two shapes compare like for like.
 func availabilityChanged(before, after workout.RiderProfile) bool {
 	if len(before.AvailableDays) == 0 {
 		return false
 	}
-	if before.HoursPerAvailableDay != after.HoursPerAvailableDay {
+	if len(before.HoursByDay) == 0 || len(after.HoursByDay) == 0 {
+		// Days stated without hours: only the day set and the figure can differ.
+		if math.Abs(before.HoursPerAvailableDay-after.HoursPerAvailableDay) > 0.01 {
+			return true
+		}
+		return !sameDays(before.AvailableDays, after.AvailableDays)
+	}
+	if len(before.HoursByDay) != len(after.HoursByDay) {
 		return true
 	}
-	days := map[string]bool{}
-	for _, d := range before.AvailableDays {
-		days[strings.ToLower(d)] = true
+	for d, h := range before.HoursByDay {
+		a, ok := after.HoursByDay[d]
+		if !ok || math.Abs(a-h) > 0.01 {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDays(a, b []string) bool {
+	set := map[string]bool{}
+	for _, d := range a {
+		set[strings.ToLower(d)] = true
 	}
 	seen := map[string]bool{}
-	for _, d := range after.AvailableDays {
+	for _, d := range b {
 		d = strings.ToLower(d)
-		if !days[d] {
-			return true
+		if !set[d] {
+			return false
 		}
 		seen[d] = true
 	}
-	return len(seen) != len(days)
+	return len(seen) == len(set)
 }
 
 // rebuildRiderPlan rebuilds every goal of the rider from today after their
