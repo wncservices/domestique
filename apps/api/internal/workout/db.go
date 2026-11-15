@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS rider_profiles (
     resting_hr                 INTEGER NOT NULL DEFAULT 0,
     available_days             TEXT NOT NULL DEFAULT '',
     hours_per_available_day    DOUBLE PRECISION NOT NULL DEFAULT 0,
+    hours_by_day               TEXT NOT NULL DEFAULT '',
     experience_level           TEXT NOT NULL DEFAULT '',
     ftp_verified_at            TEXT NOT NULL DEFAULT '',
     ftp_test_snoozed_until     TEXT NOT NULL DEFAULT '',
@@ -870,6 +871,9 @@ func (d *DB) addEstimatedColumns() error {
 		// which is what every rider had before they could choose.
 		`ALTER TABLE rider_profiles ADD COLUMN hr_zones_cycling TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE rider_profiles ADD COLUMN hr_zones_running TEXT NOT NULL DEFAULT ''`,
+		// Hours per weekday, a JSON object; '' reads as the old single figure on
+		// each available day, which is what every profile had before.
+		`ALTER TABLE rider_profiles ADD COLUMN hours_by_day TEXT NOT NULL DEFAULT ''`,
 		// Seconds per bpm for a ride; '' for every ride analysed before it existed,
 		// which the backfill fills in later.
 		`ALTER TABLE session_analyses ADD COLUMN hr_histogram TEXT NOT NULL DEFAULT ''`,
@@ -1467,16 +1471,17 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 		days                 string
 		estimated            string
 		hrCycling, hrRunning string
+		hoursByDay           string
 	)
 	err := d.db.QueryRowContext(ctx, d.query(`
         SELECT rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr, threshold_hr, resting_hr,
                available_days, hours_per_available_day, experience_level, estimated_fields,
                auto_push_workouts, ftp_levels_calibrated_watts, ftp_verified_at, ftp_test_snoozed_until, smart_trainer, weight_kg,
-               hr_zones_cycling, hr_zones_running, updated_at
+               hr_zones_cycling, hr_zones_running, hours_by_day, updated_at
         FROM rider_profiles WHERE rider = ?`), normalizeRider(rider)).Scan(
 		&p.Rider, &p.FTPWatts, &p.FTPEstimated, &p.ThresholdPaceSecPerKM, &p.MaxHR, &p.ThresholdHR, &p.RestingHR,
 		&days, &p.HoursPerAvailableDay, &p.ExperienceLevel, &estimated, &p.AutoPushWorkouts, &p.FTPLevelsCalibratedAt,
-		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.WeightKG, &hrCycling, &hrRunning, &p.UpdatedAt)
+		&p.FTPVerifiedAt, &p.FTPTestSnoozedUntil, &p.SmartTrainer, &p.WeightKG, &hrCycling, &hrRunning, &hoursByDay, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return RiderProfile{}, false, nil
 	}
@@ -1491,6 +1496,12 @@ func (d *DB) GetProfile(ctx context.Context, rider string) (RiderProfile, bool, 
 	}
 	p.AvailableDays = splitList(days)
 	p.Estimated = splitList(estimated)
+	stored, err := decodeHoursByDay(hoursByDay)
+	if err != nil {
+		return RiderProfile{}, false, err
+	}
+	p.HoursByDay = reconcileStoredHours(stored, p.AvailableDays, p.HoursPerAvailableDay)
+	p.NormaliseAvailability()
 	return p, true, nil
 }
 
@@ -1560,6 +1571,12 @@ func (d *DB) SaveProfileOn(ctx context.Context, profile RiderProfile, source, da
 	}
 	profile.Rider = rider
 	profile.UpdatedAt = d.timestamp()
+	// The old columns are written from the map so older readers keep working.
+	profile.NormaliseAvailability()
+	hoursByDay, err := encodeHoursByDay(profile.HoursByDay)
+	if err != nil {
+		return RiderProfile{}, err
+	}
 
 	// Whether this save changes FTP is decided against what is stored now,
 	// before the upsert overwrites it.
@@ -1575,8 +1592,8 @@ func (d *DB) SaveProfileOn(ctx context.Context, profile RiderProfile, source, da
 	_, err = d.db.ExecContext(ctx, d.query(`
         INSERT INTO rider_profiles (rider, ftp_watts, ftp_estimated, threshold_pace_sec_per_km, max_hr,
                     threshold_hr, resting_hr, available_days, hours_per_available_day, experience_level, estimated_fields,
-                    auto_push_workouts, smart_trainer, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    auto_push_workouts, smart_trainer, hours_by_day, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (rider) DO UPDATE SET
             ftp_watts = excluded.ftp_watts, ftp_estimated = excluded.ftp_estimated,
             threshold_pace_sec_per_km = excluded.threshold_pace_sec_per_km,
@@ -1584,10 +1601,10 @@ func (d *DB) SaveProfileOn(ctx context.Context, profile RiderProfile, source, da
             available_days = excluded.available_days, hours_per_available_day = excluded.hours_per_available_day,
             experience_level = excluded.experience_level, estimated_fields = excluded.estimated_fields,
             auto_push_workouts = excluded.auto_push_workouts, smart_trainer = excluded.smart_trainer,
-            updated_at = excluded.updated_at`),
+            hours_by_day = excluded.hours_by_day, updated_at = excluded.updated_at`),
 		profile.Rider, profile.FTPWatts, profile.FTPEstimated, profile.ThresholdPaceSecPerKM, profile.MaxHR, profile.ThresholdHR, profile.RestingHR,
 		joinList(profile.AvailableDays), profile.HoursPerAvailableDay, profile.ExperienceLevel,
-		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.SmartTrainer, profile.UpdatedAt)
+		joinList(profile.Estimated), profile.AutoPushWorkouts, profile.SmartTrainer, hoursByDay, profile.UpdatedAt)
 	if err != nil {
 		return RiderProfile{}, err
 	}
