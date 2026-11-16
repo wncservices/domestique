@@ -72,8 +72,8 @@ type Week struct {
 	// recovery weeks of their own.
 	Recovery bool
 	// TargetHours is this week's training volume target, derived from the
-	// rider's own profile (RiderProfile.HoursPerAvailableDay ×
-	// len(AvailableDays)) — 0 when the profile states neither, in which
+	// rider's own profile (RiderProfile.WeekHours, the sum over the days
+	// they offer) — 0 when the profile states neither, in which
 	// case every week's TargetHours is 0 and a caller should treat this
 	// plan as phase/timing information only, prompting the rider to fill
 	// in their profile before it means anything as a volume target.
@@ -182,7 +182,7 @@ const recoveryEveryNWeeks = 4
 const recoveryLoadFraction = 0.6
 
 // Each phase's own ceiling, as a fraction of the rider's peak weekly hours
-// (profile.HoursPerAvailableDay × len(AvailableDays)). Base builds toward
+// (profile.WeekHours(), the sum over the days offered). Base builds toward
 // this gradually rather than starting at it — see weekFraction — so a
 // plan's very first week is not the same volume as its last Base week.
 const (
@@ -249,7 +249,7 @@ func buildPlanPos(goal workout.Goal, profile workout.RiderProfile, today time.Ti
 	daysUntilEvent := int(event.Sub(anchorUTC).Hours() / 24)
 	totalWeeks := daysUntilEvent/7 + 1
 
-	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
+	peakHours := profile.WeekHours()
 
 	lengths := allocateWeeks(totalWeeks)
 	if !hasTaper(goal) {
@@ -373,7 +373,7 @@ func buildRollingPos(goal workout.Goal, profile workout.RiderProfile, today time
 	startUTC := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
 	firstWeek := int(startUTC.Sub(rollingAnchor).Hours()/24) / 7
 
-	peakHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
+	peakHours := profile.WeekHours()
 
 	plan := Plan{GoalID: goal.ID, Weeks: make([]Week, 0, rollingWeeks), TotalWeeks: rollingWeeks, Adjustment: 1}
 	pos := make([]int, 0, rollingWeeks)

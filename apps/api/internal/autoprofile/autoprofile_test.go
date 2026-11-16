@@ -156,3 +156,21 @@ func TestApplyFillsThresholdHROnlyWhenEmptyOrEstimated(t *testing.T) {
 		t.Errorf("rider-typed must not change: %+v %v", kept, changed)
 	}
 }
+
+func TestInferenceFillsPerDayHours(t *testing.T) {
+	s := Suggestion{AvailableDays: []string{"tue", "sat"}, HoursPerAvailableDay: 1.5}
+	p, _ := Apply(workout.RiderProfile{Rider: "wilant"}, s)
+	want := map[string]float64{"tue": 1.5, "sat": 1.5}
+	if !reflect.DeepEqual(p.HoursByDay, want) {
+		t.Fatalf("HoursByDay = %v, want %v", p.HoursByDay, want)
+	}
+
+	typed := workout.RiderProfile{
+		Rider: "wilant", AvailableDays: []string{"mon"}, HoursPerAvailableDay: 2,
+		HoursByDay: map[string]float64{"mon": 2},
+	}
+	got, changed := Apply(typed, s)
+	if len(changed) != 0 || !reflect.DeepEqual(got, typed) {
+		t.Fatalf("typed profile changed: %v %+v", changed, got)
+	}
+}

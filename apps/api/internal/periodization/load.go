@@ -81,7 +81,7 @@ func BuildWithLoad(goal workout.Goal, profile workout.RiderProfile, today time.T
 		}
 	}
 	plan.LoadBasis = "hours"
-	capHours := profile.HoursPerAvailableDay * float64(len(profile.AvailableDays))
+	capHours := profile.WeekHours()
 	if load == nil || !(capHours > 0) || math.IsInf(capHours, 0) || len(plan.Weeks) == 0 {
 		return plan, nil
 	}

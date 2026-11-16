@@ -81,7 +81,7 @@ func (s *Server) handleGoalCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !(profile.FTPWatts > 0) || !(profile.HoursPerAvailableDay*float64(len(profile.AvailableDays)) > 0) {
+	if !(profile.FTPWatts > 0) || !(profile.WeekHours() > 0) {
 		answer(goalCheckDTO{Key: "needs_profile", Message: "Add your FTP and available hours to see if this is realistic.", Tone: "neutral"})
 		return
 	}

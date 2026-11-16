@@ -32,6 +32,7 @@ import ThresholdSuggestions from '@/components/fitness/ThresholdSuggestions.vue'
 import TrainingZones from '@/components/fitness/TrainingZones.vue'
 import { useLibrary } from '@/composables/useLibrary'
 import { levelsRecalibratedText, useRecalibration } from '@/composables/useRecalibration'
+import { weekTotal, withProposal } from '@/utils/hoursByDay'
 import { bestEffortToast } from '@/utils/bestEfforts'
 import type { PeriodChoice } from '@/utils/seasonReview'
 import { ftpTestToast } from '@/utils/ftpTests'
@@ -156,7 +157,7 @@ async function loadProfile() {
 // The two fields scheduling cannot work without: with no available days or no
 // hours per day, a plan has nothing to size or place workouts against, and
 // no workouts appear. This is what the one-click setup below is for.
-const needsSetup = computed(() => !(profile.value.availableDays ?? []).length || !profile.value.hoursPerAvailableDay)
+const needsSetup = computed(() => weekTotal(profile.value) === 0)
 
 function discardProfile() {
   profile.value = cloneProfile(savedProfile.value)
@@ -268,8 +269,7 @@ async function proposeProfileChange() {
     const proposal = await api.proposeProfileChange(profileNote.value)
     profile.value = {
       ...profile.value,
-      availableDays: proposal.availableDays ?? profile.value.availableDays,
-      hoursPerAvailableDay: proposal.hoursPerAvailableDay ?? profile.value.hoursPerAvailableDay,
+      ...withProposal(profile.value, proposal.availableDays, proposal.hoursPerAvailableDay),
     }
     proposalExplanation.value = proposal.explanation ?? ''
     toast.add({ title: 'Suggested a profile change', description: 'Review the fields below, then Save profile if this looks right.', icon: 'i-lucide-sparkles' })

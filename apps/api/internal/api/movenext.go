@@ -122,7 +122,15 @@ func (s *Server) handleMoveNext(w http.ResponseWriter, r *http.Request) {
 	}
 	weekEnd := periodization.MondayOf(now).AddDate(0, 0, 6).Format(dateLayout)
 	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)
-	next, ok := weekplan.NextFreeDay(tomorrow, weekEnd, available, taken, func(string) bool { return false })
+	// A day the session fits comes first; a shorter day is still better than
+	// refusing, since the rider asked to move it.
+	secs := workout.PlannedSeconds(wk.Steps)
+	next, ok := weekplan.NextFreeDay(tomorrow, weekEnd, available, taken, func(d string) bool {
+		return !weekplan.Fits(profile, d, secs)
+	})
+	if !ok {
+		next, ok = weekplan.NextFreeDay(tomorrow, weekEnd, available, taken, func(string) bool { return false })
+	}
 	if !ok {
 		refuse(moveNextNoFreeDayMessage)
 		return

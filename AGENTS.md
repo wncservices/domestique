@@ -645,14 +645,16 @@ instead of rebuilding the same plan again and churning Garmin copies.
   through the normal season pass as its rolling window reaches them. Two dated goals
   never take from each other: the first to fill keeps its days.
 - *Available days or hours changed* (`PUT /api/training/profile`, only when the weekday
-  set or `hoursPerAvailableDay` differs: `availabilityChanged`). `rebuildDays` runs the
+  set or any day's hours differ: `availabilityChanged` compares the `hoursByDay` maps within
+  0.01 h). A save from an old tab that sends only the two old fields and matches the stored
+  days and mean (`workout.SameAvailability`) keeps the stored per-day map and rebuilds nothing. `rebuildDays` runs the
   sport rebuild for **every** goal of the rider, dated first (so `inDatedGoalSpan` stays
   consistent), then `planGoalNow` for each. Untouched sessions move to the new days
   from today; touched ones stay. It runs with auto-schedule off too: the rider asked.
   `staleRebuild` never calls it stale, because it reads the profile as it stands when
   it runs. An FTP-only save rebuilds nothing: FTP flows through refresh and
   recalibration (`TestChangingOnlyFTPDoesNotRebuild`). A save that omits
-  `hoursPerAvailableDay` stores 0, which is a change. The **first** days (the previous
+  both `hoursByDay` and `hoursPerAvailableDay` stores 0, which is a change. The **first** days (the previous
   profile had none) only plan the rider's goals (`planRiderGoals`): nothing sits on old
   days, and a goal made before the profile gets its plan without Fill or a tick.
 
@@ -737,7 +739,9 @@ scheduler honours the days (`splitEventWeek`): sessions on and after the event a
 from `MiniTaperStart` are easy endurance rides of `MiniTaperDayHours` each (a day the rider cannot train
 does not hand its hours to the others, so a Saturday-only rider with a Sunday race gets one day's taper
 load on Saturday), structured sessions are placed only on the earlier days, and the week gets no
-route-demand bias, `WithTargetTSS` boost or third hard session. **C has no taper and no mini-taper**: the
+route-demand bias, `WithTargetTSS` boost or third hard session. The long ride goes on the day with
+the most hours before the mini-taper, if that day comes before it; otherwise the week has none, as
+before. **C has no taper and no mini-taper**: the
 event week is an ordinary week. Everything that asks "is this a reduced week" goes through
 `Week.Reduced()` (recovery, taper phase, or `MiniTaperDays > 0`): the ledger (a reduced week is opened
 with `reduced`, nothing carried in, nothing repaid, no green push), alternates (no harder swap).
@@ -757,7 +761,8 @@ auto-push is on. Priority of an undated goal changes nothing. Giving an undated 
 different priority: the B the form sends back is not a choice. Priorities other than A/B/C are refused by validation. The Plan page labels a
 mini-taper week "mini-taper" (`miniTaperDays` on the periodization and week-focus DTOs).
 
-**Weeks are sized in TSS from CTL, with available hours as the cap.**
+**Weeks are sized in TSS from CTL, with available hours as the cap.** The cap is the sum of the
+days (`RiderProfile.WeekHours`), not figure x days.
 `periodization.BuildWithLoad` takes a `LoadInput` built by `api.loadInput`, which
 `reconciledPeriodizationPlan` alone calls, so every plan reader sees the same
 weeks. A week the hours cap held back is `LoadCapped`, and `scheduler.WithTargetTSS`
@@ -930,8 +935,12 @@ under 0.8 is -0.2; no decoupling is no move; under 5 is +0.3, 5 to 8 is +0.1, ov
 is no move; clamped to [1, 10]; rule `durability_move`, subject `cycling:endurance`). An eased or
 shortened long ride is not generated, so it does not move it. The scheduler's long slot weighs
 `1.8 + 0.1 x (endurance level - starting level)`, clamped to 1.8-2.4 (1.8 with no endurance level):
-only the split of the week's rest hours changes, and there is no per-day-hours cap on it, as there
-never was. **Decay** (`decayLevels`, `internal/api/leveldecay.go`) runs from `AutoScheduleTick`, so
+it changes the split of the week's rest hours. Each day is capped at its own hours:
+endurance and long slots are water-filled (a slot over its day is set to the day and the excess goes
+to slots still under theirs), the long slot goes on the day with the most hours (ties to the later
+day, so a uniform profile keeps it on the last day), and a week sized at the weekly cap may place
+fewer hours than its target (decided with the user: hours mean hours, spare hours on a structured day
+are not filled with easy riding). Fixed sessions (crew rides) are not capped. **Decay** (`decayLevels`, `internal/api/leveldecay.go`) runs from `AutoScheduleTick`, so
 only with auto-schedule on, under the scheduling lock, after the metrics pass and before the season
 pass (a week filled or refreshed in that tick uses the lowered level; sessions already built keep
 theirs until refreshed), in the day's first sync slot (`inMorningSlot`), once per rider per ISO week:
@@ -948,6 +957,26 @@ rule and `level_recalibration` record; a drop therefore raises levels. The endur
 excluded (not FTP-relative). A change under 3% leaves the marker alone in both directions, so drift
 accumulates against the last calibrated FTP; a change over 25% moves only the marker. Logs carry
 counts and a stage, never a level, a decoupling or an FTP beside a rider.
+
+## Hours per weekday
+
+Three profile fields hold availability, and they must agree (`workout.NormaliseAvailability`):
+
+- `rider_profiles.hours_by_day` (JSON, `''` = none) is authoritative when non-empty.
+- `available_days` and `hours_per_available_day` are still written from it (the map's days, and
+  the **mean**), so their readers and a rollback to an older image keep the same weekly cap
+  (days x mean = the sum) and lose only the shape. Read through `HoursOn(day)` and `WeekHours()`,
+  never the single figure.
+- `GetProfile` reconciles: when the map's day set or mean disagrees with the old columns (an older
+  image edited them), the old columns win and the map is derived from them. A profile with no map
+  reads its single figure on each available day, so old rows need no backfill.
+
+A day's hours are a hard cap for everyone, old profiles included. Automatic moves only use a day the
+session fits (`weekplan`: planned seconds <= hours + 300 s): the missed make-up and the readiness
+swap skip otherwise. "Not today" is the rider's own move, so it prefers a fitting free day and falls
+back to the first free one. Repayment lengthens a session up to the hours of its own day
+(`ledger/repay.go`). `autoprofile` and the LLM proposal still produce one figure, spread over the
+days they name.
 
 ## Heart-rate zones
 

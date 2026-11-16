@@ -143,10 +143,16 @@ type RiderProfile struct {
 	// AvailableDays is which weekdays the rider can train, lowercase
 	// three-letter abbreviations ("mon", "tue", ...). Nil means not stated.
 	AvailableDays []string
-	// HoursPerAvailableDay is a rough budget, not a hard cap — the manual
-	// builder and, later, the planner use it to size sessions.
+	// HoursPerAvailableDay is the mean of HoursByDay (NormaliseAvailability
+	// derives it), kept for readers of the old column. It is not a limit:
+	// per-day hours are, and a session is capped at its own day's hours.
 	HoursPerAvailableDay float64
-	ExperienceLevel      string
+	// HoursByDay is the hours offered per weekday ("mon".."sun"), only days
+	// above 0. It is authoritative when non-empty: AvailableDays and
+	// HoursPerAvailableDay are then derived from it (NormaliseAvailability)
+	// and kept written for older readers. nil or empty means not stated.
+	HoursByDay      map[string]float64
+	ExperienceLevel string
 	// FTPLevelsCalibratedAt is the FTP (watts) the rider's progression
 	// levels were last calibrated against; 0 means never. It follows FTP in
 	// both directions — see the level-recalibration design — so it is the

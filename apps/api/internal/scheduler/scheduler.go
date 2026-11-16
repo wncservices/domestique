@@ -311,6 +311,9 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 			continue
 		}
 		capSeconds := shares[i] * targetHours * 3600
+		if h := profile.HoursOn(days[i]); h > 0 {
+			capSeconds = math.Min(capSeconds, h*3600)
+		}
 		if week.Recovery {
 			capSeconds = math.Min(capSeconds, recoverySessionMaxSeconds)
 		}
@@ -347,7 +350,9 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 			restWeights[i] = longWeight(levels, profile, sport)
 		}
 	}
-	restShares := normalizeWeights(restWeights)
+	// Each day holds at most its own hours: what a slot's share would put past
+	// them goes to the slots with room, and what none has room for is dropped.
+	restHours := waterFill(remainingHours, restWeights, dayCaps(days, profile))
 
 	out := make([]workout.CreateWorkoutRequest, 0, n)
 	for i, day := range days {
@@ -361,9 +366,12 @@ func buildWeek(week periodization.Week, profile workout.RiderProfile, levels map
 			req.Description = GeneratedDescription
 			req.Flags = workout.Flags{Origin: workout.OriginPlan}
 		default:
-			hours := remainingHours * restShares[i]
+			hours := restHours[i]
 			if mini.days[i] {
 				hours = mini.perDay
+				if h := profile.HoursOn(day); h > 0 {
+					hours = math.Min(hours, h)
+				}
 			}
 			if hours <= 0 {
 				continue
@@ -458,9 +466,10 @@ const thirdSlotMinDays = 6
 // recoverySessionMaxSeconds for its length). Weeks too short for any
 // structured session (structuredSlotsFor) are all easy, as before.
 //
-// Otherwise the rider's last available day carries the long session and
+// Otherwise the day with the most hours (longDayIndex: the last available day
+// when every day has the same) carries the long session and
 // structuredSlotsFor's zones are placed among the rest via
-// placeStructuredDays. For a cycling build or peak week with enough days
+// placeStructuredDaysIn. For a cycling build or peak week with enough days
 // and planned CTL a third zone is added (when it can be placed without
 // adjacency), and a non-nil mix replaces the table's zones slot for slot.
 func assignSlots(week periodization.Week, profile workout.RiderProfile, levels map[string]float64, sport model.Sport, days []string, mix *intensity.Mix, structuredLimit int) (kinds []slotKind, zones []string, targetLevels []float64) {
@@ -482,7 +491,8 @@ func assignSlots(week periodization.Week, profile workout.RiderProfile, levels m
 		targetLevels[0] = math.Max(levelFor(levels, sport, zone, profile)-1.0, 1.0)
 		return kinds, zones, targetLevels
 	}
-	kinds[n-1] = slotLong
+	long := longDayIndex(days, profile)
+	kinds[long] = slotLong
 
 	cycling := sport != model.SportRunning
 	wantThird := cycling && len(structured) > 0 &&
@@ -496,10 +506,10 @@ func assignSlots(week periodization.Week, profile workout.RiderProfile, levels m
 		structured = zonesFor(week.Phase, structured, count, mix)
 	}
 
-	positions := placeStructuredDaysIn(days, len(structured), structuredLimit)
+	positions := placeStructuredDaysIn(days, len(structured), structuredLimit, long)
 	if wantThird && len(positions) < len(structured) {
 		structured = structured[:len(structured)-1]
-		positions = placeStructuredDaysIn(days, len(structured), structuredLimit)
+		positions = placeStructuredDaysIn(days, len(structured), structuredLimit, long)
 	}
 	for i, pos := range positions {
 		kinds[pos] = slotStructured
@@ -545,8 +555,8 @@ func zonesFor(phase periodization.Phase, table []structuredSlot, count int, mix 
 }
 
 // placeStructuredDays picks which of days' slots (0-indexed, calendar
-// order; slot len(days)-1 is always the long day and so never eligible)
-// carry k structured sessions. The hard constraint — no two structured
+// order) carry k structured sessions when the long day is the last one; see
+// placeStructuredDaysIn for a long day anywhere in the week. The hard constraint — no two structured
 // slots calendar-adjacent — rules candidate combinations out; among what is
 // left, the one that spreads structured days furthest from the long day and
 // from each other wins (the design's own placement heuristic). k is 0 to
@@ -557,35 +567,45 @@ func zonesFor(phase periodization.Phase, table []structuredSlot, count int, mix 
 // structuredSlotsFor's own n-based rules) no non-adjacent combination
 // exists at all.
 func placeStructuredDays(days []string, k int) []int {
-	return placeStructuredDaysIn(days, k, len(days)-1)
+	return placeStructuredDaysIn(days, k, len(days), len(days)-1)
 }
 
-// placeStructuredDaysIn is placeStructuredDays with the structured slots kept
-// among the first limit days. When fewer than k fit without two on adjacent
-// days it places as many as do.
-func placeStructuredDaysIn(days []string, k, limit int) []int {
-	if limit >= len(days)-1 {
-		// No restriction: exactly k or none, as always.
-		return placeStructured(days, k, limit)
+// placeStructuredDaysIn is placeStructuredDays with the long day at index long
+// (never eligible) and the structured slots kept among the first limit days.
+// When the limit leaves out a day other than the long one and fewer than k fit
+// without two on adjacent days, it places as many as do.
+func placeStructuredDaysIn(days []string, k, limit, long int) []int {
+	if eligibleSlots(len(days), limit, long) >= len(days)-1 {
+		// No restriction beyond the long day: exactly k or none, as always.
+		return placeStructured(days, k, limit, long)
 	}
 	for ; k > 0; k-- {
-		if best := placeStructured(days, k, limit); len(best) > 0 {
+		if best := placeStructured(days, k, limit, long); len(best) > 0 {
 			return best
 		}
 	}
 	return nil
 }
 
-func placeStructured(days []string, k, limit int) []int {
+// eligibleSlots counts the slots below limit that are not the long day.
+func eligibleSlots(n, limit, long int) int {
+	limit = min(limit, n)
+	if long >= 0 && long < limit {
+		return limit - 1
+	}
+	return limit
+}
+
+func placeStructured(days []string, k, limit, long int) []int {
 	n := len(days)
 	if k <= 0 || n < 3 {
 		return nil
 	}
-	limit = min(limit, n-1)
-	if k > limit {
+	limit = min(limit, n)
+	if k > eligibleSlots(n, limit, long) {
 		return nil
 	}
-	long := days[n-1]
+	longDay := days[long]
 
 	// The first pass keeps every hard session off the days either side of the
 	// long day, the week boundary included (a Sunday long run is followed by
@@ -601,14 +621,14 @@ func placeStructured(days []string, k, limit int) []int {
 				if hasAdjacentPair(days, chosen) {
 					return
 				}
-				if score := spreadScore(days, chosen, long); score > bestScore {
+				if score := spreadScore(days, chosen, longDay); score > bestScore {
 					bestScore = score
 					best = append([]int(nil), chosen...)
 				}
 				return
 			}
 			for i := start; i < limit; i++ {
-				if offLong && circularDays(days[i], long) == 1 {
+				if i == long || offLong && circularDays(days[i], longDay) == 1 {
 					continue
 				}
 				choose(i+1, append(chosen, i))
