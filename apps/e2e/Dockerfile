@@ -15,7 +15,7 @@
 # The lockfile moving on its own (Renovate, 2026-11-13: 1.65.0 against this
 # image's 1.62.1) did it again, so scripts/check-playwright-image.sh now fails
 # CI on a mismatch, and renovate.json moves the image and the package in one PR.
-FROM mcr.microsoft.com/playwright:v1.65.0-noble
+FROM mcr.microsoft.com/playwright:v1.65.1-noble
 
 WORKDIR /app
 COPY package.json package-lock.json ./
