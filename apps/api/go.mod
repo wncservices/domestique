@@ -7,7 +7,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/fogleman/gg v1.3.0
 	github.com/jackc/pgx/v5 v5.13.0
-	github.com/muktihari/fit v0.28.6
+	github.com/muktihari/fit v0.28.7
 	github.com/paulmach/orb v0.14.0
 	github.com/prometheus/client_golang v1.25.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
@@ -19,10 +19,10 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.37.2
-	k8s.io/apimachinery v0.37.2
-	k8s.io/client-go v0.37.2
-	modernc.org/sqlite v1.62.0
+	k8s.io/api v0.37.3
+	k8s.io/apimachinery v0.37.3
+	k8s.io/client-go v0.37.3
+	modernc.org/sqlite v1.63.0
 )
 
 require (
